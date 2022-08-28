@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
+use std::iter::Peekable;
+use std::str::Chars;
 
 #[derive(Debug, PartialEq, Clone)]
 #[allow(dead_code)]
@@ -63,20 +65,16 @@ macro_rules! hash {
 }
 
 struct Scanner<'a> {
-    source: &'a str,
+    source: Peekable<Chars<'a>>,
     line: i32,
-    current: i32,
-    start: i32,
     keywords: HashMap<String, Tokens>,
     err: bool,
 }
 impl<'a> Scanner<'a> {
-    fn new(source: &'a str) -> Self {
+    fn new(source: Peekable<Chars<'a>>) -> Self {
         Scanner {
             source,
             line: 1,
-            current: 0,
-            start: 0,
             err: false,
             keywords: hash![
                 ("int".to_string(), Tokens::Int),
@@ -91,14 +89,18 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    fn match_next(&mut self, expected: char, if_match: Tokens, if_not: Tokens) -> Tokens {
+        match self.source.next_if_eq(&expected) {
+            Some(_v) => if_match,
+            None => if_not,
+        }
+    }
+
     fn scan_token(&mut self) -> Result<Vec<Tokens>, Vec<ScanErr>> {
         let mut errors: Vec<ScanErr> = Vec::new();
         let mut tokens: Vec<Tokens> = Vec::new();
-        let source_len = self.source.len() as i32;
 
-        while self.current < source_len {
-            self.start = self.current;
-            let c = self.advance();
+        while let Some(c) = self.source.next() {
             match c {
                 '(' => tokens.push(Tokens::LeftParen),
                 ')' => tokens.push(Tokens::RightParen),
@@ -118,9 +120,11 @@ impl<'a> Scanner<'a> {
 
                 '/' => {
                     if self.matches('/') {
-                        while self.peek() != '\n' && !self.is_at_end() {
-                            self.advance();
-                        }
+                        let _: String = self
+                            .source
+                            .by_ref()
+                            .take_while(|c| *c != '\n' && *c != '\0')
+                            .collect::<String>(); // there has to be a better way to consume the iter
                     } else {
                         tokens.push(Tokens::Slash)
                     }
@@ -140,26 +144,30 @@ impl<'a> Scanner<'a> {
 
                 _ => {
                     if c.is_ascii_digit() {
-                        while self.peek().is_ascii_digit() {
-                            self.advance();
+                        // Number
+                        let mut num = String::new();
+
+                        while let Some(digit) = self.source.by_ref().next_if(|c| c.is_digit(10)) {
+                            num.push(digit);
                         }
-                        let num = self
-                            .source
-                            .get(self.start as usize..self.current as usize)
-                            .unwrap()
-                            .parse::<i32>()
-                            .unwrap();
-                        tokens.push(Tokens::Number(num))
+                        // have to prepend already consumned char
+                        num.insert(0, c);
+                        tokens.push(Tokens::Number(num.parse::<i32>().unwrap()));
                     } else if c.is_alphabetic() || c == '_' {
-                        while self.peek().is_alphabetic() || self.peek() == '_' {
-                            self.advance();
-                        }
-                        let value = self
+                        // Identifier
+                        let mut value = String::new();
+                        while let Some(v) = self
                             .source
-                            .get(self.start as usize..self.current as usize)
-                            .unwrap();
-                        if self.keywords.contains_key(value) {
-                            tokens.push(self.keywords.get(value).unwrap().clone());
+                            .by_ref()
+                            .next_if(|c| c.is_alphabetic() || *c == '_')
+                        {
+                            value.push(v);
+                        }
+
+                        value.insert(0, c);
+                        // dbg!(&self.source);
+                        if self.keywords.contains_key(&value) {
+                            tokens.push(self.keywords.get(&value).unwrap().clone());
                         } else {
                             tokens.push(Tokens::Ident(value.to_string()))
                         }
@@ -179,70 +187,37 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn advance(&mut self) -> char {
-        let result = self.at();
-        self.current += 1;
-
-        result
-    }
-    fn is_at_end(&self) -> bool {
-        if self.current >= self.source.len() as i32 {
-            true
-        } else {
-            false
-        }
-    }
-    fn at(&self) -> char {
-        self.source
-            .chars()
-            .nth(self.current as usize)
-            .expect("valid ascii in source-code")
-    }
     fn matches(&mut self, expected: char) -> bool {
-        if self.is_at_end() {
-            return false;
-        };
-        if self.at() != expected {
-            return false;
-        };
-
-        self.current += 1;
-        true
-    }
-    fn match_next(&mut self, expected: char, valid: Tokens, invalid: Tokens) -> Tokens {
-        if self.matches(expected) {
-            valid
-        } else {
-            invalid
+        match self.source.peek() {
+            Some(v) => {
+                if *v != expected {
+                    return false;
+                }
+            }
+            None => return false,
         }
-    }
-    fn peek(&self) -> char {
-        if self.is_at_end() {
-            return '\0';
-        };
-        self.at()
+        self.source.next();
+        true
     }
 
     fn string(&mut self) -> Result<String, ScanErr> {
-        while self.peek() != '"' && !self.is_at_end() {
-            if self.peek() == '\n' {
-                self.line += 1;
-            }
-            self.advance();
-        }
-        if self.is_at_end() {
+        let mut last_char = '\0';
+        let result = self
+            .source
+            .by_ref()
+            .take_while(|c| {
+                last_char = *c;
+                *c != '"'
+            })
+            .collect::<String>();
+        if last_char != '"' {
             return Err(ScanErr {
                 line: self.line,
                 msg: "Unterminated string".to_string(),
             });
         }
-        self.advance();
 
-        Ok(self
-            .source
-            .get(self.start as usize + 1..self.current as usize - 1)
-            .expect("substring doesnt exist")
-            .to_string())
+        Ok(result)
     }
 }
 
@@ -274,15 +249,13 @@ fn main() {
     let source = fs::read_to_string(file.unwrap()).expect("couldn't find file: {file}");
 
     let mut tokens: Option<Vec<Tokens>> = None;
-    let mut scanner = Scanner::new(&source);
+    let mut scanner = Scanner::new(source.chars().peekable());
     match scanner.scan_token() {
         Ok(v) => tokens = Some(v),
         Err(e) => {
             for err in e {
                 err.print_error("");
             }
-            // e.iter().map(|err| err.print_error(""));
-            // .collect::<Vec<ScanErr>>();
             had_error = true;
         }
     }
@@ -295,8 +268,8 @@ mod tests {
 
     #[test]
     fn basic_single_and_double_tokens() {
-        let source = "!= = > == \n\n    ;";
-        let mut scanner = Scanner::new(&source);
+        let source = "!= = > == \n\n    ;".chars().peekable();
+        let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => v,
             Err(e) => panic!("test"),
@@ -312,8 +285,8 @@ mod tests {
     }
     #[test]
     fn ignores_comments() {
-        let source = "// this is a    comment\n\n!this";
-        let mut scanner = Scanner::new(&source);
+        let source = "// this is a    comment\n\n!this".chars().peekable();
+        let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => v,
             Err(e) => panic!("test"),
@@ -323,8 +296,8 @@ mod tests {
     }
     #[test]
     fn token_basic_math_expression() {
-        let source = "3 + 1 / 4";
-        let mut scanner = Scanner::new(&source);
+        let source = "3 + 1 / 4".chars().peekable();
+        let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => v,
             Err(e) => panic!("test"),
@@ -340,8 +313,8 @@ mod tests {
     }
     #[test]
     fn basic_math_double_digit_nums() {
-        let source = "300 - 11 * 41";
-        let mut scanner = Scanner::new(&source);
+        let source = "300 - 11 * 41".chars().peekable();
+        let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => v,
             Err(e) => panic!("test"),
@@ -357,8 +330,8 @@ mod tests {
     }
     #[test]
     fn matches_keywords_and_strings() {
-        let source = "int some = \"this is a string\"";
-        let mut scanner = Scanner::new(&source);
+        let source = "int some = \"this is a string\"".chars().peekable();
+        let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => v,
             Err(e) => panic!("test"),
@@ -373,8 +346,8 @@ mod tests {
     }
     #[test]
     fn errors_on_unterminated_string() {
-        let source = "int some = \"this is a string";
-        let mut scanner = Scanner::new(&source);
+        let source = "int some = \"this is a string".chars().peekable();
+        let mut scanner = Scanner::new(source);
 
         let result = match scanner.scan_token() {
             Ok(v) => panic!(),
@@ -388,8 +361,10 @@ mod tests {
     }
     #[test]
     fn matches_complex_keywords() {
-        let source = "int some_long;\nwhile (val >= 12) {*p = val}";
-        let mut scanner = Scanner::new(&source);
+        let source = "int some_long;\nwhile (val >= 12) {*p = val}"
+            .chars()
+            .peekable();
+        let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => v,
             Err(e) => panic!("test"),
@@ -415,8 +390,8 @@ mod tests {
     }
     #[test]
     fn detects_single_on_invalid_char() {
-        let source = "int c = 0$";
-        let mut scanner = Scanner::new(&source);
+        let source = "int c = 0$".chars().peekable();
+        let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => panic!(),
             Err(e) => e,
@@ -429,8 +404,8 @@ mod tests {
     }
     #[test]
     fn detects_mutliple_on_invalid_chars() {
-        let source = "int c = 0$\n\n% ^";
-        let mut scanner = Scanner::new(&source);
+        let source = "int c = 0$\n\n% ^".chars().peekable();
+        let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => panic!(),
             Err(e) => e,
@@ -449,6 +424,36 @@ mod tests {
                 msg: "Unexpected character: ^".to_string(),
             },
         ];
+        assert_eq!(result, expected);
+    }
+    #[test]
+    fn can_handle_non_ascii_alphabet() {
+        let source = "\nint ä = 123".chars().peekable();
+        let mut scanner = Scanner::new(source);
+        let result = match scanner.scan_token() {
+            Ok(v) => v,
+            Err(e) => panic!(),
+        };
+        let expected = vec![
+            Tokens::Int,
+            Tokens::Ident("ä".to_string()),
+            Tokens::Equal,
+            Tokens::Number(123),
+        ];
+        assert_eq!(result, expected);
+    }
+    #[test]
+    fn errors_on_non_ascii_non_letters() {
+        let source = "\nint ä ~ = 123".chars().peekable();
+        let mut scanner = Scanner::new(source);
+        let result = match scanner.scan_token() {
+            Ok(v) => panic!(),
+            Err(e) => e,
+        };
+        let expected = vec![ScanErr {
+            line: 2,
+            msg: "Unexpected character: ~".to_string(),
+        }];
         assert_eq!(result, expected);
     }
 }

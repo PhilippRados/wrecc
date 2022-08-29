@@ -146,16 +146,17 @@ impl<'a> Scanner<'a> {
                     if c.is_ascii_digit() {
                         // Number
                         let mut num = String::new();
+                        // have to prepend already consumned char
+                        num.push(c);
 
                         while let Some(digit) = self.source.by_ref().next_if(|c| c.is_digit(10)) {
                             num.push(digit);
                         }
-                        // have to prepend already consumned char
-                        num.insert(0, c);
                         tokens.push(Tokens::Number(num.parse::<i32>().unwrap()));
                     } else if c.is_alphabetic() || c == '_' {
                         // Identifier
                         let mut value = String::new();
+                        value.push(c);
                         while let Some(v) = self
                             .source
                             .by_ref()
@@ -163,9 +164,6 @@ impl<'a> Scanner<'a> {
                         {
                             value.push(v);
                         }
-
-                        value.insert(0, c);
-                        // dbg!(&self.source);
                         if self.keywords.contains_key(&value) {
                             tokens.push(self.keywords.get(&value).unwrap().clone());
                         } else {

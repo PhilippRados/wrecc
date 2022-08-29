@@ -48,7 +48,6 @@ pub enum Tokens {
     False,
     For,
     If,
-    Null,
     Return,
     While,
 
@@ -94,7 +93,6 @@ impl<'a> Scanner<'a> {
                 ("else".to_string(), Tokens::Else),
                 ("for".to_string(), Tokens::For),
                 ("while".to_string(), Tokens::While),
-                ("null".to_string(), Tokens::Null),
                 ("return".to_string(), Tokens::Return)
             ],
         }

@@ -4,7 +4,7 @@ use std::str::Chars;
 
 #[derive(Debug, PartialEq, Clone)]
 #[allow(dead_code)]
-pub enum Tokens {
+pub enum TokenType {
     // Single-character tokens.
     LeftParen,
     RightParen,
@@ -45,13 +45,30 @@ pub enum Tokens {
     Int,
     Char,
     Else,
-    False,
     For,
     If,
     Return,
     While,
 
     Eof,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Tokens {
+    pub token: TokenType,
+    pub line_index: i32,
+    pub column: i32,
+    pub line_string: String,
+}
+impl Tokens {
+    pub fn new(token: TokenType, line_index: i32, column: i32, line_string: String) -> Self {
+        Tokens {
+            token,
+            line_index,
+            column,
+            line_string,
+        }
+    }
 }
 
 macro_rules! hash {
@@ -76,75 +93,122 @@ impl ScanErr {
 
 pub struct Scanner<'a> {
     source: Peekable<Chars<'a>>,
+    raw_source: Vec<String>,
     line: i32,
-    keywords: HashMap<String, Tokens>,
+    column: i32,
+    keywords: HashMap<String, TokenType>,
     err: bool,
 }
 impl<'a> Scanner<'a> {
-    pub fn new(source: Peekable<Chars<'a>>) -> Self {
+    pub fn new(source: &'a str) -> Self {
         Scanner {
-            source,
+            source: source.chars().peekable(),
+            raw_source: source
+                .split("\n")
+                .map(|s| s.to_string().clone())
+                .collect::<Vec<String>>(),
             line: 1,
+            column: 1,
             err: false,
             keywords: hash![
-                ("int".to_string(), Tokens::Int),
-                ("char".to_string(), Tokens::Char),
-                ("if".to_string(), Tokens::If),
-                ("else".to_string(), Tokens::Else),
-                ("for".to_string(), Tokens::For),
-                ("while".to_string(), Tokens::While),
-                ("return".to_string(), Tokens::Return)
+                ("int".to_string(), TokenType::Int),
+                ("char".to_string(), TokenType::Char),
+                ("if".to_string(), TokenType::If),
+                ("else".to_string(), TokenType::Else),
+                ("for".to_string(), TokenType::For),
+                ("while".to_string(), TokenType::While),
+                ("return".to_string(), TokenType::Return)
             ],
         }
     }
 
-    fn match_next(&mut self, expected: char, if_match: Tokens, if_not: Tokens) -> Tokens {
+    fn match_next(&mut self, expected: char, if_match: TokenType, if_not: TokenType) -> TokenType {
         match self.source.next_if_eq(&expected) {
             Some(_v) => if_match,
             None => if_not,
         }
     }
-
+    fn add_token(&mut self, tokens: &mut Vec<Tokens>, current_token: TokenType) {
+        tokens.push(Tokens {
+            token: current_token.clone(),
+            line_index: self.line,
+            column: self.column,
+            line_string: self.raw_source[(self.line - 1) as usize].clone(),
+        });
+        self.column += Self::get_token_len(current_token);
+    }
+    fn get_token_len(token: TokenType) -> i32 {
+        match token {
+            TokenType::BangEqual
+            | TokenType::EqualEqual
+            | TokenType::GreaterEqual
+            | TokenType::LessEqual => 2,
+            TokenType::String(s) => (s.len() + 2) as i32,
+            TokenType::Ident(s) => s.len() as i32,
+            TokenType::Int => 3,
+            TokenType::Char => 3,
+            TokenType::While => 5,
+            TokenType::Else => 4,
+            TokenType::For => 3,
+            TokenType::If => 2,
+            TokenType::Return => 6,
+            TokenType::Number(n) => n.to_string().len() as i32,
+            _ => 1,
+        }
+    }
     pub fn scan_token(&mut self) -> Result<Vec<Tokens>, Vec<ScanErr>> {
         let mut errors: Vec<ScanErr> = Vec::new();
         let mut tokens: Vec<Tokens> = Vec::new();
 
         while let Some(c) = self.source.next() {
             match c {
-                '(' => tokens.push(Tokens::LeftParen),
-                ')' => tokens.push(Tokens::RightParen),
-                '{' => tokens.push(Tokens::LeftBrace),
-                '}' => tokens.push(Tokens::RightBrace),
-                ',' => tokens.push(Tokens::Comma),
-                '.' => tokens.push(Tokens::Dot),
-                '-' => tokens.push(Tokens::Minus),
-                '+' => tokens.push(Tokens::Plus),
-                ';' => tokens.push(Tokens::Semicolon),
-                '*' => tokens.push(Tokens::Star),
+                '(' => self.add_token(&mut tokens, TokenType::LeftParen),
+                ')' => self.add_token(&mut tokens, TokenType::RightParen),
+                '{' => self.add_token(&mut tokens, TokenType::LeftBrace),
+                '}' => self.add_token(&mut tokens, TokenType::RightBrace),
+                ',' => self.add_token(&mut tokens, TokenType::Comma),
+                '.' => self.add_token(&mut tokens, TokenType::Dot),
+                '-' => self.add_token(&mut tokens, TokenType::Minus),
+                '+' => self.add_token(&mut tokens, TokenType::Plus),
+                ';' => self.add_token(&mut tokens, TokenType::Semicolon),
+                '*' => self.add_token(&mut tokens, TokenType::Star),
 
-                '!' => tokens.push(self.match_next('=', Tokens::BangEqual, Tokens::Bang)),
-                '=' => tokens.push(self.match_next('=', Tokens::EqualEqual, Tokens::Equal)),
-                '<' => tokens.push(self.match_next('=', Tokens::LessEqual, Tokens::Less)),
-                '>' => tokens.push(self.match_next('=', Tokens::GreaterEqual, Tokens::Greater)),
+                '!' => {
+                    let token = self.match_next('=', TokenType::BangEqual, TokenType::Bang);
+                    self.add_token(&mut tokens, token);
+                }
+                '=' => {
+                    let token = self.match_next('=', TokenType::EqualEqual, TokenType::Equal);
+                    self.add_token(&mut tokens, token);
+                }
+                '<' => {
+                    let token = self.match_next('=', TokenType::LessEqual, TokenType::Less);
+                    self.add_token(&mut tokens, token);
+                }
+                '>' => {
+                    let token = self.match_next('=', TokenType::GreaterEqual, TokenType::Greater);
+                    self.add_token(&mut tokens, token);
+                }
 
                 '/' => {
                     if self.matches('/') {
-                        let _: String = self
-                            .source
-                            .by_ref()
-                            .take_while(|c| *c != '\n' && *c != '\0')
-                            .collect::<String>(); // there has to be a better way to consume the iter
+                        // there has to be a better way to consume the iter without the first \n
+                        while let Some(_) =
+                            self.source.by_ref().next_if(|&c| c != '\n' && c != '\0')
+                        {
+                        }
                     } else {
-                        tokens.push(Tokens::Slash)
+                        self.add_token(&mut tokens, TokenType::Slash)
                     }
                 }
-                ' ' => (),
-                '\r' => (),
-                '\t' => (),
-                '\n' => self.line += 1,
+                ' ' | '\r' | '\t' => self.column += 1,
+                '\n' => {
+                    self.line += 1;
+                    self.column = 1
+                }
 
                 '"' => match self.string() {
-                    Ok(string) => tokens.push(Tokens::String(string)),
+                    Ok(string) => self.add_token(&mut tokens, TokenType::String(string.clone())),
                     Err(e) => {
                         self.err = true;
                         errors.push(e)
@@ -161,7 +225,7 @@ impl<'a> Scanner<'a> {
                         while let Some(digit) = self.source.by_ref().next_if(|c| c.is_digit(10)) {
                             num.push(digit);
                         }
-                        tokens.push(Tokens::Number(num.parse::<i32>().unwrap()));
+                        self.add_token(&mut tokens, TokenType::Number(num.parse::<i32>().unwrap()));
                     } else if c.is_alphabetic() || c == '_' {
                         // Identifier
                         let mut value = String::new();
@@ -174,9 +238,9 @@ impl<'a> Scanner<'a> {
                             value.push(v);
                         }
                         if self.keywords.contains_key(&value) {
-                            tokens.push(self.keywords.get(&value).unwrap().clone());
+                            self.add_token(&mut tokens, self.keywords.get(&value).unwrap().clone());
                         } else {
-                            tokens.push(Tokens::Ident(value.to_string()))
+                            self.add_token(&mut tokens, TokenType::Ident(value.to_string()))
                         }
                     } else {
                         self.err = true;
@@ -234,85 +298,113 @@ mod tests {
 
     #[test]
     fn basic_single_and_double_tokens() {
-        let source = "!= = > == \n\n    ;".chars().peekable();
+        let source = "!= = > == \n\n    ;";
         let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => v,
             Err(e) => panic!("test"),
         };
         let expected = vec![
-            Tokens::BangEqual,
-            Tokens::Equal,
-            Tokens::Greater,
-            Tokens::EqualEqual,
-            Tokens::Semicolon,
+            Tokens::new(TokenType::BangEqual, 1, 1, "!= = > == ".to_string()),
+            Tokens::new(TokenType::Equal, 1, 4, "!= = > == ".to_string()),
+            Tokens::new(TokenType::Greater, 1, 6, "!= = > == ".to_string()),
+            Tokens::new(TokenType::EqualEqual, 1, 8, "!= = > == ".to_string()),
+            Tokens::new(TokenType::Semicolon, 3, 5, "    ;".to_string()),
         ];
         assert_eq!(result, expected);
     }
     #[test]
     fn ignores_comments() {
-        let source = "// this is a    comment\n\n!this".chars().peekable();
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => v,
-            Err(e) => panic!("test"),
-        };
-        let expected = vec![Tokens::Bang, Tokens::Ident("this".to_string())];
-        assert_eq!(result, expected);
-    }
-    #[test]
-    fn token_basic_math_expression() {
-        let source = "3 + 1 / 4".chars().peekable();
+        let source = "// this is a    comment\n\n!this";
         let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => v,
             Err(e) => panic!("test"),
         };
         let expected = vec![
-            Tokens::Number(3),
-            Tokens::Plus,
-            Tokens::Number(1),
-            Tokens::Slash,
-            Tokens::Number(4),
+            Tokens::new(TokenType::Bang, 3, 1, "!this".to_string()),
+            Tokens::new(
+                TokenType::Ident("this".to_string()),
+                3,
+                2,
+                "!this".to_string(),
+            ),
+        ];
+        assert_eq!(result, expected);
+    }
+    #[test]
+    fn token_basic_math_expression() {
+        let source = "3 + 1 / 4";
+        let mut scanner = Scanner::new(source);
+        let result = match scanner.scan_token() {
+            Ok(v) => v,
+            Err(e) => panic!("test"),
+        };
+        let expected = vec![
+            Tokens::new(TokenType::Number(3), 1, 1, "3 + 1 / 4".to_string()),
+            Tokens::new(TokenType::Plus, 1, 3, "3 + 1 / 4".to_string()),
+            Tokens::new(TokenType::Number(1), 1, 5, "3 + 1 / 4".to_string()),
+            Tokens::new(TokenType::Slash, 1, 7, "3 + 1 / 4".to_string()),
+            Tokens::new(TokenType::Number(4), 1, 9, "3 + 1 / 4".to_string()),
         ];
         assert_eq!(result, expected);
     }
     #[test]
     fn basic_math_double_digit_nums() {
-        let source = "300 - 11 * 41".chars().peekable();
+        let source = "300 - 11 * 41";
         let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => v,
             Err(e) => panic!("test"),
         };
         let expected = vec![
-            Tokens::Number(300),
-            Tokens::Minus,
-            Tokens::Number(11),
-            Tokens::Star,
-            Tokens::Number(41),
+            Tokens::new(TokenType::Number(300), 1, 1, "300 - 11 * 41".to_string()),
+            Tokens::new(TokenType::Minus, 1, 5, "300 - 11 * 41".to_string()),
+            Tokens::new(TokenType::Number(11), 1, 7, "300 - 11 * 41".to_string()),
+            Tokens::new(TokenType::Star, 1, 10, "300 - 11 * 41".to_string()),
+            Tokens::new(TokenType::Number(41), 1, 12, "300 - 11 * 41".to_string()),
         ];
         assert_eq!(result, expected);
     }
     #[test]
     fn matches_keywords_and_strings() {
-        let source = "int some = \"this is a string\"".chars().peekable();
+        let source = "int some = \"this is a string\"";
         let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => v,
             Err(e) => panic!("test"),
         };
         let expected = vec![
-            Tokens::Int,
-            Tokens::Ident("some".to_string()),
-            Tokens::Equal,
-            Tokens::String("this is a string".to_string()),
+            Tokens::new(
+                TokenType::Int,
+                1,
+                1,
+                "int some = \"this is a string\"".to_string(),
+            ),
+            Tokens::new(
+                TokenType::Ident("some".to_string()),
+                1,
+                5,
+                "int some = \"this is a string\"".to_string(),
+            ),
+            Tokens::new(
+                TokenType::Equal,
+                1,
+                10,
+                "int some = \"this is a string\"".to_string(),
+            ),
+            Tokens::new(
+                TokenType::String("this is a string".to_string()),
+                1,
+                12,
+                "int some = \"this is a string\"".to_string(),
+            ),
         ];
         assert_eq!(result, expected);
     }
     #[test]
     fn errors_on_unterminated_string() {
-        let source = "int some = \"this is a string".chars().peekable();
+        let source = "int some = \"this is a string";
         let mut scanner = Scanner::new(source);
 
         let result = match scanner.scan_token() {
@@ -327,39 +419,102 @@ mod tests {
     }
     #[test]
     fn matches_complex_keywords() {
-        let source = "int some_long;\nwhile (val >= 12) {*p = val}"
-            .chars()
-            .peekable();
+        let source = "int some_long;\nwhile (val >= 12) {*p = val}";
         let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => v,
             Err(e) => panic!("test"),
         };
         let expected = vec![
-            Tokens::Int,
-            Tokens::Ident("some_long".to_string()),
-            Tokens::Semicolon,
-            Tokens::While,
-            Tokens::LeftParen,
-            Tokens::Ident("val".to_string()),
-            Tokens::GreaterEqual,
-            Tokens::Number(12),
-            Tokens::RightParen,
-            Tokens::LeftBrace,
-            Tokens::Star,
-            Tokens::Ident("p".to_string()),
-            Tokens::Equal,
-            Tokens::Ident("val".to_string()),
-            Tokens::RightBrace,
+            Tokens::new(TokenType::Int, 1, 1, "int some_long;".to_string()),
+            Tokens::new(
+                TokenType::Ident("some_long".to_string()),
+                1,
+                5,
+                "int some_long;".to_string(),
+            ),
+            Tokens::new(TokenType::Semicolon, 1, 14, "int some_long;".to_string()),
+            Tokens::new(
+                TokenType::While,
+                2,
+                1,
+                "while (val >= 12) {*p = val}".to_string(),
+            ),
+            Tokens::new(
+                TokenType::LeftParen,
+                2,
+                7,
+                "while (val >= 12) {*p = val}".to_string(),
+            ),
+            Tokens::new(
+                TokenType::Ident("val".to_string()),
+                2,
+                8,
+                "while (val >= 12) {*p = val}".to_string(),
+            ),
+            Tokens::new(
+                TokenType::GreaterEqual,
+                2,
+                12,
+                "while (val >= 12) {*p = val}".to_string(),
+            ),
+            Tokens::new(
+                TokenType::Number(12),
+                2,
+                15,
+                "while (val >= 12) {*p = val}".to_string(),
+            ),
+            Tokens::new(
+                TokenType::RightParen,
+                2,
+                17,
+                "while (val >= 12) {*p = val}".to_string(),
+            ),
+            Tokens::new(
+                TokenType::LeftBrace,
+                2,
+                19,
+                "while (val >= 12) {*p = val}".to_string(),
+            ),
+            Tokens::new(
+                TokenType::Star,
+                2,
+                20,
+                "while (val >= 12) {*p = val}".to_string(),
+            ),
+            Tokens::new(
+                TokenType::Ident("p".to_string()),
+                2,
+                21,
+                "while (val >= 12) {*p = val}".to_string(),
+            ),
+            Tokens::new(
+                TokenType::Equal,
+                2,
+                23,
+                "while (val >= 12) {*p = val}".to_string(),
+            ),
+            Tokens::new(
+                TokenType::Ident("val".to_string()),
+                2,
+                25,
+                "while (val >= 12) {*p = val}".to_string(),
+            ),
+            Tokens::new(
+                TokenType::RightBrace,
+                2,
+                28,
+                "while (val >= 12) {*p = val}".to_string(),
+            ),
         ];
         assert_eq!(result, expected);
     }
     #[test]
     fn detects_single_on_invalid_char() {
-        let source = "int c = 0$".chars().peekable();
+        let source = "int c = 0$";
         let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
-            Ok(v) => panic!(),
+            Ok(_v) => panic!(),
             Err(e) => e,
         };
         let expected = vec![ScanErr {
@@ -370,7 +525,7 @@ mod tests {
     }
     #[test]
     fn detects_mutliple_on_invalid_chars() {
-        let source = "int c = 0$\n\n% ^".chars().peekable();
+        let source = "int c = 0$\n\n% ^";
         let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => panic!(),
@@ -394,23 +549,28 @@ mod tests {
     }
     #[test]
     fn can_handle_non_ascii_alphabet() {
-        let source = "\nint ä = 123".chars().peekable();
+        let source = "\nint ä = 123";
         let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => v,
             Err(e) => panic!(),
         };
         let expected = vec![
-            Tokens::Int,
-            Tokens::Ident("ä".to_string()),
-            Tokens::Equal,
-            Tokens::Number(123),
+            Tokens::new(TokenType::Int, 2, 1, "int ä = 123".to_string()),
+            Tokens::new(
+                TokenType::Ident("ä".to_string()),
+                2,
+                5,
+                "int ä = 123".to_string(),
+            ),
+            Tokens::new(TokenType::Equal, 2, 8, "int ä = 123".to_string()), // ä len is 2 but thats fine because its the same when indexing
+            Tokens::new(TokenType::Number(123), 2, 10, "int ä = 123".to_string()),
         ];
         assert_eq!(result, expected);
     }
     #[test]
     fn errors_on_non_ascii_non_letters() {
-        let source = "\nint ä ~ = 123".chars().peekable();
+        let source = "\nint ä ~ = 123";
         let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => panic!(),

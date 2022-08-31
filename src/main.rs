@@ -10,7 +10,7 @@ fn sys_error(msg: &str, exit_code: i32) {
     std::process::exit(exit_code);
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 enum Expr {
     Binary {
         left: Box<Expr>,
@@ -29,7 +29,7 @@ enum Expr {
 }
 
 struct Parser {
-    tokens: Peekable<std::vec::IntoIter<scanner::Tokens>>,
+    tokens: Peekable<std::vec::IntoIter<Tokens>>,
 }
 
 impl Parser {
@@ -44,7 +44,7 @@ impl Parser {
     fn equality(&mut self) -> Expr {
         let mut expr = self.comparison();
 
-        match self.matches(vec![Tokens::BangEqual, Tokens::EqualEqual]) {
+        match self.matches(vec![TokenType::BangEqual, TokenType::EqualEqual]) {
             Some(token) => {
                 let operator = token;
                 let right = self.equality();
@@ -62,10 +62,10 @@ impl Parser {
         let mut expr = self.term();
 
         match self.matches(vec![
-            Tokens::Greater,
-            Tokens::GreaterEqual,
-            Tokens::Less,
-            Tokens::LessEqual,
+            TokenType::Greater,
+            TokenType::GreaterEqual,
+            TokenType::Less,
+            TokenType::LessEqual,
         ]) {
             Some(token) => {
                 let operator = token;
@@ -83,7 +83,7 @@ impl Parser {
     fn term(&mut self) -> Expr {
         let mut expr = self.factor();
 
-        match self.matches(vec![Tokens::Minus, Tokens::Plus]) {
+        match self.matches(vec![TokenType::Minus, TokenType::Plus]) {
             Some(token) => {
                 let operator = token;
                 let right = self.factor();
@@ -100,7 +100,7 @@ impl Parser {
     fn factor(&mut self) -> Expr {
         let mut expr = self.unary();
 
-        match self.matches(vec![Tokens::Slash, Tokens::Star]) {
+        match self.matches(vec![TokenType::Slash, TokenType::Star]) {
             Some(token) => {
                 let operator = token;
                 let right = self.unary();
@@ -115,7 +115,7 @@ impl Parser {
         expr
     }
     fn unary(&mut self) -> Expr {
-        match self.matches(vec![Tokens::Bang, Tokens::Minus]) {
+        match self.matches(vec![TokenType::Bang, TokenType::Minus]) {
             Some(token) => {
                 let operator = token;
                 let right = self.unary();
@@ -129,31 +129,30 @@ impl Parser {
         self.primary()
     }
     fn primary(&mut self) -> Expr {
-        match self.tokens.next() {
-            Some(v) => match v {
-                Tokens::Number(v) => return Expr::Number(v),
-                Tokens::String(v) => return Expr::String(v),
-                _ => (),
-            },
-            None => (),
-        }
-        if let Some(_) = self.matches(vec![Tokens::LeftParen]) {
-            let expr = self.expression();
-            match self.matches(vec![Tokens::RightParen]) {
-                Some(_) => (),
-                None => eprintln!("missing closing ')'"),
+        if let Some(token) = self.tokens.next() {
+            match token.token {
+                TokenType::Number(v) => return Expr::Number(v),
+                TokenType::String(v) => return Expr::String(v),
+                TokenType::LeftParen => {
+                    let expr = self.expression();
+                    match self.matches(vec![TokenType::RightParen]) {
+                        Some(_) => (),
+                        None => panic!("missing closing ')'"),
+                    }
+                    return Expr::Grouping {
+                        expression: Box::new(expr),
+                    };
+                }
+                _ => panic!("Expected expression found: {:?}", token.line_string),
             }
-            return Expr::Grouping {
-                expression: Box::new(expr),
-            };
         }
         unreachable!()
     }
 
-    fn matches(&mut self, expected: Vec<scanner::Tokens>) -> Option<scanner::Tokens> {
+    fn matches(&mut self, expected: Vec<TokenType>) -> Option<Tokens> {
         match self.tokens.peek() {
             Some(v) => {
-                if !expected.contains(v) {
+                if !expected.contains(&v.token) {
                     return None;
                 }
             }
@@ -161,6 +160,44 @@ impl Parser {
         }
         self.tokens.next()
     }
+}
+
+fn execute(ast: Expr) -> i32 {
+    match ast {
+        Expr::Binary {
+            left: l,
+            token: t,
+            right: r,
+        } => evaluate_binary(*l, t, *r),
+        Expr::Unary { token: t, right: r } => evaluate_unary(t, *r),
+        Expr::Grouping { expression: e } => evaluate_grouping(*e),
+        Expr::Number(v) => return v,
+        // Expr::String(v) => return v,
+        _ => panic!("cant interpret this token"),
+    }
+}
+fn evaluate_binary(left: Expr, token: Tokens, right: Expr) -> i32 {
+    let left = execute(left);
+    let right = execute(right);
+
+    match token.token {
+        TokenType::Plus => left + right,
+        TokenType::Minus => left - right,
+        TokenType::Star => left * right,
+        TokenType::Slash => left / right,
+        _ => panic!("invalid binary operator"),
+    }
+}
+fn evaluate_unary(token: Tokens, right: Expr) -> i32 {
+    let right = execute(right);
+    match token.token {
+        TokenType::Bang => !right,
+        TokenType::Minus => -right,
+        _ => panic!("invalid unary token"),
+    }
+}
+fn evaluate_grouping(expr: Expr) -> i32 {
+    execute(expr)
 }
 
 fn main() {
@@ -174,7 +211,7 @@ fn main() {
     let source = fs::read_to_string(file.unwrap()).expect("couldn't find file: {file}");
 
     let mut tokens: Option<Vec<Tokens>> = None;
-    let mut scanner = Scanner::new(source.chars().peekable());
+    let mut scanner = Scanner::new(&source);
     match scanner.scan_token() {
         Ok(v) => tokens = Some(v),
         Err(e) => {
@@ -184,33 +221,51 @@ fn main() {
             had_error = true;
         }
     }
-    if !had_error {
-        let mut parser = Parser::new(tokens.unwrap());
-        let ast = parser.expression();
-        dbg!(ast);
+
+    if had_error {
+        return;
     }
+    let mut parser = Parser::new(tokens.unwrap());
+    let ast = parser.expression();
+
+    if had_error {
+        return;
+    }
+    println!("{}", execute(ast));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    macro_rules! token_default {
+        ($token_type:expr) => {
+            Tokens::new($token_type, 1, 1, "".to_string())
+        };
+    }
+    macro_rules! tok_vec {
+        ($($token_type:expr),+) => {{
+            let mut v:Vec<Tokens> = Vec::new();
+            $(v.push(token_default!($token_type));)+
+            v
+        }}
+    }
     #[test]
     fn creates_ast() {
-        let tokens = vec![
-            Tokens::Number(32),
-            Tokens::Plus,
-            Tokens::Number(1),
-            Tokens::Star,
-            Tokens::Number(2),
+        let tokens = tok_vec![
+            TokenType::Number(32),
+            TokenType::Plus,
+            TokenType::Number(1),
+            TokenType::Star,
+            TokenType::Number(2)
         ];
         let mut p = Parser::new(tokens);
         let result = p.expression();
         let expected = Expr::Binary {
             left: Box::new(Expr::Number(32)),
-            token: Tokens::Plus,
+            token: token_default!(TokenType::Plus),
             right: Box::new(Expr::Binary {
                 left: Box::new(Expr::Number(1)),
-                token: Tokens::Star,
+                token: token_default!(TokenType::Star),
                 right: Box::new(Expr::Number(2)),
             }),
         };

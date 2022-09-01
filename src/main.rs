@@ -216,7 +216,7 @@ fn main() {
         Ok(v) => tokens = Some(v),
         Err(e) => {
             for err in e {
-                err.print_error("");
+                err.print_error();
             }
             had_error = true;
         }

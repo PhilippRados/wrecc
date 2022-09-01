@@ -81,13 +81,22 @@ macro_rules! hash {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ScanErr {
-    line: i32,
+    line_index: i32,
+    line_string: String,
+    column: i32,
     msg: String,
 }
 
 impl ScanErr {
-    pub fn print_error(&self, pos: &str) {
-        eprintln!("[line {} ] Error {pos}: {}", self.line, self.msg);
+    pub fn print_error(&self) {
+        eprintln!("Error: {}", self.msg);
+        eprintln!("|");
+        eprintln!("{} {}", self.line_index, self.line_string);
+        eprint!("|");
+        for _ in 0..self.column {
+            eprint!(" ");
+        }
+        eprintln!("^");
     }
 }
 
@@ -245,9 +254,12 @@ impl<'a> Scanner<'a> {
                     } else {
                         self.err = true;
                         errors.push(ScanErr {
-                            line: self.line,
+                            line_index: self.line,
+                            line_string: self.raw_source[(self.line - 1) as usize].clone(),
+                            column: self.column,
                             msg: format!("Unexpected character: {c}").to_string(),
                         });
+                        self.column += 1;
                     }
                 }
             }
@@ -283,7 +295,9 @@ impl<'a> Scanner<'a> {
             .collect::<String>();
         if last_char != '"' {
             return Err(ScanErr {
-                line: self.line,
+                line_index: self.line,
+                line_string: self.raw_source[(self.line - 1) as usize].clone(),
+                column: self.column,
                 msg: "Unterminated string".to_string(),
             });
         }
@@ -412,7 +426,9 @@ mod tests {
             Err(e) => e,
         };
         let expected = vec![ScanErr {
-            line: 1,
+            line_index: 1,
+            line_string: "int some = \"this is a string".to_string(),
+            column: 12,
             msg: "Unterminated string".to_string(),
         }];
         assert_eq!(result, expected);
@@ -518,7 +534,9 @@ mod tests {
             Err(e) => e,
         };
         let expected = vec![ScanErr {
-            line: 1,
+            line_index: 1,
+            column: 10,
+            line_string: "int c = 0$".to_string(),
             msg: "Unexpected character: $".to_string(),
         }];
         assert_eq!(result, expected);
@@ -533,15 +551,21 @@ mod tests {
         };
         let expected = vec![
             ScanErr {
-                line: 1,
+                line_index: 1,
+                column: 10,
+                line_string: "int c = 0$".to_string(),
                 msg: "Unexpected character: $".to_string(),
             },
             ScanErr {
-                line: 3,
+                line_index: 3,
+                column: 1,
+                line_string: "% ^".to_string(),
                 msg: "Unexpected character: %".to_string(),
             },
             ScanErr {
-                line: 3,
+                line_index: 3,
+                column: 3,
+                line_string: "% ^".to_string(),
                 msg: "Unexpected character: ^".to_string(),
             },
         ];
@@ -577,7 +601,9 @@ mod tests {
             Err(e) => e,
         };
         let expected = vec![ScanErr {
-            line: 2,
+            line_index: 2,
+            column: 8,
+            line_string: "int ä ~ = 123".to_string(),
             msg: "Unexpected character: ~".to_string(),
         }];
         assert_eq!(result, expected);

@@ -28,6 +28,27 @@ enum Expr {
     String(String),
 }
 
+enum Stmt {
+    Print(Expr),
+    Expr(Expr),
+}
+
+impl Stmt {
+    fn visit(&mut self) {
+        match self {
+            Stmt::Print(expr) => visit_print_stmt(expr),
+            Stmt::Expr(expr) => {
+                execute(expr.clone());
+                ()
+            }
+        }
+    }
+}
+fn visit_print_stmt(expr: &Expr) {
+    let value = execute(expr.clone());
+    println!("{}", value);
+}
+
 struct Parser {
     tokens: Peekable<std::vec::IntoIter<Tokens>>,
 }
@@ -38,16 +59,74 @@ impl Parser {
             tokens: tokens.into_iter().peekable(),
         }
     }
-    fn expression(&mut self) -> Expr {
+    fn parse(&mut self) -> Option<Vec<Stmt>> {
+        let mut statements: Vec<Stmt> = Vec::new();
+        let mut had_error = false;
+
+        while self.tokens.peek() != None {
+            match self.statement() {
+                Ok(v) => statements.push(v),
+                Err(e) => {
+                    e.print_error();
+                    self.synchronize();
+                    had_error = true;
+                }
+            }
+        }
+        if had_error {
+            None
+        } else {
+            Some(statements)
+        }
+    }
+    fn synchronize(&mut self) {
+        let mut prev = self.tokens.next();
+
+        while let Some(v) = self.tokens.peek() {
+            if prev.unwrap().token == TokenType::Semicolon {
+                match v.token {
+                    TokenType::If
+                    | TokenType::Return
+                    | TokenType::Print
+                    | TokenType::While
+                    | TokenType::For
+                    | TokenType::Int => return,
+                    _ => (),
+                }
+            }
+            prev = Some(v.clone());
+        }
+    }
+    fn statement(&mut self) -> Result<Stmt, Error> {
+        match self.tokens.next() {
+            Some(t) => match t.token {
+                TokenType::Print => self.print_statement(),
+                _ => self.expression_statement(),
+            },
+            None => unreachable!(),
+        }
+    }
+    fn print_statement(&mut self) -> Result<Stmt, Error> {
+        let value = self.expression()?;
+        self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
+        Ok(Stmt::Print(value))
+    }
+    fn expression_statement(&mut self) -> Result<Stmt, Error> {
+        let expr = self.expression()?;
+        self.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
+        Ok(Stmt::Expr(expr))
+    }
+
+    fn expression(&mut self) -> Result<Expr, Error> {
         self.equality()
     }
-    fn equality(&mut self) -> Expr {
-        let mut expr = self.comparison();
+    fn equality(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.comparison()?;
 
         match self.matches(vec![TokenType::BangEqual, TokenType::EqualEqual]) {
             Some(token) => {
                 let operator = token;
-                let right = self.equality();
+                let right = self.equality()?;
                 expr = Expr::Binary {
                     left: Box::new(expr),
                     token: operator,
@@ -56,10 +135,10 @@ impl Parser {
             }
             None => (),
         }
-        expr
+        Ok(expr)
     }
-    fn comparison(&mut self) -> Expr {
-        let mut expr = self.term();
+    fn comparison(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.term()?;
 
         match self.matches(vec![
             TokenType::Greater,
@@ -69,7 +148,7 @@ impl Parser {
         ]) {
             Some(token) => {
                 let operator = token;
-                let right = self.term();
+                let right = self.term()?;
                 expr = Expr::Binary {
                     left: Box::new(expr),
                     token: operator,
@@ -78,15 +157,15 @@ impl Parser {
             }
             None => (),
         }
-        expr
+        Ok(expr)
     }
-    fn term(&mut self) -> Expr {
-        let mut expr = self.factor();
+    fn term(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.factor()?;
 
         match self.matches(vec![TokenType::Minus, TokenType::Plus]) {
             Some(token) => {
                 let operator = token;
-                let right = self.factor();
+                let right = self.factor()?;
                 expr = Expr::Binary {
                     left: Box::new(expr),
                     token: operator,
@@ -95,15 +174,15 @@ impl Parser {
             }
             None => (),
         }
-        expr
+        Ok(expr)
     }
-    fn factor(&mut self) -> Expr {
-        let mut expr = self.unary();
+    fn factor(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.unary()?;
 
         match self.matches(vec![TokenType::Slash, TokenType::Star]) {
             Some(token) => {
                 let operator = token;
-                let right = self.unary();
+                let right = self.unary()?;
                 expr = Expr::Binary {
                     left: Box::new(expr),
                     token: operator,
@@ -112,41 +191,68 @@ impl Parser {
             }
             None => (),
         }
-        expr
+        Ok(expr)
     }
-    fn unary(&mut self) -> Expr {
+    fn unary(&mut self) -> Result<Expr, Error> {
         match self.matches(vec![TokenType::Bang, TokenType::Minus]) {
             Some(token) => {
                 let operator = token;
-                let right = self.unary();
-                return Expr::Unary {
+                let right = self.unary()?;
+                return Ok(Expr::Unary {
                     token: operator,
                     right: Box::new(right),
-                };
+                });
             }
             None => (),
         }
         self.primary()
     }
-    fn primary(&mut self) -> Expr {
+    fn primary(&mut self) -> Result<Expr, Error> {
         if let Some(token) = self.tokens.next() {
             match token.token {
-                TokenType::Number(v) => return Expr::Number(v),
-                TokenType::String(v) => return Expr::String(v),
+                TokenType::Number(v) => return Ok(Expr::Number(v)),
+                TokenType::String(v) => return Ok(Expr::String(v)),
                 TokenType::LeftParen => {
-                    let expr = self.expression();
-                    match self.matches(vec![TokenType::RightParen]) {
-                        Some(_) => (),
-                        None => panic!("missing closing ')'"),
-                    }
-                    return Expr::Grouping {
+                    let expr = self.expression()?;
+                    self.consume(TokenType::RightParen, "missing closing ')'")?;
+                    return Ok(Expr::Grouping {
                         expression: Box::new(expr),
-                    };
+                    });
                 }
-                _ => panic!("Expected expression found: {:?}", token.line_string),
+                _ => {
+                    return Err(Error::new(
+                        &token,
+                        &format!("Expected expression found: {:?}", &token.token),
+                    ))
+                }
             }
         }
-        unreachable!()
+        Err(Error {
+            line_index: -1,
+            line_string: "".to_string(),
+            column: -1,
+            msg: "Expected expression".to_string(),
+        })
+        // unreachable!()
+    }
+    fn consume(&mut self, token: TokenType, msg: &str) -> Result<(), Error> {
+        match self.tokens.next() {
+            Some(v) => {
+                if v.token != token {
+                    return Err(Error::new(&v, msg));
+                } else {
+                    return Ok(());
+                }
+            }
+            None => {
+                return Err(Error {
+                    line_index: -1,
+                    line_string: "".to_string(),
+                    column: -1,
+                    msg: msg.to_string(),
+                })
+            }
+        }
     }
 
     fn matches(&mut self, expected: Vec<TokenType>) -> Option<Tokens> {
@@ -159,6 +265,13 @@ impl Parser {
             None => return None,
         }
         self.tokens.next()
+    }
+}
+
+fn interpret(statements: Vec<Stmt>) {
+    // statements.into_iter().by_ref().map(|s| s.visit());
+    for mut s in statements {
+        s.visit();
     }
 }
 
@@ -201,7 +314,6 @@ fn evaluate_grouping(expr: Expr) -> i32 {
 }
 
 fn main() {
-    let mut had_error = false;
     let args: Vec<String> = std::env::args().collect();
     let mut file: Option<&str> = None;
     match args.len() {
@@ -218,20 +330,17 @@ fn main() {
             for err in e {
                 err.print_error();
             }
-            had_error = true;
+            return;
         }
     }
 
-    if had_error {
-        return;
-    }
+    let mut statements: Option<Vec<Stmt>> = None;
     let mut parser = Parser::new(tokens.unwrap());
-    let ast = parser.expression();
-
-    if had_error {
-        return;
+    match parser.parse() {
+        Some(v) => statements = Some(v),
+        None => return,
     }
-    println!("{}", execute(ast));
+    interpret(statements.unwrap());
 }
 
 #[cfg(test)]

@@ -49,6 +49,7 @@ pub enum TokenType {
     If,
     Return,
     While,
+    Print,
 
     Eof,
 }
@@ -80,23 +81,35 @@ macro_rules! hash {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct ScanErr {
-    line_index: i32,
-    line_string: String,
-    column: i32,
-    msg: String,
+pub struct Error {
+    pub line_index: i32,
+    pub line_string: String,
+    pub column: i32,
+    pub msg: String,
 }
 
-impl ScanErr {
+impl Error {
+    pub fn new(t: &Tokens, msg: &str) -> Self {
+        Error {
+            line_index: t.line_index,
+            line_string: t.line_string.clone(),
+            column: t.column,
+            msg: msg.to_string(),
+        }
+    }
     pub fn print_error(&self) {
         eprintln!("Error: {}", self.msg);
-        eprintln!("|");
-        eprintln!("{} {}", self.line_index, self.line_string);
-        eprint!("|");
-        for _ in 0..self.column {
-            eprint!(" ");
+
+        // Change to Option<>
+        if self.line_index != -1 {
+            eprintln!("|");
+            eprintln!("{} {}", self.line_index, self.line_string);
+            eprint!("|");
+            for _ in 0..self.column {
+                eprint!(" ");
+            }
+            eprintln!("^");
         }
-        eprintln!("^");
     }
 }
 
@@ -126,7 +139,8 @@ impl<'a> Scanner<'a> {
                 ("else".to_string(), TokenType::Else),
                 ("for".to_string(), TokenType::For),
                 ("while".to_string(), TokenType::While),
-                ("return".to_string(), TokenType::Return)
+                ("return".to_string(), TokenType::Return),
+                ("print".to_string(), TokenType::Print)
             ],
         }
     }
@@ -165,8 +179,8 @@ impl<'a> Scanner<'a> {
             _ => 1,
         }
     }
-    pub fn scan_token(&mut self) -> Result<Vec<Tokens>, Vec<ScanErr>> {
-        let mut errors: Vec<ScanErr> = Vec::new();
+    pub fn scan_token(&mut self) -> Result<Vec<Tokens>, Vec<Error>> {
+        let mut errors: Vec<Error> = Vec::new();
         let mut tokens: Vec<Tokens> = Vec::new();
 
         while let Some(c) = self.source.next() {
@@ -253,7 +267,7 @@ impl<'a> Scanner<'a> {
                         }
                     } else {
                         self.err = true;
-                        errors.push(ScanErr {
+                        errors.push(Error {
                             line_index: self.line,
                             line_string: self.raw_source[(self.line - 1) as usize].clone(),
                             column: self.column,
@@ -283,7 +297,7 @@ impl<'a> Scanner<'a> {
         true
     }
 
-    fn string(&mut self) -> Result<String, ScanErr> {
+    fn string(&mut self) -> Result<String, Error> {
         let mut last_char = '\0';
         let result = self
             .source
@@ -294,7 +308,7 @@ impl<'a> Scanner<'a> {
             })
             .collect::<String>();
         if last_char != '"' {
-            return Err(ScanErr {
+            return Err(Error {
                 line_index: self.line,
                 line_string: self.raw_source[(self.line - 1) as usize].clone(),
                 column: self.column,
@@ -425,7 +439,7 @@ mod tests {
             Ok(v) => panic!(),
             Err(e) => e,
         };
-        let expected = vec![ScanErr {
+        let expected = vec![Error {
             line_index: 1,
             line_string: "int some = \"this is a string".to_string(),
             column: 12,
@@ -533,7 +547,7 @@ mod tests {
             Ok(_v) => panic!(),
             Err(e) => e,
         };
-        let expected = vec![ScanErr {
+        let expected = vec![Error {
             line_index: 1,
             column: 10,
             line_string: "int c = 0$".to_string(),
@@ -550,19 +564,19 @@ mod tests {
             Err(e) => e,
         };
         let expected = vec![
-            ScanErr {
+            Error {
                 line_index: 1,
                 column: 10,
                 line_string: "int c = 0$".to_string(),
                 msg: "Unexpected character: $".to_string(),
             },
-            ScanErr {
+            Error {
                 line_index: 3,
                 column: 1,
                 line_string: "% ^".to_string(),
                 msg: "Unexpected character: %".to_string(),
             },
-            ScanErr {
+            Error {
                 line_index: 3,
                 column: 3,
                 line_string: "% ^".to_string(),
@@ -600,7 +614,7 @@ mod tests {
             Ok(v) => panic!(),
             Err(e) => e,
         };
-        let expected = vec![ScanErr {
+        let expected = vec![Error {
             line_index: 2,
             column: 8,
             line_string: "int ä ~ = 123".to_string(),

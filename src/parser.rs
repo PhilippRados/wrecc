@@ -4,6 +4,20 @@ use crate::scanner::TokenType;
 use crate::scanner::Tokens;
 use std::iter::Peekable;
 
+macro_rules! if_match_return {
+    ($self:ident,$var:expr,$default:expr) => {
+        let variant = $var($default);
+        match $self.matches(vec![variant]) {
+            Some(t) => match t.token {
+                TokenType::Number(n) => return Ok(Expr::Number(n)),
+                TokenType::String(s) => return Ok(Expr::String(s.clone())),
+                _ => unreachable!(),
+            },
+            None => (),
+        }
+    };
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Binary {
@@ -75,6 +89,7 @@ impl Parser {
         match self.tokens.next() {
             Some(t) => match t.token {
                 TokenType::Print => self.print_statement(),
+                // TokenType::Int => self.var_declaration(),
                 _ => panic!("only expression not allowed {:?}", t), //self.expression_statement(),
             },
             None => unreachable!(),
@@ -85,11 +100,11 @@ impl Parser {
         self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
         Ok(Stmt::Print(value))
     }
-    fn expression_statement(&mut self) -> Result<Stmt, Error> {
-        let expr = self.expression()?;
-        self.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
-        Ok(Stmt::Expr(expr))
-    }
+    // fn var_declaration(&mut self) -> Result<Stmt, Error> {
+    // let value = self.expression()?;
+    // self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
+    // Ok(Stmt::Print(value))
+    // }
 
     fn expression(&mut self) -> Result<Expr, Error> {
         self.equality()
@@ -182,17 +197,9 @@ impl Parser {
         self.primary()
     }
     fn primary(&mut self) -> Result<Expr, Error> {
-        match self.matches(vec![
-            TokenType::Number(0),
-            TokenType::String("".to_string()),
-        ]) {
-            Some(token) => match &token.token {
-                TokenType::Number(n) => return Ok(Expr::Number(*n)),
-                TokenType::String(s) => return Ok(Expr::String(s.clone())),
-                _ => unreachable!(),
-            },
-            None => (),
-        }
+        if_match_return!(self, TokenType::Number, 0);
+        if_match_return!(self, TokenType::String, "".to_string());
+
         match self.matches(vec![TokenType::LeftParen]) {
             Some(t) => {
                 let expr = self.expression()?;
@@ -205,12 +212,10 @@ impl Parser {
         }
         match self.tokens.peek() {
             Some(t) => {
-                return Err(Error {
-                    line_index: t.line_index,
-                    line_string: t.line_string.clone(),
-                    column: t.column,
-                    msg: format!("Expected expression found: {:?}", t.token),
-                })
+                return Err(Error::new(
+                    t,
+                    &format!("Expected expression found: {:?}", t.token),
+                ));
             }
             None => {
                 return Err(Error {

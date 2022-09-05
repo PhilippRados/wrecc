@@ -1,0 +1,8 @@
+Error: Expected expression found: Semicolon
+|
+1 print 2 +;
+|          ^
+Error: missing closing ')'
+|
+2 print (2 * 1 -12;
+|                 ^

@@ -21,7 +21,9 @@ fn main() {
         2 => file = Some(&args[1]),
         _ => sys_error("usage: rucc <file>", 2),
     }
-    let source = fs::read_to_string(file.unwrap()).expect("couldn't find file: {file}");
+
+    let source =
+        fs::read_to_string(file.unwrap()).expect(&format!("couldn't find file: {}", file.unwrap()));
 
     let mut tokens: Option<Vec<Tokens>> = None;
     let mut scanner = Scanner::new(&source);
@@ -34,7 +36,6 @@ fn main() {
             return;
         }
     }
-    dbg!(&tokens);
 
     let mut statements: Option<Vec<Stmt>> = None;
     let mut parser = Parser::new(tokens.unwrap());

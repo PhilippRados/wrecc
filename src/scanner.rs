@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum TokenType {
     // Single-character tokens.
@@ -52,6 +52,14 @@ pub enum TokenType {
     Print,
 
     Eof,
+}
+impl PartialEq for TokenType {
+    fn eq(&self, other: &Self) -> bool {
+        let tag = std::mem::discriminant(self);
+        let o_tag = std::mem::discriminant(other);
+
+        tag == o_tag
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -168,11 +176,9 @@ impl<'a> Scanner<'a> {
             | TokenType::LessEqual => 2,
             TokenType::String(s) => (s.len() + 2) as i32,
             TokenType::Ident(s) => s.len() as i32,
-            TokenType::Int => 3,
-            TokenType::Char => 3,
-            TokenType::While => 5,
-            TokenType::Else => 4,
-            TokenType::For => 3,
+            TokenType::Int | TokenType::For => 3,
+            TokenType::Char | TokenType::Else => 4,
+            TokenType::While | TokenType::Print => 5,
             TokenType::If => 2,
             TokenType::Return => 6,
             TokenType::Number(n) => n.to_string().len() as i32,
@@ -427,6 +433,22 @@ mod tests {
                 12,
                 "int some = \"this is a string\"".to_string(),
             ),
+        ];
+        assert_eq!(result, expected);
+    }
+    #[test]
+    fn matches_print_keyword() {
+        let source = "print 2 +;";
+        let mut scanner = Scanner::new(source);
+        let result = match scanner.scan_token() {
+            Ok(v) => v,
+            Err(e) => panic!("test"),
+        };
+        let expected = vec![
+            Tokens::new(TokenType::Print, 1, 1, "print 2 +;".to_string()),
+            Tokens::new(TokenType::Number(2), 1, 7, "print 2 +;".to_string()),
+            Tokens::new(TokenType::Plus, 1, 9, "print 2 +;".to_string()),
+            Tokens::new(TokenType::Semicolon, 1, 10, "print 2 +;".to_string()),
         ];
         assert_eq!(result, expected);
     }

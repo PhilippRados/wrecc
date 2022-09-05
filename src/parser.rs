@@ -68,13 +68,14 @@ impl Parser {
                 }
             }
             prev = Some(v.clone());
+            self.tokens.next();
         }
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
         match self.tokens.next() {
             Some(t) => match t.token {
                 TokenType::Print => self.print_statement(),
-                _ => self.expression_statement(),
+                _ => panic!("only expression not allowed {:?}", t), //self.expression_statement(),
             },
             None => unreachable!(),
         }
@@ -178,35 +179,48 @@ impl Parser {
             }
             None => (),
         }
-        dbg!(self.primary())
+        self.primary()
     }
     fn primary(&mut self) -> Result<Expr, Error> {
-        if let Some(token) = self.tokens.next() {
-            match token.token {
-                TokenType::Number(v) => return Ok(Expr::Number(v)),
-                TokenType::String(v) => return Ok(Expr::String(v)),
-                TokenType::LeftParen => {
-                    let expr = self.expression()?;
-                    self.consume(TokenType::RightParen, "missing closing ')'")?;
-                    return Ok(Expr::Grouping {
-                        expression: Box::new(expr),
-                    });
-                }
-                _ => {
-                    return Err(Error::new(
-                        &token,
-                        &format!("Expected expression found: {:?}", &token.token),
-                    ))
-                }
-            }
+        match self.matches(vec![
+            TokenType::Number(0),
+            TokenType::String("".to_string()),
+        ]) {
+            Some(token) => match &token.token {
+                TokenType::Number(n) => return Ok(Expr::Number(*n)),
+                TokenType::String(s) => return Ok(Expr::String(s.clone())),
+                _ => unreachable!(),
+            },
+            None => (),
         }
-        Err(Error {
-            line_index: -1,
-            line_string: "".to_string(),
-            column: -1,
-            msg: "Expected expression".to_string(),
-        })
-        // unreachable!()
+        match self.matches(vec![TokenType::LeftParen]) {
+            Some(t) => {
+                let expr = self.expression()?;
+                self.consume(TokenType::RightParen, "missing closing ')'")?;
+                return Ok(Expr::Grouping {
+                    expression: Box::new(expr),
+                });
+            }
+            None => (),
+        }
+        match self.tokens.peek() {
+            Some(t) => {
+                return Err(Error {
+                    line_index: t.line_index,
+                    line_string: t.line_string.clone(),
+                    column: t.column,
+                    msg: format!("Expected expression found: {:?}", t.token),
+                })
+            }
+            None => {
+                return Err(Error {
+                    line_index: -1,
+                    line_string: "".to_string(),
+                    column: -1,
+                    msg: "Expected expression found end of file".to_string(),
+                })
+            }
+        };
     }
     fn consume(&mut self, token: TokenType, msg: &str) -> Result<(), Error> {
         match self.tokens.next() {
@@ -266,6 +280,7 @@ mod tests {
             TokenType::Number(2)
         ];
         let mut p = Parser::new(tokens);
+
         let result = p.expression();
         let expected = Expr::Binary {
             left: Box::new(Expr::Number(32)),
@@ -277,5 +292,20 @@ mod tests {
             }),
         };
         assert_eq!(result.unwrap(), expected);
+    }
+    #[test]
+    fn matches_works_on_enums_with_values() {
+        let tokens = vec![
+            token_default!(TokenType::Number(2)),
+            token_default!(TokenType::Plus),
+        ];
+        let mut p = Parser::new(tokens);
+
+        let result = p.matches(vec![
+            TokenType::Number(0),
+            TokenType::String("".to_string()),
+        ]);
+        let expected = Some(token_default!(TokenType::Number(2)));
+        assert_eq!(result, expected);
     }
 }

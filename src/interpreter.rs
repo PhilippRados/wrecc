@@ -25,7 +25,6 @@ fn visit_print_stmt(expr: &Expr) {
 }
 
 pub fn interpret(statements: Vec<Stmt>) {
-    // statements.into_iter().by_ref().map(|s| s.visit());
     for mut s in statements {
         s.visit();
     }
@@ -41,7 +40,6 @@ fn execute(ast: Expr) -> i32 {
         Expr::Unary { token: t, right: r } => evaluate_unary(t, *r),
         Expr::Grouping { expression: e } => evaluate_grouping(*e),
         Expr::Number(v) => return v,
-        // Expr::String(v) => return v,
         _ => panic!("cant interpret this token"),
     }
 }

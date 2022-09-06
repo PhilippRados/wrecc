@@ -94,7 +94,12 @@ impl Parser {
         if let Some(_) = self.matches(vec![TokenType::Print]) {
             return self.print_statement();
         }
-        unreachable!()
+        self.expression_statement()
+    }
+    fn expression_statement(&mut self) -> Result<Stmt, Error> {
+        let expr = self.expression()?;
+        self.consume(TokenType::Semicolon, "Expect ';' after expression")?;
+        Ok(Stmt::Expr(expr))
     }
     fn print_statement(&mut self) -> Result<Stmt, Error> {
         let value = self.expression()?;

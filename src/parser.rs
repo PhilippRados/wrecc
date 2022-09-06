@@ -17,7 +17,6 @@ macro_rules! if_match_return {
         }
     };
 }
-
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Binary {
@@ -51,7 +50,7 @@ impl Parser {
         let mut had_error = false;
 
         while self.tokens.peek() != None {
-            match self.statement() {
+            match self.declaration() {
                 Ok(v) => statements.push(v),
                 Err(e) => {
                     e.print_error();
@@ -85,26 +84,26 @@ impl Parser {
             self.tokens.next();
         }
     }
-    fn statement(&mut self) -> Result<Stmt, Error> {
-        match self.tokens.next() {
-            Some(t) => match t.token {
-                TokenType::Print => self.print_statement(),
-                // TokenType::Int => self.var_declaration(),
-                _ => panic!("only expression not allowed {:?}", t), //self.expression_statement(),
-            },
-            None => unreachable!(),
+    fn declaration(&mut self) -> Result<Stmt, Error> {
+        if let Some(_) = self.matches(vec![TokenType::Int]) {
+            return self.int_declaration();
         }
+        self.statement()
+    }
+    fn statement(&mut self) -> Result<Stmt, Error> {
+        if let Some(_) = self.matches(vec![TokenType::Print]) {
+            return self.print_statement();
+        }
+        unreachable!()
     }
     fn print_statement(&mut self) -> Result<Stmt, Error> {
         let value = self.expression()?;
         self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
         Ok(Stmt::Print(value))
     }
-    // fn var_declaration(&mut self) -> Result<Stmt, Error> {
-    // let value = self.expression()?;
-    // self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
-    // Ok(Stmt::Print(value))
-    // }
+    fn int_declaration(&mut self) -> Result<Stmt, Error> {
+        unimplemented!();
+    }
 
     fn expression(&mut self) -> Result<Expr, Error> {
         self.equality()
@@ -112,87 +111,72 @@ impl Parser {
     fn equality(&mut self) -> Result<Expr, Error> {
         let mut expr = self.comparison()?;
 
-        match self.matches(vec![TokenType::BangEqual, TokenType::EqualEqual]) {
-            Some(token) => {
-                let operator = token;
-                let right = self.equality()?;
-                expr = Expr::Binary {
-                    left: Box::new(expr),
-                    token: operator,
-                    right: Box::new(right),
-                };
+        while let Some(token) = self.matches(vec![TokenType::BangEqual, TokenType::EqualEqual]) {
+            let operator = token;
+            let right = self.comparison()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                token: operator,
+                right: Box::new(right),
             }
-            None => (),
         }
         Ok(expr)
     }
     fn comparison(&mut self) -> Result<Expr, Error> {
         let mut expr = self.term()?;
 
-        match self.matches(vec![
+        while let Some(token) = self.matches(vec![
             TokenType::Greater,
             TokenType::GreaterEqual,
             TokenType::Less,
             TokenType::LessEqual,
         ]) {
-            Some(token) => {
-                let operator = token;
-                let right = self.term()?;
-                expr = Expr::Binary {
-                    left: Box::new(expr),
-                    token: operator,
-                    right: Box::new(right),
-                };
-            }
-            None => (),
+            let operator = token;
+            let right = self.term()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                token: operator,
+                right: Box::new(right),
+            };
         }
         Ok(expr)
     }
     fn term(&mut self) -> Result<Expr, Error> {
         let mut expr = self.factor()?;
 
-        match self.matches(vec![TokenType::Minus, TokenType::Plus]) {
-            Some(token) => {
-                let operator = token;
-                let right = self.factor()?;
-                expr = Expr::Binary {
-                    left: Box::new(expr),
-                    token: operator,
-                    right: Box::new(right),
-                };
-            }
-            None => (),
+        while let Some(token) = self.matches(vec![TokenType::Minus, TokenType::Plus]) {
+            let operator = token;
+            let right = self.factor()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                token: operator,
+                right: Box::new(right),
+            };
         }
         Ok(expr)
     }
     fn factor(&mut self) -> Result<Expr, Error> {
         let mut expr = self.unary()?;
 
-        match self.matches(vec![TokenType::Slash, TokenType::Star]) {
-            Some(token) => {
-                let operator = token;
-                let right = self.unary()?;
-                expr = Expr::Binary {
-                    left: Box::new(expr),
-                    token: operator,
-                    right: Box::new(right),
-                };
-            }
-            None => (),
+        while let Some(token) = self.matches(vec![TokenType::Slash, TokenType::Star]) {
+            let operator = token;
+            let right = self.unary()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                token: operator,
+                right: Box::new(right),
+            };
         }
         Ok(expr)
     }
     fn unary(&mut self) -> Result<Expr, Error> {
-        match self.matches(vec![TokenType::Bang, TokenType::Minus]) {
-            Some(token) => {
-                let operator = token;
-                let right = self.unary()?;
-                return Ok(Expr::Unary {
-                    token: operator,
-                    right: Box::new(right),
-                });
-            }
-            None => (),
+        if let Some(token) = self.matches(vec![TokenType::Bang, TokenType::Minus]) {
+            let operator = token;
+            let right = self.unary()?;
+            return Ok(Expr::Unary {
+                token: operator,
+                right: Box::new(right),
+            });
         }
         self.primary()
     }
@@ -200,15 +184,12 @@ impl Parser {
         if_match_return!(self, TokenType::Number, 0);
         if_match_return!(self, TokenType::String, "".to_string());
 
-        match self.matches(vec![TokenType::LeftParen]) {
-            Some(t) => {
-                let expr = self.expression()?;
-                self.consume(TokenType::RightParen, "missing closing ')'")?;
-                return Ok(Expr::Grouping {
-                    expression: Box::new(expr),
-                });
-            }
-            None => (),
+        if let Some(_) = self.matches(vec![TokenType::LeftParen]) {
+            let expr = self.expression()?;
+            self.consume(TokenType::RightParen, "missing closing ')'")?;
+            return Ok(Expr::Grouping {
+                expression: Box::new(expr),
+            });
         }
         match self.tokens.peek() {
             Some(t) => {
@@ -312,5 +293,49 @@ mod tests {
         ]);
         let expected = Some(token_default!(TokenType::Number(2)));
         assert_eq!(result, expected);
+    }
+    #[test]
+    fn nested_groupings() {
+        let tokens = tok_vec![
+            TokenType::LeftParen,
+            TokenType::Number(3),
+            TokenType::Slash,
+            TokenType::LeftParen,
+            TokenType::Number(6),
+            TokenType::Minus,
+            TokenType::Number(7),
+            TokenType::RightParen,
+            TokenType::Star,
+            TokenType::Number(2),
+            TokenType::RightParen,
+            TokenType::Plus,
+            TokenType::Number(1)
+        ];
+        let mut p = Parser::new(tokens);
+
+        let result = p.expression();
+        let expected = Expr::Binary {
+            left: Box::new(Expr::Grouping {
+                expression: Box::new(Expr::Binary {
+                    left: Box::new(Expr::Binary {
+                        left: Box::new(Expr::Number(3)),
+                        token: token_default!(TokenType::Slash),
+                        right: Box::new(Expr::Grouping {
+                            expression: Box::new(Expr::Binary {
+                                left: Box::new(Expr::Number(6)),
+                                token: token_default!(TokenType::Minus),
+                                right: Box::new(Expr::Number(7)),
+                            }),
+                        }),
+                    }),
+                    token: token_default!(TokenType::Star),
+                    right: Box::new(Expr::Number(2)),
+                }),
+            }),
+            token: token_default!(TokenType::Plus),
+            right: Box::new(Expr::Number(1)),
+        };
+
+        assert_eq!(result.unwrap(), expected);
     }
 }

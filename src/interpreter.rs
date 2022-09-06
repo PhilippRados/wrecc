@@ -11,6 +11,7 @@ impl Stmt {
     fn visit(&mut self) {
         match self {
             Stmt::Print(expr) => visit_print_stmt(expr),
+            // Stmt::Int_declaration(ident) =>
             Stmt::Expr(expr) => {
                 execute(expr.clone());
                 ()

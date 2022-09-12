@@ -7,6 +7,7 @@ pub enum Stmt {
     Print(Expr),
     Expr(Expr),
     IntVar(String),
+    InitIntVar(String, Expr),
     AssignVar(String, Expr),
 }
 
@@ -32,6 +33,9 @@ impl Interpreter {
         }
         self.env.insert(var_name, self.execute(expr));
     }
+    fn init_var(&mut self, var_name: String, expr: Expr) {
+        self.env.insert(var_name, self.execute(expr));
+    }
 
     pub fn interpret(&mut self, statements: Vec<Stmt>) {
         for s in statements {
@@ -42,6 +46,7 @@ impl Interpreter {
         match statement {
             Stmt::Print(expr) => self.visit_print_stmt(expr),
             Stmt::IntVar(name) => self.create_var(name.clone()),
+            Stmt::InitIntVar(name, expr) => self.init_var(name.clone(), expr),
             Stmt::AssignVar(name, expr) => self.assign_var(name.clone(), expr),
             Stmt::Expr(expr) => {
                 self.execute(expr.clone());

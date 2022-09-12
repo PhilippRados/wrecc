@@ -1,4 +1,4 @@
-Error: Expected expression found: Semicolon
+Error: Expected expression found: ';'
 |
 1 print 2 +;
 |          ^

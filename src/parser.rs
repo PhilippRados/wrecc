@@ -106,8 +106,14 @@ impl Parser {
             )?
             .unwrap_string();
 
-        self.consume(TokenKind::Semicolon, "Expect ';' after int declaration")?;
-        Ok(Stmt::IntVar(name))
+        if let Some(_) = self.matches(vec![TokenKind::Equal]) {
+            let value = self.expression()?;
+            self.consume(TokenKind::Semicolon, "Expect ';' after expression")?;
+            Ok(Stmt::InitIntVar(name, value))
+        } else {
+            self.consume(TokenKind::Semicolon, "Expect ';' after int declaration")?;
+            Ok(Stmt::IntVar(name))
+        }
     }
     fn int_assignment(&mut self, name: String) -> Result<Stmt, Error> {
         self.consume(TokenKind::Equal, "Expect '=' after int declaration")?;
@@ -215,7 +221,7 @@ impl Parser {
             Some(t) => {
                 return Err(Error::new(
                     t,
-                    &format!("Expected expression found: {:?}", t.token),
+                    &format!("Expected expression found: {}", t.token),
                 ));
             }
             None => {

@@ -1,23 +1,10 @@
 use crate::interpreter::Stmt;
 use crate::scanner::Error;
-use crate::scanner::TokenType;
-use crate::scanner::Tokens;
+use crate::token::TokenKind;
+use crate::token::TokenType;
+use crate::token::Tokens;
 use std::iter::Peekable;
 
-macro_rules! if_match_return {
-    ($self:ident,$var:expr,$default:expr) => {
-        let variant = $var($default);
-        match $self.matches(vec![variant]) {
-            Some(t) => match t.token {
-                TokenType::Number(n) => return Ok(Expr::Number(n)),
-                TokenType::String(s) => return Ok(Expr::String(s.clone())),
-                TokenType::Ident(s) => return Ok(Expr::Variable(s.clone())),
-                _ => unreachable!(),
-            },
-            None => (),
-        }
-    };
-}
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Binary {
@@ -35,15 +22,6 @@ pub enum Expr {
     Number(i32),
     String(String),
     Variable(String),
-}
-macro_rules! unwrap_enum {
-    ($target: expr, $pat: path) => {{
-        if let $pat(a) = $target {
-            a
-        } else {
-            panic!("{} doesnt have a field", stringify!($pat));
-        }
-    }};
 }
 
 pub struct Parser {
@@ -96,47 +74,46 @@ impl Parser {
         }
     }
     fn declaration(&mut self) -> Result<Stmt, Error> {
-        if let Some(_) = self.matches(vec![TokenType::Int]) {
+        if let Some(_) = self.matches(vec![TokenKind::Int]) {
             return self.int_declaration();
         }
-        if let Some(name) = self.matches(vec![TokenType::Ident("".to_string())]) {
-            return self.int_assignment(unwrap_enum!(name.token, TokenType::Ident));
+        if let Some(name) = self.matches(vec![TokenKind::Ident]) {
+            return self.int_assignment(name.unwrap_string());
         }
         self.statement()
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
-        if let Some(_) = self.matches(vec![TokenType::Print]) {
+        if let Some(_) = self.matches(vec![TokenKind::Print]) {
             return self.print_statement();
         }
         self.expression_statement()
     }
     fn expression_statement(&mut self) -> Result<Stmt, Error> {
         let expr = self.expression()?;
-        self.consume(TokenType::Semicolon, "Expect ';' after expression")?;
+        self.consume(TokenKind::Semicolon, "Expect ';' after expression")?;
         Ok(Stmt::Expr(expr))
     }
     fn print_statement(&mut self) -> Result<Stmt, Error> {
         let value = self.expression()?;
-        self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
+        self.consume(TokenKind::Semicolon, "Expect ';' after value.")?;
         Ok(Stmt::Print(value))
     }
     fn int_declaration(&mut self) -> Result<Stmt, Error> {
-        let name = unwrap_enum!(
-            self.consume(
-                TokenType::Ident("".to_string()),
+        let name = self
+            .consume(
+                TokenKind::Ident,
                 "Expect identifier following int declaration",
             )?
-            .token,
-            TokenType::Ident
-        );
-        self.consume(TokenType::Semicolon, "Expect ';' after int declaration")?;
+            .unwrap_string();
+
+        self.consume(TokenKind::Semicolon, "Expect ';' after int declaration")?;
         Ok(Stmt::IntVar(name))
     }
     fn int_assignment(&mut self, name: String) -> Result<Stmt, Error> {
-        self.consume(TokenType::Equal, "Expect '=' after int declaration")?;
+        self.consume(TokenKind::Equal, "Expect '=' after int declaration")?;
 
         let value = self.expression()?;
-        self.consume(TokenType::Semicolon, "Expect ';' after assignment")?;
+        self.consume(TokenKind::Semicolon, "Expect ';' after assignment")?;
         Ok(Stmt::AssignVar(name, value))
     }
 
@@ -146,7 +123,7 @@ impl Parser {
     fn equality(&mut self) -> Result<Expr, Error> {
         let mut expr = self.comparison()?;
 
-        while let Some(token) = self.matches(vec![TokenType::BangEqual, TokenType::EqualEqual]) {
+        while let Some(token) = self.matches(vec![TokenKind::BangEqual, TokenKind::EqualEqual]) {
             let operator = token;
             let right = self.comparison()?;
             expr = Expr::Binary {
@@ -161,10 +138,10 @@ impl Parser {
         let mut expr = self.term()?;
 
         while let Some(token) = self.matches(vec![
-            TokenType::Greater,
-            TokenType::GreaterEqual,
-            TokenType::Less,
-            TokenType::LessEqual,
+            TokenKind::Greater,
+            TokenKind::GreaterEqual,
+            TokenKind::Less,
+            TokenKind::LessEqual,
         ]) {
             let operator = token;
             let right = self.term()?;
@@ -179,7 +156,7 @@ impl Parser {
     fn term(&mut self) -> Result<Expr, Error> {
         let mut expr = self.factor()?;
 
-        while let Some(token) = self.matches(vec![TokenType::Minus, TokenType::Plus]) {
+        while let Some(token) = self.matches(vec![TokenKind::Minus, TokenKind::Plus]) {
             let operator = token;
             let right = self.factor()?;
             expr = Expr::Binary {
@@ -193,7 +170,7 @@ impl Parser {
     fn factor(&mut self) -> Result<Expr, Error> {
         let mut expr = self.unary()?;
 
-        while let Some(token) = self.matches(vec![TokenType::Slash, TokenType::Star]) {
+        while let Some(token) = self.matches(vec![TokenKind::Slash, TokenKind::Star]) {
             let operator = token;
             let right = self.unary()?;
             expr = Expr::Binary {
@@ -205,7 +182,7 @@ impl Parser {
         Ok(expr)
     }
     fn unary(&mut self) -> Result<Expr, Error> {
-        if let Some(token) = self.matches(vec![TokenType::Bang, TokenType::Minus]) {
+        if let Some(token) = self.matches(vec![TokenKind::Bang, TokenKind::Minus]) {
             let operator = token;
             let right = self.unary()?;
             return Ok(Expr::Unary {
@@ -216,13 +193,20 @@ impl Parser {
         self.primary()
     }
     fn primary(&mut self) -> Result<Expr, Error> {
-        if_match_return!(self, TokenType::Number, 0);
-        if_match_return!(self, TokenType::String, "".to_string());
-        if_match_return!(self, TokenType::Ident, "".to_string());
+        //TODO: avoid repition
+        if let Some(n) = self.matches(vec![TokenKind::Number]) {
+            return Ok(Expr::Number(n.unwrap_num()));
+        }
+        if let Some(s) = self.matches(vec![TokenKind::String]) {
+            return Ok(Expr::String(s.unwrap_string()));
+        }
+        if let Some(s) = self.matches(vec![TokenKind::Ident]) {
+            return Ok(Expr::Variable(s.unwrap_string()));
+        }
 
-        if let Some(_) = self.matches(vec![TokenType::LeftParen]) {
+        if let Some(_) = self.matches(vec![TokenKind::LeftParen]) {
             let expr = self.expression()?;
-            self.consume(TokenType::RightParen, "missing closing ')'")?;
+            self.consume(TokenKind::RightParen, "missing closing ')'")?;
             return Ok(Expr::Grouping {
                 expression: Box::new(expr),
             });
@@ -244,10 +228,10 @@ impl Parser {
             }
         };
     }
-    fn consume(&mut self, token: TokenType, msg: &str) -> Result<Tokens, Error> {
+    fn consume(&mut self, token: TokenKind, msg: &str) -> Result<Tokens, Error> {
         match self.tokens.next() {
             Some(v) => {
-                if v.token != token {
+                if TokenKind::from(&v.token) != token {
                     return Err(Error::new(&v, msg));
                 } else {
                     return Ok(v);
@@ -264,10 +248,11 @@ impl Parser {
         }
     }
 
-    fn matches(&mut self, expected: Vec<TokenType>) -> Option<Tokens> {
+    // TODO: dont need vec when only matching single enum
+    fn matches(&mut self, expected: Vec<TokenKind>) -> Option<Tokens> {
         match self.tokens.peek() {
             Some(v) => {
-                if !expected.contains(&v.token) {
+                if !expected.contains(&TokenKind::from(&v.token)) {
                     return None;
                 }
             }
@@ -279,6 +264,7 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
+    //TODO: clean up tests
     use super::*;
     macro_rules! token_default {
         ($token_type:expr) => {
@@ -323,10 +309,7 @@ mod tests {
         ];
         let mut p = Parser::new(tokens);
 
-        let result = p.matches(vec![
-            TokenType::Number(0),
-            TokenType::String("".to_string()),
-        ]);
+        let result = p.matches(vec![TokenKind::Number, TokenKind::String]);
         let expected = Some(token_default!(TokenType::Number(2)));
         assert_eq!(result, expected);
     }

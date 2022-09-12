@@ -1,6 +1,6 @@
 use crate::parser::Expr;
-use crate::scanner::TokenType;
-use crate::scanner::Tokens;
+use crate::token::TokenType;
+use crate::token::Tokens;
 use std::collections::HashMap;
 
 pub enum Stmt {
@@ -61,7 +61,7 @@ impl Interpreter {
             Expr::Grouping { expression: e } => self.evaluate_grouping(*e),
             Expr::Number(v) => return v,
             Expr::Variable(v) => return *self.env.get(&v).unwrap(),
-            _ => panic!("cant interpret this token"),
+            _ => panic!("cant interpret this expression"),
         }
     }
     fn evaluate_binary(&self, left: Expr, token: Tokens, right: Expr) -> i32 {
@@ -73,7 +73,7 @@ impl Interpreter {
             TokenType::Minus => left - right,
             TokenType::Star => left * right,
             TokenType::Slash => left / right,
-            _ => panic!("invalid binary operator"),
+            _ => panic!("invalid binary operator {}", token.token),
         }
     }
     fn evaluate_unary(&self, token: Tokens, right: Expr) -> i32 {
@@ -81,7 +81,7 @@ impl Interpreter {
         match token.token {
             TokenType::Bang => !right,
             TokenType::Minus => -right,
-            _ => panic!("invalid unary token"),
+            _ => panic!("invalid unary token {}", token.token),
         }
     }
     fn evaluate_grouping(&self, expr: Expr) -> i32 {

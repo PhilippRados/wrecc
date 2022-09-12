@@ -1,86 +1,8 @@
+use crate::token::TokenType;
+use crate::token::Tokens;
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum TokenType {
-    // Single-character tokens.
-    LeftParen,
-    RightParen,
-    LeftBrace,
-    RightBrace,
-    LeftBracket,
-    RightBracket,
-    Comma,
-    Dot,
-    Semicolon,
-    Slash,
-    Star,
-
-    // One or two character tokens.
-    Plus,
-    PlusPlus,
-    Minus,
-    MinusMinus,
-    Bang,
-    BangEqual,
-    Equal,
-    EqualEqual,
-    Greater,
-    GreaterEqual,
-    Less,
-    LessEqual,
-    Amp,
-    AmpAmp,
-    PipePipe,
-
-    // Literals.
-    Ident(String),
-    String(String),
-    CharLit(char),
-    Number(i32),
-
-    // Keywords.
-    Int,
-    Char,
-    Else,
-    For,
-    If,
-    Return,
-    While,
-    Print,
-
-    Eof,
-}
-impl PartialEq for TokenType {
-    // Allow enum-values to be the same even when their arguments differ:
-    // TokenType::Number(2) == TokenType::Number(0)
-    fn eq(&self, other: &Self) -> bool {
-        let tag = std::mem::discriminant(self);
-        let o_tag = std::mem::discriminant(other);
-
-        tag == o_tag
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Tokens {
-    pub token: TokenType,
-    pub line_index: i32,
-    pub column: i32,
-    pub line_string: String,
-}
-impl Tokens {
-    pub fn new(token: TokenType, line_index: i32, column: i32, line_string: String) -> Self {
-        Tokens {
-            token,
-            line_index,
-            column,
-            line_string,
-        }
-    }
-}
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Error {
@@ -321,6 +243,7 @@ impl<'a> Scanner<'a> {
 }
 
 #[cfg(test)]
+#[allow(unused_variables)]
 mod tests {
     use super::*;
 

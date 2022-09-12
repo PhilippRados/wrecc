@@ -1,8 +1,9 @@
 use std::fs;
 
 mod scanner;
-use scanner::Tokens;
 use scanner::*;
+mod token;
+use token::Tokens;
 mod parser;
 use parser::Parser;
 mod interpreter;

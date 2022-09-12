@@ -54,6 +54,8 @@ pub enum TokenType {
     Eof,
 }
 impl PartialEq for TokenType {
+    // Allow enum-values to be the same even when their arguments differ:
+    // TokenType::Number(2) == TokenType::Number(0)
     fn eq(&self, other: &Self) -> bool {
         let tag = std::mem::discriminant(self);
         let o_tag = std::mem::discriminant(other);
@@ -78,14 +80,6 @@ impl Tokens {
             line_string,
         }
     }
-}
-
-macro_rules! hash {
-    ($($key_val:expr),+) => {{
-        let mut h = HashMap::new();
-        $(h.insert($key_val.0,$key_val.1);)+
-        h
-    }}
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -140,7 +134,7 @@ impl<'a> Scanner<'a> {
             line: 1,
             column: 1,
             err: false,
-            keywords: hash![
+            keywords: HashMap::from([
                 ("int".to_string(), TokenType::Int),
                 ("char".to_string(), TokenType::Char),
                 ("if".to_string(), TokenType::If),
@@ -148,8 +142,8 @@ impl<'a> Scanner<'a> {
                 ("for".to_string(), TokenType::For),
                 ("while".to_string(), TokenType::While),
                 ("return".to_string(), TokenType::Return),
-                ("print".to_string(), TokenType::Print)
-            ],
+                ("print".to_string(), TokenType::Print),
+            ]),
         }
     }
 

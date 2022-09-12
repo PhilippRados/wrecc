@@ -11,6 +11,7 @@ macro_rules! if_match_return {
             Some(t) => match t.token {
                 TokenType::Number(n) => return Ok(Expr::Number(n)),
                 TokenType::String(s) => return Ok(Expr::String(s.clone())),
+                TokenType::Ident(s) => return Ok(Expr::Variable(s.clone())),
                 _ => unreachable!(),
             },
             None => (),
@@ -33,6 +34,16 @@ pub enum Expr {
     },
     Number(i32),
     String(String),
+    Variable(String),
+}
+macro_rules! unwrap_enum {
+    ($target: expr, $pat: path) => {{
+        if let $pat(a) = $target {
+            a
+        } else {
+            panic!("{} doesnt have a field", stringify!($pat));
+        }
+    }};
 }
 
 pub struct Parser {
@@ -88,6 +99,9 @@ impl Parser {
         if let Some(_) = self.matches(vec![TokenType::Int]) {
             return self.int_declaration();
         }
+        if let Some(name) = self.matches(vec![TokenType::Ident("".to_string())]) {
+            return self.int_assignment(unwrap_enum!(name.token, TokenType::Ident));
+        }
         self.statement()
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
@@ -107,7 +121,23 @@ impl Parser {
         Ok(Stmt::Print(value))
     }
     fn int_declaration(&mut self) -> Result<Stmt, Error> {
-        unimplemented!();
+        let name = unwrap_enum!(
+            self.consume(
+                TokenType::Ident("".to_string()),
+                "Expect identifier following int declaration",
+            )?
+            .token,
+            TokenType::Ident
+        );
+        self.consume(TokenType::Semicolon, "Expect ';' after int declaration")?;
+        Ok(Stmt::IntVar(name))
+    }
+    fn int_assignment(&mut self, name: String) -> Result<Stmt, Error> {
+        self.consume(TokenType::Equal, "Expect '=' after int declaration")?;
+
+        let value = self.expression()?;
+        self.consume(TokenType::Semicolon, "Expect ';' after assignment")?;
+        Ok(Stmt::AssignVar(name, value))
     }
 
     fn expression(&mut self) -> Result<Expr, Error> {
@@ -188,6 +218,7 @@ impl Parser {
     fn primary(&mut self) -> Result<Expr, Error> {
         if_match_return!(self, TokenType::Number, 0);
         if_match_return!(self, TokenType::String, "".to_string());
+        if_match_return!(self, TokenType::Ident, "".to_string());
 
         if let Some(_) = self.matches(vec![TokenType::LeftParen]) {
             let expr = self.expression()?;
@@ -213,13 +244,13 @@ impl Parser {
             }
         };
     }
-    fn consume(&mut self, token: TokenType, msg: &str) -> Result<(), Error> {
+    fn consume(&mut self, token: TokenType, msg: &str) -> Result<Tokens, Error> {
         match self.tokens.next() {
             Some(v) => {
                 if v.token != token {
                     return Err(Error::new(&v, msg));
                 } else {
-                    return Ok(());
+                    return Ok(v);
                 }
             }
             None => {

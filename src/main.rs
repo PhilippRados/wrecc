@@ -6,8 +6,8 @@ use scanner::*;
 mod parser;
 use parser::Parser;
 mod interpreter;
-use interpreter::interpret;
 use interpreter::Stmt;
+use interpreter::*;
 
 fn sys_error(msg: &str, exit_code: i32) {
     eprintln!("rucc: {msg}");
@@ -43,6 +43,5 @@ fn main() {
         Some(v) => statements = Some(v),
         None => return,
     }
-
-    interpret(statements.unwrap());
+    Interpreter::new().interpret(statements.unwrap());
 }

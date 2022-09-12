@@ -1,0 +1,3 @@
+int uwe;
+uwe = 2 * (1 -4);
+print uwe;

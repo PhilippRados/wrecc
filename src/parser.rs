@@ -17,11 +17,15 @@ pub enum Expr {
         right: Box<Expr>,
     },
     Grouping {
-        expression: Box<Expr>,
+        expr: Box<Expr>,
+    },
+    Assign {
+        name: String,
+        expr: Box<Expr>,
     },
     Number(i32),
     String(String),
-    Variable(String),
+    Ident(String),
 }
 
 pub struct Parser {
@@ -77,9 +81,6 @@ impl Parser {
         if let Some(_) = self.matches(vec![TokenKind::Int]) {
             return self.int_declaration();
         }
-        if let Some(name) = self.matches(vec![TokenKind::Ident]) {
-            return self.int_assignment(name.unwrap_string());
-        }
         self.statement()
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
@@ -109,22 +110,35 @@ impl Parser {
         if let Some(_) = self.matches(vec![TokenKind::Equal]) {
             let value = self.expression()?;
             self.consume(TokenKind::Semicolon, "Expect ';' after expression")?;
-            Ok(Stmt::InitIntVar(name, value))
+            Ok(Stmt::InitVar(name, value))
         } else {
             self.consume(TokenKind::Semicolon, "Expect ';' after int declaration")?;
-            Ok(Stmt::IntVar(name))
+            Ok(Stmt::DeclareVar(name))
         }
-    }
-    fn int_assignment(&mut self, name: String) -> Result<Stmt, Error> {
-        self.consume(TokenKind::Equal, "Expect '=' after int declaration")?;
-
-        let value = self.expression()?;
-        self.consume(TokenKind::Semicolon, "Expect ';' after assignment")?;
-        Ok(Stmt::AssignVar(name, value))
     }
 
     fn expression(&mut self) -> Result<Expr, Error> {
-        self.equality()
+        self.int_assignment()
+    }
+    fn int_assignment(&mut self) -> Result<Expr, Error> {
+        let expr = self.equality()?;
+
+        if let Some(_) = self.matches(vec![TokenKind::Equal]) {
+            let value = self.expression()?;
+            match expr {
+                Expr::Ident(name) => {
+                    return Ok(Expr::Assign {
+                        name,
+                        expr: Box::new(value),
+                    });
+                }
+                _ => {
+                    let t = self.tokens.peek().unwrap();
+                    return Err(Error::new(t, &format!("cant assign to {:?}", t)));
+                }
+            }
+        }
+        Ok(expr)
     }
     fn equality(&mut self) -> Result<Expr, Error> {
         let mut expr = self.comparison()?;
@@ -207,14 +221,14 @@ impl Parser {
             return Ok(Expr::String(s.unwrap_string()));
         }
         if let Some(s) = self.matches(vec![TokenKind::Ident]) {
-            return Ok(Expr::Variable(s.unwrap_string()));
+            return Ok(Expr::Ident(s.unwrap_string()));
         }
 
         if let Some(_) = self.matches(vec![TokenKind::LeftParen]) {
             let expr = self.expression()?;
             self.consume(TokenKind::RightParen, "missing closing ')'")?;
             return Ok(Expr::Grouping {
-                expression: Box::new(expr),
+                expr: Box::new(expr),
             });
         }
         match self.tokens.peek() {
@@ -341,12 +355,12 @@ mod tests {
         let result = p.expression();
         let expected = Expr::Binary {
             left: Box::new(Expr::Grouping {
-                expression: Box::new(Expr::Binary {
+                expr: Box::new(Expr::Binary {
                     left: Box::new(Expr::Binary {
                         left: Box::new(Expr::Number(3)),
                         token: token_default!(TokenType::Slash),
                         right: Box::new(Expr::Grouping {
-                            expression: Box::new(Expr::Binary {
+                            expr: Box::new(Expr::Binary {
                                 left: Box::new(Expr::Number(6)),
                                 token: token_default!(TokenType::Minus),
                                 right: Box::new(Expr::Number(7)),

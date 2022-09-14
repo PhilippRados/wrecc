@@ -81,6 +81,49 @@ impl Interpreter {
             TokenType::Minus => left - right,
             TokenType::Star => left * right,
             TokenType::Slash => left / right,
+            TokenType::EqualEqual => {
+                if left == right {
+                    1
+                } else {
+                    0
+                }
+            }
+            TokenType::BangEqual => {
+                if left != right {
+                    1
+                } else {
+                    0
+                }
+            }
+            TokenType::Greater => {
+                if left > right {
+                    1
+                } else {
+                    0
+                }
+            }
+            TokenType::GreaterEqual => {
+                if left >= right {
+                    1
+                } else {
+                    0
+                }
+            }
+
+            TokenType::Less => {
+                if left < right {
+                    1
+                } else {
+                    0
+                }
+            }
+            TokenType::LessEqual => {
+                if left <= right {
+                    1
+                } else {
+                    0
+                }
+            }
             _ => panic!("invalid binary operator {}", token.token),
         }
     }

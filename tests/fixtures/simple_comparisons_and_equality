@@ -1,0 +1,16 @@
+print 3 != 2;
+print 2 == 2;
+print 3 != 3;
+
+int a = 10;
+int b = 0;
+
+print a < b;
+print b <= a;
+
+a = 0;
+b = 2;
+print a > b;
+
+a = 2;
+print a >= b;

@@ -8,35 +8,62 @@ pub enum Stmt {
     Expr(Expr),
     DeclareVar(String),
     InitVar(String, Expr),
+    Block(Vec<Stmt>),
+}
+
+#[derive(Clone)]
+struct Environment {
+    current: HashMap<String, i32>,
+    enclosing: Option<Box<Environment>>,
+}
+impl Environment {
+    pub fn new(enclosing: Option<Box<Environment>>) -> Self {
+        Environment {
+            current: HashMap::new(),
+            enclosing,
+        }
+    }
+    fn create_var(&mut self, var_name: String) {
+        self.current.insert(var_name, -1);
+    }
+    fn get_var(&self, name: String) -> i32 {
+        match self.current.get(&name) {
+            Some(v) => *v,
+            None => match &self.enclosing {
+                Some(env) => (**env).get_var(name),
+                None => panic!("undeclared var {}", name),
+            },
+        }
+    }
+    fn assign_var(&mut self, name: String, value: i32) -> i32 {
+        match self.current.get(&name) {
+            Some(_) => {
+                self.current.insert(name, value);
+                return value;
+            }
+            None => match &mut self.enclosing {
+                Some(env) => (*env).assign_var(name, value),
+                None => panic!("undeclared var {}", name),
+            },
+        }
+    }
+    fn init_var(&mut self, var_name: String, value: i32) {
+        self.current.insert(var_name, value);
+    }
 }
 
 pub struct Interpreter {
-    env: HashMap<String, i32>,
+    env: Environment,
 }
 impl Interpreter {
     pub fn new() -> Self {
         Interpreter {
-            env: HashMap::new(),
+            env: Environment::new(None),
         }
     }
     fn visit_print_stmt(&mut self, expr: Expr) {
         let value = self.execute(expr.clone());
         println!("{}", value);
-    }
-    fn create_var(&mut self, var_name: String) {
-        self.env.insert(var_name, -1);
-    }
-    fn assign_var(&mut self, var_name: String, expr: Expr) -> i32 {
-        if self.env.get(&var_name) == None {
-            panic!("can't find variable {}", var_name);
-        }
-        let value = self.execute(expr);
-        self.env.insert(var_name, value);
-        value
-    }
-    fn init_var(&mut self, var_name: String, expr: Expr) {
-        let value = self.execute(expr);
-        self.env.insert(var_name, value);
     }
 
     pub fn interpret(&mut self, statements: Vec<Stmt>) {
@@ -47,14 +74,32 @@ impl Interpreter {
     fn visit(&mut self, statement: Stmt) {
         match statement {
             Stmt::Print(expr) => self.visit_print_stmt(expr),
-            Stmt::DeclareVar(name) => self.create_var(name.clone()),
-            Stmt::InitVar(name, expr) => self.init_var(name.clone(), expr),
-            // Stmt::AssignVar(name, expr) => self.assign_var(name.clone(), expr),
+            Stmt::DeclareVar(name) => self.env.create_var(name.clone()),
+            Stmt::InitVar(name, expr) => {
+                let value = self.execute(expr);
+                self.env.init_var(name.clone(), value)
+            }
             Stmt::Expr(expr) => {
                 self.execute(expr.clone());
                 ()
             }
+            Stmt::Block(statements) => {
+                self.execute_block(
+                    statements,
+                    Environment::new(Some(Box::new(self.env.clone()))),
+                );
+                ()
+            }
         }
+    }
+
+    fn execute_block(&mut self, statements: Vec<Stmt>, env: Environment) {
+        let prev = self.env.clone();
+
+        self.env = env;
+        self.interpret(statements);
+
+        self.env = prev;
     }
 
     fn execute(&mut self, ast: Expr) -> i32 {
@@ -67,8 +112,11 @@ impl Interpreter {
             Expr::Unary { token: t, right: r } => self.evaluate_unary(t, *r),
             Expr::Grouping { expr: e } => self.evaluate_grouping(*e),
             Expr::Number(v) => return v,
-            Expr::Ident(v) => return *self.env.get(&v).unwrap(),
-            Expr::Assign { name, expr } => self.assign_var(name, *expr),
+            Expr::Ident(v) => return self.env.get_var(v),
+            Expr::Assign { name, expr } => {
+                let value = self.execute(*expr);
+                self.env.assign_var(name, value)
+            }
             _ => panic!("cant interpret this expression"),
         }
     }

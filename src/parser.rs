@@ -87,7 +87,22 @@ impl Parser {
         if let Some(_) = self.matches(vec![TokenKind::Print]) {
             return self.print_statement();
         }
+        if let Some(_) = self.matches(vec![TokenKind::LeftBrace]) {
+            return Ok(Stmt::Block(self.block()?));
+        }
         self.expression_statement()
+    }
+    fn block(&mut self) -> Result<Vec<Stmt>, Error> {
+        let mut statements = Vec::new();
+
+        while let Some(token) = self.tokens.peek() {
+            if TokenKind::from(&token.token) == TokenKind::RightBrace {
+                break;
+            }
+            statements.push(self.declaration()?);
+        }
+        self.consume(TokenKind::RightBrace, "Expect '}' after Block")?;
+        Ok(statements)
     }
     fn expression_statement(&mut self) -> Result<Stmt, Error> {
         let expr = self.expression()?;

@@ -1,0 +1,19 @@
+int a = 1;
+int b = 2;
+int c = 3;
+{
+  int a = 4;
+  int b = 5;
+  {
+    int a = 6;
+    print a;
+    print b;
+    print c;
+  }
+  print a;
+  print b;
+  print c;
+}
+print a;
+print b;
+print c;

@@ -84,6 +84,9 @@ impl Parser {
         self.statement()
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
+        if let Some(_) = self.matches(vec![TokenKind::If]) {
+            return self.if_statement();
+        }
         if let Some(_) = self.matches(vec![TokenKind::Print]) {
             return self.print_statement();
         }
@@ -113,6 +116,26 @@ impl Parser {
         let value = self.expression()?;
         self.consume(TokenKind::Semicolon, "Expect ';' after value.")?;
         Ok(Stmt::Print(value))
+    }
+    fn if_statement(&mut self) -> Result<Stmt, Error> {
+        self.consume(TokenKind::LeftParen, "Expect '(' after 'if'");
+        let condition = self.expression()?;
+        self.consume(
+            TokenKind::RightParen,
+            "Expect closing ')' after if condition",
+        )?;
+
+        let then_branch = self.statement()?;
+        let mut else_branch = None;
+        match self.matches(vec![TokenKind::Else]) {
+            Some(_) => else_branch = Some(self.statement()?),
+            None => (),
+        }
+        Ok(Stmt::If(
+            condition,
+            Box::new(then_branch),
+            Box::new(else_branch),
+        ))
     }
     fn int_declaration(&mut self) -> Result<Stmt, Error> {
         let name = self

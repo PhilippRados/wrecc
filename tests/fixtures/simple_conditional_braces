@@ -1,0 +1,8 @@
+if (2 > 2) {
+    print 1;
+} else {
+    print 0;
+    if (3 == 3){
+      print 3;
+    }
+}

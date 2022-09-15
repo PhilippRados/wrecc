@@ -9,6 +9,7 @@ pub enum Stmt {
     DeclareVar(String),
     InitVar(String, Expr),
     Block(Vec<Stmt>),
+    If(Expr, Box<Stmt>, Box<Option<Stmt>>),
 }
 
 #[derive(Clone)]
@@ -65,6 +66,13 @@ impl Interpreter {
         let value = self.execute(expr.clone());
         println!("{}", value);
     }
+    fn if_statement(&mut self, cond: Expr, then_branch: Stmt, else_branch: Option<Stmt>) {
+        if self.execute(cond) == 1 {
+            self.visit(then_branch);
+        } else if let Some(_) = else_branch {
+            self.visit(else_branch.unwrap());
+        }
+    }
 
     pub fn interpret(&mut self, statements: Vec<Stmt>) {
         for s in statements {
@@ -89,6 +97,9 @@ impl Interpreter {
                     Environment::new(Some(Box::new(self.env.clone()))),
                 );
                 ()
+            }
+            Stmt::If(cond, then_branch, else_branch) => {
+                self.if_statement(cond, *then_branch, *else_branch)
             }
         }
     }

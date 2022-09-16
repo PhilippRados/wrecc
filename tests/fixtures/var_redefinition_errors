@@ -1,0 +1,7 @@
+int a = 0;
+{
+    int a;
+    print a;
+}
+int a = 2;
+print a;

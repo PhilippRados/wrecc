@@ -24,7 +24,11 @@ impl Environment {
             enclosing,
         }
     }
-    fn create_var(&mut self, var_name: String) {
+    fn declare_var(&mut self, var_name: String) {
+        if self.current.contains_key(&var_name) {
+            eprintln!("Error: Redifinition of variable '{}'", var_name);
+            std::process::exit(-1);
+        }
         self.current.insert(var_name, -1);
     }
     fn get_var(&self, name: String) -> i32 {
@@ -49,6 +53,10 @@ impl Environment {
         }
     }
     fn init_var(&mut self, var_name: String, value: i32) {
+        if self.current.contains_key(&var_name) {
+            eprintln!("Error: Redifinition of variable '{}'", var_name);
+            std::process::exit(-1);
+        }
         self.current.insert(var_name, value);
     }
 }
@@ -82,7 +90,7 @@ impl Interpreter {
     fn visit(&mut self, statement: Stmt) {
         match statement {
             Stmt::Print(expr) => self.visit_print_stmt(expr),
-            Stmt::DeclareVar(name) => self.env.create_var(name.clone()),
+            Stmt::DeclareVar(name) => self.env.declare_var(name.clone()),
             Stmt::InitVar(name, expr) => {
                 let value = self.execute(expr);
                 self.env.init_var(name.clone(), value)

@@ -23,6 +23,11 @@ pub enum Expr {
         name: String,
         expr: Box<Expr>,
     },
+    Logical {
+        left: Box<Expr>,
+        token: Tokens,
+        right: Box<Expr>,
+    },
     Number(i32),
     String(String),
     Ident(String),
@@ -159,7 +164,7 @@ impl Parser {
         self.int_assignment()
     }
     fn int_assignment(&mut self) -> Result<Expr, Error> {
-        let expr = self.equality()?;
+        let expr = self.or()?;
 
         if let Some(_) = self.matches(vec![TokenKind::Equal]) {
             let value = self.expression()?;
@@ -172,8 +177,34 @@ impl Parser {
                 }
                 _ => {
                     let t = self.tokens.peek().unwrap();
-                    return Err(Error::new(t, &format!("cant assign to {:?}", t)));
+                    return Err(Error::new(t, &format!("cant assign to {}", t.token)));
                 }
+            }
+        }
+        Ok(expr)
+    }
+    fn or(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.and()?;
+
+        while let Some(token) = self.matches(vec![TokenKind::PipePipe]) {
+            let right = self.and()?;
+            expr = Expr::Logical {
+                left: Box::new(expr),
+                token,
+                right: Box::new(right),
+            }
+        }
+        Ok(expr)
+    }
+    fn and(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.equality()?;
+
+        while let Some(token) = self.matches(vec![TokenKind::AmpAmp]) {
+            let right = self.equality()?;
+            expr = Expr::Logical {
+                left: Box::new(expr),
+                token,
+                right: Box::new(right),
             }
         }
         Ok(expr)

@@ -37,12 +37,12 @@ impl Environment {
         }
     }
     fn assign_var(&mut self, name: String, value: i32) -> i32 {
-        match self.current.get(&name) {
-            Some(_) => {
+        match self.current.contains_key(&name) {
+            true => {
                 self.current.insert(name, value);
                 return value;
             }
-            None => match &mut self.enclosing {
+            false => match &mut self.enclosing {
                 Some(env) => (*env).assign_var(name, value),
                 None => panic!("undeclared var {}", name),
             },
@@ -105,31 +105,46 @@ impl Interpreter {
     }
 
     fn execute_block(&mut self, statements: Vec<Stmt>, env: Environment) {
-        let prev = self.env.clone();
-
         self.env = env;
         self.interpret(statements);
 
-        self.env = prev;
+        // this means assignment to vars inside block which were declared outside
+        // of the block are still apparent after block
+        self.env = *(self.env.enclosing.as_ref().unwrap().clone());
     }
 
     fn execute(&mut self, ast: Expr) -> i32 {
         match ast {
-            Expr::Binary {
-                left: l,
-                token: t,
-                right: r,
-            } => self.evaluate_binary(*l, t, *r),
-            Expr::Unary { token: t, right: r } => self.evaluate_unary(t, *r),
-            Expr::Grouping { expr: e } => self.evaluate_grouping(*e),
+            Expr::Binary { left, token, right } => self.evaluate_binary(*left, token, *right),
+            Expr::Unary { token, right } => self.evaluate_unary(token, *right),
+            Expr::Grouping { expr } => self.evaluate_grouping(*expr),
             Expr::Number(v) => return v,
             Expr::Ident(v) => return self.env.get_var(v),
             Expr::Assign { name, expr } => {
                 let value = self.execute(*expr);
                 self.env.assign_var(name, value)
             }
+            Expr::Logical { left, token, right } => self.evaluate_logical(*left, token, *right),
             _ => panic!("cant interpret this expression"),
         }
+    }
+    fn evaluate_logical(&mut self, left: Expr, token: Tokens, right: Expr) -> i32 {
+        let left = self.execute(left);
+
+        match token.token {
+            TokenType::PipePipe => {
+                if left != 0 {
+                    return left;
+                }
+            }
+            TokenType::AmpAmp => {
+                if left == 0 {
+                    return left;
+                }
+            }
+            _ => unreachable!(),
+        }
+        self.execute(right)
     }
     fn evaluate_binary(&mut self, left: Expr, token: Tokens, right: Expr) -> i32 {
         let left = self.execute(left);

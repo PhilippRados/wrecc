@@ -187,6 +187,10 @@ impl<'a> Scanner<'a> {
                         } else {
                             self.add_token(&mut tokens, TokenType::Ident(value.to_string()))
                         }
+                    } else if c == '&' && self.matches('&') {
+                        self.add_token(&mut tokens, TokenType::AmpAmp)
+                    } else if c == '|' && self.matches('|') {
+                        self.add_token(&mut tokens, TokenType::PipePipe)
                     } else {
                         self.err = true;
                         errors.push(Error {

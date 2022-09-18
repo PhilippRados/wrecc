@@ -26,7 +26,7 @@ impl Environment {
     }
     fn declare_var(&mut self, var_name: String) {
         if self.current.contains_key(&var_name) {
-            eprintln!("Error: Redifinition of variable '{}'", var_name);
+            eprintln!("Error: Redefinition of variable '{}'", var_name);
             std::process::exit(-1);
         }
         self.current.insert(var_name, -1);
@@ -54,7 +54,7 @@ impl Environment {
     }
     fn init_var(&mut self, var_name: String, value: i32) {
         if self.current.contains_key(&var_name) {
-            eprintln!("Error: Redifinition of variable '{}'", var_name);
+            eprintln!("Error: Redefinition of variable '{}'", var_name);
             std::process::exit(-1);
         }
         self.current.insert(var_name, value);

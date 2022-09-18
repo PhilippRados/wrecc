@@ -3,6 +3,7 @@ use crate::token::TokenType;
 use crate::token::Tokens;
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub enum Stmt {
     Print(Expr),
     Expr(Expr),
@@ -10,6 +11,7 @@ pub enum Stmt {
     InitVar(String, Expr),
     Block(Vec<Stmt>),
     If(Expr, Box<Stmt>, Box<Option<Stmt>>),
+    While(Expr, Box<Stmt>),
 }
 
 #[derive(Clone)]
@@ -70,15 +72,21 @@ impl Interpreter {
             env: Environment::new(None),
         }
     }
-    fn visit_print_stmt(&mut self, expr: Expr) {
+    fn print_statement(&mut self, expr: Expr) {
         let value = self.execute(expr.clone());
         println!("{}", value);
     }
     fn if_statement(&mut self, cond: Expr, then_branch: Stmt, else_branch: Option<Stmt>) {
-        if self.execute(cond) == 1 {
+        if self.execute(cond) != 0 {
             self.visit(then_branch);
         } else if let Some(_) = else_branch {
             self.visit(else_branch.unwrap());
+        }
+    }
+    fn while_statement(&mut self, cond: Expr, body: Stmt) {
+        // TODO: not call clone every iteration => costs resources
+        while self.execute(cond.clone()) != 0 {
+            self.visit(body.clone());
         }
     }
 
@@ -89,7 +97,7 @@ impl Interpreter {
     }
     fn visit(&mut self, statement: Stmt) {
         match statement {
-            Stmt::Print(expr) => self.visit_print_stmt(expr),
+            Stmt::Print(expr) => self.print_statement(expr),
             Stmt::DeclareVar(name) => self.env.declare_var(name.clone()),
             Stmt::InitVar(name, expr) => {
                 let value = self.execute(expr);
@@ -109,6 +117,7 @@ impl Interpreter {
             Stmt::If(cond, then_branch, else_branch) => {
                 self.if_statement(cond, *then_branch, *else_branch)
             }
+            Stmt::While(cond, body) => self.while_statement(cond, *body),
         }
     }
 

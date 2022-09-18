@@ -95,10 +95,25 @@ impl Parser {
         if let Some(_) = self.matches(vec![TokenKind::Print]) {
             return self.print_statement();
         }
+        if let Some(_) = self.matches(vec![TokenKind::While]) {
+            return self.while_statement();
+        }
         if let Some(_) = self.matches(vec![TokenKind::LeftBrace]) {
             return Ok(Stmt::Block(self.block()?));
         }
         self.expression_statement()
+    }
+    fn while_statement(&mut self) -> Result<Stmt, Error> {
+        self.consume(TokenKind::LeftParen, "Expect '(' after while-statement")?;
+        let cond = self.expression()?;
+        self.consume(
+            TokenKind::RightParen,
+            "Expected closing ')' after while-condition",
+        )?;
+
+        let body = self.statement()?;
+
+        Ok(Stmt::While(cond, Box::new(body)))
     }
     fn block(&mut self) -> Result<Vec<Stmt>, Error> {
         let mut statements = Vec::new();

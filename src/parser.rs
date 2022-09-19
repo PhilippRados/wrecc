@@ -89,6 +89,9 @@ impl Parser {
         self.statement()
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
+        if let Some(_) = self.matches(vec![TokenKind::For]) {
+            return self.for_statement();
+        }
         if let Some(_) = self.matches(vec![TokenKind::If]) {
             return self.if_statement();
         }
@@ -102,6 +105,42 @@ impl Parser {
             return Ok(Stmt::Block(self.block()?));
         }
         self.expression_statement()
+    }
+    fn for_statement(&mut self) -> Result<Stmt, Error> {
+        self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
+        let mut init = None;
+        if let Some(token) = self.matches(vec![TokenKind::Int, TokenKind::Semicolon]) {
+            match TokenKind::from(&token.token) {
+                TokenKind::Int => init = Some(self.int_declaration()?),
+                TokenKind::Semicolon => (),
+                _ => init = Some(self.expression_statement()?),
+            }
+        }
+        let mut cond = None;
+        if self.matches(vec![TokenKind::Semicolon]) == None {
+            cond = Some(self.expression()?);
+            self.consume(TokenKind::Semicolon, "Expect ';' after for-condition")?;
+        }
+        let mut inc = None;
+        if self.matches(vec![TokenKind::RightParen]) == None {
+            inc = Some(self.expression()?);
+            self.consume(TokenKind::RightParen, "Expect ')' for-loop")?;
+        }
+
+        let mut body = self.statement()?;
+
+        // Since rust has no c-style for-loop we mimic it as a while loop
+        if inc != None {
+            body = Stmt::Block(vec![body, Stmt::Expr(inc.unwrap())]);
+        }
+        if cond != None {
+            body = Stmt::While(cond.unwrap(), Box::new(body));
+        }
+        if init != None {
+            body = Stmt::Block(vec![init.unwrap(), body]);
+        }
+
+        Ok(body)
     }
     fn while_statement(&mut self) -> Result<Stmt, Error> {
         self.consume(TokenKind::LeftParen, "Expect '(' after while-statement")?;
@@ -138,7 +177,7 @@ impl Parser {
         Ok(Stmt::Print(value))
     }
     fn if_statement(&mut self) -> Result<Stmt, Error> {
-        self.consume(TokenKind::LeftParen, "Expect '(' after 'if'");
+        self.consume(TokenKind::LeftParen, "Expect '(' after 'if'")?;
         let condition = self.expression()?;
         self.consume(
             TokenKind::RightParen,

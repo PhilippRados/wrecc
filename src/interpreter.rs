@@ -3,7 +3,7 @@ use crate::token::TokenType;
 use crate::token::Tokens;
 use std::collections::HashMap;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Stmt {
     Print(Expr),
     Expr(Expr),

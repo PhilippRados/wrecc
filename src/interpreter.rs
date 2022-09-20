@@ -73,11 +73,11 @@ impl Interpreter {
         }
     }
     fn print_statement(&mut self, expr: Expr) {
-        let value = self.execute(expr.clone());
+        let value = self.execute(&expr);
         println!("{}", value);
     }
     fn if_statement(&mut self, cond: Expr, then_branch: Stmt, else_branch: Option<Stmt>) {
-        if self.execute(cond) != 0 {
+        if self.execute(&cond) != 0 {
             self.visit(then_branch);
         } else if let Some(_) = else_branch {
             self.visit(else_branch.unwrap());
@@ -85,7 +85,7 @@ impl Interpreter {
     }
     fn while_statement(&mut self, cond: Expr, body: Stmt) {
         // TODO: not call clone every iteration => costs resources
-        while self.execute(cond.clone()) != 0 {
+        while self.execute(&cond) != 0 {
             self.visit(body.clone());
         }
     }
@@ -100,11 +100,11 @@ impl Interpreter {
             Stmt::Print(expr) => self.print_statement(expr),
             Stmt::DeclareVar(name) => self.env.declare_var(name.clone()),
             Stmt::InitVar(name, expr) => {
-                let value = self.execute(expr);
+                let value = self.execute(&expr);
                 self.env.init_var(name.clone(), value)
             }
             Stmt::Expr(expr) => {
-                self.execute(expr.clone());
+                self.execute(&expr);
                 ()
             }
             Stmt::Block(statements) => {
@@ -127,25 +127,25 @@ impl Interpreter {
 
         // this means assignment to vars inside block which were declared outside
         // of the block are still apparent after block
-        self.env = *(self.env.enclosing.as_ref().unwrap().clone());
+        self.env = *(self.env.enclosing.as_ref().unwrap().clone()); // TODO: remove as_ref and clone
     }
 
-    fn execute(&mut self, ast: Expr) -> i32 {
+    fn execute(&mut self, ast: &Expr) -> i32 {
         match ast {
-            Expr::Binary { left, token, right } => self.evaluate_binary(*left, token, *right),
-            Expr::Unary { token, right } => self.evaluate_unary(token, *right),
-            Expr::Grouping { expr } => self.evaluate_grouping(*expr),
-            Expr::Number(v) => return v,
-            Expr::Ident(v) => return self.env.get_var(v),
+            Expr::Binary { left, token, right } => self.evaluate_binary(left, token, right),
+            Expr::Unary { token, right } => self.evaluate_unary(token, right),
+            Expr::Grouping { expr } => self.evaluate_grouping(expr),
+            Expr::Number(v) => return *v,
+            Expr::Ident(v) => return self.env.get_var(v.clone()), // TODO: pass &str
             Expr::Assign { name, expr } => {
-                let value = self.execute(*expr);
-                self.env.assign_var(name, value)
+                let value = self.execute(expr);
+                self.env.assign_var(name.clone(), value)
             }
-            Expr::Logical { left, token, right } => self.evaluate_logical(*left, token, *right),
+            Expr::Logical { left, token, right } => self.evaluate_logical(left, token, right),
             _ => panic!("cant interpret this expression"),
         }
     }
-    fn evaluate_logical(&mut self, left: Expr, token: Tokens, right: Expr) -> i32 {
+    fn evaluate_logical(&mut self, left: &Box<Expr>, token: &Tokens, right: &Box<Expr>) -> i32 {
         let left = self.execute(left);
 
         match token.token {
@@ -163,7 +163,7 @@ impl Interpreter {
         }
         self.execute(right)
     }
-    fn evaluate_binary(&mut self, left: Expr, token: Tokens, right: Expr) -> i32 {
+    fn evaluate_binary(&mut self, left: &Box<Expr>, token: &Tokens, right: &Box<Expr>) -> i32 {
         let left = self.execute(left);
         let right = self.execute(right);
 
@@ -218,7 +218,7 @@ impl Interpreter {
             _ => panic!("invalid binary operator {}", token.token),
         }
     }
-    fn evaluate_unary(&mut self, token: Tokens, right: Expr) -> i32 {
+    fn evaluate_unary(&mut self, token: &Tokens, right: &Box<Expr>) -> i32 {
         let right = self.execute(right);
         match token.token {
             TokenType::Bang => !right,
@@ -226,7 +226,7 @@ impl Interpreter {
             _ => panic!("invalid unary token {}", token.token),
         }
     }
-    fn evaluate_grouping(&mut self, expr: Expr) -> i32 {
+    fn evaluate_grouping(&mut self, expr: &Box<Expr>) -> i32 {
         self.execute(expr)
     }
 }

@@ -78,8 +78,7 @@ impl Parser {
                     _ => (),
                 }
             }
-            prev = Some(v.clone());
-            self.tokens.next();
+            prev = self.tokens.next();
         }
     }
     fn declaration(&mut self) -> Result<Stmt, Error> {

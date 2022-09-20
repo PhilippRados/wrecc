@@ -3,7 +3,7 @@ use crate::token::TokenType;
 use crate::token::Tokens;
 use std::collections::HashMap;
 
-#[derive(Clone, PartialEq)]
+#[derive(PartialEq)]
 pub enum Stmt {
     Print(Expr),
     Expr(Expr),
@@ -26,12 +26,12 @@ impl Environment {
             enclosing,
         }
     }
-    fn declare_var(&mut self, var_name: String) {
-        if self.current.contains_key(&var_name) {
+    fn declare_var(&mut self, var_name: &str) {
+        if self.current.contains_key(var_name) {
             eprintln!("Error: Redefinition of variable '{}'", var_name);
             std::process::exit(-1);
         }
-        self.current.insert(var_name, -1);
+        self.current.insert(var_name.to_string(), -1);
     }
     fn get_var(&self, name: &str) -> i32 {
         match self.current.get(name) {
@@ -54,12 +54,12 @@ impl Environment {
             },
         }
     }
-    fn init_var(&mut self, var_name: String, value: i32) {
-        if self.current.contains_key(&var_name) {
+    fn init_var(&mut self, var_name: &str, value: i32) {
+        if self.current.contains_key(var_name) {
             eprintln!("Error: Redefinition of variable '{}'", var_name);
             std::process::exit(-1);
         }
-        self.current.insert(var_name, value);
+        self.current.insert(var_name.to_string(), value);
     }
 }
 
@@ -72,39 +72,38 @@ impl Interpreter {
             env: Environment::new(None),
         }
     }
-    fn print_statement(&mut self, expr: Expr) {
-        let value = self.execute(&expr);
+    fn print_statement(&mut self, expr: &Expr) {
+        let value = self.execute(expr);
         println!("{}", value);
     }
-    fn if_statement(&mut self, cond: Expr, then_branch: Stmt, else_branch: Option<Stmt>) {
-        if self.execute(&cond) != 0 {
+    fn if_statement(&mut self, cond: &Expr, then_branch: &Stmt, else_branch: &Option<Stmt>) {
+        if self.execute(cond) != 0 {
             self.visit(then_branch);
-        } else if let Some(_) = else_branch {
-            self.visit(else_branch.unwrap());
+        } else if let Some(stmt) = else_branch {
+            self.visit(stmt);
         }
     }
-    fn while_statement(&mut self, cond: Expr, body: Stmt) {
-        // TODO: not call clone every iteration => costs resources
-        while self.execute(&cond) != 0 {
-            self.visit(body.clone());
+    fn while_statement(&mut self, cond: &Expr, body: &Stmt) {
+        while self.execute(cond) != 0 {
+            self.visit(body);
         }
     }
 
-    pub fn interpret(&mut self, statements: Vec<Stmt>) {
+    pub fn interpret(&mut self, statements: &Vec<Stmt>) {
         for s in statements {
             self.visit(s);
         }
     }
-    fn visit(&mut self, statement: Stmt) {
+    fn visit(&mut self, statement: &Stmt) {
         match statement {
             Stmt::Print(expr) => self.print_statement(expr),
             Stmt::DeclareVar(name) => self.env.declare_var(name),
             Stmt::InitVar(name, expr) => {
-                let value = self.execute(&expr);
+                let value = self.execute(expr);
                 self.env.init_var(name, value)
             }
             Stmt::Expr(expr) => {
-                self.execute(&expr);
+                self.execute(expr);
                 ()
             }
             Stmt::Block(statements) => {
@@ -115,13 +114,13 @@ impl Interpreter {
                 ()
             }
             Stmt::If(cond, then_branch, else_branch) => {
-                self.if_statement(cond, *then_branch, *else_branch)
+                self.if_statement(cond, then_branch, else_branch)
             }
-            Stmt::While(cond, body) => self.while_statement(cond, *body),
+            Stmt::While(cond, body) => self.while_statement(cond, body),
         }
     }
 
-    fn execute_block(&mut self, statements: Vec<Stmt>, env: Environment) {
+    fn execute_block(&mut self, statements: &Vec<Stmt>, env: Environment) {
         self.env = env;
         self.interpret(statements);
 

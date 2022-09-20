@@ -44,5 +44,5 @@ fn main() {
         Some(v) => statements = Some(v),
         None => return,
     }
-    Interpreter::new().interpret(statements.unwrap());
+    Interpreter::new().interpret(&statements.unwrap());
 }

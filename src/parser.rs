@@ -5,7 +5,7 @@ use crate::token::TokenType;
 use crate::token::Tokens;
 use std::iter::Peekable;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq)]
 pub enum Expr {
     Binary {
         left: Box<Expr>,

@@ -33,8 +33,8 @@ impl Environment {
         }
         self.current.insert(var_name, -1);
     }
-    fn get_var(&self, name: String) -> i32 {
-        match self.current.get(&name) {
+    fn get_var(&self, name: &str) -> i32 {
+        match self.current.get(name) {
             Some(v) => *v,
             None => match &self.enclosing {
                 Some(env) => (**env).get_var(name),
@@ -42,10 +42,10 @@ impl Environment {
             },
         }
     }
-    fn assign_var(&mut self, name: String, value: i32) -> i32 {
-        match self.current.contains_key(&name) {
+    fn assign_var(&mut self, name: &str, value: i32) -> i32 {
+        match self.current.contains_key(name) {
             true => {
-                self.current.insert(name, value);
+                self.current.insert(name.to_string(), value);
                 return value;
             }
             false => match &mut self.enclosing {
@@ -98,10 +98,10 @@ impl Interpreter {
     fn visit(&mut self, statement: Stmt) {
         match statement {
             Stmt::Print(expr) => self.print_statement(expr),
-            Stmt::DeclareVar(name) => self.env.declare_var(name.clone()),
+            Stmt::DeclareVar(name) => self.env.declare_var(name),
             Stmt::InitVar(name, expr) => {
                 let value = self.execute(&expr);
-                self.env.init_var(name.clone(), value)
+                self.env.init_var(name, value)
             }
             Stmt::Expr(expr) => {
                 self.execute(&expr);
@@ -136,10 +136,10 @@ impl Interpreter {
             Expr::Unary { token, right } => self.evaluate_unary(token, right),
             Expr::Grouping { expr } => self.evaluate_grouping(expr),
             Expr::Number(v) => return *v,
-            Expr::Ident(v) => return self.env.get_var(v.clone()), // TODO: pass &str
+            Expr::Ident(v) => return self.env.get_var(v),
             Expr::Assign { name, expr } => {
                 let value = self.execute(expr);
-                self.env.assign_var(name.clone(), value)
+                self.env.assign_var(name, value)
             }
             Expr::Logical { left, token, right } => self.evaluate_logical(left, token, right),
             _ => panic!("cant interpret this expression"),

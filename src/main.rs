@@ -1,9 +1,10 @@
 use std::fs;
 
+mod environment;
 mod scanner;
 use scanner::*;
 mod token;
-use token::Tokens;
+use token::Token;
 mod parser;
 use parser::Parser;
 mod interpreter;
@@ -26,7 +27,7 @@ fn main() {
     let source =
         fs::read_to_string(file.unwrap()).expect(&format!("couldn't find file: {}", file.unwrap()));
 
-    let mut tokens: Option<Vec<Tokens>> = None;
+    let mut tokens: Option<Vec<Token>> = None;
     let mut scanner = Scanner::new(&source);
     match scanner.scan_token() {
         Ok(v) => tokens = Some(v),

@@ -1,5 +1,5 @@
+use crate::token::Token;
 use crate::token::TokenType;
-use crate::token::Tokens;
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -13,7 +13,7 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn new(t: &Tokens, msg: &str) -> Self {
+    pub fn new(t: &Token, msg: &str) -> Self {
         Error {
             line_index: t.line_index,
             line_string: t.line_string.clone(),
@@ -75,8 +75,8 @@ impl<'a> Scanner<'a> {
             None => if_not,
         }
     }
-    fn add_token(&mut self, tokens: &mut Vec<Tokens>, current_token: TokenType) {
-        tokens.push(Tokens {
+    fn add_token(&mut self, tokens: &mut Vec<Token>, current_token: TokenType) {
+        tokens.push(Token {
             token: current_token.clone(),
             line_index: self.line,
             column: self.column,
@@ -101,9 +101,9 @@ impl<'a> Scanner<'a> {
             _ => 1,
         }
     }
-    pub fn scan_token(&mut self) -> Result<Vec<Tokens>, Vec<Error>> {
+    pub fn scan_token(&mut self) -> Result<Vec<Token>, Vec<Error>> {
         let mut errors: Vec<Error> = Vec::new();
-        let mut tokens: Vec<Tokens> = Vec::new();
+        let mut tokens: Vec<Token> = Vec::new();
 
         while let Some(c) = self.source.next() {
             match c {
@@ -260,11 +260,11 @@ mod tests {
             Err(e) => panic!("test"),
         };
         let expected = vec![
-            Tokens::new(TokenType::BangEqual, 1, 1, "!= = > == ".to_string()),
-            Tokens::new(TokenType::Equal, 1, 4, "!= = > == ".to_string()),
-            Tokens::new(TokenType::Greater, 1, 6, "!= = > == ".to_string()),
-            Tokens::new(TokenType::EqualEqual, 1, 8, "!= = > == ".to_string()),
-            Tokens::new(TokenType::Semicolon, 3, 5, "    ;".to_string()),
+            Token::new(TokenType::BangEqual, 1, 1, "!= = > == ".to_string()),
+            Token::new(TokenType::Equal, 1, 4, "!= = > == ".to_string()),
+            Token::new(TokenType::Greater, 1, 6, "!= = > == ".to_string()),
+            Token::new(TokenType::EqualEqual, 1, 8, "!= = > == ".to_string()),
+            Token::new(TokenType::Semicolon, 3, 5, "    ;".to_string()),
         ];
         assert_eq!(result, expected);
     }
@@ -277,8 +277,8 @@ mod tests {
             Err(e) => panic!("test"),
         };
         let expected = vec![
-            Tokens::new(TokenType::Bang, 3, 1, "!this".to_string()),
-            Tokens::new(
+            Token::new(TokenType::Bang, 3, 1, "!this".to_string()),
+            Token::new(
                 TokenType::Ident("this".to_string()),
                 3,
                 2,
@@ -296,11 +296,11 @@ mod tests {
             Err(e) => panic!("test"),
         };
         let expected = vec![
-            Tokens::new(TokenType::Number(3), 1, 1, "3 + 1 / 4".to_string()),
-            Tokens::new(TokenType::Plus, 1, 3, "3 + 1 / 4".to_string()),
-            Tokens::new(TokenType::Number(1), 1, 5, "3 + 1 / 4".to_string()),
-            Tokens::new(TokenType::Slash, 1, 7, "3 + 1 / 4".to_string()),
-            Tokens::new(TokenType::Number(4), 1, 9, "3 + 1 / 4".to_string()),
+            Token::new(TokenType::Number(3), 1, 1, "3 + 1 / 4".to_string()),
+            Token::new(TokenType::Plus, 1, 3, "3 + 1 / 4".to_string()),
+            Token::new(TokenType::Number(1), 1, 5, "3 + 1 / 4".to_string()),
+            Token::new(TokenType::Slash, 1, 7, "3 + 1 / 4".to_string()),
+            Token::new(TokenType::Number(4), 1, 9, "3 + 1 / 4".to_string()),
         ];
         assert_eq!(result, expected);
     }
@@ -313,11 +313,11 @@ mod tests {
             Err(e) => panic!("test"),
         };
         let expected = vec![
-            Tokens::new(TokenType::Number(300), 1, 1, "300 - 11 * 41".to_string()),
-            Tokens::new(TokenType::Minus, 1, 5, "300 - 11 * 41".to_string()),
-            Tokens::new(TokenType::Number(11), 1, 7, "300 - 11 * 41".to_string()),
-            Tokens::new(TokenType::Star, 1, 10, "300 - 11 * 41".to_string()),
-            Tokens::new(TokenType::Number(41), 1, 12, "300 - 11 * 41".to_string()),
+            Token::new(TokenType::Number(300), 1, 1, "300 - 11 * 41".to_string()),
+            Token::new(TokenType::Minus, 1, 5, "300 - 11 * 41".to_string()),
+            Token::new(TokenType::Number(11), 1, 7, "300 - 11 * 41".to_string()),
+            Token::new(TokenType::Star, 1, 10, "300 - 11 * 41".to_string()),
+            Token::new(TokenType::Number(41), 1, 12, "300 - 11 * 41".to_string()),
         ];
         assert_eq!(result, expected);
     }
@@ -330,25 +330,25 @@ mod tests {
             Err(e) => panic!("test"),
         };
         let expected = vec![
-            Tokens::new(
+            Token::new(
                 TokenType::Int,
                 1,
                 1,
                 "int some = \"this is a string\"".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::Ident("some".to_string()),
                 1,
                 5,
                 "int some = \"this is a string\"".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::Equal,
                 1,
                 10,
                 "int some = \"this is a string\"".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::String("this is a string".to_string()),
                 1,
                 12,
@@ -366,10 +366,10 @@ mod tests {
             Err(e) => panic!("test"),
         };
         let expected = vec![
-            Tokens::new(TokenType::Print, 1, 1, "print 2 +;".to_string()),
-            Tokens::new(TokenType::Number(2), 1, 7, "print 2 +;".to_string()),
-            Tokens::new(TokenType::Plus, 1, 9, "print 2 +;".to_string()),
-            Tokens::new(TokenType::Semicolon, 1, 10, "print 2 +;".to_string()),
+            Token::new(TokenType::Print, 1, 1, "print 2 +;".to_string()),
+            Token::new(TokenType::Number(2), 1, 7, "print 2 +;".to_string()),
+            Token::new(TokenType::Plus, 1, 9, "print 2 +;".to_string()),
+            Token::new(TokenType::Semicolon, 1, 10, "print 2 +;".to_string()),
         ];
         assert_eq!(result, expected);
     }
@@ -399,81 +399,81 @@ mod tests {
             Err(e) => panic!("test"),
         };
         let expected = vec![
-            Tokens::new(TokenType::Int, 1, 1, "int some_long;".to_string()),
-            Tokens::new(
+            Token::new(TokenType::Int, 1, 1, "int some_long;".to_string()),
+            Token::new(
                 TokenType::Ident("some_long".to_string()),
                 1,
                 5,
                 "int some_long;".to_string(),
             ),
-            Tokens::new(TokenType::Semicolon, 1, 14, "int some_long;".to_string()),
-            Tokens::new(
+            Token::new(TokenType::Semicolon, 1, 14, "int some_long;".to_string()),
+            Token::new(
                 TokenType::While,
                 2,
                 1,
                 "while (val >= 12) {*p = val}".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::LeftParen,
                 2,
                 7,
                 "while (val >= 12) {*p = val}".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::Ident("val".to_string()),
                 2,
                 8,
                 "while (val >= 12) {*p = val}".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::GreaterEqual,
                 2,
                 12,
                 "while (val >= 12) {*p = val}".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::Number(12),
                 2,
                 15,
                 "while (val >= 12) {*p = val}".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::RightParen,
                 2,
                 17,
                 "while (val >= 12) {*p = val}".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::LeftBrace,
                 2,
                 19,
                 "while (val >= 12) {*p = val}".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::Star,
                 2,
                 20,
                 "while (val >= 12) {*p = val}".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::Ident("p".to_string()),
                 2,
                 21,
                 "while (val >= 12) {*p = val}".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::Equal,
                 2,
                 23,
                 "while (val >= 12) {*p = val}".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::Ident("val".to_string()),
                 2,
                 25,
                 "while (val >= 12) {*p = val}".to_string(),
             ),
-            Tokens::new(
+            Token::new(
                 TokenType::RightBrace,
                 2,
                 28,
@@ -537,15 +537,15 @@ mod tests {
             Err(e) => panic!(),
         };
         let expected = vec![
-            Tokens::new(TokenType::Int, 2, 1, "int ä = 123".to_string()),
-            Tokens::new(
+            Token::new(TokenType::Int, 2, 1, "int ä = 123".to_string()),
+            Token::new(
                 TokenType::Ident("ä".to_string()),
                 2,
                 5,
                 "int ä = 123".to_string(),
             ),
-            Tokens::new(TokenType::Equal, 2, 8, "int ä = 123".to_string()), // ä len is 2 but thats fine because its the same when indexing
-            Tokens::new(TokenType::Number(123), 2, 10, "int ä = 123".to_string()),
+            Token::new(TokenType::Equal, 2, 8, "int ä = 123".to_string()), // ä len is 2 but thats fine because its the same when indexing
+            Token::new(TokenType::Number(123), 2, 10, "int ä = 123".to_string()),
         ];
         assert_eq!(result, expected);
     }

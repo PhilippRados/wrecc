@@ -1,19 +1,19 @@
 use crate::interpreter::Stmt;
 use crate::scanner::Error;
+use crate::token::Token;
 use crate::token::TokenKind;
 use crate::token::TokenType;
-use crate::token::Tokens;
 use std::iter::Peekable;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Binary {
         left: Box<Expr>,
-        token: Tokens,
+        token: Token,
         right: Box<Expr>,
     },
     Unary {
-        token: Tokens,
+        token: Token,
         right: Box<Expr>,
     },
     Grouping {
@@ -25,8 +25,12 @@ pub enum Expr {
     },
     Logical {
         left: Box<Expr>,
-        token: Tokens,
+        token: Token,
         right: Box<Expr>,
+    },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
     },
     Number(i32),
     String(String),
@@ -34,11 +38,11 @@ pub enum Expr {
 }
 
 pub struct Parser {
-    tokens: Peekable<std::vec::IntoIter<Tokens>>,
+    tokens: Peekable<std::vec::IntoIter<Token>>,
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Tokens>) -> Self {
+    pub fn new(tokens: Vec<Token>) -> Self {
         Parser {
             tokens: tokens.into_iter().peekable(),
         }
@@ -197,20 +201,47 @@ impl Parser {
     }
     fn int_declaration(&mut self) -> Result<Stmt, Error> {
         let name = self
-            .consume(
-                TokenKind::Ident,
-                "Expect identifier following int declaration",
-            )?
+            .consume(TokenKind::Ident, "Expect identifier following int keyword")?
             .unwrap_string();
 
         if let Some(_) = self.matches(vec![TokenKind::Equal]) {
+            // variable defintion
             let value = self.expression()?;
             self.consume(TokenKind::Semicolon, "Expect ';' after expression")?;
             Ok(Stmt::InitVar(name, value))
+        } else if let Some(_) = self.matches(vec![TokenKind::LeftParen]) {
+            // function defintion
+            self.function(name)
         } else {
+            // var declaration
             self.consume(TokenKind::Semicolon, "Expect ';' after int declaration")?;
             Ok(Stmt::DeclareVar(name))
         }
+    }
+    fn function(&mut self, name: String) -> Result<Stmt, Error> {
+        let mut params = Vec::new();
+
+        if !self.check(TokenKind::RightParen) {
+            loop {
+                // TODO: actually check parameter type
+                self.consume(TokenKind::Int, "Expect int type as parameter type")?;
+                params.push(
+                    self.consume(TokenKind::Ident, "Expect identifier after type")?
+                        .unwrap_string(),
+                );
+                if self.matches(vec![TokenKind::Comma]) == None {
+                    break;
+                }
+            }
+        }
+        self.consume(
+            TokenKind::RightParen,
+            "Expect ')' after function parameters",
+        )?;
+        self.consume(TokenKind::LeftBrace, "Expect '{' before function body.")?;
+        let body = self.block()?;
+
+        Ok(Stmt::Function(name, params, body))
     }
 
     fn expression(&mut self) -> Result<Expr, Error> {
@@ -332,7 +363,31 @@ impl Parser {
                 right: Box::new(right),
             });
         }
-        self.primary()
+        self.call()
+    }
+    fn call(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.primary()?;
+
+        while let Some(_) = self.matches(vec![TokenKind::LeftParen]) {
+            expr = self.evaluate_args(expr)?;
+        }
+        Ok(expr)
+    }
+    fn evaluate_args(&mut self, callee: Expr) -> Result<Expr, Error> {
+        let mut args = Vec::new();
+        if !self.check(TokenKind::RightParen) {
+            loop {
+                args.push(self.expression()?);
+                if self.matches(vec![TokenKind::Comma]) == None {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenKind::RightParen, "Expect ')' after function call")?;
+        Ok(Expr::Call {
+            callee: Box::new(callee),
+            args,
+        })
     }
     fn primary(&mut self) -> Result<Expr, Error> {
         //TODO: avoid repition
@@ -370,7 +425,7 @@ impl Parser {
             }
         };
     }
-    fn consume(&mut self, token: TokenKind, msg: &str) -> Result<Tokens, Error> {
+    fn consume(&mut self, token: TokenKind, msg: &str) -> Result<Token, Error> {
         match self.tokens.next() {
             Some(v) => {
                 if TokenKind::from(&v.token) != token {
@@ -389,9 +444,15 @@ impl Parser {
             }
         }
     }
+    fn check(&mut self, expected: TokenKind) -> bool {
+        if let Some(token) = self.tokens.peek() {
+            return TokenKind::from(&token.token) == expected;
+        }
+        false
+    }
 
     // TODO: dont need vec when only matching single enum
-    fn matches(&mut self, expected: Vec<TokenKind>) -> Option<Tokens> {
+    fn matches(&mut self, expected: Vec<TokenKind>) -> Option<Token> {
         match self.tokens.peek() {
             Some(v) => {
                 if !expected.contains(&TokenKind::from(&v.token)) {
@@ -410,12 +471,12 @@ mod tests {
     use super::*;
     macro_rules! token_default {
         ($token_type:expr) => {
-            Tokens::new($token_type, 1, 1, "".to_string())
+            Token::new($token_type, 1, 1, "".to_string())
         };
     }
     macro_rules! tok_vec {
         ($($token_type:expr),+) => {{
-            let mut v:Vec<Tokens> = Vec::new();
+            let mut v:Vec<Token> = Vec::new();
             $(v.push(token_default!($token_type));)+
             v
         }}

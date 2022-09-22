@@ -1,9 +1,10 @@
+use crate::environment::*;
 use crate::parser::Expr;
+use crate::token::Token;
 use crate::token::TokenType;
-use crate::token::Tokens;
-use std::collections::HashMap;
+use std::rc::Rc;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum Stmt {
     Print(Expr),
     Expr(Expr),
@@ -12,64 +13,20 @@ pub enum Stmt {
     Block(Vec<Stmt>),
     If(Expr, Box<Stmt>, Box<Option<Stmt>>),
     While(Expr, Box<Stmt>),
+    Function(String, Vec<String>, Vec<Stmt>),
 }
-
 #[derive(Clone)]
-struct Environment {
-    current: HashMap<String, i32>,
-    enclosing: Option<Box<Environment>>,
-}
-impl Environment {
-    pub fn new(enclosing: Option<Box<Environment>>) -> Self {
-        Environment {
-            current: HashMap::new(),
-            enclosing,
-        }
-    }
-    fn declare_var(&mut self, var_name: &str) {
-        if self.current.contains_key(var_name) {
-            eprintln!("Error: Redefinition of variable '{}'", var_name);
-            std::process::exit(-1);
-        }
-        self.current.insert(var_name.to_string(), -1);
-    }
-    fn get_var(&self, name: &str) -> i32 {
-        match self.current.get(name) {
-            Some(v) => *v,
-            None => match &self.enclosing {
-                Some(env) => (**env).get_var(name),
-                None => panic!("undeclared var {}", name),
-            },
-        }
-    }
-    fn assign_var(&mut self, name: &str, value: i32) -> i32 {
-        match self.current.contains_key(name) {
-            true => {
-                self.current.insert(name.to_string(), value);
-                return value;
-            }
-            false => match &mut self.enclosing {
-                Some(env) => (*env).assign_var(name, value),
-                None => panic!("undeclared var {}", name),
-            },
-        }
-    }
-    fn init_var(&mut self, var_name: &str, value: i32) {
-        if self.current.contains_key(var_name) {
-            eprintln!("Error: Redefinition of variable '{}'", var_name);
-            std::process::exit(-1);
-        }
-        self.current.insert(var_name.to_string(), value);
-    }
-}
-
 pub struct Interpreter {
     env: Environment,
+    pub global: Environment,
 }
 impl Interpreter {
     pub fn new() -> Self {
+        // TODO: make env have a refernce to global
+        let global = Environment::new(None);
         Interpreter {
-            env: Environment::new(None),
+            env: global.clone(),
+            global,
         }
     }
     fn print_statement(&mut self, expr: &Expr) {
@@ -117,10 +74,17 @@ impl Interpreter {
                 self.if_statement(cond, then_branch, else_branch)
             }
             Stmt::While(cond, body) => self.while_statement(cond, body),
+            Stmt::Function(name, params, body) => self.function_definition(name, params, body),
         }
     }
+    fn function_definition(&mut self, name: &str, params: &Vec<String>, body: &Vec<Stmt>) {
+        self.global.current.funcs.insert(
+            name.to_string(),
+            Function::new(params.clone(), body.clone()),
+        );
+    }
 
-    fn execute_block(&mut self, statements: &Vec<Stmt>, env: Environment) {
+    pub fn execute_block(&mut self, statements: &Vec<Stmt>, env: Environment) {
         self.env = env;
         self.interpret(statements);
 
@@ -141,10 +105,30 @@ impl Interpreter {
                 self.env.assign_var(name, value)
             }
             Expr::Logical { left, token, right } => self.evaluate_logical(left, token, right),
+            Expr::Call { callee, args } => self.evaluate_call(callee, args),
             _ => panic!("cant interpret this expression"),
         }
     }
-    fn evaluate_logical(&mut self, left: &Box<Expr>, token: &Tokens, right: &Box<Expr>) -> i32 {
+    fn evaluate_call(&mut self, callee: &Expr, args: &Vec<Expr>) -> i32 {
+        let callee = match callee {
+            Expr::Ident(func_name) => func_name,
+            _ => panic!("function name has to be identifier"),
+        };
+
+        let mut arg_list = Vec::new();
+        for arg in args {
+            arg_list.push(self.execute(arg));
+        }
+
+        match self.global.current.funcs.get(callee) {
+            Some(function) => {
+                function.call(&mut self.clone(), arg_list);
+                0
+            }
+            None => panic!("no function '{}' exists", callee),
+        }
+    }
+    fn evaluate_logical(&mut self, left: &Box<Expr>, token: &Token, right: &Box<Expr>) -> i32 {
         let left = self.execute(left);
 
         match token.token {
@@ -162,7 +146,7 @@ impl Interpreter {
         }
         self.execute(right)
     }
-    fn evaluate_binary(&mut self, left: &Box<Expr>, token: &Tokens, right: &Box<Expr>) -> i32 {
+    fn evaluate_binary(&mut self, left: &Box<Expr>, token: &Token, right: &Box<Expr>) -> i32 {
         let left = self.execute(left);
         let right = self.execute(right);
 
@@ -217,7 +201,7 @@ impl Interpreter {
             _ => panic!("invalid binary operator {}", token.token),
         }
     }
-    fn evaluate_unary(&mut self, token: &Tokens, right: &Box<Expr>) -> i32 {
+    fn evaluate_unary(&mut self, token: &Token, right: &Box<Expr>) -> i32 {
         let right = self.execute(right);
         match token.token {
             TokenType::Bang => !right,

@@ -198,15 +198,15 @@ impl Display for TokenType {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Tokens {
+pub struct Token {
     pub token: TokenType,
     pub line_index: i32,
     pub column: i32,
     pub line_string: String,
 }
-impl Tokens {
+impl Token {
     pub fn new(token: TokenType, line_index: i32, column: i32, line_string: String) -> Self {
-        Tokens {
+        Token {
             token,
             line_index,
             column,

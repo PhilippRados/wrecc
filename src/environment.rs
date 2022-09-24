@@ -10,14 +10,20 @@ impl Function {
     pub fn new(params: Vec<String>, body: Vec<Stmt>) -> Self {
         Function { params, body }
     }
-    pub fn call(&self, interpreter: &mut Interpreter, args: Vec<i32>) {
+    pub fn call(&self, interpreter: &mut Interpreter, args: Vec<i32>) -> i32 {
         let mut env = Environment::new(Some(Box::new(interpreter.env.clone())));
         self.params
             .iter()
             .enumerate()
             .for_each(|(i, param)| env.init_var(param, args[i]));
 
-        interpreter.execute_block(&self.body, env);
+        match interpreter.execute_block(&self.body, env) {
+            Ok(_) => 0,
+            Err(return_val) => match return_val {
+                ReturnValue::Some(v) => v,
+                ReturnValue::None => 0,
+            },
+        }
     }
     pub fn arity(&self) -> usize {
         self.params.len()

@@ -95,6 +95,9 @@ impl Parser {
         if let Some(_) = self.matches(vec![TokenKind::For]) {
             return self.for_statement();
         }
+        if let Some(_) = self.matches(vec![TokenKind::Return]) {
+            return self.return_statement();
+        }
         if let Some(_) = self.matches(vec![TokenKind::If]) {
             return self.if_statement();
         }
@@ -108,6 +111,14 @@ impl Parser {
             return Ok(Stmt::Block(self.block()?));
         }
         self.expression_statement()
+    }
+    fn return_statement(&mut self) -> Result<Stmt, Error> {
+        let mut value = None;
+        if !self.check(TokenKind::Semicolon) {
+            value = Some(self.expression()?);
+        }
+        self.consume(TokenKind::Semicolon, "Expect ';' after return statement")?;
+        Ok(Stmt::Return(value))
     }
     fn for_statement(&mut self) -> Result<Stmt, Error> {
         self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;

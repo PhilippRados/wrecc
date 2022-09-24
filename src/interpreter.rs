@@ -13,6 +13,11 @@ pub enum Stmt {
     If(Expr, Box<Stmt>, Box<Option<Stmt>>),
     While(Expr, Box<Stmt>),
     Function(String, Vec<String>, Vec<Stmt>),
+    Return(Option<Expr>),
+}
+pub enum ReturnValue {
+    Some(i32),
+    None,
 }
 pub struct Interpreter {
     pub env: Environment,
@@ -29,46 +34,60 @@ impl Interpreter {
         let value = self.execute(expr);
         println!("{}", value);
     }
-    fn if_statement(&mut self, cond: &Expr, then_branch: &Stmt, else_branch: &Option<Stmt>) {
+    fn if_statement(
+        &mut self,
+        cond: &Expr,
+        then_branch: &Stmt,
+        else_branch: &Option<Stmt>,
+    ) -> Result<(), ReturnValue> {
         if self.execute(cond) != 0 {
-            self.visit(then_branch);
+            self.visit(then_branch)?;
         } else if let Some(stmt) = else_branch {
-            self.visit(stmt);
+            self.visit(stmt)?;
         }
+        Ok(())
     }
-    fn while_statement(&mut self, cond: &Expr, body: &Stmt) {
+    fn while_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), ReturnValue> {
         while self.execute(cond) != 0 {
-            self.visit(body);
+            self.visit(body)?;
         }
+        Ok(())
     }
 
-    pub fn interpret(&mut self, statements: &Vec<Stmt>) {
+    pub fn interpret(&mut self, statements: &Vec<Stmt>) -> Result<(), ReturnValue> {
         for s in statements {
-            self.visit(s);
+            self.visit(s)?;
         }
+        Ok(())
     }
-    fn visit(&mut self, statement: &Stmt) {
+    fn visit(&mut self, statement: &Stmt) -> Result<(), ReturnValue> {
         match statement {
-            Stmt::Print(expr) => self.print_statement(expr),
-            Stmt::DeclareVar(name) => self.env.declare_var(name),
+            Stmt::Print(expr) => Ok(self.print_statement(expr)),
+            Stmt::DeclareVar(name) => Ok(self.env.declare_var(name)),
             Stmt::InitVar(name, expr) => {
                 let value = self.execute(expr);
-                self.env.init_var(name, value)
+                Ok(self.env.init_var(name, value))
             }
             Stmt::Expr(expr) => {
                 self.execute(expr);
+                Ok(())
             }
-            Stmt::Block(statements) => {
-                self.execute_block(
-                    statements,
-                    Environment::new(Some(Box::new(self.env.clone()))),
-                );
-            }
+            Stmt::Block(statements) => self.execute_block(
+                statements,
+                Environment::new(Some(Box::new(self.env.clone()))),
+            ),
             Stmt::If(cond, then_branch, else_branch) => {
                 self.if_statement(cond, then_branch, else_branch)
             }
             Stmt::While(cond, body) => self.while_statement(cond, body),
-            Stmt::Function(name, params, body) => self.function_definition(name, params, body),
+            Stmt::Function(name, params, body) => Ok(self.function_definition(name, params, body)),
+            Stmt::Return(value) => Err(self.return_statement(value)),
+        }
+    }
+    fn return_statement(&mut self, value: &Option<Expr>) -> ReturnValue {
+        match value {
+            Some(v) => ReturnValue::Some(self.execute(v)),
+            None => ReturnValue::None,
         }
     }
     fn function_definition(&mut self, name: &str, params: &Vec<String>, body: &Vec<Stmt>) {
@@ -86,13 +105,18 @@ impl Interpreter {
         }
     }
 
-    pub fn execute_block(&mut self, statements: &Vec<Stmt>, env: Environment) {
+    pub fn execute_block(
+        &mut self,
+        statements: &Vec<Stmt>,
+        env: Environment,
+    ) -> Result<(), ReturnValue> {
         self.env = env;
-        self.interpret(statements);
+        let result = self.interpret(statements);
 
         // this means assignment to vars inside block which were declared outside
         // of the block are still apparent after block
         self.env = *self.env.enclosing.as_ref().unwrap().clone(); // TODO: remove as_ref and clone
+        result
     }
 
     fn execute(&mut self, ast: &Expr) -> i32 {
@@ -125,8 +149,7 @@ impl Interpreter {
         match self.global.current.funcs.get(callee) {
             Some(function) => {
                 if function.arity() == arg_list.len() {
-                    function.clone().call(self, arg_list);
-                    0
+                    function.clone().call(self, arg_list)
                 } else {
                     eprintln!(
                         "Error: at '{}': expected {} argument(s) found {}",

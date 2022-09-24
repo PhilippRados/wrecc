@@ -2,7 +2,6 @@ use crate::environment::*;
 use crate::parser::Expr;
 use crate::token::Token;
 use crate::token::TokenType;
-use std::rc::Rc;
 
 #[derive(PartialEq, Clone)]
 pub enum Stmt {
@@ -15,18 +14,15 @@ pub enum Stmt {
     While(Expr, Box<Stmt>),
     Function(String, Vec<String>, Vec<Stmt>),
 }
-#[derive(Clone)]
 pub struct Interpreter {
     env: Environment,
     pub global: Environment,
 }
 impl Interpreter {
     pub fn new() -> Self {
-        // TODO: make env have a refernce to global
-        let global = Environment::new(None);
         Interpreter {
-            env: global.clone(),
-            global,
+            env: Environment::new(None),
+            global: Environment::new(None),
         }
     }
     fn print_statement(&mut self, expr: &Expr) {
@@ -61,14 +57,12 @@ impl Interpreter {
             }
             Stmt::Expr(expr) => {
                 self.execute(expr);
-                ()
             }
             Stmt::Block(statements) => {
                 self.execute_block(
                     statements,
                     Environment::new(Some(Box::new(self.env.clone()))),
                 );
-                ()
             }
             Stmt::If(cond, then_branch, else_branch) => {
                 self.if_statement(cond, then_branch, else_branch)
@@ -90,7 +84,7 @@ impl Interpreter {
 
         // this means assignment to vars inside block which were declared outside
         // of the block are still apparent after block
-        self.env = *(self.env.enclosing.as_ref().unwrap().clone()); // TODO: remove as_ref and clone
+        self.env = *self.env.enclosing.as_ref().unwrap().clone(); // TODO: remove as_ref and clone
     }
 
     fn execute(&mut self, ast: &Expr) -> i32 {
@@ -122,7 +116,7 @@ impl Interpreter {
 
         match self.global.current.funcs.get(callee) {
             Some(function) => {
-                function.call(&mut self.clone(), arg_list);
+                function.clone().call(self, arg_list);
                 0
             }
             None => panic!("no function '{}' exists", callee),

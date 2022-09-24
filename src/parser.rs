@@ -467,7 +467,6 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
-    //TODO: clean up tests
     use super::*;
     macro_rules! token_default {
         ($token_type:expr) => {

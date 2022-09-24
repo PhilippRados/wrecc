@@ -1,5 +1,4 @@
 use crate::interpreter::*;
-use crate::parser::Expr;
 use std::collections::HashMap;
 
 #[derive(Clone)]
@@ -12,7 +11,7 @@ impl Function {
         Function { params, body }
     }
     pub fn call(&self, interpreter: &mut Interpreter, args: Vec<i32>) {
-        let mut env = Environment::new(Some(Box::new(interpreter.global.clone()))); // TODO: remove this indirection with box
+        let mut env = Environment::new(Some(Box::new(interpreter.global.clone())));
         self.params
             .iter()
             .enumerate()
@@ -35,7 +34,6 @@ impl Table {
         }
     }
 }
-// FIX: environment shouldnt need clone
 #[derive(Clone)]
 pub struct Environment {
     pub current: Table,
@@ -71,7 +69,7 @@ impl Environment {
                 return value;
             }
             false => match &mut self.enclosing {
-                Some(env) => (*env).assign_var(name, value),
+                Some(env) => env.assign_var(name, value),
                 None => panic!("undeclared var {}", name),
             },
         }

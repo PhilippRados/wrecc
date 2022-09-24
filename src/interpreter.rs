@@ -124,8 +124,18 @@ impl Interpreter {
 
         match self.global.current.funcs.get(callee) {
             Some(function) => {
-                function.clone().call(self, arg_list);
-                0
+                if function.arity() == arg_list.len() {
+                    function.clone().call(self, arg_list);
+                    0
+                } else {
+                    eprintln!(
+                        "Error: at '{}': expected {} argument(s) found {}",
+                        callee,
+                        function.arity(),
+                        arg_list.len()
+                    );
+                    std::process::exit(-1);
+                }
             }
             None => panic!("no function '{}' exists", callee),
         }

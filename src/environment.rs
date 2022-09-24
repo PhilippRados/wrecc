@@ -19,6 +19,9 @@ impl Function {
 
         interpreter.execute_block(&self.body, env);
     }
+    pub fn arity(&self) -> usize {
+        self.params.len()
+    }
 }
 
 #[derive(Clone)]

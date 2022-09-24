@@ -1,0 +1,6 @@
+{
+  int some() {
+    print 1;
+  }
+some();
+}

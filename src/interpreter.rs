@@ -15,7 +15,7 @@ pub enum Stmt {
     Function(String, Vec<String>, Vec<Stmt>),
 }
 pub struct Interpreter {
-    env: Environment,
+    pub env: Environment,
     pub global: Environment,
 }
 impl Interpreter {
@@ -72,10 +72,18 @@ impl Interpreter {
         }
     }
     fn function_definition(&mut self, name: &str, params: &Vec<String>, body: &Vec<Stmt>) {
-        self.global.current.funcs.insert(
-            name.to_string(),
-            Function::new(params.clone(), body.clone()),
-        );
+        if let Some(_) = self.env.enclosing {
+            eprintln!(
+                "Error: at '{}' can only define functions in global scope",
+                name
+            );
+            std::process::exit(-1);
+        } else {
+            self.global.current.funcs.insert(
+                name.to_string(),
+                Function::new(params.clone(), body.clone()),
+            );
+        }
     }
 
     pub fn execute_block(&mut self, statements: &Vec<Stmt>, env: Environment) {

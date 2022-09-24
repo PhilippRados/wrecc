@@ -11,7 +11,7 @@ impl Function {
         Function { params, body }
     }
     pub fn call(&self, interpreter: &mut Interpreter, args: Vec<i32>) {
-        let mut env = Environment::new(Some(Box::new(interpreter.global.clone())));
+        let mut env = Environment::new(Some(Box::new(interpreter.env.clone())));
         self.params
             .iter()
             .enumerate()

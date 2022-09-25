@@ -1,7 +1,7 @@
 use crate::interpreter::*;
 use std::collections::HashMap;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Function {
     pub params: Vec<String>,
     pub body: Vec<Stmt>,
@@ -30,7 +30,7 @@ impl Function {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Table {
     vars: HashMap<String, i32>,
     pub funcs: HashMap<String, Function>,
@@ -43,7 +43,7 @@ impl Table {
         }
     }
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Environment {
     pub current: Table,
     pub enclosing: Option<Box<Environment>>,

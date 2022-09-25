@@ -85,23 +85,28 @@ impl Interpreter {
         }
     }
     fn return_statement(&mut self, value: &Option<Expr>) -> ReturnValue {
+        if self.env.enclosing == None {
+            eprintln!("Error: can't have return-statement in global scope");
+            std::process::exit(-1);
+        }
         match value {
             Some(v) => ReturnValue::Some(self.execute(v)),
             None => ReturnValue::None,
         }
     }
     fn function_definition(&mut self, name: &str, params: &Vec<String>, body: &Vec<Stmt>) {
-        if let Some(_) = self.env.enclosing {
+        if self.env.enclosing == None {
+            // current scope is global
+            self.global.current.funcs.insert(
+                name.to_string(),
+                Function::new(params.clone(), body.clone()),
+            );
+        } else {
             eprintln!(
                 "Error: at '{}' can only define functions in global scope",
                 name
             );
             std::process::exit(-1);
-        } else {
-            self.global.current.funcs.insert(
-                name.to_string(),
-                Function::new(params.clone(), body.clone()),
-            );
         }
     }
 

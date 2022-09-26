@@ -1,4 +1,5 @@
 use crate::environment::*;
+use crate::error::Error;
 use crate::parser::Expr;
 use crate::token::Token;
 use crate::token::TokenType;
@@ -7,13 +8,13 @@ use crate::token::TokenType;
 pub enum Stmt {
     Print(Expr),
     Expr(Expr),
-    DeclareVar(String),
-    InitVar(String, Expr),
+    DeclareVar(Token),
+    InitVar(Token, Expr),
     Block(Vec<Stmt>),
     If(Expr, Box<Stmt>, Box<Option<Stmt>>),
     While(Expr, Box<Stmt>),
-    Function(String, Vec<String>, Vec<Stmt>),
-    Return(Option<Expr>),
+    Function(Token, Vec<Token>, Vec<Stmt>),
+    Return(Token, Option<Expr>),
 }
 pub enum ReturnValue {
     Some(i32),
@@ -81,32 +82,27 @@ impl Interpreter {
             }
             Stmt::While(cond, body) => self.while_statement(cond, body),
             Stmt::Function(name, params, body) => Ok(self.function_definition(name, params, body)),
-            Stmt::Return(value) => Err(self.return_statement(value)),
+            Stmt::Return(keyword, value) => Err(self.return_statement(keyword, value)),
         }
     }
-    fn return_statement(&mut self, value: &Option<Expr>) -> ReturnValue {
+    fn return_statement(&mut self, keyword: &Token, value: &Option<Expr>) -> ReturnValue {
         if self.env.enclosing == None {
-            eprintln!("Error: can't have return-statement in global scope");
-            std::process::exit(-1);
+            Error::new(keyword, "can't define return in global scope").print_exit();
         }
         match value {
             Some(v) => ReturnValue::Some(self.execute(v)),
             None => ReturnValue::None,
         }
     }
-    fn function_definition(&mut self, name: &str, params: &Vec<String>, body: &Vec<Stmt>) {
+    fn function_definition(&mut self, name: &Token, params: &Vec<Token>, body: &Vec<Stmt>) {
         if self.env.enclosing == None {
             // current scope is global
             self.global.current.funcs.insert(
-                name.to_string(),
+                name.unwrap_string(),
                 Function::new(params.clone(), body.clone()),
             );
         } else {
-            eprintln!(
-                "Error: at '{}' can only define functions in global scope",
-                name
-            );
-            std::process::exit(-1);
+            Error::new(name, "can only define functions in global scope").print_exit();
         }
     }
 
@@ -136,14 +132,21 @@ impl Interpreter {
                 self.env.assign_var(name, value)
             }
             Expr::Logical { left, token, right } => self.evaluate_logical(left, token, right),
-            Expr::Call { callee, args } => self.evaluate_call(callee, args),
+            Expr::Call {
+                left_paren,
+                callee,
+                args,
+            } => self.evaluate_call(left_paren, callee, args),
             _ => panic!("cant interpret this expression"),
         }
     }
-    fn evaluate_call(&mut self, callee: &Expr, args: &Vec<Expr>) -> i32 {
-        let callee = match callee {
+    fn evaluate_call(&mut self, left_paren: &Token, callee: &Expr, args: &Vec<Expr>) -> i32 {
+        let func_name = match callee {
             Expr::Ident(func_name) => func_name,
-            _ => panic!("function name has to be identifier"),
+            _ => {
+                Error::new(left_paren, "function-name has to be identifier").print_exit();
+                unreachable!()
+            }
         };
 
         let mut arg_list = Vec::new();
@@ -151,21 +154,33 @@ impl Interpreter {
             arg_list.push(self.execute(arg));
         }
 
-        match self.global.current.funcs.get(callee) {
+        match self.global.current.funcs.get(&func_name.unwrap_string()) {
             Some(function) => {
                 if function.arity() == arg_list.len() {
                     function.clone().call(self, arg_list)
                 } else {
-                    eprintln!(
-                        "Error: at '{}': expected {} argument(s) found {}",
-                        callee,
-                        function.arity(),
-                        arg_list.len()
-                    );
-                    std::process::exit(-1);
+                    Error::new(
+                        left_paren,
+                        &format!(
+                            "Error: at '{}': expected {} argument(s) found {}",
+                            func_name.unwrap_string(),
+                            function.arity(),
+                            arg_list.len()
+                        ),
+                    )
+                    .print_exit();
+
+                    unreachable!();
                 }
             }
-            None => panic!("no function '{}' exists", callee),
+            None => {
+                Error::new(
+                    left_paren,
+                    &format!("no function {} exists", func_name.unwrap_string()),
+                )
+                .print_exit();
+                unreachable!();
+            }
         }
     }
     fn evaluate_logical(&mut self, left: &Box<Expr>, token: &Token, right: &Box<Expr>) -> i32 {
@@ -238,7 +253,10 @@ impl Interpreter {
                     0
                 }
             }
-            _ => panic!("invalid binary operator {}", token.token),
+            _ => {
+                Error::new(token, "invalid binary operator").print_exit();
+                unreachable!()
+            }
         }
     }
     fn evaluate_unary(&mut self, token: &Token, right: &Box<Expr>) -> i32 {
@@ -246,7 +264,10 @@ impl Interpreter {
         match token.token {
             TokenType::Bang => !right,
             TokenType::Minus => -right,
-            _ => panic!("invalid unary token {}", token.token),
+            _ => {
+                Error::new(token, "invalid unary operator").print_exit();
+                unreachable!()
+            }
         }
     }
     fn evaluate_grouping(&mut self, expr: &Box<Expr>) -> i32 {

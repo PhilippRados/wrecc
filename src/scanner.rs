@@ -1,48 +1,16 @@
+use crate::error::Error;
 use crate::token::Token;
 use crate::token::TokenType;
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;
 
-#[derive(Debug, Eq, PartialEq)]
-pub struct Error {
-    pub line_index: i32,
-    pub line_string: String,
-    pub column: i32,
-    pub msg: String,
-}
-
-impl Error {
-    pub fn new(t: &Token, msg: &str) -> Self {
-        Error {
-            line_index: t.line_index,
-            line_string: t.line_string.clone(),
-            column: t.column,
-            msg: msg.to_string(),
-        }
-    }
-    pub fn print_error(&self) {
-        eprintln!("Error: {}", self.msg);
-
-        // Change to Option<>
-        if self.line_index != -1 {
-            eprintln!("|");
-            eprintln!("{} {}", self.line_index, self.line_string);
-            eprint!("|");
-            for _ in 0..self.column {
-                eprint!(" ");
-            }
-            eprintln!("^");
-        }
-    }
-}
-
 pub struct Scanner<'a> {
     source: Peekable<Chars<'a>>,
     raw_source: Vec<String>,
     line: i32,
     column: i32,
-    keywords: HashMap<String, TokenType>,
+    keywords: HashMap<&'a str, TokenType>,
     err: bool,
 }
 impl<'a> Scanner<'a> {
@@ -57,14 +25,14 @@ impl<'a> Scanner<'a> {
             column: 1,
             err: false,
             keywords: HashMap::from([
-                ("int".to_string(), TokenType::Int),
-                ("char".to_string(), TokenType::Char),
-                ("if".to_string(), TokenType::If),
-                ("else".to_string(), TokenType::Else),
-                ("for".to_string(), TokenType::For),
-                ("while".to_string(), TokenType::While),
-                ("return".to_string(), TokenType::Return),
-                ("print".to_string(), TokenType::Print),
+                ("int", TokenType::Int),
+                ("char", TokenType::Char),
+                ("if", TokenType::If),
+                ("else", TokenType::Else),
+                ("for", TokenType::For),
+                ("while", TokenType::While),
+                ("return", TokenType::Return),
+                ("print", TokenType::Print),
             ]),
         }
     }
@@ -182,8 +150,11 @@ impl<'a> Scanner<'a> {
                         {
                             value.push(v);
                         }
-                        if self.keywords.contains_key(&value) {
-                            self.add_token(&mut tokens, self.keywords.get(&value).unwrap().clone());
+                        if self.keywords.contains_key(&value as &str) {
+                            self.add_token(
+                                &mut tokens,
+                                self.keywords.get(&value as &str).unwrap().clone(),
+                            );
                         } else {
                             self.add_token(&mut tokens, TokenType::Ident(value.to_string()))
                         }
@@ -197,7 +168,7 @@ impl<'a> Scanner<'a> {
                             line_index: self.line,
                             line_string: self.raw_source[(self.line - 1) as usize].clone(),
                             column: self.column,
-                            msg: format!("Unexpected character: {c}").to_string(),
+                            msg: format!("Unexpected character: {c}"),
                         });
                         self.column += 1;
                     }

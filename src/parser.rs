@@ -1,5 +1,5 @@
+use crate::error::Error;
 use crate::interpreter::Stmt;
-use crate::scanner::Error;
 use crate::token::Token;
 use crate::token::TokenKind;
 use crate::token::TokenType;
@@ -20,7 +20,7 @@ pub enum Expr {
         expr: Box<Expr>,
     },
     Assign {
-        name: String,
+        name: Token,
         expr: Box<Expr>,
     },
     Logical {
@@ -29,12 +29,12 @@ pub enum Expr {
         right: Box<Expr>,
     },
     Call {
+        left_paren: Token,
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
     Number(i32),
-    String(String),
-    Ident(String),
+    Ident(Token),
 }
 
 pub struct Parser {
@@ -95,8 +95,8 @@ impl Parser {
         if let Some(_) = self.matches(vec![TokenKind::For]) {
             return self.for_statement();
         }
-        if let Some(_) = self.matches(vec![TokenKind::Return]) {
-            return self.return_statement();
+        if let Some(t) = self.matches(vec![TokenKind::Return]) {
+            return self.return_statement(t);
         }
         if let Some(_) = self.matches(vec![TokenKind::If]) {
             return self.if_statement();
@@ -112,13 +112,13 @@ impl Parser {
         }
         self.expression_statement()
     }
-    fn return_statement(&mut self) -> Result<Stmt, Error> {
+    fn return_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
         let mut value = None;
         if !self.check(TokenKind::Semicolon) {
             value = Some(self.expression()?);
         }
         self.consume(TokenKind::Semicolon, "Expect ';' after return statement")?;
-        Ok(Stmt::Return(value))
+        Ok(Stmt::Return(keyword, value))
     }
     fn for_statement(&mut self) -> Result<Stmt, Error> {
         self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
@@ -211,9 +211,7 @@ impl Parser {
         ))
     }
     fn int_declaration(&mut self) -> Result<Stmt, Error> {
-        let name = self
-            .consume(TokenKind::Ident, "Expect identifier following int keyword")?
-            .unwrap_string();
+        let name = self.consume(TokenKind::Ident, "Expect identifier following int keyword")?;
 
         if let Some(_) = self.matches(vec![TokenKind::Equal]) {
             // variable defintion
@@ -229,17 +227,14 @@ impl Parser {
             Ok(Stmt::DeclareVar(name))
         }
     }
-    fn function(&mut self, name: String) -> Result<Stmt, Error> {
+    fn function(&mut self, name: Token) -> Result<Stmt, Error> {
         let mut params = Vec::new();
 
         if !self.check(TokenKind::RightParen) {
             loop {
                 // TODO: actually check parameter type
                 self.consume(TokenKind::Int, "Expect int type as parameter type")?;
-                params.push(
-                    self.consume(TokenKind::Ident, "Expect identifier after type")?
-                        .unwrap_string(),
-                );
+                params.push(self.consume(TokenKind::Ident, "Expect identifier after type")?);
                 if self.matches(vec![TokenKind::Comma]) == None {
                     break;
                 }
@@ -379,12 +374,12 @@ impl Parser {
     fn call(&mut self) -> Result<Expr, Error> {
         let mut expr = self.primary()?;
 
-        while let Some(_) = self.matches(vec![TokenKind::LeftParen]) {
-            expr = self.evaluate_args(expr)?;
+        while let Some(t) = self.matches(vec![TokenKind::LeftParen]) {
+            expr = self.evaluate_args(t, expr)?;
         }
         Ok(expr)
     }
-    fn evaluate_args(&mut self, callee: Expr) -> Result<Expr, Error> {
+    fn evaluate_args(&mut self, left_paren: Token, callee: Expr) -> Result<Expr, Error> {
         let mut args = Vec::new();
         if !self.check(TokenKind::RightParen) {
             loop {
@@ -396,6 +391,7 @@ impl Parser {
         }
         self.consume(TokenKind::RightParen, "Expect ')' after function call")?;
         Ok(Expr::Call {
+            left_paren,
             callee: Box::new(callee),
             args,
         })
@@ -405,11 +401,8 @@ impl Parser {
         if let Some(n) = self.matches(vec![TokenKind::Number]) {
             return Ok(Expr::Number(n.unwrap_num()));
         }
-        if let Some(s) = self.matches(vec![TokenKind::String]) {
-            return Ok(Expr::String(s.unwrap_string()));
-        }
         if let Some(s) = self.matches(vec![TokenKind::Ident]) {
-            return Ok(Expr::Ident(s.unwrap_string()));
+            return Ok(Expr::Ident(s));
         }
 
         if let Some(_) = self.matches(vec![TokenKind::LeftParen]) {

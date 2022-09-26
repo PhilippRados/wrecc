@@ -3,6 +3,7 @@ use std::fs;
 mod environment;
 mod scanner;
 use scanner::*;
+mod error;
 mod token;
 use token::Token;
 mod parser;

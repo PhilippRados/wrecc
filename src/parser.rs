@@ -78,6 +78,7 @@ impl Parser {
                     | TokenType::Print
                     | TokenType::While
                     | TokenType::For
+                    | TokenType::Char
                     | TokenType::Int => return,
                     _ => (),
                 }

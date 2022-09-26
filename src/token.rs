@@ -39,6 +39,7 @@ pub enum TokenKind {
     Number,
 
     // Keywords.
+    Void,
     Int,
     Char,
     Else,
@@ -93,6 +94,7 @@ impl From<&TokenType> for TokenKind {
             TokenType::CharLit(_) => TokenKind::CharLit,
             TokenType::Char => TokenKind::Char,
             TokenType::Int => TokenKind::Int,
+            TokenType::Void => TokenKind::Void,
         }
     }
 }
@@ -136,6 +138,7 @@ pub enum TokenType {
     Number(i32),
 
     // Keywords.
+    Void,
     Int,
     Char,
     Else,
@@ -192,6 +195,7 @@ impl Display for TokenType {
                 TokenType::Return => "'return'",
                 TokenType::While => "'while'",
                 TokenType::Eof => "<EOF>",
+                TokenType::Void => "'void'",
             }
         )
     }

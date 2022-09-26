@@ -7,9 +7,9 @@ use std::str::Chars;
 
 pub struct Scanner<'a> {
     source: Peekable<Chars<'a>>,
-    raw_source: Vec<String>,
-    line: i32,
-    column: i32,
+    pub raw_source: Vec<String>,
+    pub line: i32,
+    pub column: i32,
     keywords: HashMap<&'a str, TokenType>,
     err: bool,
 }
@@ -25,6 +25,7 @@ impl<'a> Scanner<'a> {
             column: 1,
             err: false,
             keywords: HashMap::from([
+                ("void", TokenType::Void),
                 ("int", TokenType::Int),
                 ("char", TokenType::Char),
                 ("if", TokenType::If),
@@ -127,6 +128,13 @@ impl<'a> Scanner<'a> {
                         errors.push(e)
                     }
                 },
+                '\'' => match self.char_lit() {
+                    Ok(char) => self.add_token(&mut tokens, TokenType::CharLit(char)),
+                    Err(e) => {
+                        self.err = true;
+                        errors.push(e)
+                    }
+                },
 
                 _ => {
                     if c.is_ascii_digit() {
@@ -164,12 +172,10 @@ impl<'a> Scanner<'a> {
                         self.add_token(&mut tokens, TokenType::PipePipe)
                     } else {
                         self.err = true;
-                        errors.push(Error {
-                            line_index: self.line,
-                            line_string: self.raw_source[(self.line - 1) as usize].clone(),
-                            column: self.column,
-                            msg: format!("Unexpected character: {c}"),
-                        });
+                        errors.push(Error::new_scan_error(
+                            self,
+                            &format!("Unexpected character: {c}").to_string(),
+                        ));
                         self.column += 1;
                     }
                 }
@@ -192,6 +198,32 @@ impl<'a> Scanner<'a> {
         }
         self.source.next();
         true
+    }
+    fn char_lit(&mut self) -> Result<char, Error> {
+        let mut last_char = '\0';
+        let result = self
+            .source
+            .by_ref()
+            .take_while(|c| {
+                last_char = *c;
+                *c != '\''
+            })
+            .collect::<String>();
+        if last_char != '\'' {
+            return Err(Error::new_scan_error(self, "unterminated char literal"));
+        } else if result.len() > 1 || result.len() <= 0 {
+            return Err(Error::new_scan_error(
+                self,
+                "char literal must contain single character",
+            ));
+        } else if !result.is_ascii() {
+            return Err(Error::new_scan_error(
+                self,
+                "char literal must be valid ascii value",
+            ));
+        }
+
+        Ok(result.chars().nth(0).unwrap())
     }
 
     fn string(&mut self) -> Result<String, Error> {
@@ -533,6 +565,64 @@ mod tests {
             column: 8,
             line_string: "int ä ~ = 123".to_string(),
             msg: "Unexpected character: ~".to_string(),
+        }];
+        assert_eq!(result, expected);
+    }
+    #[test]
+    fn char_literal() {
+        let source = "char some = '1'";
+        let mut scanner = Scanner::new(source);
+        let result = match scanner.scan_token() {
+            Ok(v) => v,
+            Err(e) => panic!(),
+        };
+        let expected = vec![
+            Token::new(TokenType::Char, 1, 1, "char some = '1'".to_string()),
+            Token::new(
+                TokenType::Ident("some".to_string()),
+                1,
+                6,
+                "char some = '1'".to_string(),
+            ),
+            Token::new(TokenType::Equal, 1, 11, "char some = '1'".to_string()),
+            Token::new(
+                TokenType::CharLit('1'),
+                1,
+                13,
+                "char some = '1'".to_string(),
+            ),
+        ];
+        assert_eq!(result, expected);
+    }
+    #[test]
+    fn char_literal_len_greater_1() {
+        let source = "char some = '12'";
+        let mut scanner = Scanner::new(source);
+        let result = match scanner.scan_token() {
+            Ok(v) => panic!(),
+            Err(e) => e,
+        };
+        let expected = vec![Error {
+            line_index: 1,
+            column: 13,
+            line_string: "char some = '12'".to_string(),
+            msg: "char literal must contain single character".to_string(),
+        }];
+        assert_eq!(result, expected);
+    }
+    #[test]
+    fn char_literal_empty() {
+        let source = "char some = ''";
+        let mut scanner = Scanner::new(source);
+        let result = match scanner.scan_token() {
+            Ok(v) => panic!(),
+            Err(e) => e,
+        };
+        let expected = vec![Error {
+            line_index: 1,
+            column: 13,
+            line_string: "char some = ''".to_string(),
+            msg: "char literal must contain single character".to_string(),
         }];
         assert_eq!(result, expected);
     }

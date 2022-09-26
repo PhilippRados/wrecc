@@ -137,16 +137,12 @@ impl Interpreter {
                 callee,
                 args,
             } => self.evaluate_call(left_paren, callee, args),
-            _ => panic!("cant interpret this expression"),
         }
     }
     fn evaluate_call(&mut self, left_paren: &Token, callee: &Expr, args: &Vec<Expr>) -> i32 {
         let func_name = match callee {
             Expr::Ident(func_name) => func_name,
-            _ => {
-                Error::new(left_paren, "function-name has to be identifier").print_exit();
-                unreachable!()
-            }
+            _ => Error::new(left_paren, "function-name has to be identifier").print_exit(),
         };
 
         let mut arg_list = Vec::new();
@@ -168,19 +164,14 @@ impl Interpreter {
                             arg_list.len()
                         ),
                     )
-                    .print_exit();
-
-                    unreachable!();
+                    .print_exit()
                 }
             }
-            None => {
-                Error::new(
-                    left_paren,
-                    &format!("no function {} exists", func_name.unwrap_string()),
-                )
-                .print_exit();
-                unreachable!();
-            }
+            None => Error::new(
+                left_paren,
+                &format!("no function {} exists", func_name.unwrap_string()),
+            )
+            .print_exit(),
         }
     }
     fn evaluate_logical(&mut self, left: &Box<Expr>, token: &Token, right: &Box<Expr>) -> i32 {
@@ -253,10 +244,7 @@ impl Interpreter {
                     0
                 }
             }
-            _ => {
-                Error::new(token, "invalid binary operator").print_exit();
-                unreachable!()
-            }
+            _ => Error::new(token, "invalid binary operator").print_exit(),
         }
     }
     fn evaluate_unary(&mut self, token: &Token, right: &Box<Expr>) -> i32 {
@@ -264,10 +252,7 @@ impl Interpreter {
         match token.token {
             TokenType::Bang => !right,
             TokenType::Minus => -right,
-            _ => {
-                Error::new(token, "invalid unary operator").print_exit();
-                unreachable!()
-            }
+            _ => Error::new(token, "invalid unary operator").print_exit(),
         }
     }
     fn evaluate_grouping(&mut self, expr: &Box<Expr>) -> i32 {

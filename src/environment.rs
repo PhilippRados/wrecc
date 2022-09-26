@@ -74,10 +74,7 @@ impl Environment {
             Some(v) => *v,
             None => match &self.enclosing {
                 Some(env) => (**env).get_var(var_name),
-                None => {
-                    Error::new(var_name, "undeclared variable").print_exit();
-                    unreachable!()
-                }
+                None => Error::new(var_name, "undeclared variable").print_exit(),
             },
         }
     }
@@ -90,10 +87,7 @@ impl Environment {
             }
             false => match &mut self.enclosing {
                 Some(env) => env.assign_var(var_name, value),
-                None => {
-                    Error::new(var_name, "undeclared variable").print_exit();
-                    unreachable!()
-                }
+                None => Error::new(var_name, "undeclared variable").print_exit(),
             },
         }
     }

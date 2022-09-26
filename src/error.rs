@@ -31,7 +31,7 @@ impl Error {
             eprintln!("^");
         }
     }
-    pub fn print_exit(&self) {
+    pub fn print_exit(&self) -> ! {
         self.print_error();
         std::process::exit(-1);
     }

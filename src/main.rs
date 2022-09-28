@@ -2,6 +2,7 @@ use std::fs;
 
 mod environment;
 mod scanner;
+mod types;
 use scanner::*;
 mod error;
 mod token;

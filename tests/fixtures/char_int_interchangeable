@@ -1,0 +1,7 @@
+char combined = 'c' + 2;
+char p = 'A' + '!';
+int ip = p;
+
+print combined;
+print p;
+print ip;

@@ -3,6 +3,7 @@ use crate::interpreter::Stmt;
 use crate::token::Token;
 use crate::token::TokenKind;
 use crate::token::TokenType;
+use crate::types::Types;
 use std::iter::Peekable;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -34,17 +35,20 @@ pub enum Expr {
         args: Vec<Expr>,
     },
     Number(i32),
+    CharLit(i8),
     Ident(Token),
 }
 
 pub struct Parser {
     tokens: Peekable<std::vec::IntoIter<Token>>,
+    types: Vec<TokenKind>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser {
             tokens: tokens.into_iter().peekable(),
+            types: Types::into_vec(),
         }
     }
     pub fn parse(&mut self) -> Option<Vec<Stmt>> {
@@ -87,8 +91,8 @@ impl Parser {
         }
     }
     fn declaration(&mut self) -> Result<Stmt, Error> {
-        if let Some(_) = self.matches(vec![TokenKind::Int]) {
-            return self.int_declaration();
+        if let Some(t) = self.matches(self.types.clone()) {
+            return self.type_declaration(t);
         }
         self.statement()
     }
@@ -102,8 +106,8 @@ impl Parser {
         if let Some(_) = self.matches(vec![TokenKind::If]) {
             return self.if_statement();
         }
-        if let Some(_) = self.matches(vec![TokenKind::Print]) {
-            return self.print_statement();
+        if let Some(t) = self.matches(vec![TokenKind::Print]) {
+            return self.print_statement(t);
         }
         if let Some(_) = self.matches(vec![TokenKind::While]) {
             return self.while_statement();
@@ -123,28 +127,35 @@ impl Parser {
     }
     fn for_statement(&mut self) -> Result<Stmt, Error> {
         self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
+
         let mut init = None;
-        if let Some(token) = self.matches(vec![TokenKind::Int, TokenKind::Semicolon]) {
+        if let Some(token) = self.matches(self.types.clone()) {
             match TokenKind::from(&token.token) {
-                TokenKind::Int => init = Some(self.int_declaration()?),
-                TokenKind::Semicolon => (),
-                _ => init = Some(self.expression_statement()?),
+                TokenKind::Int | TokenKind::Char | TokenKind::Void => {
+                    init = Some(self.type_declaration(token)?)
+                }
+                _ => {
+                    if !self.check(TokenKind::Semicolon) {
+                        init = Some(self.expression_statement()?)
+                    }
+                }
             }
         }
+
         let mut cond = None;
         if self.matches(vec![TokenKind::Semicolon]) == None {
             cond = Some(self.expression()?);
             self.consume(TokenKind::Semicolon, "Expect ';' after for-condition")?;
         }
+
         let mut inc = None;
         if self.matches(vec![TokenKind::RightParen]) == None {
             inc = Some(self.expression()?);
             self.consume(TokenKind::RightParen, "Expect ')' for-loop")?;
         }
 
-        let mut body = self.statement()?;
-
         // Since rust has no c-style for-loop we mimic it as a while loop
+        let mut body = self.statement()?;
         if inc != None {
             body = Stmt::Block(vec![body, Stmt::Expr(inc.unwrap())]);
         }
@@ -186,10 +197,10 @@ impl Parser {
         self.consume(TokenKind::Semicolon, "Expect ';' after expression")?;
         Ok(Stmt::Expr(expr))
     }
-    fn print_statement(&mut self) -> Result<Stmt, Error> {
+    fn print_statement(&mut self, token: Token) -> Result<Stmt, Error> {
         let value = self.expression()?;
         self.consume(TokenKind::Semicolon, "Expect ';' after value.")?;
-        Ok(Stmt::Print(value))
+        Ok(Stmt::Print(token, value))
     }
     fn if_statement(&mut self) -> Result<Stmt, Error> {
         self.consume(TokenKind::LeftParen, "Expect '(' after 'if'")?;
@@ -211,31 +222,45 @@ impl Parser {
             Box::new(else_branch),
         ))
     }
-    fn int_declaration(&mut self) -> Result<Stmt, Error> {
-        let name = self.consume(TokenKind::Ident, "Expect identifier following int keyword")?;
+    fn type_declaration(&mut self, type_decl: Token) -> Result<Stmt, Error> {
+        let name = self.consume(
+            TokenKind::Ident,
+            "Expect identifier following type-specifier",
+        )?;
 
         if let Some(_) = self.matches(vec![TokenKind::Equal]) {
             // variable defintion
             let value = self.expression()?;
             self.consume(TokenKind::Semicolon, "Expect ';' after expression")?;
-            Ok(Stmt::InitVar(name, value))
+            Ok(Stmt::InitVar(type_decl, name, value))
         } else if let Some(_) = self.matches(vec![TokenKind::LeftParen]) {
             // function defintion
-            self.function(name)
+            self.function(type_decl, name)
         } else {
             // var declaration
-            self.consume(TokenKind::Semicolon, "Expect ';' after int declaration")?;
-            Ok(Stmt::DeclareVar(name))
+            self.consume(TokenKind::Semicolon, "Expect ';' after type declaration")?;
+            Ok(Stmt::DeclareVar(type_decl, name))
         }
     }
-    fn function(&mut self, name: Token) -> Result<Stmt, Error> {
+    fn function(&mut self, type_decl: Token, name: Token) -> Result<Stmt, Error> {
         let mut params = Vec::new();
 
         if !self.check(TokenKind::RightParen) {
             loop {
-                // TODO: actually check parameter type
-                self.consume(TokenKind::Int, "Expect int type as parameter type")?;
-                params.push(self.consume(TokenKind::Ident, "Expect identifier after type")?);
+                let param_type = match self.matches(self.types.clone()) {
+                    Some(type_decl) => type_decl,
+                    None => {
+                        let actual = self.tokens.peek().expect("Expected Type");
+                        return Err(Error::new(
+                            actual,
+                            &format!("Expected type found {}", actual.token),
+                        ));
+                    }
+                };
+                params.push((
+                    param_type,
+                    self.consume(TokenKind::Ident, "Expect identifier after type")?,
+                ));
                 if self.matches(vec![TokenKind::Comma]) == None {
                     break;
                 }
@@ -248,13 +273,13 @@ impl Parser {
         self.consume(TokenKind::LeftBrace, "Expect '{' before function body.")?;
         let body = self.block()?;
 
-        Ok(Stmt::Function(name, params, body))
+        Ok(Stmt::Function(type_decl, name, params, body))
     }
 
     fn expression(&mut self) -> Result<Expr, Error> {
-        self.int_assignment()
+        self.var_assignment()
     }
-    fn int_assignment(&mut self) -> Result<Expr, Error> {
+    fn var_assignment(&mut self) -> Result<Expr, Error> {
         let expr = self.or()?;
 
         if let Some(_) = self.matches(vec![TokenKind::Equal]) {
@@ -401,6 +426,9 @@ impl Parser {
         //TODO: avoid repition
         if let Some(n) = self.matches(vec![TokenKind::Number]) {
             return Ok(Expr::Number(n.unwrap_num()));
+        }
+        if let Some(c) = self.matches(vec![TokenKind::CharLit]) {
+            return Ok(Expr::CharLit(c.unwrap_char()));
         }
         if let Some(s) = self.matches(vec![TokenKind::Ident]) {
             return Ok(Expr::Ident(s));

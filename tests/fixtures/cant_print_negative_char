@@ -1,0 +1,4 @@
+int big = 100;
+char p = 'c' + big;
+
+print p;

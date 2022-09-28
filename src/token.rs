@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum TokenKind {
     // Single-character tokens.
     LeftParen,
@@ -134,7 +134,7 @@ pub enum TokenType {
     // Literals.
     Ident(String),
     String(String),
-    CharLit(char),
+    CharLit(i8),
     Number(i32),
 
     // Keywords.
@@ -228,6 +228,12 @@ impl Token {
         match &self.token {
             TokenType::Number(n) => *n,
             _ => panic!("cant unwrap number on {} token", self.token),
+        }
+    }
+    pub fn unwrap_char(&self) -> i8 {
+        match &self.token {
+            TokenType::CharLit(c) => *c,
+            _ => panic!("cant unwrap char on {} token", self.token),
         }
     }
 }

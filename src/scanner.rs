@@ -129,7 +129,7 @@ impl<'a> Scanner<'a> {
                     }
                 },
                 '\'' => match self.char_lit() {
-                    Ok(char) => self.add_token(&mut tokens, TokenType::CharLit(char)),
+                    Ok(char) => self.add_token(&mut tokens, TokenType::CharLit(char as i8)),
                     Err(e) => {
                         self.err = true;
                         errors.push(e)
@@ -211,7 +211,7 @@ impl<'a> Scanner<'a> {
             .collect::<String>();
         if last_char != '\'' {
             return Err(Error::new_scan_error(self, "unterminated char literal"));
-        } else if result.len() > 1 || result.len() <= 0 {
+        } else if result.len() != 1 {
             return Err(Error::new_scan_error(
                 self,
                 "char literal must contain single character",
@@ -586,7 +586,7 @@ mod tests {
             ),
             Token::new(TokenType::Equal, 1, 11, "char some = '1'".to_string()),
             Token::new(
-                TokenType::CharLit('1'),
+                TokenType::CharLit('1' as i8),
                 1,
                 13,
                 "char some = '1'".to_string(),

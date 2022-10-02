@@ -1,0 +1,2 @@
+void other(){}
+int some = other() + 1;

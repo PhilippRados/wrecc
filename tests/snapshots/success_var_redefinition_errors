@@ -1,5 +1,4 @@
--1
-Error: Error: Redefinition of variable 'a'
+Error: Redefinition of variable 'a'
 |
 6 int a = 2;
 |     ^

@@ -1,20 +1,58 @@
 use crate::token::TokenKind;
+use std::fmt::Display;
 
 #[derive(Clone, PartialEq)]
-pub enum Types {
+pub enum TypeValues {
     Char(i8),
     Int(i32),
     Void,
+}
+impl TypeValues {
+    pub fn unwrap_num(&self) -> i32 {
+        match self {
+            TypeValues::Char(c) => *c as i32,
+            TypeValues::Int(n) => *n,
+            TypeValues::Void => unreachable!("Type checker should catch this"),
+        }
+    }
+    pub fn from(token: &Types, value: i32) -> Self {
+        match token {
+            Types::Int => TypeValues::Int(value),
+            Types::Char => TypeValues::Char(value as i8),
+            Types::Void => TypeValues::Void,
+        }
+    }
+}
+#[derive(Copy, Clone, PartialEq, PartialOrd)]
+pub enum Types {
+    Void = 0, // type-promotion order
+    Char = 1,
+    Int = 2,
+}
+impl From<&TypeValues> for Types {
+    fn from(token: &TypeValues) -> Self {
+        match token {
+            TypeValues::Char(_) => Types::Char,
+            TypeValues::Int(_) => Types::Int,
+            TypeValues::Void => Types::Void,
+        }
+    }
 }
 impl Types {
     pub fn into_vec() -> Vec<TokenKind> {
         vec![TokenKind::Char, TokenKind::Int, TokenKind::Void]
     }
-    pub fn unwrap_num(&self) -> i32 {
-        match self {
-            Types::Char(c) => *c as i32,
-            Types::Int(n) => *n,
-            Types::Void => unreachable!("Type checker should catch this"),
-        }
+}
+impl Display for Types {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Types::Char => "'char'",
+                Types::Int => "'int'",
+                Types::Void => "'void'",
+            }
+        )
     }
 }

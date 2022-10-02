@@ -1,0 +1,369 @@
+use crate::environment::Environment;
+use crate::environment::Function;
+use crate::error::Error;
+use crate::interpreter::Stmt;
+use crate::parser::Expr;
+use crate::token::Token;
+use crate::types::Types;
+
+// macro_rules! err_return {
+//     ($e:expr) => {
+//         if let Return::Err(e) = $e {
+//             return Return::Err(e);
+//         } else {
+//             $e
+//         }
+//     };
+// }
+
+#[derive(PartialEq)]
+enum Scope {
+    Global,
+    Block,
+    Function(Types), // function return type
+}
+
+// #[derive(PartialEq)]
+// pub enum Return {
+//     NoCall,       // no return in block
+//     Empty,        // return;
+//     Value(Types), // return <val>;
+//     Err(Error),   // error occured
+// }
+pub struct TypeChecker {
+    errors: Vec<Error>,
+    scope: Vec<Scope>,
+    env: Environment<Types>,
+    global_env: Environment<Types>,
+}
+impl TypeChecker {
+    pub fn new() -> Self {
+        TypeChecker {
+            errors: vec![],
+            env: Environment::new(None),
+            global_env: Environment::new(None),
+            scope: vec![Scope::Global],
+        }
+    }
+    pub fn check(&mut self, statements: &Vec<Stmt>) -> Result<(), Vec<Error>> {
+        if let Err(e) = self.check_statements(statements) {
+            self.errors.push(e);
+            // synchronize
+        }
+        if self.errors.len() == 0 {
+            Ok(())
+        } else {
+            Err(self.errors.clone())
+        }
+    }
+    fn check_statements(&mut self, statements: &Vec<Stmt>) -> Result<(), Error> {
+        for s in statements {
+            self.visit(s)?
+        }
+        Ok(())
+    }
+    fn visit(&mut self, statement: &Stmt) -> Result<(), Error> {
+        match statement {
+            Stmt::DeclareVar(type_decl, var_name) => self.declare_var(type_decl, var_name),
+            Stmt::InitVar(type_decl, name, expr) => self.init_var(type_decl, name, expr),
+            Stmt::Function(return_type, name, params, body) => {
+                self.function_definition(return_type.clone(), name, params.clone(), body.clone())
+            }
+            Stmt::Return(keyword, value) => self.return_statement(keyword, value),
+            Stmt::Print(token, expr) => self.print_statement(token, expr),
+            Stmt::Expr(expr) => match self.expr_type(expr) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
+            },
+            Stmt::Block(statements) => self.block(
+                statements,
+                Environment::new(Some(Box::new(self.env.clone()))),
+                None,
+            ),
+            Stmt::If(keyword, cond, then_branch, else_branch) => {
+                self.if_statement(keyword, cond, then_branch, else_branch)
+            }
+            Stmt::While(cond, body) => self.while_statement(cond, body),
+        }
+    }
+    fn while_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), Error> {
+        self.expr_type(cond)?;
+        self.visit(body)?;
+        Ok(())
+    }
+    fn declare_var(&mut self, type_decl: &Types, var_name: &Token) -> Result<(), Error> {
+        let name = var_name.unwrap_string();
+
+        if self.env.current.vars.contains_key(&name) {
+            return Err(Error::new(
+                var_name,
+                &format!("Redefinition of variable '{}'", var_name.unwrap_string()),
+            ));
+        }
+        if *type_decl == Types::Void {
+            return Err(Error::new(
+                var_name,
+                &format!("Can't assign to 'void' {}", var_name.unwrap_string()),
+            ));
+        }
+        self.env.declare_var(type_decl.clone(), name);
+        Ok(())
+    }
+    fn init_var(&mut self, type_decl: &Types, var_name: &Token, expr: &Expr) -> Result<(), Error> {
+        let name = var_name.unwrap_string();
+        let value = match self.expr_type(expr) {
+            Ok(v) => v,
+            Err(e) => return Err(e),
+        };
+
+        if self.env.current.vars.contains_key(&name) {
+            return Err(Error::new(
+                var_name,
+                &format!("Redefinition of variable '{}'", name),
+            ));
+        } else if *type_decl == Types::Void {
+            return Err(Error::new(
+                var_name,
+                &format!("Can't assign to 'void' {}", name),
+            ));
+        } else if value == Types::Void {
+            return Err(Error::new(
+                var_name,
+                &format!(
+                    "'void' cant be assigned to variable {} of type {}",
+                    name, type_decl
+                ),
+            ));
+        } else {
+            // currently only type-checks for void since int and char are interchangeable
+            self.env.init_var(name, type_decl.clone())?; // FIX:
+            Ok(())
+        }
+    }
+    fn if_statement(
+        &mut self,
+        keyword: &Token,
+        cond: &Expr,
+        then_branch: &Stmt,
+        else_branch: &Option<Stmt>,
+    ) -> Result<(), Error> {
+        let cond = match self.expr_type(cond) {
+            Ok(t) => t,
+            Err(e) => return Err(e),
+        };
+        if cond == Types::Void {
+            return Err(Error::new(
+                keyword,
+                "expected Expression inside of condition, found 'void'",
+            ));
+        }
+        self.visit(then_branch)?;
+        if let Some(else_branch) = else_branch {
+            self.visit(else_branch)?;
+        }
+        Ok(())
+    }
+    fn print_statement(&mut self, token: &Token, expr: &Expr) -> Result<(), Error> {
+        let t = match self.expr_type(expr) {
+            Ok(v) => v,
+            Err(e) => return Err(e),
+        };
+        if t == Types::Void {
+            Err(Error::new(token, "can't print 'void' expression"))
+        } else {
+            Ok(())
+        }
+    }
+    fn function_definition(
+        &mut self,
+        return_type: Types,
+        name: &Token,
+        params: Vec<(Types, Token)>,
+        body: Vec<Stmt>,
+    ) -> Result<(), Error> {
+        if *self.scope.last().unwrap() != Scope::Global {
+            return Err(Error::new(
+                name,
+                "can only define functions in global scope",
+            ));
+        }
+
+        self.global_env.current.funcs.insert(
+            name.unwrap_string(),
+            Function::new(return_type, params.clone(), body.clone()),
+        );
+
+        let mut env = Environment::new(Some(Box::new(self.env.clone())));
+
+        for (type_decl, name) in params.iter() {
+            env.init_var(name.unwrap_string(), type_decl.clone())?
+        }
+
+        self.block(&body, env, Some(return_type))?;
+        Ok(())
+    }
+    fn return_statement(&mut self, keyword: &Token, expr: &Option<Expr>) -> Result<(), Error> {
+        if let Some(expr) = expr {
+            let type_decl = match self.expr_type(expr) {
+                Ok(t) => t,
+                Err(e) => return Err(e),
+            };
+            self.check_return(keyword, type_decl)
+        } else {
+            self.check_return(keyword, Types::Void)
+        }
+    }
+
+    pub fn expr_type(&mut self, ast: &Expr) -> Result<Types, Error> {
+        match ast {
+            Expr::Binary { left, token, right } => self.evaluate_binary(left, token, right),
+            Expr::Unary { token: _, right } => self.evaluate_unary(right),
+            Expr::Grouping { expr } => self.evaluate_grouping(expr),
+            Expr::Number(_) => Ok(Types::Int),
+            Expr::CharLit(_) => Ok(Types::Char),
+            Expr::Logical { left, token, right } => self.evaluate_logical(left, token, right),
+            Expr::Ident(v) => self.env.get_var(v),
+            Expr::Assign { name, expr } => {
+                let value = self.expr_type(expr)?;
+                self.env.assign_var(name, value)
+            }
+            Expr::Call {
+                left_paren,
+                callee,
+                args,
+            } => self.evaluate_call(left_paren, callee, args),
+        }
+    }
+
+    fn evaluate_call(
+        &mut self,
+        left_paren: &Token,
+        callee: &Expr,
+        args: &Vec<Expr>,
+    ) -> Result<Types, Error> {
+        let func_name = match callee {
+            Expr::Ident(func_name) => func_name,
+            _ => return Err(Error::new(left_paren, "function-name has to be identifier")),
+        };
+
+        match self
+            .global_env
+            .current
+            .funcs
+            .get(&func_name.unwrap_string())
+        {
+            Some(function) => {
+                if function.arity() == args.len() {
+                    // compare param and arg types
+                    Ok(function.return_type)
+                } else {
+                    Err(Error::new(
+                        left_paren,
+                        &format!(
+                            "at '{}': expected {} argument(s) found {}",
+                            func_name.unwrap_string(),
+                            function.arity(),
+                            args.len()
+                        ),
+                    ))
+                }
+            }
+            None => Err(Error::new(
+                left_paren,
+                &format!("no function {} exists", func_name.unwrap_string()),
+            )),
+        }
+    }
+    fn block(
+        &mut self,
+        body: &Vec<Stmt>,
+        env: Environment<Types>,
+        return_type: Option<Types>,
+    ) -> Result<(), Error> {
+        self.env = env;
+        if let Some(return_type) = return_type {
+            self.scope.push(Scope::Function(return_type));
+        } else {
+            self.scope.push(Scope::Block);
+        }
+        let result = self.check_statements(&body);
+
+        self.env = *self.env.enclosing.as_ref().unwrap().clone();
+        self.scope.pop();
+
+        result
+    }
+    fn evaluate_logical(
+        &mut self,
+        left: &Box<Expr>,
+        token: &Token,
+        right: &Box<Expr>,
+    ) -> Result<Types, Error> {
+        self.evaluate_binary(left, token, right)
+    }
+    fn evaluate_binary(
+        &mut self,
+        left: &Box<Expr>,
+        token: &Token,
+        right: &Box<Expr>,
+    ) -> Result<Types, Error> {
+        let left = self.expr_type(left)?;
+        let right = self.expr_type(right)?;
+
+        if left == Types::Void || right == Types::Void {
+            return Err(Error::new(
+                token,
+                &format!(
+                    "invalid binary expression: {} {} {}",
+                    left, token.token, right
+                ),
+            ));
+        }
+
+        Ok(if left > right { left } else { right }) // implicit type conversion
+    }
+    fn evaluate_unary(&mut self, right: &Box<Expr>) -> Result<Types, Error> {
+        self.expr_type(right)
+    }
+    fn evaluate_grouping(&mut self, expr: &Box<Expr>) -> Result<Types, Error> {
+        self.expr_type(expr)
+    }
+    fn check_return(&mut self, keyword: &Token, body_return: Types) -> Result<(), Error> {
+        match self.find_function() {
+            Some(Scope::Function(function_type)) => {
+                if *function_type == Types::Void && body_return != Types::Void {
+                    return Err(Error::new(
+                        keyword,
+                        &format!(
+                            "function return expects type:'void', found: {}",
+                            body_return
+                        ),
+                    ));
+                } else if *function_type != Types::Void && body_return == Types::Void {
+                    return Err(Error::new(
+                        keyword,
+                        &format!(
+                            "function return expects type:{}, found: 'void'",
+                            function_type
+                        ),
+                    ));
+                }
+            }
+            _ => {
+                return Err(Error::new(
+                    keyword,
+                    "can only define return statements inside a function",
+                ));
+            }
+        };
+        Ok(())
+    }
+    fn find_function(&self) -> Option<&Scope> {
+        for ref scope in self.scope.iter().rev() {
+            if matches!(scope, Scope::Function(_)) {
+                return Some(scope);
+            }
+        }
+        None
+    }
+}

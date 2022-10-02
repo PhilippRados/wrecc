@@ -41,14 +41,12 @@ pub enum Expr {
 
 pub struct Parser {
     tokens: Peekable<std::vec::IntoIter<Token>>,
-    types: Vec<TokenKind>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser {
             tokens: tokens.into_iter().peekable(),
-            types: Types::into_vec(),
         }
     }
     pub fn parse(&mut self) -> Option<Vec<Stmt>> {
@@ -91,7 +89,8 @@ impl Parser {
         }
     }
     fn declaration(&mut self) -> Result<Stmt, Error> {
-        if let Some(t) = self.matches(self.types.clone()) {
+        if let Some(t) = self.matches_type() {
+            // returns OPtion<Types>
             return self.type_declaration(t);
         }
         self.statement()
@@ -103,8 +102,8 @@ impl Parser {
         if let Some(t) = self.matches(vec![TokenKind::Return]) {
             return self.return_statement(t);
         }
-        if let Some(_) = self.matches(vec![TokenKind::If]) {
-            return self.if_statement();
+        if let Some(t) = self.matches(vec![TokenKind::If]) {
+            return self.if_statement(t);
         }
         if let Some(t) = self.matches(vec![TokenKind::Print]) {
             return self.print_statement(t);
@@ -129,17 +128,10 @@ impl Parser {
         self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
 
         let mut init = None;
-        if let Some(token) = self.matches(self.types.clone()) {
-            match TokenKind::from(&token.token) {
-                TokenKind::Int | TokenKind::Char | TokenKind::Void => {
-                    init = Some(self.type_declaration(token)?)
-                }
-                _ => {
-                    if !self.check(TokenKind::Semicolon) {
-                        init = Some(self.expression_statement()?)
-                    }
-                }
-            }
+        if let Some(token) = self.matches_type() {
+            init = Some(self.type_declaration(token)?);
+        } else if !self.check(TokenKind::Semicolon) {
+            init = Some(self.expression_statement()?)
         }
 
         let mut cond = None;
@@ -202,7 +194,7 @@ impl Parser {
         self.consume(TokenKind::Semicolon, "Expect ';' after value.")?;
         Ok(Stmt::Print(token, value))
     }
-    fn if_statement(&mut self) -> Result<Stmt, Error> {
+    fn if_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
         self.consume(TokenKind::LeftParen, "Expect '(' after 'if'")?;
         let condition = self.expression()?;
         self.consume(
@@ -217,12 +209,13 @@ impl Parser {
             None => (),
         }
         Ok(Stmt::If(
+            keyword,
             condition,
             Box::new(then_branch),
             Box::new(else_branch),
         ))
     }
-    fn type_declaration(&mut self, type_decl: Token) -> Result<Stmt, Error> {
+    fn type_declaration(&mut self, type_decl: Types) -> Result<Stmt, Error> {
         let name = self.consume(
             TokenKind::Ident,
             "Expect identifier following type-specifier",
@@ -242,12 +235,12 @@ impl Parser {
             Ok(Stmt::DeclareVar(type_decl, name))
         }
     }
-    fn function(&mut self, type_decl: Token, name: Token) -> Result<Stmt, Error> {
+    fn function(&mut self, type_decl: Types, name: Token) -> Result<Stmt, Error> {
         let mut params = Vec::new();
 
         if !self.check(TokenKind::RightParen) {
             loop {
-                let param_type = match self.matches(self.types.clone()) {
+                let param_type = match self.matches_type() {
                     Some(type_decl) => type_decl,
                     None => {
                         let actual = self.tokens.peek().expect("Expected Type");
@@ -495,6 +488,22 @@ impl Parser {
             None => return None,
         }
         self.tokens.next()
+    }
+    fn matches_type(&mut self) -> Option<Types> {
+        match self.tokens.peek() {
+            Some(v) => {
+                if !v.is_type() {
+                    return None;
+                }
+            }
+            None => return None,
+        }
+        Some(
+            self.tokens
+                .next()
+                .expect("can only be types because of previous check")
+                .into_type(),
+        )
     }
 }
 

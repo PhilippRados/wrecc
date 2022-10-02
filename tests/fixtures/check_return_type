@@ -1,0 +1,7 @@
+int some() {
+  if (1 > 2) {
+    return;
+  }
+  return 2;
+}
+print some();

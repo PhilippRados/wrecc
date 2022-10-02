@@ -1,0 +1,4 @@
+Error: function return expects type:'int', found: 'void'
+|
+3     return;
+|     ^

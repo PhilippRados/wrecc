@@ -1,51 +1,58 @@
 use std::fs;
 
 mod environment;
-mod scanner;
-mod types;
-use scanner::*;
 mod error;
-mod token;
-use token::Token;
-mod parser;
-use parser::Parser;
 mod interpreter;
-use interpreter::Stmt;
+mod parser;
+mod scanner;
+mod token;
+mod typechecker;
+mod types;
 use interpreter::*;
+use parser::Parser;
+use scanner::*;
+use typechecker::TypeChecker;
 
-fn sys_error(msg: &str, exit_code: i32) {
+fn sys_error(msg: &str, exit_code: i32) -> ! {
     eprintln!("rucc: {msg}");
     std::process::exit(exit_code);
 }
 
 fn main() {
+    // read input file
     let args: Vec<String> = std::env::args().collect();
-    let mut file: Option<&str> = None;
-    match args.len() {
-        2 => file = Some(&args[1]),
+    let file = match args.len() {
+        2 => &args[1],
         _ => sys_error("usage: rucc <file>", 2),
-    }
+    };
 
-    let source =
-        fs::read_to_string(file.unwrap()).expect(&format!("couldn't find file: {}", file.unwrap()));
+    let source = fs::read_to_string(file).expect(&format!("couldn't find file: {}", file));
 
-    let mut tokens: Option<Vec<Token>> = None;
-    let mut scanner = Scanner::new(&source);
-    match scanner.scan_token() {
-        Ok(v) => tokens = Some(v),
+    // Scan input
+    let tokens = match Scanner::new(&source).scan_token() {
+        Ok(v) => v,
         Err(e) => {
             for err in e {
                 err.print_error();
             }
             return;
         }
+    };
+
+    // Parse statements
+    let statements = match Parser::new(tokens).parse() {
+        Some(s) => s,
+        None => return,
+    };
+
+    // Check for errors
+    if let Err(e) = TypeChecker::new().check(&statements) {
+        for err in e {
+            err.print_error();
+        }
+        return;
     }
 
-    let mut statements: Option<Vec<Stmt>> = None;
-    let mut parser = Parser::new(tokens.unwrap());
-    match parser.parse() {
-        Some(v) => statements = Some(v),
-        None => return,
-    }
-    Interpreter::new().interpret(&statements.unwrap());
+    // Interpret
+    Interpreter::new().interpret(&statements);
 }

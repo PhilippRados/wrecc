@@ -1,29 +1,33 @@
 use crate::error::Error;
 use crate::interpreter::*;
 use crate::token::Token;
-use crate::token::TokenType;
+use crate::types::TypeValues;
 use crate::types::Types;
 use std::collections::HashMap;
 
 #[derive(Clone, PartialEq)]
 pub struct Function {
-    pub params: Vec<(Token, Token)>,
+    pub params: Vec<(Types, Token)>,
     pub body: Vec<Stmt>,
+    pub return_type: Types,
 }
 impl Function {
-    pub fn new(params: Vec<(Token, Token)>, body: Vec<Stmt>) -> Self {
-        Function { params, body }
+    pub fn new(return_type: Types, params: Vec<(Types, Token)>, body: Vec<Stmt>) -> Self {
+        Function {
+            return_type,
+            params,
+            body,
+        }
     }
-    pub fn call(&self, interpreter: &mut Interpreter, args: Vec<Types>) -> Types {
+    pub fn call(&self, interpreter: &mut Interpreter, args: Vec<TypeValues>) -> TypeValues {
         let mut env = Environment::new(Some(Box::new(interpreter.env.clone())));
-        self.params
-            .iter()
-            .enumerate()
-            .for_each(|(i, param)| env.init_var(&param.0, &param.1, args[i].clone()));
+        self.params.iter().enumerate().for_each(|(i, (_, name))| {
+            env.init_var(name.unwrap_string(), args[i].clone()).unwrap()
+        });
 
         match interpreter.execute_block(&self.body, env) {
-            Ok(_) => Types::Void,
-            Err(return_val) => return_val.unwrap_or(Types::Void),
+            Ok(_) => TypeValues::Void,
+            Err(return_val) => return_val.unwrap_or(TypeValues::Void),
         }
     }
     pub fn arity(&self) -> usize {
@@ -32,81 +36,59 @@ impl Function {
 }
 
 #[derive(Clone, PartialEq)]
-pub struct Table {
-    vars: HashMap<String, Types>,
+pub struct Table<VarT> {
+    pub vars: HashMap<String, VarT>,
     pub funcs: HashMap<String, Function>,
 }
-impl Table {
-    fn new() -> Self {
+impl<VarT> Table<VarT> {
+    pub fn new() -> Self {
         Table {
-            vars: HashMap::new(),
-            funcs: HashMap::new(),
+            vars: HashMap::<String, VarT>::new(),
+            funcs: HashMap::<String, Function>::new(),
         }
     }
 }
 
 #[derive(Clone, PartialEq)]
-pub struct Environment {
-    pub current: Table,
-    pub enclosing: Option<Box<Environment>>,
+pub struct Environment<VarT> {
+    pub current: Table<VarT>,
+    pub enclosing: Option<Box<Environment<VarT>>>,
 }
-impl Environment {
-    pub fn new(enclosing: Option<Box<Environment>>) -> Self {
+impl<VarT: Clone> Environment<VarT> {
+    pub fn new(enclosing: Option<Box<Environment<VarT>>>) -> Self {
         Environment {
             current: Table::new(),
             enclosing,
         }
     }
-    pub fn declare_var(&mut self, var_name: &Token) {
-        let name = var_name.unwrap_string();
-        if self.current.vars.contains_key(&name) {
-            Error::new(
-                var_name,
-                &format!("Error: Redefinition of variable '{}'", name),
-            )
-            .print_exit();
-        }
-        self.current.vars.insert(name, Types::Int(-1));
+    pub fn declare_var(&mut self, type_decl: VarT, name: String) {
+        self.current.vars.insert(name, type_decl);
     }
-    pub fn get_var(&self, var_name: &Token) -> Types {
+    pub fn get_var(&self, var_name: &Token) -> Result<VarT, Error> {
         let name = var_name.unwrap_string();
         match self.current.vars.get(&name) {
-            Some(v) => v.clone(),
+            Some(v) => Ok(v.clone()),
             None => match &self.enclosing {
                 Some(env) => (**env).get_var(var_name),
-                None => Error::new(var_name, "undeclared variable").print_exit(),
+                None => Err(Error::new(var_name, "undeclared variable")),
             },
         }
     }
-    pub fn assign_var(&mut self, var_name: &Token, value: Types) -> Types {
+    pub fn assign_var(&mut self, var_name: &Token, value: VarT) -> Result<VarT, Error> {
         let name = var_name.unwrap_string();
         match self.current.vars.contains_key(&name) {
             true => {
                 self.current.vars.insert(name, value.clone());
-                value
+                Ok(value)
             }
             false => match &mut self.enclosing {
                 Some(env) => env.assign_var(var_name, value),
-                None => Error::new(var_name, "undeclared variable").print_exit(),
+                None => Err(Error::new(var_name, "undeclared variable")),
             },
         }
     }
-    pub fn init_var(&mut self, type_decl: &Token, var_name: &Token, value: Types) {
-        let name = var_name.unwrap_string();
-        if self.current.vars.contains_key(&name) {
-            Error::new(
-                var_name,
-                &format!("Error: Redefinition of variable '{}'", name),
-            )
-            .print_exit();
-        }
-        self.current.vars.insert(
-            name,
-            match type_decl.token {
-                TokenType::Int => Types::Int(value.unwrap_num()),
-                TokenType::Char => Types::Char(value.unwrap_num() as i8),
-                _ => unreachable!("Type-checker should catch this"),
-            },
-        );
+    pub fn init_var(&mut self, name: String, value: VarT) -> Result<(), Error> {
+        self.current.vars.insert(name, value);
+        Ok(())
     }
 }

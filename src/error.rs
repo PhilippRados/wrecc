@@ -1,7 +1,7 @@
 use crate::scanner::Scanner;
 use crate::token::Token;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Error {
     pub line_index: i32,
     pub line_string: String,

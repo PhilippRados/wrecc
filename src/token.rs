@@ -1,6 +1,7 @@
+use crate::types::Types;
 use std::fmt::Display;
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum TokenKind {
     // Single-character tokens.
     LeftParen,
@@ -234,6 +235,19 @@ impl Token {
         match &self.token {
             TokenType::CharLit(c) => *c,
             _ => panic!("cant unwrap char on {} token", self.token),
+        }
+    }
+    pub fn is_type(&self) -> bool {
+        Types::into_vec().contains(&TokenKind::from(&self.token))
+    }
+    pub fn into_type(&self) -> Types {
+        assert!(self.is_type());
+
+        match self.token {
+            TokenType::Int => Types::Int,
+            TokenType::Char => Types::Char,
+            TokenType::Void => Types::Void,
+            _ => unreachable!("only types are checked"),
         }
     }
 }

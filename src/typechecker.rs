@@ -6,35 +6,18 @@ use crate::parser::Expr;
 use crate::token::Token;
 use crate::types::Types;
 
-// macro_rules! err_return {
-//     ($e:expr) => {
-//         if let Return::Err(e) = $e {
-//             return Return::Err(e);
-//         } else {
-//             $e
-//         }
-//     };
-// }
-
 #[derive(PartialEq)]
 enum Scope {
     Global,
     Block,
     Function(Types), // function return type
 }
-
-// #[derive(PartialEq)]
-// pub enum Return {
-//     NoCall,       // no return in block
-//     Empty,        // return;
-//     Value(Types), // return <val>;
-//     Err(Error),   // error occured
-// }
 pub struct TypeChecker {
     errors: Vec<Error>,
     scope: Vec<Scope>,
     env: Environment<Types>,
     global_env: Environment<Types>,
+    returns_all_paths: bool,
 }
 impl TypeChecker {
     pub fn new() -> Self {
@@ -43,6 +26,7 @@ impl TypeChecker {
             env: Environment::new(None),
             global_env: Environment::new(None),
             scope: vec![Scope::Global],
+            returns_all_paths: false,
         }
     }
     pub fn check(&mut self, statements: &Vec<Stmt>) -> Result<(), Vec<Error>> {
@@ -89,6 +73,7 @@ impl TypeChecker {
     fn while_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), Error> {
         self.expr_type(cond)?;
         self.visit(body)?;
+        self.returns_all_paths = false;
         Ok(())
     }
     fn declare_var(&mut self, type_decl: &Types, var_name: &Token) -> Result<(), Error> {
@@ -111,10 +96,7 @@ impl TypeChecker {
     }
     fn init_var(&mut self, type_decl: &Types, var_name: &Token, expr: &Expr) -> Result<(), Error> {
         let name = var_name.unwrap_string();
-        let value = match self.expr_type(expr) {
-            Ok(v) => v,
-            Err(e) => return Err(e),
-        };
+        let value = self.expr_type(expr)?;
 
         if self.env.current.vars.contains_key(&name) {
             return Err(Error::new(
@@ -147,10 +129,7 @@ impl TypeChecker {
         then_branch: &Stmt,
         else_branch: &Option<Stmt>,
     ) -> Result<(), Error> {
-        let cond = match self.expr_type(cond) {
-            Ok(t) => t,
-            Err(e) => return Err(e),
-        };
+        let cond = self.expr_type(cond)?;
         if cond == Types::Void {
             return Err(Error::new(
                 keyword,
@@ -158,16 +137,21 @@ impl TypeChecker {
             ));
         }
         self.visit(then_branch)?;
+        let then_return = self.returns_all_paths;
+        self.returns_all_paths = false;
+
         if let Some(else_branch) = else_branch {
             self.visit(else_branch)?;
+            let else_return = self.returns_all_paths;
+
+            if !then_return || !else_return {
+                self.returns_all_paths = false;
+            }
         }
         Ok(())
     }
     fn print_statement(&mut self, token: &Token, expr: &Expr) -> Result<(), Error> {
-        let t = match self.expr_type(expr) {
-            Ok(v) => v,
-            Err(e) => return Err(e),
-        };
+        let t = self.expr_type(expr)?;
         if t == Types::Void {
             Err(Error::new(token, "can't print 'void' expression"))
         } else {
@@ -200,14 +184,20 @@ impl TypeChecker {
         }
 
         self.block(&body, env, Some(return_type))?;
-        Ok(())
+
+        if return_type != Types::Void && !self.returns_all_paths {
+            Err(Error::new(
+                name,
+                "non-void function doesnt return in all code paths",
+            ))
+        } else {
+            Ok(())
+        }
     }
     fn return_statement(&mut self, keyword: &Token, expr: &Option<Expr>) -> Result<(), Error> {
+        self.returns_all_paths = true;
         if let Some(expr) = expr {
-            let type_decl = match self.expr_type(expr) {
-                Ok(t) => t,
-                Err(e) => return Err(e),
-            };
+            let type_decl = self.expr_type(expr)?;
             self.check_return(keyword, type_decl)
         } else {
             self.check_return(keyword, Types::Void)
@@ -320,6 +310,7 @@ impl TypeChecker {
             ));
         }
 
+        // TODO: isnt quite correct bc char + char should be int => integer promotion
         Ok(if left > right { left } else { right }) // implicit type conversion
     }
     fn evaluate_unary(&mut self, right: &Box<Expr>) -> Result<Types, Error> {

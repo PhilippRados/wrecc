@@ -27,7 +27,7 @@ impl TypeValues {
 pub enum Types {
     Void = 0, // type-promotion order
     Char = 1,
-    Int = 2,
+    Int = 4,
 }
 impl From<&TypeValues> for Types {
     fn from(token: &TypeValues) -> Self {

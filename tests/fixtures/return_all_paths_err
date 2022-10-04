@@ -1,8 +1,17 @@
-char some(int a){
-  if (1 > 2){
-    return 2;
-  }else {
-    a = 2;
+int some(char a){
+  if (2 > 1) {
+    if (2){
+      if (1){
+        return 1;
+      } else {
+        1 + 1; // doesnt return;
+      }
+    } else {
+      return 0;
+    }
+  } else {
+    return 1;
   }
 }
-some(1);
+
+print some(1);

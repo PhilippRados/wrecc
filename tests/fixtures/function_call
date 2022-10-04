@@ -1,7 +1,7 @@
 void is_bigger(int input) {
     print input;
 }
-int some_func(int test) {
+void some_func(int test) {
     int thresh = 5;
     if (test > thresh){
       is_bigger(test);

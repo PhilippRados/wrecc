@@ -1,1 +1,4 @@
-Error: Have to return in all code-paths
+Error: non-void function doesnt return in all code paths
+|
+1 int some(char a){
+|     ^

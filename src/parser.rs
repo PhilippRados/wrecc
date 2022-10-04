@@ -96,7 +96,7 @@ impl Parser {
         self.statement()
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
-        if let Some(_) = self.matches(vec![TokenKind::For]) {
+        if self.matches(vec![TokenKind::For]).is_some() {
             return self.for_statement();
         }
         if let Some(t) = self.matches(vec![TokenKind::Return]) {
@@ -108,10 +108,10 @@ impl Parser {
         if let Some(t) = self.matches(vec![TokenKind::Print]) {
             return self.print_statement(t);
         }
-        if let Some(_) = self.matches(vec![TokenKind::While]) {
+        if self.matches(vec![TokenKind::While]).is_some() {
             return self.while_statement();
         }
-        if let Some(_) = self.matches(vec![TokenKind::LeftBrace]) {
+        if self.matches(vec![TokenKind::LeftBrace]).is_some() {
             return Ok(Stmt::Block(self.block()?));
         }
         self.expression_statement()
@@ -221,12 +221,12 @@ impl Parser {
             "Expect identifier following type-specifier",
         )?;
 
-        if let Some(_) = self.matches(vec![TokenKind::Equal]) {
+        if self.matches(vec![TokenKind::Equal]).is_some() {
             // variable defintion
             let value = self.expression()?;
             self.consume(TokenKind::Semicolon, "Expect ';' after expression")?;
             Ok(Stmt::InitVar(type_decl, name, value))
-        } else if let Some(_) = self.matches(vec![TokenKind::LeftParen]) {
+        } else if self.matches(vec![TokenKind::LeftParen]).is_some() {
             // function defintion
             self.function(type_decl, name)
         } else {
@@ -275,7 +275,7 @@ impl Parser {
     fn var_assignment(&mut self) -> Result<Expr, Error> {
         let expr = self.or()?;
 
-        if let Some(_) = self.matches(vec![TokenKind::Equal]) {
+        if self.matches(vec![TokenKind::Equal]).is_some() {
             let value = self.expression()?;
             match expr {
                 Expr::Ident(name) => {
@@ -427,7 +427,7 @@ impl Parser {
             return Ok(Expr::Ident(s));
         }
 
-        if let Some(_) = self.matches(vec![TokenKind::LeftParen]) {
+        if self.matches(vec![TokenKind::LeftParen]).is_some() {
             let expr = self.expression()?;
             self.consume(TokenKind::RightParen, "missing closing ')'")?;
             return Ok(Expr::Grouping {
@@ -435,39 +435,33 @@ impl Parser {
             });
         }
         match self.tokens.peek() {
-            Some(t) => {
-                return Err(Error::new(
-                    t,
-                    &format!("Expected expression found: {}", t.token),
-                ));
-            }
-            None => {
-                return Err(Error {
-                    line_index: -1,
-                    line_string: "".to_string(),
-                    column: -1,
-                    msg: "Expected expression found end of file".to_string(),
-                })
-            }
-        };
+            Some(t) => Err(Error::new(
+                t,
+                &format!("Expected expression found: {}", t.token),
+            )),
+            None => Err(Error {
+                line_index: -1,
+                line_string: "".to_string(),
+                column: -1,
+                msg: "Expected expression found end of file".to_string(),
+            }),
+        }
     }
     fn consume(&mut self, token: TokenKind, msg: &str) -> Result<Token, Error> {
         match self.tokens.next() {
             Some(v) => {
                 if TokenKind::from(&v.token) != token {
-                    return Err(Error::new(&v, msg));
+                    Err(Error::new(&v, msg))
                 } else {
-                    return Ok(v);
+                    Ok(v)
                 }
             }
-            None => {
-                return Err(Error {
-                    line_index: -1,
-                    line_string: "".to_string(),
-                    column: -1,
-                    msg: msg.to_string(),
-                })
-            }
+            None => Err(Error {
+                line_index: -1,
+                line_string: "".to_string(),
+                column: -1,
+                msg: msg.to_string(),
+            }),
         }
     }
     fn check(&mut self, expected: TokenKind) -> bool {

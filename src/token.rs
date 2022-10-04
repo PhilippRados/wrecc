@@ -240,7 +240,7 @@ impl Token {
     pub fn is_type(&self) -> bool {
         Types::into_vec().contains(&TokenKind::from(&self.token))
     }
-    pub fn into_type(&self) -> Types {
+    pub fn into_type(self) -> Types {
         assert!(self.is_type());
 
         match self.token {

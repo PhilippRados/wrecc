@@ -23,10 +23,11 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let file = match args.len() {
         2 => &args[1],
-        _ => sys_error("usage: rucc <file>", 2),
+        _ => sys_error("usage: rucc <file>", 22),
     };
 
-    let source = fs::read_to_string(file).expect(&format!("couldn't find file: {}", file));
+    let source = fs::read_to_string(file)
+        .unwrap_or_else(|_| sys_error(&format!("couldn't find file: '{}'", file), 2));
 
     // Scan input
     let tokens = match Scanner::new(&source).scan_token() {

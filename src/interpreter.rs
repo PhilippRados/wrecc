@@ -108,21 +108,18 @@ impl Interpreter {
         }
     }
     fn return_statement(&mut self, value: &Option<Expr>) -> Option<TypeValues> {
-        match value {
-            Some(v) => Some(self.execute(v)),
-            None => None,
-        }
+        value.as_ref().map(|v| self.execute(v))
     }
     fn function_definition(
         &mut self,
         return_type: &Types,
         name: &Token,
-        params: &Vec<(Types, Token)>,
-        body: &Vec<Stmt>,
+        params: &[(Types, Token)],
+        body: &[Stmt],
     ) {
         self.global.current.funcs.insert(
             name.unwrap_string(),
-            Function::new(return_type.clone(), params.clone(), body.clone()),
+            Function::new(*return_type, params.to_owned(), body.to_owned()),
         );
     }
 
@@ -147,8 +144,8 @@ impl Interpreter {
             }
             Expr::Unary { token, right } => TypeValues::Int(self.evaluate_unary(token, right)),
             Expr::Grouping { expr } => self.evaluate_grouping(expr),
-            Expr::Number(v) => return TypeValues::Int(*v),
-            Expr::CharLit(c) => return TypeValues::Char(*c),
+            Expr::Number(v) => TypeValues::Int(*v),
+            Expr::CharLit(c) => TypeValues::Char(*c),
             Expr::Ident(v) => self.env.get_var(v).expect("type-checker should catch this"),
             Expr::Assign { name, expr } => {
                 let value = self.execute(expr);
@@ -183,12 +180,7 @@ impl Interpreter {
             .clone()
             .call(self, arg_list)
     }
-    fn evaluate_logical(
-        &mut self,
-        left: &Box<Expr>,
-        token: &Token,
-        right: &Box<Expr>,
-    ) -> TypeValues {
+    fn evaluate_logical(&mut self, left: &Expr, token: &Token, right: &Expr) -> TypeValues {
         let left = self.execute(left);
 
         match token.token {
@@ -206,7 +198,7 @@ impl Interpreter {
         }
         self.execute(right)
     }
-    fn evaluate_binary(&mut self, left: &Box<Expr>, token: &Token, right: &Box<Expr>) -> i32 {
+    fn evaluate_binary(&mut self, left: &Expr, token: &Token, right: &Expr) -> i32 {
         let left = self.execute(left).unwrap_num();
         let right = self.execute(right).unwrap_num();
 
@@ -261,7 +253,7 @@ impl Interpreter {
             _ => Error::new(token, "invalid binary operator").print_exit(),
         }
     }
-    fn evaluate_unary(&mut self, token: &Token, right: &Box<Expr>) -> i32 {
+    fn evaluate_unary(&mut self, token: &Token, right: &Expr) -> i32 {
         let right = self.execute(right).unwrap_num();
         match token.token {
             TokenType::Bang => {
@@ -275,7 +267,7 @@ impl Interpreter {
             _ => Error::new(token, "invalid unary operator").print_exit(),
         }
     }
-    fn evaluate_grouping(&mut self, expr: &Box<Expr>) -> TypeValues {
+    fn evaluate_grouping(&mut self, expr: &Expr) -> TypeValues {
         self.execute(expr)
     }
 }

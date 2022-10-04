@@ -18,8 +18,8 @@ impl<'a> Scanner<'a> {
         Scanner {
             source: source.chars().peekable(),
             raw_source: source
-                .split("\n")
-                .map(|s| s.to_string().clone())
+                .split('\n')
+                .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
             line: 1,
             column: 1,
@@ -107,10 +107,12 @@ impl<'a> Scanner<'a> {
                 '/' => {
                     if self.matches('/') {
                         // there has to be a better way to consume the iter without the first \n
-                        while let Some(_) =
-                            self.source.by_ref().next_if(|&c| c != '\n' && c != '\0')
-                        {
-                        }
+                        while self
+                            .source
+                            .by_ref()
+                            .next_if(|&c| c != '\n' && c != '\0')
+                            .is_some()
+                        {}
                     } else {
                         self.add_token(&mut tokens, TokenType::Slash)
                     }
@@ -143,7 +145,8 @@ impl<'a> Scanner<'a> {
                         // have to prepend already consumned char
                         num.push(c);
 
-                        while let Some(digit) = self.source.by_ref().next_if(|c| c.is_digit(10)) {
+                        while let Some(digit) = self.source.by_ref().next_if(|c| c.is_ascii_digit())
+                        {
                             num.push(digit);
                         }
                         self.add_token(&mut tokens, TokenType::Number(num.parse::<i32>().unwrap()));
@@ -223,7 +226,7 @@ impl<'a> Scanner<'a> {
             ));
         }
 
-        Ok(result.chars().nth(0).unwrap())
+        Ok(result.chars().next().unwrap())
     }
 
     fn string(&mut self) -> Result<String, Error> {

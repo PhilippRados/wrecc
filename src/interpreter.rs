@@ -49,7 +49,7 @@ impl Interpreter {
         then_branch: &Stmt,
         else_branch: &Option<Stmt>,
     ) -> Result<(), Option<TypeValues>> {
-        if self.execute(cond).unwrap_num() != 0 {
+        if self.execute(cond).unwrap_as_int() != 0 {
             self.visit(then_branch)?;
         } else if let Some(stmt) = else_branch {
             self.visit(stmt)?;
@@ -57,7 +57,7 @@ impl Interpreter {
         Ok(())
     }
     fn while_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), Option<TypeValues>> {
-        while self.execute(cond).unwrap_num() != 0 {
+        while self.execute(cond).unwrap_as_int() != 0 {
             self.visit(body)?;
         }
         Ok(())
@@ -81,8 +81,8 @@ impl Interpreter {
                     .init_var(
                         name.unwrap_string(),
                         match type_decl {
-                            Types::Int => TypeValues::Int(value.unwrap_num()),
-                            Types::Char => TypeValues::Char(value.unwrap_num() as i8),
+                            Types::Int => TypeValues::Int(value.unwrap_as_int()),
+                            Types::Char => TypeValues::Char(value.unwrap_as_int() as i8),
                             Types::Void => unreachable!("typechecker"),
                         },
                     )
@@ -185,12 +185,12 @@ impl Interpreter {
 
         match token.token {
             TokenType::PipePipe => {
-                if left.unwrap_num() != 0 {
+                if left.unwrap_as_int() != 0 {
                     return left;
                 }
             }
             TokenType::AmpAmp => {
-                if left.unwrap_num() == 0 {
+                if left.unwrap_as_int() == 0 {
                     return left;
                 }
             }
@@ -199,8 +199,8 @@ impl Interpreter {
         self.execute(right)
     }
     fn evaluate_binary(&mut self, left: &Expr, token: &Token, right: &Expr) -> i32 {
-        let left = self.execute(left).unwrap_num();
-        let right = self.execute(right).unwrap_num();
+        let left = self.execute(left).unwrap_as_int();
+        let right = self.execute(right).unwrap_as_int();
 
         match token.token {
             TokenType::Plus => left + right,
@@ -254,7 +254,7 @@ impl Interpreter {
         }
     }
     fn evaluate_unary(&mut self, token: &Token, right: &Expr) -> i32 {
-        let right = self.execute(right).unwrap_num();
+        let right = self.execute(right).unwrap_as_int();
         match token.token {
             TokenType::Bang => {
                 if right == 0 {

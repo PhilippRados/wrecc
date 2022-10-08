@@ -1,5 +1,6 @@
 use std::fs;
 
+mod codegen;
 mod environment;
 mod error;
 mod interpreter;
@@ -8,6 +9,7 @@ mod scanner;
 mod token;
 mod typechecker;
 mod types;
+use codegen::Compiler;
 use interpreter::*;
 use parser::Parser;
 use scanner::*;
@@ -55,5 +57,6 @@ fn main() {
     }
 
     // Interpret
-    Interpreter::new().interpret(&statements);
+    // Interpreter::new().interpret(&statements);
+    Compiler::new().compile(&statements);
 }

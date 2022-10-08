@@ -297,8 +297,8 @@ impl TypeChecker {
         token: &Token,
         right: &Expr,
     ) -> Result<Types, Error> {
-        let left = self.expr_type(left)?;
-        let right = self.expr_type(right)?;
+        let mut left = self.expr_type(left)?;
+        let mut right = self.expr_type(right)?;
 
         if left == Types::Void || right == Types::Void {
             return Err(Error::new(
@@ -310,8 +310,17 @@ impl TypeChecker {
             ));
         }
 
-        // TODO: isnt quite correct bc char + char should be int => integer promotion
+        left = self.maybe_int_promote(left);
+        right = self.maybe_int_promote(right);
+
         Ok(if left > right { left } else { right }) // implicit type conversion
+    }
+    fn maybe_int_promote(&self, type_decl: Types) -> Types {
+        if type_decl < Types::Int {
+            Types::Int
+        } else {
+            type_decl
+        }
     }
     fn evaluate_unary(&mut self, right: &Expr) -> Result<Types, Error> {
         self.expr_type(right)

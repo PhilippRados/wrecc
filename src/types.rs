@@ -8,7 +8,7 @@ pub enum TypeValues {
     Void,
 }
 impl TypeValues {
-    pub fn unwrap_num(&self) -> i32 {
+    pub fn unwrap_as_int(&self) -> i32 {
         match self {
             TypeValues::Char(c) => *c as i32,
             TypeValues::Int(n) => *n,

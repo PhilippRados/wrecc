@@ -107,6 +107,7 @@ impl Compiler {
     }
     fn cg_printint(&mut self, reg: RegisterIndex) -> Result<(), std::fmt::Error> {
         let reg = self.registers.get_mut(&reg);
+
         writeln!(self.output, "\tmovq {}, %rdi\n\tcall _printint\n", reg.name)?;
         reg.free();
         Ok(())
@@ -253,15 +254,6 @@ impl Compiler {
     //     self.env = *self.env.enclosing.as_ref().unwrap().clone(); // TODO: remove as_ref and clone
     //     result
     // }
-    // fn scratch_alloc(&mut self) -> RegisterIndex {
-    //     for (i, r) in self.registers.iter_mut().enumerate() {
-    //         if !r.in_use {
-    //             r.in_use = true;
-    //             return RegisterIndex::from(i);
-    //         }
-    //     }
-    //     panic!("no free regesiter");
-    // }
 
     fn cg_literal(&mut self, num: i32) -> Result<RegisterIndex, std::fmt::Error> {
         let reg = self.registers.scratch_alloc();
@@ -279,9 +271,9 @@ impl Compiler {
                self.evaluate_binary(left, token, right)
             }
             Expr::Number(v) => self.cg_literal(*v),
+            Expr::Grouping { expr } => self.execute(expr),
+            // Expr::Unary { token, right } => self.cg_unary(token, right),
             _ => panic!("Not implemented")
-            // Expr::Unary { token, right } => TypeValues::Int(self.evaluate_unary(token, right)),
-            // Expr::Grouping { expr } => self.evaluate_grouping(expr),
             // Expr::CharLit(c) => TypeValues::Char(*c),
             // Expr::Ident(v) => self.env.get_var(v).expect("type-checker should catch this"),
             // Expr::Assign { name, expr } => {
@@ -386,14 +378,35 @@ impl Compiler {
         let right_name = self.registers.get(&right).name;
 
         writeln!(self.output, "\tmovq {}, %rax", left_name)?;
-        // writeln!(self.output, "\tmovq {}, %rcx", right_name)?;
         writeln!(self.output, "\tcqo\n\tidivq {}", right_name)?; // rax / rcx => rax
         writeln!(self.output, "\tmovq %rax, {}", right_name)?; // move rax(int result) into right reg (remainder in rdx)
 
         self.registers.get_mut(&left).free();
         Ok(right)
     }
-    // returns register with result
+
+    fn cg_comparison(
+        &mut self,
+        operator: &str,
+        left: RegisterIndex,
+        right: RegisterIndex,
+    ) -> Result<RegisterIndex, std::fmt::Error> {
+        let left_name = self.registers.get(&left).name;
+        let right_name = self.registers.get(&right).name;
+
+        writeln!(self.output, "\tcmpq {}, {}", right_name, left_name)?;
+        // write ZF to %al based on operator and zero extend %right_register with value of %al
+        writeln!(
+            self.output,
+            "\t{operator} %al\n\tmovzbq %al, {}",
+            right_name
+        )?;
+
+        self.registers.get_mut(&left).free();
+        Ok(right)
+    }
+
+    // returns register-index that holds result
     fn evaluate_binary(
         &mut self,
         left: &Expr,
@@ -408,49 +421,12 @@ impl Compiler {
             TokenType::Minus => self.cg_sub(left_reg, right_reg),
             TokenType::Star => self.cg_mult(left_reg, right_reg),
             TokenType::Slash => self.cg_div(left_reg, right_reg),
-            // TokenType::EqualEqual => {
-            //     if left_reg == right_reg {
-            //         1
-            //     } else {
-            //         0
-            //     }
-            // }
-            // TokenType::BangEqual => {
-            //     if left_reg != right_reg {
-            //         1
-            //     } else {
-            //         0
-            //     }
-            // }
-            // TokenType::Greater => {
-            //     if left_reg > right_reg {
-            //         1
-            //     } else {
-            //         0
-            //     }
-            // }
-            // TokenType::GreaterEqual => {
-            //     if left_reg >= right_reg {
-            //         1
-            //     } else {
-            //         0
-            //     }
-            // }
-
-            // TokenType::Less => {
-            //     if left_reg < right_reg {
-            //         1
-            //     } else {
-            //         0
-            //     }
-            // }
-            // TokenType::LessEqual => {
-            //     if left_reg <= right_reg {
-            //         1
-            //     } else {
-            //         0
-            //     }
-            // }
+            TokenType::EqualEqual => self.cg_comparison("sete", left_reg, right_reg),
+            TokenType::BangEqual => self.cg_comparison("setne", left_reg, right_reg),
+            TokenType::Greater => self.cg_comparison("setg", left_reg, right_reg),
+            TokenType::GreaterEqual => self.cg_comparison("setge", left_reg, right_reg),
+            TokenType::Less => self.cg_comparison("setl", left_reg, right_reg),
+            TokenType::LessEqual => self.cg_comparison("setle", left_reg, right_reg),
             _ => Error::new(token, "invalid binary operator").print_exit(),
         }
     }

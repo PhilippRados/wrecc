@@ -267,13 +267,11 @@ impl Compiler {
     }
     pub fn execute(&mut self, ast: &Expr) -> Result<RegisterIndex, std::fmt::Error> {
         match ast {
-            Expr::Binary { left, token, right } => {
-               self.evaluate_binary(left, token, right)
-            }
+            Expr::Binary { left, token, right } => self.evaluate_binary(left, token, right),
             Expr::Number(v) => self.cg_literal(*v),
             Expr::Grouping { expr } => self.execute(expr),
-            // Expr::Unary { token, right } => self.cg_unary(token, right),
-            _ => panic!("Not implemented")
+            Expr::Unary { token, right } => self.cg_unary(token, right),
+            _ => unimplemented!(),
             // Expr::CharLit(c) => TypeValues::Char(*c),
             // Expr::Ident(v) => self.env.get_var(v).expect("type-checker should catch this"),
             // Expr::Assign { name, expr } => {
@@ -327,6 +325,20 @@ impl Compiler {
     //     }
     //     self.execute(right)
     // }
+    fn cg_unary(&mut self, token: &Token, right: &Expr) -> Result<RegisterIndex, std::fmt::Error> {
+        let reg_index = self.execute(right)?;
+        let reg_name = self.registers.get(&reg_index).name;
+        match token.token {
+            TokenType::Bang => {
+                writeln!(self.output, "\tcmpq $0, {}", reg_name)?; // compares reg-value with 0
+                writeln!(self.output, "\tsete %al\n\tmovzbq %al, {}", reg_name)?;
+                // sets %al to 1 if comparison true and to 0 when false and then copies %al to current reg
+            }
+            TokenType::Minus => writeln!(self.output, "\tnegq {}", reg_name)?,
+            _ => Error::new(token, "invalid unary operator").print_exit(),
+        }
+        Ok(reg_index)
+    }
 
     fn cg_add(
         &mut self,
@@ -430,21 +442,4 @@ impl Compiler {
             _ => Error::new(token, "invalid binary operator").print_exit(),
         }
     }
-    // fn evaluate_unary(&mut self, token: &Token, right: &Expr) -> i32 {
-    //     let right = self.execute(right).unwrap_as_int();
-    //     match token.token {
-    //         TokenType::Bang => {
-    //             if right == 0 {
-    //                 1
-    //             } else {
-    //                 0
-    //             }
-    //         }
-    //         TokenType::Minus => -right,
-    //         _ => Error::new(token, "invalid unary operator").print_exit(),
-    //     }
-    // }
-    // fn evaluate_grouping(&mut self, expr: &Expr) -> TypeValues {
-    //     self.execute(expr)
-    // }
 }

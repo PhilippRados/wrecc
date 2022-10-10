@@ -1,3 +1,4 @@
+use crate::environment::Environment;
 // use crate::environment::*;
 use crate::error::Error;
 use crate::interpreter::Stmt;
@@ -5,11 +6,12 @@ use crate::parser::Expr;
 use crate::token::Token;
 use crate::token::TokenType;
 // use crate::types::TypeValues;
-// use crate::types::Types;
+use crate::types::Types;
 use std::fmt::Write;
 use std::fs::File;
 use std::io::Write as _;
 
+#[derive(Clone)]
 enum RegisterIndex {
     R8,
     R9,
@@ -93,12 +95,14 @@ impl ScratchRegisters {
 pub struct Compiler {
     registers: ScratchRegisters,
     output: String,
+    env: Environment<RegisterIndex>,
 }
 impl Compiler {
     pub fn new() -> Self {
         Compiler {
             output: String::new(),
             registers: ScratchRegisters::new(),
+            env: Environment::new(None),
         }
     }
     fn print_statement(&mut self, expr: &Expr) -> Result<(), std::fmt::Error> {
@@ -167,12 +171,18 @@ impl Compiler {
          \tret"
     }
 
-    pub fn compile(&mut self, statements: &Vec<Stmt>) {
+    fn gen_stmts(&mut self, statements: &Vec<Stmt>) -> Result<(), std::fmt::Error> {
         for s in statements {
             if let Err(e) = self.visit(s) {
-                eprintln!("{:?}", e);
-                return;
+                return Err(e);
             }
+        }
+        Ok(())
+    }
+    pub fn compile(&mut self, statements: &Vec<Stmt>) {
+        if let Err(e) = self.gen_stmts(statements) {
+            eprintln!("{:?}", e);
+            return;
         }
         let mut output = File::create("/Users/philipprados/documents/coding/Rust/rucc/generated.s")
             .expect("create failed");
@@ -182,7 +192,7 @@ impl Compiler {
 
         output
             .write_all(self.output.as_bytes())
-            .expect("write faield");
+            .expect("write failed");
     }
     fn visit(&mut self, statement: &Stmt) -> Result<(), std::fmt::Error> {
         match statement {
@@ -191,30 +201,26 @@ impl Compiler {
                 self.execute(expr)?;
                 Ok(())
             }
+            Stmt::DeclareVar(_type_decl, name) => {
+                // will need type in future for %rsp offset
+                let reg = self.registers.scratch_alloc();
+                Ok(self.env.declare_var(reg, name.unwrap_string()))
+            }
+            Stmt::InitVar(_type_decl, name, expr) => {
+                let reg_value = self.execute(expr)?;
+                self.env.init_var(name.unwrap_string(), reg_value).unwrap();
+                Ok(())
+            }
+            Stmt::Block(statements) => {
+                self.block(
+                    statements,
+                    Environment::new(Some(Box::new(self.env.clone()))),
+                )?;
+                Ok(())
+            }
             _ => unimplemented!(),
         }
     }
-    //         Stmt::DeclareVar(type_decl, name) => Ok(self
-    //             .env
-    //             .declare_var(TypeValues::from(type_decl, -1), name.unwrap_string())),
-    //         Stmt::InitVar(type_decl, name, expr) => {
-    //             let value = self.execute(expr);
-    //             self.env
-    //                 .init_var(
-    //                     name.unwrap_string(),
-    //                     match type_decl {
-    //                         Types::Int => TypeValues::Int(value.unwrap_as_int()),
-    //                         Types::Char => TypeValues::Char(value.unwrap_as_int() as i8),
-    //                         Types::Void => unreachable!("typechecker"),
-    //                     },
-    //                 )
-    //                 .unwrap();
-    //             Ok(())
-    //         }
-    //         Stmt::Block(statements) => self.execute_block(
-    //             statements,
-    //             Environment::new(Some(Box::new(self.env.clone()))),
-    //         ),
     //         Stmt::If(_, cond, then_branch, else_branch) => {
     //             self.if_statement(cond, then_branch, else_branch)
     //         }
@@ -241,19 +247,19 @@ impl Compiler {
     //     );
     // }
 
-    // pub fn execute_block(
-    //     &mut self,
-    //     statements: &Vec<Stmt>,
-    //     env: Environment<TypeValues>,
-    // ) -> Result<(), Option<TypeValues>> {
-    //     self.env = env;
-    //     let result = self.interpret(statements);
+    pub fn block(
+        &mut self,
+        statements: &Vec<Stmt>,
+        env: Environment<RegisterIndex>,
+    ) -> Result<(), std::fmt::Error> {
+        self.env = env;
+        let result = self.gen_stmts(statements);
 
-    //     // this means assignment to vars inside block which were declared outside
-    //     // of the block are still apparent after block
-    //     self.env = *self.env.enclosing.as_ref().unwrap().clone(); // TODO: remove as_ref and clone
-    //     result
-    // }
+        // this means assignment to vars inside block which were declared outside
+        // of the block are still apparent after block
+        self.env = *self.env.enclosing.as_ref().unwrap().clone(); // TODO: remove as_ref and clone
+        result
+    }
 
     fn cg_literal(&mut self, num: i32) -> Result<RegisterIndex, std::fmt::Error> {
         let reg = self.registers.scratch_alloc();
@@ -271,16 +277,17 @@ impl Compiler {
             Expr::Number(v) => self.cg_literal(*v),
             Expr::Grouping { expr } => self.execute(expr),
             Expr::Unary { token, right } => self.cg_unary(token, right),
-            _ => unimplemented!(),
-            // Expr::CharLit(c) => TypeValues::Char(*c),
-            // Expr::Ident(v) => self.env.get_var(v).expect("type-checker should catch this"),
-            // Expr::Assign { name, expr } => {
-            //     let value = self.execute(expr);
-            //     self.env
-            //         .assign_var(name, value)
-            //         .expect("type-checker should catch this")
-            // }
             // Expr::Logical { left, token, right } => self.evaluate_logical(left, token, right),
+            Expr::Assign { name, expr } => {
+                let value_reg = self.execute(expr)?;
+                Ok(self
+                    .env
+                    .assign_var(name, value_reg)
+                    .expect("type-checker catches"))
+            }
+            Expr::Ident(v) => Ok(self.env.get_var(v).expect("type-checker catches")),
+            _ => unimplemented!("{:?}", ast),
+            // Expr::CharLit(c) => TypeValues::Char(*c),
             // Expr::Call {
             //     left_paren: _,
             //     callee,

@@ -1,9 +1,11 @@
+// use crate::environment::EnvFunctionality;
 use crate::environment::Environment;
 use crate::environment::Function;
 use crate::error::Error;
 use crate::interpreter::Stmt;
 use crate::parser::Expr;
 use crate::token::Token;
+use crate::token::TokenType;
 use crate::types::Types;
 
 #[derive(PartialEq)]
@@ -15,9 +17,10 @@ enum Scope {
 pub struct TypeChecker {
     errors: Vec<Error>,
     scope: Vec<Scope>,
-    env: Environment<Types>,
-    global_env: Environment<Types>,
+    env: Environment,
+    global_env: Environment,
     returns_all_paths: bool,
+    builtins: Vec<(&'static str, Function)>,
 }
 impl TypeChecker {
     pub fn new() -> Self {
@@ -27,9 +30,27 @@ impl TypeChecker {
             global_env: Environment::new(None),
             scope: vec![Scope::Global],
             returns_all_paths: false,
+            builtins: vec![(
+                "printint",
+                Function::new(
+                    Types::Void,
+                    vec![(
+                        Types::Char,
+                        Token::new(TokenType::Ident("".to_string()), -1, -1, "".to_string()),
+                    )],
+                    vec![],
+                ),
+            )],
         }
     }
     pub fn check(&mut self, statements: &Vec<Stmt>) -> Result<(), Vec<Error>> {
+        // initialze builtins so typechecker doesnt throw error when it doesnt find them in the program
+        for (name, f) in self.builtins.iter().by_ref() {
+            self.global_env
+                .current
+                .funcs
+                .insert(name.to_string(), f.clone());
+        }
         if let Err(e) = self.check_statements(statements) {
             self.errors.push(e);
             // synchronize
@@ -118,7 +139,7 @@ impl TypeChecker {
             ))
         } else {
             // currently only type-checks for void since int and char are interchangeable
-            self.env.init_var(name, *type_decl)?; // FIX:
+            self.env.init_var(name, *type_decl);
             Ok(())
         }
     }
@@ -180,7 +201,7 @@ impl TypeChecker {
         let mut env = Environment::new(Some(Box::new(self.env.clone())));
 
         for (type_decl, name) in params.iter() {
-            env.init_var(name.unwrap_string(), *type_decl)?
+            env.init_var(name.unwrap_string(), *type_decl)
         }
 
         self.block(&body, env, Some(return_type))?;
@@ -267,7 +288,7 @@ impl TypeChecker {
     fn block(
         &mut self,
         body: &Vec<Stmt>,
-        env: Environment<Types>,
+        env: Environment,
         return_type: Option<Types>,
     ) -> Result<(), Error> {
         self.env = env;

@@ -25,9 +25,9 @@ impl TypeValues {
 }
 #[derive(Copy, Clone, PartialEq, PartialOrd)]
 pub enum Types {
-    Void = 0, // type-promotion order
-    Char = 1,
-    Int = 4,
+    Void, // type-promotion order
+    Char,
+    Int,
 }
 impl From<&TypeValues> for Types {
     fn from(token: &TypeValues) -> Self {
@@ -41,6 +41,14 @@ impl From<&TypeValues> for Types {
 impl Types {
     pub fn into_vec() -> Vec<TokenKind> {
         vec![TokenKind::Char, TokenKind::Int, TokenKind::Void]
+    }
+    // returns type-size in bytes
+    pub fn size(&self) -> i32 {
+        match self {
+            Types::Void => 0,
+            Types::Char => 1,
+            Types::Int => 4,
+        }
     }
 }
 impl Display for Types {

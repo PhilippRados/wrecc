@@ -148,6 +148,8 @@ pub struct Compiler {
     global_env: Environment<StackRegister>,
     sp_index: usize,
     decl_size: usize,
+    function_name: Option<String>,
+    label_index: usize,
 }
 impl Compiler {
     pub fn new() -> Self {
@@ -161,7 +163,9 @@ impl Compiler {
             registers: ScratchRegisters::new(),
             sp_index: 0,
             decl_size: 0,
+            label_index: 0,
             env: CgEnv::new(),
+            function_name: None,
             global_env,
         }
     }
@@ -250,19 +254,73 @@ impl Compiler {
             Stmt::Function(return_type, name, params, body) => {
                 self.function_definition(return_type, name, params, body)
             }
-            // Stmt::Return(_, expr) => self.return_statement(expr), // jump to function postamble
+            Stmt::Return(_, expr) => self.return_statement(expr), // jump to function postamble
+            Stmt::If(_, cond, then_branch, else_branch) => {
+                self.if_statement(cond, then_branch, else_branch)
+            }
             _ => unimplemented!(),
         }
     }
-    //         Stmt::If(_, cond, then_branch, else_branch) => {
-    //             self.if_statement(cond, then_branch, else_branch)
-    //         }
     //         Stmt::While(cond, body) => self.while_statement(cond, body),
     //     }
     // }
-    // fn return_statement(&mut self, value: &Option<Expr>) -> Option<TypeValues> {
-    //     value.as_ref().map(|v| self.execute(v))
-    // }
+    fn create_label(&mut self) -> usize {
+        let result = self.label_index;
+        self.label_index += 1;
+        result
+    }
+    fn if_statement(
+        &mut self,
+        cond: &Expr,
+        then_branch: &Stmt,
+        else_branch: &Option<Stmt>,
+    ) -> Result<(), std::fmt::Error> {
+        let mut cond_reg = self.execute(cond)?;
+        let done_label = self.create_label();
+        let mut else_label = done_label;
+
+        writeln!(
+            self.output,
+            "\tcmpl    $0, {}",
+            cond_reg.name(&self.registers)
+        )?;
+        cond_reg.free(&mut self.registers);
+
+        if !else_branch.is_none() {
+            else_label = self.create_label();
+        }
+        writeln!(self.output, "\tje    L{}", else_label)?;
+        self.visit(then_branch)?;
+
+        if let Some(else_branch) = else_branch {
+            writeln!(self.output, "\tjmp    L{}", done_label)?;
+            writeln!(self.output, "L{}:", else_label)?;
+            self.visit(else_branch)?;
+        }
+        writeln!(self.output, "L{}:", done_label)?;
+        Ok(())
+    }
+    fn return_statement(&mut self, value: &Option<Expr>) -> Result<(), std::fmt::Error> {
+        let function_epilogue = format!(
+            "{}_epilogue",
+            self.function_name
+                .as_ref()
+                .expect("typechecker catches nested function-declarations")
+                .clone()
+        );
+        match value {
+            Some(expr) => {
+                let return_value = self.execute(expr)?;
+                writeln!(
+                    self.output,
+                    "\tmovl    {}, %eax\n\tjmp    {}",
+                    return_value.name(&self.registers),
+                    function_epilogue
+                )
+            }
+            None => writeln!(self.output, "\tjmp    {}", function_epilogue),
+        }
+    }
     fn increment_sp(&mut self) -> Result<(), std::fmt::Error> {
         if self.decl_size > self.sp_index {
             self.sp_index += 16;
@@ -272,8 +330,7 @@ impl Compiler {
     }
 
     // resets stack-pointer back to base-pointer
-    fn reset_sp(&mut self) -> Result<(), std::fmt::Error> {
-        // TODO: use cg_add in future when literals are in Registers
+    fn cg_reset_sp(&mut self) -> Result<(), std::fmt::Error> {
         writeln!(self.output, "\taddq    ${}, %rsp", self.sp_index)?;
         Ok(())
     }
@@ -308,9 +365,18 @@ impl Compiler {
     ) -> Result<(), std::fmt::Error> {
         self.global_env
             .declare_func(*return_type, name.unwrap_string());
+
+        self.function_name = Some(name.unwrap_string()); // save function name for return label jump
+
+        // generate function code
         self.cg_func_preamble(name.unwrap_string(), params)?;
         self.cg_stmts(body)?;
         self.cg_func_postamble(&name.unwrap_string())?;
+
+        self.sp_index = 0;
+        self.env.reset_bp_offset(); // reset bp offset for next function
+        self.function_name = None;
+
         Ok(())
     }
     fn cg_func_preamble(
@@ -329,14 +395,13 @@ impl Compiler {
         Ok(())
     }
     fn cg_func_postamble(&mut self, name: &str) -> Result<(), std::fmt::Error> {
-        self.reset_sp()?;
         writeln!(self.output, "{}_epilogue:", name)?;
+        self.cg_reset_sp()?;
         match name {
             "main" => writeln!(self.output, "\tmovl    $0, %eax")?,
             _ => writeln!(self.output, "\tnop")?,
         }
         writeln!(self.output, "\tpopq    %rbp\n\tret")?;
-        self.env.reset_bp_offset(); // reset bp offset for next function
         Ok(())
     }
 

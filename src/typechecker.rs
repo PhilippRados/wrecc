@@ -56,13 +56,12 @@ impl TypeChecker {
             self.errors.push(e);
             // synchronize
         }
-        if !self.found_main {
-            return Err(vec![Error::missing_entrypoint()]);
-        }
-        if self.errors.is_empty() {
-            Ok(())
-        } else {
+        if !self.errors.is_empty() {
             Err(self.errors.clone())
+        } else if !self.found_main {
+            Err(vec![Error::missing_entrypoint()])
+        } else {
+            Ok(())
         }
     }
     fn check_statements(&mut self, statements: &Vec<Stmt>) -> Result<(), Error> {
@@ -195,7 +194,8 @@ impl TypeChecker {
                 name,
                 "can only define functions in global scope",
             ));
-        } else if name.unwrap_string() == "main" {
+        }
+        if name.unwrap_string() == "main" {
             self.found_main = true;
         }
 
@@ -263,6 +263,11 @@ impl TypeChecker {
             _ => return Err(Error::new(left_paren, "function-name has to be identifier")),
         };
 
+        let arg_types = args
+            .iter()
+            .map(|expr| self.expr_type(expr))
+            .collect::<Result<Vec<Types>, Error>>()?;
+
         // TODO: use get_func instead
         match self
             .global_env
@@ -272,7 +277,7 @@ impl TypeChecker {
         {
             Some(function) => {
                 if function.arity() == args.len() {
-                    // TODO: compare param and arg types
+                    Self::args_and_params_match(left_paren, &function.params, arg_types)?;
                     Ok(function.return_type)
                 } else {
                     Err(Error::new(
@@ -291,6 +296,25 @@ impl TypeChecker {
                 &format!("no function {} exists", func_name.unwrap_string()),
             )),
         }
+    }
+    fn args_and_params_match(
+        left_paren: &Token,
+        params: &Vec<(Types, Token)>,
+        args: Vec<Types>,
+    ) -> Result<(), Error> {
+        // TODO: actually compare args not only testing for void
+        for (i, arg_type) in args.iter().enumerate() {
+            if *arg_type == Types::Void {
+                return Err(Error::new(
+                    left_paren,
+                    &format!(
+                        "expected argument to be of type {} found {}",
+                        params[i].0, arg_type
+                    ),
+                ));
+            }
+        }
+        Ok(())
     }
     fn block(
         &mut self,

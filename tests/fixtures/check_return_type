@@ -4,4 +4,7 @@ int some() {
   }
   return 2;
 }
-print some();
+
+void main(){
+  print some();
+}

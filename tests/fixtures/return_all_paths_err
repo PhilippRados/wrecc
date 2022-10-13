@@ -13,5 +13,6 @@ int some(char a){
     return 1;
   }
 }
-
-print some(1);
+void main(){
+  printint(some(1));
+}

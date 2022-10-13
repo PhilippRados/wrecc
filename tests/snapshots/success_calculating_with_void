@@ -1,4 +1,4 @@
 Error: invalid binary expression: 'void' '+' 'int'
 |
-2 int some = other() + 1;
-|                    ^
+4   int some = other() + 1;
+|                      ^

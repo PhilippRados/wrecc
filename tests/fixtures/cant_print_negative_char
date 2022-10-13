@@ -1,4 +1,6 @@
-int big = 100;
-char p = 'c' + big;
+void main{
+  int big = 100;
+  char p = 'c' + big;
 
-print p;
+  printint(p);
+}

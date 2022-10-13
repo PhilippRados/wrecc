@@ -2,7 +2,7 @@ use crate::codegen::StackRegister;
 use crate::error::Error;
 use crate::interpreter::*;
 use crate::token::Token;
-// use crate::types::TypeValues;
+use crate::token::TokenType;
 use crate::types::Types;
 use std::collections::HashMap;
 
@@ -20,17 +20,6 @@ impl Function {
             body,
         }
     }
-    // pub fn call(&self, interpreter: &mut Interpreter, args: Vec<TypeValues>) -> TypeValues {
-    //     let mut env = Environment::new(Some(Box::new(interpreter.env.clone())));
-    //     self.params.iter().enumerate().for_each(|(i, (_, name))| {
-    //         env.init_var(name.unwrap_string(), args[i].clone()).unwrap()
-    //     });
-
-    //     match interpreter.execute_block(&self.body, env) {
-    //         Ok(_) => TypeValues::Void,
-    //         Err(return_val) => return_val.unwrap_or(TypeValues::Void),
-    //     }
-    // }
     pub fn arity(&self) -> usize {
         self.params.len()
     }
@@ -51,22 +40,28 @@ impl<VarT> Table<VarT> {
 }
 
 #[derive(Clone, PartialEq)]
-pub struct Environment {
-    pub current: Table<Types>,
-    pub enclosing: Option<Box<Environment>>,
+pub struct Environment<T> {
+    pub current: Table<T>,
+    pub enclosing: Option<Box<Environment<T>>>,
 }
-impl Environment {
-    pub fn new(enclosing: Option<Box<Environment>>) -> Self {
+impl<T: Clone> Environment<T> {
+    pub fn new(enclosing: Option<Box<Environment<T>>>) -> Self {
         Environment {
             current: Table::new(),
             enclosing,
         }
     }
-    pub fn declare_var(&mut self, type_decl: Types, name: String) {
+    pub fn declare_var(&mut self, type_decl: T, name: String) {
         self.current.vars.insert(name, type_decl);
     }
 
-    pub fn get_var(&self, var_name: &Token) -> Result<Types, Error> {
+    pub fn declare_func(&mut self, type_decl: Types, name: String) {
+        let f = Function::new(type_decl, vec![], vec![]);
+
+        self.current.funcs.insert(name, f);
+    }
+
+    pub fn get_var(&self, var_name: &Token) -> Result<T, Error> {
         let name = var_name.unwrap_string();
         match self.current.vars.get(&name) {
             Some(v) => Ok(v.clone()),
@@ -76,7 +71,7 @@ impl Environment {
             },
         }
     }
-    pub fn assign_var(&mut self, var_name: &Token, value: Types) -> Result<Types, Error> {
+    pub fn assign_var(&mut self, var_name: &Token, value: T) -> Result<T, Error> {
         let name = var_name.unwrap_string();
         match self.current.vars.contains_key(&name) {
             true => {
@@ -89,63 +84,40 @@ impl Environment {
             },
         }
     }
-    pub fn init_var(&mut self, name: String, value: Types) {
+    pub fn init_var(&mut self, name: String, value: T) {
         self.current.vars.insert(name, value);
     }
 }
 
 #[derive(Clone, PartialEq)]
 pub struct CgEnv {
-    pub current: HashMap<String, StackRegister>,
-    pub enclosing: Option<Box<CgEnv>>,
-    current_bp_offset: i32,
+    pub env: Environment<StackRegister>,
+    current_bp_offset: usize,
 }
 impl CgEnv {
-    pub fn new(enclosing: Option<Box<CgEnv>>) -> Self {
+    pub fn new() -> Self {
         CgEnv {
-            current: HashMap::new(),
+            env: Environment::new(None),
             current_bp_offset: 0,
-            enclosing,
         }
     }
     pub fn reset_bp_offset(&mut self) {
         self.current_bp_offset = 0;
     }
     pub fn declare_var(&mut self, type_decl: &Types, name: String) {
-        self.current_bp_offset -= type_decl.size();
-        // let reg = format!("{}(%rbp)", self.bp_offset);
-        self.current
+        self.current_bp_offset += type_decl.size();
+        self.env
+            .current
+            .vars
             .insert(name, StackRegister::new(self.current_bp_offset));
     }
 
-    pub fn get_var(&self, name: String) -> StackRegister {
-        match self.current.get(&name) {
-            Some(v) => v.clone(),
-            None => match &self.enclosing {
-                Some(env) => (**env).get_var(name),
-                None => unreachable!("typechecker should catch"),
-            },
-        }
+    pub fn get_func(&self, name: String, global_env: &Environment<StackRegister>) -> Types {
+        global_env.current.funcs.get(&name).unwrap().return_type
     }
-    // pub fn assign_var(&mut self, name: String, value: &str) -> i32 {
-    //     match self.current.contains_key(&name) {
-    //         true => {
-    //             // self.current.insert(name, value);
-    //             value
-    //         }
-    //         false => match &mut self.enclosing {
-    //             Some(env) => env.assign_var(name, value),
-    //             None => unreachable!("typechecker should catch"),
-    //         },
-    //     }
-    // }
-    pub fn init_var(&mut self, type_decl: &Types, name: String) -> StackRegister {
-        self.current_bp_offset -= type_decl.size();
-        let stack_reg = StackRegister::new(self.current_bp_offset);
-        // let reg_dest = format!("{}(%rbp)", self.bp_offset);
-        self.current.insert(name, stack_reg.clone());
-        stack_reg
 
-        // format!("\tmovq    {}, {}", reg_value, reg_dest)
+    pub fn get_var(&self, name: String) -> StackRegister {
+        let t = Token::new(TokenType::Ident(name), -1, -1, "".to_string());
+        self.env.get_var(&t).unwrap()
     }
 }

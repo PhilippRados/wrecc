@@ -1,17 +1,19 @@
-if (0)
-  if (1)
-    print 1;
-  else
-    print 0;
-
-if (1)
+void main(){
   if (0)
-    print 1;
-  else
-    print 0;
+    if (1)
+      printint(1);
+    else
+      printint(0);
 
-if (1)
   if (1)
-    print 1;
-  else
-    print 0;
+    if (0)
+      printint(1);
+    else
+      printint(0);
+
+  if (1)
+    if (1)
+      printint(1);
+    else
+      printint(0);
+}

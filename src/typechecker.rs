@@ -1,4 +1,3 @@
-// use crate::environment::EnvFunctionality;
 use crate::environment::Environment;
 use crate::environment::Function;
 use crate::error::Error;
@@ -17,8 +16,8 @@ enum Scope {
 pub struct TypeChecker {
     errors: Vec<Error>,
     scope: Vec<Scope>,
-    env: Environment,
-    global_env: Environment,
+    env: Environment<Types>,
+    global_env: Environment<Types>,
     returns_all_paths: bool,
     builtins: Vec<(&'static str, Function)>,
 }
@@ -265,7 +264,7 @@ impl TypeChecker {
         {
             Some(function) => {
                 if function.arity() == args.len() {
-                    // compare param and arg types
+                    // TODO: compare param and arg types
                     Ok(function.return_type)
                 } else {
                     Err(Error::new(
@@ -288,7 +287,7 @@ impl TypeChecker {
     fn block(
         &mut self,
         body: &Vec<Stmt>,
-        env: Environment,
+        env: Environment<Types>,
         return_type: Option<Types>,
     ) -> Result<(), Error> {
         self.env = env;

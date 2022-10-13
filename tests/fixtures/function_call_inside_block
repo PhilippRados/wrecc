@@ -1,6 +1,8 @@
-{
-  int some() {
-    print 1;
+void main(){
+  {
+    int some() {
+      printint(1);
+    }
+    some();
   }
-some();
 }

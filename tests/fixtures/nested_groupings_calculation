@@ -1,3 +1,5 @@
-print (3 / (6-7) * 2) + 1;
+void main(){
+  printint((3 / (6-7) * 2) + 1);
 
-print 7 / 3;
+  printint(7 / 3);
+}

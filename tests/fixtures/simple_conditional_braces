@@ -1,8 +1,10 @@
-if (2 > 2) {
-    print 1;
-} else {
-    print 0;
-    if (3 == 3){
-      print 3;
-    }
+void main(){
+  if (2 > 2) {
+      printint(1);
+  } else {
+      printint(0);
+      if (3 == 3){
+        printint(3);
+      }
+  }
 }

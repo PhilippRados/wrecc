@@ -1,7 +1,9 @@
-int i = 0;
-while (i < 10) {
-  if (i == 2 || i == 5) {
-    print i;
+void main(){
+  int i = 0;
+  while (i < 10) {
+    if (i == 2 || i == 5) {
+      printint(i);
+    }
+    i = i + 1;
   }
-  i = i + 1;
 }

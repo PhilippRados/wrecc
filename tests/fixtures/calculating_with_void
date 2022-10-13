@@ -1,2 +1,5 @@
 void other(){}
-int some = other() + 1;
+
+void main(){
+  int some = other() + 1;
+}

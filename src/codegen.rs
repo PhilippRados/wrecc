@@ -1,4 +1,6 @@
 use crate::environment::CgEnv;
+use crate::environment::Environment;
+use crate::environment::Function;
 use crate::error::Error;
 use crate::interpreter::Stmt;
 use crate::parser::Expr;
@@ -9,17 +11,16 @@ use std::fmt::Write;
 use std::fs::File;
 use std::io::Write as _;
 
-// argument registers from 1st to last
-const ARG_REGS: &[&str] = &["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
-
 enum Register {
     Scratch(ScratchIndex),
     Stack(StackRegister),
     Arg(usize),
+    Void,
 }
 impl Register {
     fn free(&mut self, scratch_regs: &mut ScratchRegisters) {
         match self {
+            Register::Void => unimplemented!(),
             Register::Stack(_) => (),
             Register::Arg(_) => (),
             Register::Scratch(index) => scratch_regs.get_mut(index).free(),
@@ -27,22 +28,35 @@ impl Register {
     }
     fn name(&self, scratch_regs: &ScratchRegisters) -> String {
         match self {
+            Register::Void => unimplemented!(),
             Register::Stack(reg) => reg.name(),
             Register::Scratch(index) => scratch_regs.get(index).name.to_string(),
-            Register::Arg(index) => ARG_REGS[*index].to_string(),
+            Register::Arg(index) => self.get_arg_reg(*index).to_string(),
+        }
+    }
+    // argument registers from 1st to last
+    fn get_arg_reg(&self, index: usize) -> &str {
+        match index {
+            0 => "%edi",
+            1 => "%esi",
+            2 => "%edx",
+            3 => "%ecx",
+            4 => "%r8d",
+            5 => "%r9d",
+            _ => unreachable!(),
         }
     }
 }
 #[derive(PartialEq, Clone)]
 pub struct StackRegister {
-    bp_offset: i32,
+    bp_offset: usize,
 }
 impl StackRegister {
-    pub fn new(bp_offset: i32) -> Self {
+    pub fn new(bp_offset: usize) -> Self {
         StackRegister { bp_offset }
     }
     fn name(&self) -> String {
-        format!("{}(%rbp)", self.bp_offset)
+        format!("-{}(%rbp)", self.bp_offset)
     }
 }
 
@@ -109,19 +123,19 @@ impl ScratchRegisters {
             registers: [
                 ScratchRegister {
                     in_use: false,
-                    name: "%r8",
+                    name: "%r8d",
                 },
                 ScratchRegister {
                     in_use: false,
-                    name: "%r9",
+                    name: "%r9d",
                 },
                 ScratchRegister {
                     in_use: false,
-                    name: "%r10",
+                    name: "%r10d",
                 },
                 ScratchRegister {
                     in_use: false,
-                    name: "%r11",
+                    name: "%r11d",
                 },
             ],
         }
@@ -131,27 +145,25 @@ pub struct Compiler {
     registers: ScratchRegisters,
     output: String,
     env: CgEnv,
+    global_env: Environment<StackRegister>,
+    sp_index: usize,
+    decl_size: usize,
 }
 impl Compiler {
     pub fn new() -> Self {
+        let mut global_env = Environment::new(None);
+        global_env.current.funcs.insert(
+            "printint".to_string(),
+            Function::new(Types::Void, vec![], vec![]),
+        );
         Compiler {
             output: String::new(),
             registers: ScratchRegisters::new(),
-            env: CgEnv::new(None),
+            sp_index: 0,
+            decl_size: 0,
+            env: CgEnv::new(),
+            global_env,
         }
-    }
-    fn print_statement(&mut self, expr: &Expr) -> Result<(), std::fmt::Error> {
-        let reg = self.execute(expr)?;
-        self.cg_printint(reg)
-    }
-    fn cg_printint(&mut self, mut reg: Register) -> Result<(), std::fmt::Error> {
-        writeln!(
-            self.output,
-            "\tmovq {}, %rdi\n\tcall _printint\n",
-            reg.name(&mut self.registers)
-        )?;
-        reg.free(&mut self.registers);
-        Ok(())
     }
     // fn if_statement(
     //     &mut self,
@@ -184,11 +196,12 @@ impl Compiler {
           \tmovq    %rsp, %rbp\n\
         \n\
           \tsubq    $16, %rsp\n\
-          \tmovq    %rdi, -4(%rbp)\n\
-          \tmovq    -4(%rbp), %rax\n\
-          \tmovq    %rax, %rsi\n\
+          \tmovl    %edi, -4(%rbp)\n\
+          \tmovl    -4(%rbp), %eax\n\
+          \tmovl    %eax, %esi\n\
           \tleaq	lC0(%rip), %rax\n\
           \tmovq	%rax, %rdi\n\
+          \taddq    $16, %rsp\n\
         \n\
           \tmovl    $0, %eax\n\
           \tcall    _printf\n\
@@ -221,24 +234,23 @@ impl Compiler {
     }
     fn visit(&mut self, statement: &Stmt) -> Result<(), std::fmt::Error> {
         match statement {
-            Stmt::Print(_, expr) => self.print_statement(expr),
             Stmt::Expr(expr) => {
                 self.execute(expr)?;
                 Ok(())
             }
-            Stmt::DeclareVar(type_decl, name) => {
-                Ok(self.env.declare_var(type_decl, name.unwrap_string()))
-            }
+            Stmt::DeclareVar(type_decl, name) => self.declare_var(type_decl, name.unwrap_string()),
             Stmt::InitVar(type_decl, name, expr) => {
                 let value_reg = self.execute(expr)?;
                 self.init_var(type_decl, name.unwrap_string(), value_reg)
             }
-            Stmt::Block(statements) => {
-                self.block(statements, CgEnv::new(Some(Box::new(self.env.clone()))))
-            }
+            Stmt::Block(statements) => self.block(
+                statements,
+                Environment::new(Some(Box::new(self.env.env.clone()))),
+            ),
             Stmt::Function(return_type, name, params, body) => {
                 self.function_definition(return_type, name, params, body)
             }
+            // Stmt::Return(_, expr) => self.return_statement(expr), // jump to function postamble
             _ => unimplemented!(),
         }
     }
@@ -246,23 +258,43 @@ impl Compiler {
     //             self.if_statement(cond, then_branch, else_branch)
     //         }
     //         Stmt::While(cond, body) => self.while_statement(cond, body),
-    //         Stmt::Return(_, expr) => Err(self.return_statement(expr)),
     //     }
     // }
     // fn return_statement(&mut self, value: &Option<Expr>) -> Option<TypeValues> {
     //     value.as_ref().map(|v| self.execute(v))
     // }
+    fn increment_sp(&mut self) -> Result<(), std::fmt::Error> {
+        if self.decl_size > self.sp_index {
+            self.sp_index += 16;
+            writeln!(self.output, "\tsubq    $16, %rsp")?;
+        }
+        Ok(())
+    }
+
+    // resets stack-pointer back to base-pointer
+    fn reset_sp(&mut self) -> Result<(), std::fmt::Error> {
+        // TODO: use cg_add in future when literals are in Registers
+        writeln!(self.output, "\taddq    ${}, %rsp", self.sp_index)?;
+        Ok(())
+    }
+    fn declare_var(&mut self, type_decl: &Types, name: String) -> Result<(), std::fmt::Error> {
+        self.decl_size += type_decl.size();
+        self.increment_sp()?;
+        self.env.declare_var(type_decl, name);
+        Ok(())
+    }
     fn init_var(
         &mut self,
         type_decl: &Types,
-        var_name: String,
+        name: String,
         mut value_reg: Register,
     ) -> Result<(), std::fmt::Error> {
+        self.declare_var(type_decl, name.clone())?;
         writeln!(
             self.output,
-            "\tmovq    {}, {}",
+            "\tmovl    {}, {}",
             value_reg.name(&self.registers),
-            self.env.init_var(type_decl, var_name).name()
+            self.env.get_var(name).name() // since var-declaration set everything up we just need declared register
         )?;
         value_reg.free(&mut self.registers);
         Ok(())
@@ -274,10 +306,11 @@ impl Compiler {
         params: &[(Types, Token)],
         body: &Vec<Stmt>,
     ) -> Result<(), std::fmt::Error> {
+        self.global_env
+            .declare_func(*return_type, name.unwrap_string());
         self.cg_func_preamble(name.unwrap_string(), params)?;
         self.cg_stmts(body)?;
         self.cg_func_postamble(&name.unwrap_string())?;
-        self.env.reset_bp_offset(); // reset bp offset for next function
         Ok(())
     }
     fn cg_func_preamble(
@@ -288,7 +321,6 @@ impl Compiler {
         writeln!(self.output, "\n\t.text\n\t.globl _{}", name)?;
         writeln!(self.output, "_{}:", name)?; // generate function label
         writeln!(self.output, "\tpushq   %rbp\n\tmovq    %rsp, %rbp")?; // setup base pointer and stackpointer
-                                                                        // TODO: have to move stack pointer to declare local vars
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
@@ -297,21 +329,28 @@ impl Compiler {
         Ok(())
     }
     fn cg_func_postamble(&mut self, name: &str) -> Result<(), std::fmt::Error> {
+        self.reset_sp()?;
+        writeln!(self.output, "{}_epilogue:", name)?;
         match name {
             "main" => writeln!(self.output, "\tmovl    $0, %eax")?,
             _ => writeln!(self.output, "\tnop")?,
         }
         writeln!(self.output, "\tpopq    %rbp\n\tret")?;
+        self.env.reset_bp_offset(); // reset bp offset for next function
         Ok(())
     }
 
-    pub fn block(&mut self, statements: &Vec<Stmt>, env: CgEnv) -> Result<(), std::fmt::Error> {
-        self.env = env;
+    pub fn block(
+        &mut self,
+        statements: &Vec<Stmt>,
+        env: Environment<StackRegister>,
+    ) -> Result<(), std::fmt::Error> {
+        self.env.env = env;
         let result = self.cg_stmts(statements);
 
         // this means assignment to vars inside block which were declared outside
         // of the block are still apparent after block
-        self.env = *self.env.enclosing.as_ref().unwrap().clone(); // TODO: remove as_ref and clone
+        self.env.env = *self.env.env.enclosing.as_ref().unwrap().clone();
         result
     }
 
@@ -321,7 +360,7 @@ impl Compiler {
 
         writeln!(
             self.output,
-            "\tmovq    ${num}, {}",
+            "\tmovl    ${num}, {}",
             reg.name(&self.registers)
         )?;
         Ok(reg)
@@ -346,7 +385,7 @@ impl Compiler {
     }
     fn cg_assign(&mut self, name: String, expr: &Expr) -> Result<Register, std::fmt::Error> {
         let mut value_reg = self.execute(expr)?;
-        let new_reg = self.env.get_var(name.clone());
+        let new_reg = self.env.get_var(name.clone()); // since stack pos is the same we don't have to change env
 
         // can't move from mem to mem so make temp scratch-register
         if matches!(value_reg, Register::Stack(_)) {
@@ -354,7 +393,7 @@ impl Compiler {
 
             writeln!(
                 self.output,
-                "\tmovq    {}, {}",
+                "\tmovl    {}, {}",
                 value_reg.name(&self.registers),
                 temp_scratch.name(&self.registers),
             )?;
@@ -362,7 +401,7 @@ impl Compiler {
         }
         writeln!(
             self.output,
-            "\tmovq    {}, {}",
+            "\tmovl    {}, {}",
             value_reg.name(&self.registers),
             new_reg.name(),
         )?;
@@ -376,7 +415,7 @@ impl Compiler {
 
         writeln!(
             self.output,
-            "\tmovq    {}, {}",
+            "\tmovl    {}, {}",
             stack_reg.name(),
             reg.name(&self.registers)
         )?;
@@ -390,18 +429,31 @@ impl Compiler {
         // TODO: implement args by pushing on stack
         assert!(args.len() <= 6, "function cant have more than 6 args");
 
+        // moving the arguments into their designated registers
         for (i, expr) in args.iter().enumerate() {
-            let reg = self.execute(&expr)?;
+            let mut reg = self.execute(&expr)?;
             writeln!(
                 self.output,
-                "\tmovq {},{}",
+                "\tmovl    {}, {}",
                 reg.name(&self.registers),
                 Register::Arg(i).name(&self.registers),
             )?;
+            reg.free(&mut self.registers);
         }
 
-        writeln!(self.output, "\t call _{}", func_name)?;
-        Ok(Register::Scratch(ScratchIndex::R10)) // FIX: get correct return val
+        writeln!(self.output, "\tcall    _{}", func_name)?;
+        if self.env.get_func(func_name, &self.global_env) != Types::Void {
+            let reg_index = self.registers.scratch_alloc();
+            let return_reg = Register::Scratch(reg_index);
+            writeln!(
+                self.output,
+                "\tmovl    %eax, {}",
+                return_reg.name(&self.registers)
+            )?;
+            Ok(return_reg)
+        } else {
+            Ok(Register::Void)
+        }
     }
     // fn evaluate_logical(&mut self, left: &Expr, token: &Token, right: &Expr) -> TypeValues {
     //     let left = self.execute(left);
@@ -425,15 +477,15 @@ impl Compiler {
         let reg = self.execute(right)?;
         match token.token {
             TokenType::Bang => {
-                writeln!(self.output, "\tcmpq $0, {}", reg.name(&self.registers))?; // compares reg-value with 0
+                writeln!(self.output, "\tcmpl $0, {}", reg.name(&self.registers))?; // compares reg-value with 0
                 writeln!(
                     self.output,
-                    "\tsete %al\n\tmovzbq %al, {}",
+                    "\tsete %al\n\tmovzbl %al, {}",
                     reg.name(&self.registers)
                 )?;
                 // sets %al to 1 if comparison true and to 0 when false and then copies %al to current reg
             }
-            TokenType::Minus => writeln!(self.output, "\tnegq {}", reg.name(&self.registers))?,
+            TokenType::Minus => writeln!(self.output, "\tnegl {}", reg.name(&self.registers))?,
             _ => Error::new(token, "invalid unary operator").print_exit(),
         }
         Ok(reg)
@@ -442,7 +494,7 @@ impl Compiler {
     fn cg_add(&mut self, mut left: Register, right: Register) -> Result<Register, std::fmt::Error> {
         writeln!(
             self.output,
-            "\taddq {}, {}\n",
+            "\taddl {}, {}\n",
             left.name(&self.registers),
             right.name(&self.registers)
         )?;
@@ -453,7 +505,7 @@ impl Compiler {
     fn cg_sub(&mut self, left: Register, mut right: Register) -> Result<Register, std::fmt::Error> {
         writeln!(
             self.output,
-            "\tsubq {}, {}\n",
+            "\tsubl {}, {}\n",
             right.name(&self.registers),
             left.name(&self.registers)
         )?;
@@ -469,7 +521,7 @@ impl Compiler {
     ) -> Result<Register, std::fmt::Error> {
         writeln!(
             self.output,
-            "\timulq {}, {}\n",
+            "\timull {}, {}\n",
             left.name(&self.registers),
             right.name(&self.registers)
         )?;
@@ -479,13 +531,13 @@ impl Compiler {
     }
 
     fn cg_div(&mut self, mut left: Register, right: Register) -> Result<Register, std::fmt::Error> {
-        writeln!(self.output, "\tmovq {}, %rax", left.name(&self.registers))?;
+        writeln!(self.output, "\tmovl {}, %eax", left.name(&self.registers))?;
         writeln!(
             self.output,
-            "\tcqo\n\tidivq {}",
+            "\tcqo\n\tidivl {}",
             right.name(&self.registers)
         )?; // rax / rcx => rax
-        writeln!(self.output, "\tmovq %rax, {}", right.name(&self.registers))?; // move rax(int result) into right reg (remainder in rdx)
+        writeln!(self.output, "\tmovl %eax, {}", right.name(&self.registers))?; // move rax(int result) into right reg (remainder in rdx)
 
         left.free(&mut self.registers);
         Ok(right)
@@ -499,14 +551,14 @@ impl Compiler {
     ) -> Result<Register, std::fmt::Error> {
         writeln!(
             self.output,
-            "\tcmpq {}, {}",
+            "\tcmpl {}, {}",
             right.name(&self.registers),
             left.name(&self.registers)
         )?;
         // write ZF to %al based on operator and zero extend %right_register with value of %al
         writeln!(
             self.output,
-            "\t{operator} %al\n\tmovzbq %al, {}",
+            "\t{operator} %al\n\tmovzbl %al, {}",
             right.name(&self.registers)
         )?;
 

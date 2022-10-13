@@ -1,7 +1,9 @@
-int a = 0;
-{
-    int a;
-    print a;
+void main(){
+  int a = 0;
+  {
+      int a;
+      printint(a);
+  }
+  int a = 2;
+  printint(a);
 }
-int a = 2;
-print a;

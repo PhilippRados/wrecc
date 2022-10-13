@@ -28,9 +28,8 @@ function assert_eq {
 
   if [[ "$found_error" = "" ]]; then
     rm tmp1
-  else
-    rm static_err
   fi
+  rm static_err
   rm tmp
   rm err
 }
@@ -42,3 +41,5 @@ for file in tests/fixtures/*; do
     assert_eq "success_$filename" "$file" "$filename"
   fi
 done
+
+#assert_eq "success_simple_comparisons_and_equality" "tests/fixtures/simple_comparisons_and_equality" "siggi"

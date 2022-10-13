@@ -1,15 +1,16 @@
 void is_bigger(int input) {
-    print input;
+    printint(input);
 }
 void some_func(int test) {
     int thresh = 5;
     if (test > thresh){
       is_bigger(test);
     } else {
-      print -1;
+      printint(-1);
     }
 }
-
-some_func(10);
-some_func(5);
-some_func(6);
+void main(){
+  some_func(10);
+  some_func(5);
+  some_func(6);
+}

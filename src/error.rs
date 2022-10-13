@@ -44,4 +44,12 @@ impl Error {
         self.print_error();
         std::process::exit(-1);
     }
+    pub fn missing_entrypoint() -> Self {
+        Error {
+            line_index: -1,
+            msg: "Can't find main() entrypoint to program.".to_string(),
+            line_string: "".to_string(),
+            column: -1,
+        }
+    }
 }

@@ -20,6 +20,7 @@ pub struct TypeChecker {
     global_env: Environment<Types>,
     returns_all_paths: bool,
     builtins: Vec<(&'static str, Function)>,
+    found_main: bool,
 }
 impl TypeChecker {
     pub fn new() -> Self {
@@ -29,6 +30,7 @@ impl TypeChecker {
             global_env: Environment::new(None),
             scope: vec![Scope::Global],
             returns_all_paths: false,
+            found_main: false,
             builtins: vec![(
                 "printint",
                 Function::new(
@@ -53,6 +55,9 @@ impl TypeChecker {
         if let Err(e) = self.check_statements(statements) {
             self.errors.push(e);
             // synchronize
+        }
+        if !self.found_main {
+            return Err(vec![Error::missing_entrypoint()]);
         }
         if self.errors.is_empty() {
             Ok(())
@@ -190,6 +195,8 @@ impl TypeChecker {
                 name,
                 "can only define functions in global scope",
             ));
+        } else if name.unwrap_string() == "main" {
+            self.found_main = true;
         }
 
         self.global_env.current.funcs.insert(
@@ -256,6 +263,7 @@ impl TypeChecker {
             _ => return Err(Error::new(left_paren, "function-name has to be identifier")),
         };
 
+        // TODO: use get_func instead
         match self
             .global_env
             .current

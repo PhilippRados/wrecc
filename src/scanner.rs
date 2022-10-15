@@ -157,7 +157,7 @@ impl<'a> Scanner<'a> {
                         while let Some(v) = self
                             .source
                             .by_ref()
-                            .next_if(|c| c.is_alphabetic() || *c == '_')
+                            .next_if(|c| c.is_alphabetic() || *c == '_' || c.is_ascii_digit())
                         {
                             value.push(v);
                         }

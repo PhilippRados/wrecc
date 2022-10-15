@@ -18,7 +18,7 @@ enum Register {
     Void,
 }
 impl Register {
-    fn free(&mut self, scratch_regs: &mut ScratchRegisters) {
+    fn free(&self, scratch_regs: &mut ScratchRegisters) {
         match self {
             Register::Void => unimplemented!(),
             Register::Stack(_) => (),
@@ -93,6 +93,7 @@ impl From<usize> for ScratchIndex {
 struct ScratchRegister {
     in_use: bool,
     name: &'static str,
+    name_64: &'static str,
 }
 impl ScratchRegister {
     fn free(&mut self) {
@@ -124,18 +125,22 @@ impl ScratchRegisters {
                 ScratchRegister {
                     in_use: false,
                     name: "%r8d",
+                    name_64: "%r8",
                 },
                 ScratchRegister {
                     in_use: false,
                     name: "%r9d",
+                    name_64: "%r9",
                 },
                 ScratchRegister {
                     in_use: false,
                     name: "%r10d",
+                    name_64: "%r10",
                 },
                 ScratchRegister {
                     in_use: false,
                     name: "%r11d",
+                    name_64: "%r11",
                 },
             ],
         }
@@ -169,25 +174,6 @@ impl Compiler {
             global_env,
         }
     }
-    // fn if_statement(
-    //     &mut self,
-    //     cond: &Expr,
-    //     then_branch: &Stmt,
-    //     else_branch: &Option<Stmt>,
-    // ) -> Result<(), Option<TypeValues>> {
-    //     if self.execute(cond).unwrap_as_int() != 0 {
-    //         self.visit(then_branch)?;
-    //     } else if let Some(stmt) = else_branch {
-    //         self.visit(stmt)?;
-    //     }
-    //     Ok(())
-    // }
-    // fn while_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), Option<TypeValues>> {
-    //     while self.execute(cond).unwrap_as_int() != 0 {
-    //         self.visit(body)?;
-    //     }
-    //     Ok(())
-    // }
     fn preamble() -> &'static str {
         "\t.text\n\
          \t.cstring\n\
@@ -258,24 +244,42 @@ impl Compiler {
             Stmt::If(_, cond, then_branch, else_branch) => {
                 self.if_statement(cond, then_branch, else_branch)
             }
+            Stmt::While(cond, body) => self.while_statement(cond, body),
             _ => unimplemented!(),
         }
     }
-    //         Stmt::While(cond, body) => self.while_statement(cond, body),
-    //     }
-    // }
     fn create_label(&mut self) -> usize {
         let result = self.label_index;
         self.label_index += 1;
         result
     }
+
+    fn while_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), std::fmt::Error> {
+        let start_label = self.create_label();
+        let end_label = self.create_label();
+
+        writeln!(self.output, "\tjmp    L{}\nL{}:", end_label, start_label)?;
+        self.visit(body)?;
+
+        writeln!(self.output, "L{}:", end_label)?;
+        let cond_reg = self.execute(cond)?;
+        writeln!(
+            self.output,
+            "\tcmpl    $0, {}\n\tjne      L{}",
+            cond_reg.name(&self.registers),
+            start_label
+        )?;
+
+        Ok(())
+    }
+
     fn if_statement(
         &mut self,
         cond: &Expr,
         then_branch: &Stmt,
         else_branch: &Option<Stmt>,
     ) -> Result<(), std::fmt::Error> {
-        let mut cond_reg = self.execute(cond)?;
+        let cond_reg = self.execute(cond)?;
         let done_label = self.create_label();
         let mut else_label = done_label;
 
@@ -316,7 +320,9 @@ impl Compiler {
                     "\tmovl    {}, %eax\n\tjmp    {}",
                     return_value.name(&self.registers),
                     function_epilogue
-                )
+                )?;
+                return_value.free(&mut self.registers);
+                Ok(())
             }
             None => writeln!(self.output, "\tjmp    {}", function_epilogue),
         }
@@ -344,7 +350,7 @@ impl Compiler {
         &mut self,
         type_decl: &Types,
         name: String,
-        mut value_reg: Register,
+        value_reg: Register,
     ) -> Result<(), std::fmt::Error> {
         self.declare_var(type_decl, name.clone())?;
         writeln!(
@@ -496,7 +502,7 @@ impl Compiler {
 
         // moving the arguments into their designated registers
         for (i, expr) in args.iter().enumerate() {
-            let mut reg = self.execute(&expr)?;
+            let reg = self.execute(&expr)?;
             writeln!(
                 self.output,
                 "\tmovl    {}, {}",
@@ -506,7 +512,18 @@ impl Compiler {
             reg.free(&mut self.registers);
         }
 
+        // push registers that are in use currently onto stack so they won't be overwritten during function
+        for reg in self.registers.registers.iter().filter(|r| r.in_use) {
+            writeln!(self.output, "\tpushq   {}", reg.name_64)?;
+        }
+
         writeln!(self.output, "\tcall    _{}", func_name)?;
+
+        // pop registers from before function call back to scratch registers
+        for reg in self.registers.registers.iter().filter(|r| r.in_use) {
+            writeln!(self.output, "\tpopq   {}", reg.name_64)?;
+        }
+
         if self.env.get_func(func_name, &self.global_env) != Types::Void {
             let reg_index = self.registers.scratch_alloc();
             let return_reg = Register::Scratch(reg_index);
@@ -556,7 +573,7 @@ impl Compiler {
         Ok(reg)
     }
 
-    fn cg_add(&mut self, mut left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+    fn cg_add(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
         writeln!(
             self.output,
             "\taddl {}, {}\n",
@@ -567,7 +584,7 @@ impl Compiler {
         left.free(&mut self.registers);
         Ok(right)
     }
-    fn cg_sub(&mut self, left: Register, mut right: Register) -> Result<Register, std::fmt::Error> {
+    fn cg_sub(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
         writeln!(
             self.output,
             "\tsubl {}, {}\n",
@@ -579,11 +596,7 @@ impl Compiler {
         Ok(left)
     }
 
-    fn cg_mult(
-        &mut self,
-        mut left: Register,
-        right: Register,
-    ) -> Result<Register, std::fmt::Error> {
+    fn cg_mult(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
         writeln!(
             self.output,
             "\timull {}, {}\n",
@@ -595,7 +608,7 @@ impl Compiler {
         Ok(right)
     }
 
-    fn cg_div(&mut self, mut left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+    fn cg_div(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
         writeln!(self.output, "\tmovl {}, %eax", left.name(&self.registers))?;
         writeln!(
             self.output,
@@ -611,7 +624,7 @@ impl Compiler {
     fn cg_comparison(
         &mut self,
         operator: &str,
-        mut left: Register,
+        left: Register,
         right: Register,
     ) -> Result<Register, std::fmt::Error> {
         writeln!(

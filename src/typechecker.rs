@@ -213,11 +213,13 @@ impl TypeChecker {
         self.block(&body, env, Some(return_type))?;
 
         if return_type != Types::Void && !self.returns_all_paths {
+            self.returns_all_paths = false;
             Err(Error::new(
                 name,
                 "non-void function doesnt return in all code paths",
             ))
         } else {
+            self.returns_all_paths = false;
             Ok(())
         }
     }

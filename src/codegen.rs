@@ -513,14 +513,30 @@ impl Compiler {
         }
 
         // push registers that are in use currently onto stack so they won't be overwritten during function
-        for reg in self.registers.registers.iter().filter(|r| r.in_use) {
+        let pushed_regs: Vec<&ScratchRegister> = self
+            .registers
+            .registers
+            .iter()
+            .filter(|r| r.in_use)
+            .collect();
+
+        for reg in pushed_regs.iter().by_ref() {
             writeln!(self.output, "\tpushq   {}", reg.name_64)?;
         }
 
+        // have to 16byte align stack depending on amount of pushs before
+        if pushed_regs.len() > 0 && pushed_regs.len() % 2 != 0 {
+            writeln!(self.output, "\tsubq    $8,%rsp")?;
+        }
         writeln!(self.output, "\tcall    _{}", func_name)?;
 
+        // undo the stack alignment from before call
+        if pushed_regs.len() > 0 && pushed_regs.len() % 2 != 0 {
+            writeln!(self.output, "\taddq    $8,%rsp")?;
+        }
+
         // pop registers from before function call back to scratch registers
-        for reg in self.registers.registers.iter().filter(|r| r.in_use) {
+        for reg in pushed_regs.iter().rev().by_ref() {
             writeln!(self.output, "\tpopq   {}", reg.name_64)?;
         }
 

@@ -132,6 +132,8 @@ impl Parser {
             init = Some(self.type_declaration(token)?);
         } else if !self.check(TokenKind::Semicolon) {
             init = Some(self.expression_statement()?)
+        } else {
+            self.consume(TokenKind::Semicolon, "Expect ';' in for loop")?;
         }
 
         let mut cond = None;
@@ -146,13 +148,16 @@ impl Parser {
             self.consume(TokenKind::RightParen, "Expect ')' for-loop")?;
         }
 
-        // Since rust has no c-style for-loop we mimic it as a while loop
+        // for loop is syntax sugar for while loop
         let mut body = self.statement()?;
         if inc != None {
             body = Stmt::Block(vec![body, Stmt::Expr(inc.unwrap())]);
         }
         if cond != None {
             body = Stmt::While(cond.unwrap(), Box::new(body));
+        } else {
+            // if no condition then condition is true
+            body = Stmt::While(Expr::Number(1), Box::new(body));
         }
         if init != None {
             body = Stmt::Block(vec![init.unwrap(), body]);

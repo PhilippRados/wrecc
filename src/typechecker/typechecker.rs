@@ -5,7 +5,6 @@ use std::collections::HashMap;
 #[derive(PartialEq)]
 enum Scope {
     Global,
-    // Block,
     Function(String, Types), // function name and return type
 }
 pub struct TypeChecker {
@@ -82,7 +81,6 @@ impl TypeChecker {
             Stmt::Block(statements) => self.block(
                 statements,
                 Environment::new(Some(Box::new(self.env.clone()))),
-                // Scope::Block,
             ),
             Stmt::If(keyword, cond, then_branch, else_branch) => {
                 self.if_statement(keyword, cond, then_branch, else_branch)

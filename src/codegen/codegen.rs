@@ -238,6 +238,29 @@ impl Compiler {
             *self.func_stack_size.entry(name.to_owned()).or_default() += 16 - (size % 16);
         }
     }
+    fn allocate_stack(&mut self, name: &str) -> Result<(), std::fmt::Error> {
+        // stack has to be 16byte aligned
+        self.align_stack(name);
+
+        if self.func_stack_size[name] > 0 {
+            writeln!(
+                self.output,
+                "\tsubq    ${},%rsp",
+                self.func_stack_size[name]
+            )?;
+        }
+        Ok(())
+    }
+    fn dealloc_stack(&mut self, name: &str) -> Result<(), std::fmt::Error> {
+        if self.func_stack_size[name] > 0 {
+            writeln!(
+                self.output,
+                "\taddq    ${},%rsp",
+                self.func_stack_size[name]
+            )?;
+        }
+        Ok(())
+    }
     fn cg_func_preamble(
         &mut self,
         name: &str,
@@ -247,16 +270,8 @@ impl Compiler {
         writeln!(self.output, "_{}:", name)?; // generate function label
         writeln!(self.output, "\tpushq   %rbp\n\tmovq    %rsp, %rbp")?; // setup base pointer and stackpointer
 
-        // stack has to be 16byte aligned
-        self.align_stack(name);
         // allocate stack-space for local vars
-        if self.func_stack_size[name] > 0 {
-            writeln!(
-                self.output,
-                "\tsubq    ${},%rsp",
-                self.func_stack_size[name]
-            )?;
-        }
+        self.allocate_stack(name)?;
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
@@ -266,17 +281,10 @@ impl Compiler {
     }
     fn cg_func_postamble(&mut self, name: &str) -> Result<(), std::fmt::Error> {
         writeln!(self.output, "{}_epilogue:", name)?;
-        if *self.func_stack_size.get(name).unwrap() > 0 {
-            writeln!(
-                self.output,
-                "\taddq    ${},%rsp",
-                self.func_stack_size.get(name).unwrap()
-            )?;
-        }
-        // self.cg_reset_sp()?; // after block deallocate stack variables which were declared inside block
-        // self.env.sp_index = 0;
+        self.dealloc_stack(name)?;
+
         match name {
-            "main" => writeln!(self.output, "\tmovl    $0, %eax")?,
+            "main" => writeln!(self.output, "\tmovl    $0, %eax")?, // if main return 0 success code
             _ => writeln!(self.output, "\tnop")?,
         }
         writeln!(self.output, "\tpopq    %rbp\n\tret")?;
@@ -290,9 +298,6 @@ impl Compiler {
     ) -> Result<(), std::fmt::Error> {
         self.env = env;
         let result = self.cg_stmts(statements);
-
-        // self.cg_reset_sp()?; // after block deallocate stack variables which were declared inside block
-        // self.env.sp_index = 0;
 
         // this means assignment to vars inside block which were declared outside
         // of the block are still apparent after block

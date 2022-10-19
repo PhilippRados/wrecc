@@ -1,6 +1,4 @@
-use crate::error::Error;
-use crate::token::Token;
-use crate::token::TokenType;
+use crate::common::{error::*, token::*};
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;

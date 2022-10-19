@@ -1,4 +1,4 @@
-use crate::types::Types;
+use crate::common::types::Types;
 use std::fmt::Display;
 
 #[derive(PartialEq, Clone, Debug)]

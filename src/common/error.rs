@@ -1,5 +1,5 @@
+use crate::common::token::Token;
 use crate::scanner::Scanner;
-use crate::token::Token;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Error {
@@ -51,5 +51,10 @@ impl Error {
             line_string: "".to_string(),
             column: -1,
         }
+    }
+
+    pub fn sys_exit(msg: &str, exit_code: i32) -> ! {
+        eprintln!("rucc: {msg}");
+        std::process::exit(exit_code);
     }
 }

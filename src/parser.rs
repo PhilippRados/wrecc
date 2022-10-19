@@ -1,46 +1,9 @@
-use crate::error::Error;
-use crate::interpreter::Stmt;
-use crate::token::Token;
-use crate::token::TokenKind;
-use crate::token::TokenType;
-use crate::types::Types;
+use crate::common::{error::*, expr::*, stmt::*, token::*, types::*};
 use std::iter::Peekable;
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum Expr {
-    Binary {
-        left: Box<Expr>,
-        token: Token,
-        right: Box<Expr>,
-    },
-    Unary {
-        token: Token,
-        right: Box<Expr>,
-    },
-    Grouping {
-        expr: Box<Expr>,
-    },
-    Assign {
-        name: Token,
-        expr: Box<Expr>,
-    },
-    Logical {
-        left: Box<Expr>,
-        token: Token,
-        right: Box<Expr>,
-    },
-    Call {
-        left_paren: Token,
-        callee: Box<Expr>,
-        args: Vec<Expr>,
-    },
-    Number(i32),
-    CharLit(i8),
-    Ident(Token),
-}
+use std::vec::IntoIter;
 
 pub struct Parser {
-    tokens: Peekable<std::vec::IntoIter<Token>>,
+    tokens: Peekable<IntoIter<Token>>,
 }
 
 impl Parser {

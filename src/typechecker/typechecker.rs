@@ -1,25 +1,21 @@
-use crate::environment::Environment;
-use crate::environment::Function;
-use crate::error::Error;
-use crate::interpreter::Stmt;
-use crate::parser::Expr;
-use crate::token::Token;
-use crate::token::TokenType;
-use crate::types::Types;
+use crate::common::{error::*, expr::*, stmt::*, token::*, types::*};
+use crate::typechecker::environment::*;
+use std::collections::HashMap;
 
 #[derive(PartialEq)]
 enum Scope {
     Global,
-    Block,
-    Function(Types), // function return type
+    // Block,
+    Function(String, Types), // function name and return type
 }
 pub struct TypeChecker {
     errors: Vec<Error>,
     scope: Vec<Scope>,
-    env: Environment<Types>,
-    global_env: Environment<Types>,
+    env: Environment,
+    global_env: Environment,
     returns_all_paths: bool,
     builtins: Vec<(&'static str, Function)>,
+    func_stack_size: HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
     found_main: bool,
 }
 impl TypeChecker {
@@ -31,6 +27,7 @@ impl TypeChecker {
             scope: vec![Scope::Global],
             returns_all_paths: false,
             found_main: false,
+            func_stack_size: HashMap::new(),
             builtins: vec![(
                 "printint",
                 Function::new(
@@ -39,12 +36,11 @@ impl TypeChecker {
                         Types::Char,
                         Token::new(TokenType::Ident("".to_string()), -1, -1, "".to_string()),
                     )],
-                    vec![],
                 ),
             )],
         }
     }
-    pub fn check(&mut self, statements: &Vec<Stmt>) -> Result<(), Vec<Error>> {
+    pub fn check(&mut self, statements: &Vec<Stmt>) -> Result<HashMap<String, usize>, Vec<Error>> {
         // initialze builtins so typechecker doesnt throw error when it doesnt find them in the program
         for (name, f) in self.builtins.iter().by_ref() {
             self.global_env
@@ -61,7 +57,7 @@ impl TypeChecker {
         } else if !self.found_main {
             Err(vec![Error::missing_entrypoint()])
         } else {
-            Ok(())
+            Ok(self.func_stack_size.clone())
         }
     }
     fn check_statements(&mut self, statements: &Vec<Stmt>) -> Result<(), Error> {
@@ -86,7 +82,7 @@ impl TypeChecker {
             Stmt::Block(statements) => self.block(
                 statements,
                 Environment::new(Some(Box::new(self.env.clone()))),
-                None,
+                // Scope::Block,
             ),
             Stmt::If(keyword, cond, then_branch, else_branch) => {
                 self.if_statement(keyword, cond, then_branch, else_branch)
@@ -115,7 +111,8 @@ impl TypeChecker {
                 &format!("Can't assign to 'void' {}", var_name.unwrap_string()),
             ));
         }
-        self.env.declare_var(*type_decl, name);
+        self.increment_stack_size(var_name, type_decl)?;
+        self.env.declare_var(name, *type_decl);
         Ok(())
     }
     fn init_var(&mut self, type_decl: &Types, var_name: &Token, expr: &Expr) -> Result<(), Error> {
@@ -141,9 +138,22 @@ impl TypeChecker {
                 ),
             ))
         } else {
+            self.increment_stack_size(var_name, type_decl)?;
             // currently only type-checks for void since int and char are interchangeable
             self.env.init_var(name, *type_decl);
             Ok(())
+        }
+    }
+    fn increment_stack_size(&mut self, var_name: &Token, type_decl: &Types) -> Result<(), Error> {
+        match self.find_function() {
+            Some(Scope::Function(name, _)) => {
+                *self.func_stack_size.entry(name.to_owned()).or_default() += type_decl.size();
+                Ok(())
+            }
+            _ => Err(Error::new(
+                var_name,
+                "cant declare stack variables in global scope",
+            )),
         }
     }
     fn if_statement(
@@ -199,21 +209,26 @@ impl TypeChecker {
             self.found_main = true;
         }
 
-        self.global_env.current.funcs.insert(
-            name.unwrap_string(),
-            Function::new(return_type, params.clone(), body.clone()),
-        );
+        self.scope
+            .push(Scope::Function(name.unwrap_string(), return_type));
 
-        let mut env = Environment::new(Some(Box::new(self.env.clone())));
+        self.global_env
+            .declare_func(return_type, &name.unwrap_string(), params.clone());
 
+        // initialize stack size for current function-scope
+        self.func_stack_size.insert(name.unwrap_string(), 0);
+
+        let mut env = Environment::new(Some(Box::new(self.env.clone()))); // create new scope for function body
         for (type_decl, name) in params.iter() {
-            env.init_var(name.unwrap_string(), *type_decl)
+            self.increment_stack_size(name, type_decl)?; // add params to stack-size
+            env.init_var(name.unwrap_string(), *type_decl) // initialize params in local scope
         }
 
-        self.block(&body, env, Some(return_type))?;
+        self.block(&body, env)?;
+
+        self.scope.pop();
 
         if return_type != Types::Void && !self.returns_all_paths {
-            self.returns_all_paths = false;
             Err(Error::new(
                 name,
                 "non-void function doesnt return in all code paths",
@@ -270,7 +285,6 @@ impl TypeChecker {
             .map(|expr| self.expr_type(expr))
             .collect::<Result<Vec<Types>, Error>>()?;
 
-        // TODO: use get_func instead
         match self
             .global_env
             .current
@@ -318,22 +332,11 @@ impl TypeChecker {
         }
         Ok(())
     }
-    fn block(
-        &mut self,
-        body: &Vec<Stmt>,
-        env: Environment<Types>,
-        return_type: Option<Types>,
-    ) -> Result<(), Error> {
+    fn block(&mut self, body: &Vec<Stmt>, env: Environment) -> Result<(), Error> {
         self.env = env;
-        if let Some(return_type) = return_type {
-            self.scope.push(Scope::Function(return_type));
-        } else {
-            self.scope.push(Scope::Block);
-        }
         let result = self.check_statements(body);
 
         self.env = *self.env.enclosing.as_ref().unwrap().clone();
-        self.scope.pop();
 
         result
     }
@@ -384,7 +387,7 @@ impl TypeChecker {
     }
     fn check_return(&mut self, keyword: &Token, body_return: Types) -> Result<(), Error> {
         match self.find_function() {
-            Some(Scope::Function(function_type)) => {
+            Some(Scope::Function(_, function_type)) => {
                 if *function_type == Types::Void && body_return != Types::Void {
                     return Err(Error::new(
                         keyword,
@@ -414,7 +417,7 @@ impl TypeChecker {
     }
     fn find_function(&self) -> Option<&Scope> {
         for ref scope in self.scope.iter().rev() {
-            if matches!(scope, Scope::Function(_)) {
+            if matches!(scope, Scope::Function(_, _)) {
                 return Some(scope);
             }
         }

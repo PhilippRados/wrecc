@@ -1,0 +1,19 @@
+void main(){
+    int a = 0 || 0;
+    printint(a);
+    int b = 0 || 1;
+    printint(b);
+    int c = 1 || 0;
+    printint(c);
+    int d = 1 || 1;
+    printint(d);
+
+    int e = 0 && 0;
+    printint(e);
+    int f = 0 && 1;
+    printint(f);
+    int g = 1 && 0;
+    printint(g);
+    int h = 1 && 1;
+    printint(h);
+}

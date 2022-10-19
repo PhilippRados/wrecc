@@ -318,7 +318,7 @@ impl Compiler {
             Expr::Number(v) => self.cg_literal_num(*v),
             Expr::Grouping { expr } => self.execute(expr),
             Expr::Unary { token, right } => self.cg_unary(token, right),
-            // Expr::Logical { left, token, right } => self.evaluate_logical(left, token, right),
+            Expr::Logical { left, token, right } => self.cg_logical(left, token, right),
             Expr::Assign { name, expr } => self.cg_assign(name.unwrap_string(), expr),
             Expr::Ident(name) => self.cg_ident(name.unwrap_string()),
             // Expr::CharLit(c) => TypeValues::Char(*c),
@@ -426,24 +426,103 @@ impl Compiler {
             Ok(Register::Void)
         }
     }
-    // fn evaluate_logical(&mut self, left: &Expr, token: &Token, right: &Expr) -> TypeValues {
-    //     let left = self.execute(left);
+    fn cg_logical(
+        &mut self,
+        left: &Expr,
+        token: &Token,
+        right: &Expr,
+    ) -> Result<Register, std::fmt::Error> {
+        match token.token {
+            TokenType::AmpAmp => self.cg_and(left, right),
+            TokenType::PipePipe => self.cg_or(left, right),
+            _ => unreachable!(),
+        }
+    }
+    fn cg_or(&mut self, left: &Expr, right: &Expr) -> Result<Register, std::fmt::Error> {
+        let left = self.execute(left)?;
+        let true_label = self.create_label();
 
-    //     match token.token {
-    //         TokenType::PipePipe => {
-    //             if left.unwrap_as_int() != 0 {
-    //                 return left;
-    //             }
-    //         }
-    //         TokenType::AmpAmp => {
-    //             if left.unwrap_as_int() == 0 {
-    //                 return left;
-    //             }
-    //         }
-    //         _ => unreachable!(),
-    //     }
-    //     self.execute(right)
-    // }
+        // jump to true label left is true => short circuit
+        writeln!(
+            self.output,
+            "\tcmpl    $0, {}\n\tjne    L{}",
+            left.name(&self.scratch),
+            true_label
+        )?;
+        left.free(&mut self.scratch);
+
+        let right = self.execute(right)?;
+        let false_label = self.create_label();
+
+        // if right is false we know expression is false
+        writeln!(
+            self.output,
+            "\tcmpl    $0, {}\n\tje    L{}",
+            right.name(&self.scratch),
+            false_label
+        )?;
+        right.free(&mut self.scratch);
+
+        let done_label = self.create_label();
+        let result = Register::Scratch(self.scratch.scratch_alloc());
+        // if expression true write 1 in result and skip false label
+        writeln!(
+            self.output,
+            "L{}:\n\tmovl    $1, {}",
+            true_label,
+            result.name(&self.scratch)
+        )?;
+        writeln!(self.output, "\tjmp     L{}", done_label)?;
+
+        writeln!(
+            self.output,
+            "L{}:\n\tmovl    $0, {}",
+            false_label,
+            result.name(&self.scratch)
+        )?;
+        writeln!(self.output, "L{}:", done_label)?;
+
+        Ok(result)
+    }
+    fn cg_and(&mut self, left: &Expr, right: &Expr) -> Result<Register, std::fmt::Error> {
+        let left = self.execute(left)?;
+        let false_label = self.create_label();
+
+        // if left is false expression is false, we jump to false label
+        writeln!(
+            self.output,
+            "\tcmpl    $0, {}\n\tje    L{}",
+            left.name(&self.scratch),
+            false_label
+        )?;
+        left.free(&mut self.scratch);
+
+        // left is true if right false jump to false label
+        let right = self.execute(right)?;
+        writeln!(
+            self.output,
+            "\tcmpl    $0, {}\n\tje    L{}",
+            right.name(&self.scratch),
+            false_label
+        )?;
+        right.free(&mut self.scratch);
+
+        // if no prior jump was taken expression is true
+        let true_label = self.create_label();
+        let result = Register::Scratch(self.scratch.scratch_alloc());
+        writeln!(
+            self.output,
+            "\tmovl    $1, {}\n\tjmp    L{}",
+            result.name(&self.scratch),
+            true_label
+        )?;
+
+        writeln!(self.output, "L{}:", false_label)?;
+        writeln!(self.output, "\tmovl    $0, {}", result.name(&self.scratch))?;
+
+        writeln!(self.output, "L{}:", true_label)?;
+        Ok(result)
+    }
     fn cg_unary(&mut self, token: &Token, right: &Expr) -> Result<Register, std::fmt::Error> {
         let reg = self.execute(right)?;
         match token.token {

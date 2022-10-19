@@ -88,7 +88,7 @@ impl Parser {
         Ok(Stmt::Return(keyword, value))
     }
     fn for_statement(&mut self) -> Result<Stmt, Error> {
-        self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
+        let left_paren = self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
 
         let mut init = None;
         if let Some(token) = self.matches_type() {
@@ -108,7 +108,7 @@ impl Parser {
         let mut inc = None;
         if self.matches(vec![TokenKind::RightParen]) == None {
             inc = Some(self.expression()?);
-            self.consume(TokenKind::RightParen, "Expect ')' for-loop")?;
+            self.consume(TokenKind::RightParen, "Expect ')' after for increment")?;
         }
 
         // for loop is syntax sugar for while loop
@@ -117,10 +117,10 @@ impl Parser {
             body = Stmt::Block(vec![body, Stmt::Expr(inc.unwrap())]);
         }
         if cond != None {
-            body = Stmt::While(cond.unwrap(), Box::new(body));
+            body = Stmt::While(left_paren, cond.unwrap(), Box::new(body));
         } else {
             // if no condition then condition is true
-            body = Stmt::While(Expr::Number(1), Box::new(body));
+            body = Stmt::While(left_paren, Expr::Number(1), Box::new(body));
         }
         if init != None {
             body = Stmt::Block(vec![init.unwrap(), body]);
@@ -129,7 +129,7 @@ impl Parser {
         Ok(body)
     }
     fn while_statement(&mut self) -> Result<Stmt, Error> {
-        self.consume(TokenKind::LeftParen, "Expect '(' after while-statement")?;
+        let left_paren = self.consume(TokenKind::LeftParen, "Expect '(' after while-statement")?;
         let cond = self.expression()?;
         self.consume(
             TokenKind::RightParen,
@@ -138,7 +138,7 @@ impl Parser {
 
         let body = self.statement()?;
 
-        Ok(Stmt::While(cond, Box::new(body)))
+        Ok(Stmt::While(left_paren, cond, Box::new(body)))
     }
     fn block(&mut self) -> Result<Vec<Stmt>, Error> {
         let mut statements = Vec::new();

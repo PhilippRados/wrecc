@@ -8,7 +8,7 @@ pub enum Stmt {
     InitVar(Types, Token, Expr),
     Block(Vec<Stmt>),
     If(Token, Expr, Box<Stmt>, Box<Option<Stmt>>),
-    While(Expr, Box<Stmt>),
+    While(Token, Expr, Box<Stmt>),
     Function(Types, Token, Vec<(Types, Token)>, Vec<Stmt>),
     Return(Token, Option<Expr>),
 }

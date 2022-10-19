@@ -85,11 +85,21 @@ impl TypeChecker {
             Stmt::If(keyword, cond, then_branch, else_branch) => {
                 self.if_statement(keyword, cond, then_branch, else_branch)
             }
-            Stmt::While(cond, body) => self.while_statement(cond, body),
+            Stmt::While(left_paren, cond, body) => self.while_statement(left_paren, cond, body),
         }
     }
-    fn while_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), Error> {
-        self.expr_type(cond)?;
+    fn while_statement(
+        &mut self,
+        left_paren: &Token,
+        cond: &Expr,
+        body: &Stmt,
+    ) -> Result<(), Error> {
+        if self.expr_type(cond)? == Types::Void {
+            return Err(Error::new(
+                left_paren,
+                "conditional expected scalar type found ‘void'",
+            ));
+        }
         self.visit(body)?;
         self.returns_all_paths = false;
         Ok(())

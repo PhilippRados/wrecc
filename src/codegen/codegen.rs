@@ -100,7 +100,7 @@ impl Compiler {
             Stmt::If(_, cond, then_branch, else_branch) => {
                 self.if_statement(cond, then_branch, else_branch)
             }
-            Stmt::While(cond, body) => self.while_statement(cond, body),
+            Stmt::While(_, cond, body) => self.while_statement(cond, body),
             _ => unimplemented!(),
         }
     }

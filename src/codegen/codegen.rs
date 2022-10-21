@@ -86,8 +86,8 @@ impl Compiler {
             }
             Stmt::DeclareVar(type_decl, name) => self.declare_var(type_decl, name.unwrap_string()),
             Stmt::InitVar(type_decl, name, expr) => {
-                let value_reg = self.execute(expr)?;
-                self.init_var(type_decl, name.unwrap_string(), value_reg)
+                let mut value_reg = self.execute(expr)?;
+                self.init_var(type_decl, name.unwrap_string(), &mut value_reg)
             }
             Stmt::Block(statements) => self.block(
                 statements,
@@ -187,22 +187,25 @@ impl Compiler {
     fn declare_var(&mut self, type_decl: &Types, name: String) -> Result<(), std::fmt::Error> {
         self.current_bp_offset += type_decl.size();
 
-        self.env.declare_var(name, self.current_bp_offset);
+        self.env
+            .declare_var(name, self.current_bp_offset, *type_decl);
         Ok(())
     }
     fn init_var(
         &mut self,
         type_decl: &Types,
         name: String,
-        value_reg: Register,
+        value_reg: &mut Register,
     ) -> Result<(), std::fmt::Error> {
         self.declare_var(type_decl, name.clone())?;
+        value_reg.set_type(*type_decl); // change type of rvalue to be lvalue
 
         writeln!(
             self.output,
-            "\tmovl    {}, {}",
+            "\tmov{}    {}, {}",
+            type_decl.suffix(),
             value_reg.name(&self.scratch),
-            self.env.get_var(name).name() // since var-declaration set everything up we just need declared register
+            self.env.get_var(name).register.name() // since var-declaration set everything up we just need declared register
         )?;
         value_reg.free(&mut self.scratch);
 
@@ -275,7 +278,11 @@ impl Compiler {
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
-            self.init_var(type_decl, param_name.unwrap_string(), Register::Arg(i))?;
+            self.init_var(
+                type_decl,
+                param_name.unwrap_string(),
+                &mut Register::Arg(i, *type_decl),
+            )?;
         }
         Ok(())
     }
@@ -306,29 +313,50 @@ impl Compiler {
     }
 
     fn cg_literal_num(&mut self, num: i32) -> Result<Register, std::fmt::Error> {
-        let scratch_index = self.scratch.scratch_alloc();
-        let reg = Register::Scratch(scratch_index);
+        let reg = Register::Scratch(self.scratch.scratch_alloc(), Types::Int);
 
         writeln!(self.output, "\tmovl    ${num}, {}", reg.name(&self.scratch))?;
         Ok(reg)
     }
+    fn cg_literal_char(&mut self, num: i8) -> Result<Register, std::fmt::Error> {
+        let reg = Register::Scratch(self.scratch.scratch_alloc(), Types::Char);
+
+        writeln!(self.output, "\tmovb    ${num}, {}", reg.name(&self.scratch))?;
+        Ok(reg)
+    }
     pub fn execute(&mut self, ast: &Expr) -> Result<Register, std::fmt::Error> {
-        match ast {
-            Expr::Binary { left, token, right } => self.cg_binary(left, token, right),
-            Expr::Number(v) => self.cg_literal_num(*v),
-            Expr::Grouping { expr } => self.execute(expr),
-            Expr::Unary { token, right } => self.cg_unary(token, right),
-            Expr::Logical { left, token, right } => self.cg_logical(left, token, right),
-            Expr::Assign { name, expr } => self.cg_assign(name.unwrap_string(), expr),
-            Expr::Ident(name) => self.cg_ident(name.unwrap_string()),
-            // Expr::CharLit(c) => TypeValues::Char(*c),
-            Expr::Call {
+        match &ast.kind {
+            ExprKind::Binary { left, token, right } => self.cg_binary(left, token, right),
+            ExprKind::Number(v) => self.cg_literal_num(*v),
+            ExprKind::CharLit(c) => self.cg_literal_char(*c),
+            ExprKind::Grouping { expr } => self.execute(expr),
+            ExprKind::Unary { token, right } => self.cg_unary(token, right),
+            ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
+            ExprKind::Assign { name, expr } => self.cg_assign(name.unwrap_string(), expr),
+            ExprKind::Ident(name) => self.cg_ident(name.unwrap_string()),
+            ExprKind::Call {
                 left_paren: _,
                 callee,
                 args,
             } => self.cg_call(callee, args),
-            _ => unimplemented!("{:?}", ast),
+            ExprKind::Cast { expr } => self.cg_cast(expr, ast.type_decl.unwrap()),
         }
+    }
+    fn cg_cast(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
+        let value_reg = self.execute(expr)?;
+        let dest_reg = Register::Scratch(self.scratch.scratch_alloc(), new_type);
+
+        writeln!(
+            self.output,
+            "movs{}{}   {}, {}",
+            expr.type_decl.unwrap().suffix(),
+            new_type.suffix(),
+            value_reg.name(&self.scratch),
+            dest_reg.name(&self.scratch)
+        )?;
+        value_reg.free(&mut self.scratch);
+
+        Ok(dest_reg)
     }
     fn cg_assign(&mut self, name: String, expr: &Expr) -> Result<Register, std::fmt::Error> {
         let mut value_reg = self.execute(expr)?;
@@ -336,7 +364,8 @@ impl Compiler {
 
         // can't move from mem to mem so make temp scratch-register
         if matches!(value_reg, Register::Stack(_)) {
-            let temp_scratch = Register::Scratch(self.scratch.scratch_alloc());
+            let temp_scratch =
+                Register::Scratch(self.scratch.scratch_alloc(), expr.type_decl.unwrap());
 
             writeln!(
                 self.output,
@@ -350,28 +379,28 @@ impl Compiler {
             self.output,
             "\tmovl    {}, {}",
             value_reg.name(&self.scratch),
-            new_reg.name(),
+            new_reg.register.name(),
         )?;
         value_reg.free(&mut self.scratch);
-        Ok(Register::Stack(new_reg))
+        Ok(Register::Stack(new_reg.register))
     }
     fn cg_ident(&mut self, name: String) -> Result<Register, std::fmt::Error> {
-        // TODO: directly return stack-reg
         let stack_reg = self.env.get_var(name);
         let dest_reg_index = self.scratch.scratch_alloc();
-        let reg = Register::Scratch(dest_reg_index);
+        let reg = Register::Scratch(dest_reg_index, stack_reg.type_decl);
 
         writeln!(
             self.output,
-            "\tmovl    {}, {}",
-            stack_reg.name(),
+            "\tmov{}    {}, {}",
+            stack_reg.type_decl.suffix(),
+            stack_reg.register.name(),
             reg.name(&self.scratch)
         )?;
         Ok(reg)
     }
     fn cg_call(&mut self, callee: &Expr, args: &Vec<Expr>) -> Result<Register, std::fmt::Error> {
-        let func_name = match callee {
-            Expr::Ident(func_name) => func_name.unwrap_string(),
+        let func_name = match &callee.kind {
+            ExprKind::Ident(func_name) => func_name.unwrap_string(),
             _ => unreachable!("typechecker"),
         };
         // TODO: implement args by pushing on stack
@@ -382,9 +411,10 @@ impl Compiler {
             let reg = self.execute(&expr)?;
             writeln!(
                 self.output,
-                "\tmovl    {}, {}",
+                "\tmov{}    {}, {}",
+                expr.type_decl.unwrap().suffix(),
                 reg.name(&self.scratch),
-                Register::Arg(i).name(&self.scratch),
+                Register::Arg(i, expr.type_decl.unwrap()).name(&self.scratch),
             )?;
             reg.free(&mut self.scratch);
         }
@@ -394,7 +424,7 @@ impl Compiler {
             self.scratch.registers.iter().filter(|r| r.in_use).collect();
 
         for reg in pushed_regs.iter().by_ref() {
-            writeln!(self.output, "\tpushq   {}", reg.name_64)?;
+            writeln!(self.output, "\tpushq   {}", reg.name)?;
         }
 
         // have to 16byte align stack depending on amount of pushs before
@@ -410,15 +440,22 @@ impl Compiler {
 
         // pop registers from before function call back to scratch registers
         for reg in pushed_regs.iter().rev().by_ref() {
-            writeln!(self.output, "\tpopq   {}", reg.name_64)?;
+            writeln!(self.output, "\tpopq   {}", reg.name)?;
         }
 
-        if self.global_env.get_func(func_name) != Types::Void {
+        let return_type = self.global_env.get_func(func_name);
+        if return_type != Types::Void {
             let reg_index = self.scratch.scratch_alloc();
-            let return_reg = Register::Scratch(reg_index);
+            let return_reg = Register::Scratch(reg_index, return_type);
             writeln!(
                 self.output,
-                "\tmovl    %eax, {}",
+                "\tmov{}    {}, {}",
+                return_type.suffix(),
+                match return_type {
+                    Types::Char => "%al",
+                    Types::Int => "%eax",
+                    Types::Void => unreachable!(),
+                },
                 return_reg.name(&self.scratch)
             )?;
             Ok(return_reg)
@@ -464,7 +501,7 @@ impl Compiler {
         right.free(&mut self.scratch);
 
         let done_label = self.create_label();
-        let result = Register::Scratch(self.scratch.scratch_alloc());
+        let result = Register::Scratch(self.scratch.scratch_alloc(), Types::Int);
         // if expression true write 1 in result and skip false label
         writeln!(
             self.output,
@@ -509,7 +546,7 @@ impl Compiler {
 
         // if no prior jump was taken expression is true
         let true_label = self.create_label();
-        let result = Register::Scratch(self.scratch.scratch_alloc());
+        let result = Register::Scratch(self.scratch.scratch_alloc(), Types::Int);
         writeln!(
             self.output,
             "\tmovl    $1, {}\n\tjmp    L{}",

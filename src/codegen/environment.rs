@@ -2,8 +2,14 @@ use crate::codegen::register::StackRegister;
 use crate::common::{symbol_table::*, types::*};
 
 #[derive(Clone, PartialEq)]
+pub struct Variable {
+    pub register: StackRegister,
+    pub type_decl: Types,
+}
+
+#[derive(Clone, PartialEq)]
 pub struct Environment {
-    pub current: Table<StackRegister, Types>, // <register on stack for variable, function return type>
+    pub current: Table<Variable, Types>, // <register on stack for variable, function return type>
     pub enclosing: Option<Box<Environment>>,
 }
 impl Environment {
@@ -13,13 +19,17 @@ impl Environment {
             enclosing,
         }
     }
-    pub fn declare_var(&mut self, name: String, current_bp_offset: usize) {
-        self.current
-            .vars
-            .insert(name, StackRegister::new(current_bp_offset));
+    pub fn declare_var(&mut self, name: String, current_bp_offset: usize, type_decl: Types) {
+        self.current.vars.insert(
+            name,
+            Variable {
+                register: StackRegister::new(current_bp_offset),
+                type_decl,
+            },
+        );
     }
 
-    pub fn get_var(&self, name: String) -> StackRegister {
+    pub fn get_var(&self, name: String) -> Variable {
         match self.current.vars.get(&name) {
             Some(v) => v.clone(),
             None => match &self.enclosing {

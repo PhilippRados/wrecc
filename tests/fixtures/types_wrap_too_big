@@ -1,0 +1,7 @@
+void main(){
+  char a = 'a';
+  int b = 110;
+  char c = a + b;
+
+  printint(c);
+}

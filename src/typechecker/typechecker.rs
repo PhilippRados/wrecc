@@ -39,7 +39,10 @@ impl TypeChecker {
             )],
         }
     }
-    pub fn check(&mut self, statements: &Vec<Stmt>) -> Result<HashMap<String, usize>, Vec<Error>> {
+    pub fn check(
+        &mut self,
+        statements: &mut Vec<Stmt>,
+    ) -> Result<HashMap<String, usize>, Vec<Error>> {
         // initialze builtins so typechecker doesnt throw error when it doesnt find them in the program
         for (name, f) in self.builtins.iter().by_ref() {
             self.global_env
@@ -59,22 +62,22 @@ impl TypeChecker {
             Ok(self.func_stack_size.clone())
         }
     }
-    fn check_statements(&mut self, statements: &Vec<Stmt>) -> Result<(), Error> {
+    fn check_statements(&mut self, statements: &mut Vec<Stmt>) -> Result<(), Error> {
         for s in statements {
             self.visit(s)?
         }
         Ok(())
     }
-    fn visit(&mut self, statement: &Stmt) -> Result<(), Error> {
+    fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
         match statement {
             Stmt::DeclareVar(type_decl, var_name) => self.declare_var(type_decl, var_name),
-            Stmt::InitVar(type_decl, name, expr) => self.init_var(type_decl, name, expr),
+            Stmt::InitVar(type_decl, name, ref mut expr) => self.init_var(type_decl, name, expr),
             Stmt::Function(return_type, name, params, body) => {
-                self.function_definition(*return_type, name, params.clone(), body.clone())
+                self.function_definition(*return_type, name, params.clone(), body)
             }
-            Stmt::Return(keyword, value) => self.return_statement(keyword, value),
-            Stmt::Print(token, expr) => self.print_statement(token, expr),
-            Stmt::Expr(expr) => match self.expr_type(expr) {
+            Stmt::Return(keyword, ref mut value) => self.return_statement(keyword, value),
+            Stmt::Print(token, ref mut expr) => self.print_statement(token, expr),
+            Stmt::Expr(ref mut expr) => match self.expr_type(expr) {
                 Ok(_) => Ok(()),
                 Err(e) => Err(e),
             },
@@ -82,17 +85,19 @@ impl TypeChecker {
                 statements,
                 Environment::new(Some(Box::new(self.env.clone()))),
             ),
-            Stmt::If(keyword, cond, then_branch, else_branch) => {
+            Stmt::If(keyword, ref mut cond, then_branch, else_branch) => {
                 self.if_statement(keyword, cond, then_branch, else_branch)
             }
-            Stmt::While(left_paren, cond, body) => self.while_statement(left_paren, cond, body),
+            Stmt::While(left_paren, ref mut cond, body) => {
+                self.while_statement(left_paren, cond, body)
+            }
         }
     }
     fn while_statement(
         &mut self,
         left_paren: &Token,
-        cond: &Expr,
-        body: &Stmt,
+        cond: &mut Expr,
+        body: &mut Stmt,
     ) -> Result<(), Error> {
         if self.expr_type(cond)? == Types::Void {
             return Err(Error::new(
@@ -123,7 +128,12 @@ impl TypeChecker {
         self.env.declare_var(name, *type_decl);
         Ok(())
     }
-    fn init_var(&mut self, type_decl: &Types, var_name: &Token, expr: &Expr) -> Result<(), Error> {
+    fn init_var(
+        &mut self,
+        type_decl: &Types,
+        var_name: &Token,
+        expr: &mut Expr,
+    ) -> Result<(), Error> {
         let name = var_name.unwrap_string();
         let value = self.expr_type(expr)?;
 
@@ -146,6 +156,9 @@ impl TypeChecker {
                 ),
             ))
         } else {
+            if value < *type_decl {
+                self.cast_to(expr, *type_decl);
+            }
             self.increment_stack_size(var_name, type_decl)?;
             // currently only type-checks for void since int and char are interchangeable
             self.env.init_var(name, *type_decl);
@@ -167,9 +180,9 @@ impl TypeChecker {
     fn if_statement(
         &mut self,
         keyword: &Token,
-        cond: &Expr,
-        then_branch: &Stmt,
-        else_branch: &Option<Stmt>,
+        cond: &mut Expr,
+        then_branch: &mut Stmt,
+        else_branch: &mut Option<Stmt>,
     ) -> Result<(), Error> {
         let cond = self.expr_type(cond)?;
         if cond == Types::Void {
@@ -192,7 +205,7 @@ impl TypeChecker {
         }
         Ok(())
     }
-    fn print_statement(&mut self, token: &Token, expr: &Expr) -> Result<(), Error> {
+    fn print_statement(&mut self, token: &Token, expr: &mut Expr) -> Result<(), Error> {
         let t = self.expr_type(expr)?;
         if t == Types::Void {
             Err(Error::new(token, "can't print 'void' expression"))
@@ -205,7 +218,7 @@ impl TypeChecker {
         return_type: Types,
         name: &Token,
         params: Vec<(Types, Token)>,
-        body: Vec<Stmt>,
+        body: &mut Vec<Stmt>,
     ) -> Result<(), Error> {
         if *self.scope.last().unwrap() != Scope::Global {
             return Err(Error::new(
@@ -232,7 +245,7 @@ impl TypeChecker {
             env.init_var(name.unwrap_string(), *type_decl) // initialize params in local scope
         }
 
-        self.block(&body, env)?;
+        self.block(body, env)?;
 
         self.scope.pop();
 
@@ -246,7 +259,7 @@ impl TypeChecker {
             Ok(())
         }
     }
-    fn return_statement(&mut self, keyword: &Token, expr: &Option<Expr>) -> Result<(), Error> {
+    fn return_statement(&mut self, keyword: &Token, expr: &mut Option<Expr>) -> Result<(), Error> {
         self.returns_all_paths = true;
         if let Some(expr) = expr {
             let type_decl = self.expr_type(expr)?;
@@ -256,40 +269,44 @@ impl TypeChecker {
         }
     }
 
-    pub fn expr_type(&mut self, ast: &Expr) -> Result<Types, Error> {
-        match ast {
-            Expr::Binary { left, token, right } => self.evaluate_binary(left, token, right),
-            Expr::Unary { token: _, right } => self.evaluate_unary(right),
-            Expr::Grouping { expr } => self.evaluate_grouping(expr),
-            Expr::Number(_) => Ok(Types::Int),
-            Expr::CharLit(_) => Ok(Types::Char),
-            Expr::Logical { left, token, right } => self.evaluate_logical(left, token, right),
-            Expr::Ident(v) => self.env.get_var(v),
-            Expr::Assign { name, expr } => {
-                let value = self.expr_type(expr)?;
-                self.env.assign_var(name, value)
+    pub fn expr_type(&mut self, ast: &mut Expr) -> Result<Types, Error> {
+        ast.type_decl = Some(match &mut ast.kind {
+            ExprKind::Binary { left, token, right } => self.evaluate_binary(left, token, right)?,
+            ExprKind::Unary { token: _, right } => self.evaluate_unary(right)?,
+            ExprKind::Grouping { expr } => self.evaluate_grouping(expr)?,
+            ExprKind::Number(_) => Types::Int,
+            ExprKind::CharLit(_) => Types::Char,
+            ExprKind::Logical { left, token, right } => {
+                self.evaluate_logical(left, token, right)?
             }
-            Expr::Call {
+            ExprKind::Ident(v) => self.env.get_var(v)?,
+            ExprKind::Assign { name, expr } => {
+                let value = self.expr_type(expr)?;
+                self.env.assign_var(name, value)?
+            }
+            ExprKind::Call {
                 left_paren,
                 callee,
                 args,
-            } => self.evaluate_call(left_paren, callee, args),
-        }
+            } => self.evaluate_call(left_paren, callee, args)?,
+            ExprKind::Cast { expr: _ } => unimplemented!("explicit casts"),
+        });
+        Ok(ast.type_decl.unwrap())
     }
 
     fn evaluate_call(
         &mut self,
         left_paren: &Token,
-        callee: &Expr,
-        args: &Vec<Expr>,
+        callee: &mut Expr,
+        args: &mut Vec<Expr>,
     ) -> Result<Types, Error> {
-        let func_name = match callee {
-            Expr::Ident(func_name) => func_name,
+        let func_name = match &callee.kind {
+            ExprKind::Ident(func_name) => func_name,
             _ => return Err(Error::new(left_paren, "function-name has to be identifier")),
         };
 
         let arg_types = args
-            .iter()
+            .iter_mut()
             .map(|expr| self.expr_type(expr))
             .collect::<Result<Vec<Types>, Error>>()?;
 
@@ -301,7 +318,7 @@ impl TypeChecker {
         {
             Some(function) => {
                 if function.arity() == args.len() {
-                    Self::args_and_params_match(left_paren, &function.params, arg_types)?;
+                    self.args_and_params_match(left_paren, &function.params, args, arg_types)?;
                     Ok(function.return_type)
                 } else {
                     Err(Error::new(
@@ -322,25 +339,29 @@ impl TypeChecker {
         }
     }
     fn args_and_params_match(
+        &self,
         left_paren: &Token,
         params: &Vec<(Types, Token)>,
+        expressions: &mut Vec<Expr>,
         args: Vec<Types>,
     ) -> Result<(), Error> {
         // TODO: actually compare args not only testing for void
-        for (i, arg_type) in args.iter().enumerate() {
-            if *arg_type == Types::Void {
+        for (i, type_decl) in args.iter().enumerate() {
+            // let type_decl = self.expr_type(expr)?;
+            if *type_decl == Types::Void {
                 return Err(Error::new(
                     left_paren,
                     &format!(
                         "expected argument to be of type {} found {}",
-                        params[i].0, arg_type
+                        params[i].0, type_decl
                     ),
                 ));
             }
+            self.maybe_int_promote(&mut expressions[i]);
         }
         Ok(())
     }
-    fn block(&mut self, body: &Vec<Stmt>, env: Environment) -> Result<(), Error> {
+    fn block(&mut self, body: &mut Vec<Stmt>, env: Environment) -> Result<(), Error> {
         self.env = env;
         let result = self.check_statements(body);
 
@@ -350,47 +371,60 @@ impl TypeChecker {
     }
     fn evaluate_logical(
         &mut self,
-        left: &Expr,
+        left: &mut Expr,
         token: &Token,
-        right: &Expr,
+        right: &mut Expr,
     ) -> Result<Types, Error> {
         self.evaluate_binary(left, token, right)
     }
     fn evaluate_binary(
         &mut self,
-        left: &Expr,
+        left: &mut Expr,
         token: &Token,
-        right: &Expr,
+        right: &mut Expr,
     ) -> Result<Types, Error> {
-        let mut left = self.expr_type(left)?;
-        let mut right = self.expr_type(right)?;
+        let mut left_type = self.expr_type(left)?;
+        let mut right_type = self.expr_type(right)?;
 
-        if left == Types::Void || right == Types::Void {
+        if left_type == Types::Void || right_type == Types::Void {
             return Err(Error::new(
                 token,
                 &format!(
                     "invalid binary expression: {} {} {}",
-                    left, token.token, right
+                    left_type, token.token, right_type
                 ),
             ));
         }
 
-        left = self.maybe_int_promote(left);
-        right = self.maybe_int_promote(right);
+        left_type = self.maybe_int_promote(left);
+        right_type = self.maybe_int_promote(right);
 
-        Ok(if left > right { left } else { right }) // implicit type conversion
+        Ok(if left_type > right_type {
+            left_type
+        } else {
+            right_type
+        }) // implicit type conversion
     }
-    fn maybe_int_promote(&self, type_decl: Types) -> Types {
-        if type_decl < Types::Int {
+    fn maybe_int_promote(&self, expr: &mut Expr) -> Types {
+        if expr.type_decl.unwrap() < Types::Int {
+            self.cast_to(expr, Types::Int);
             Types::Int
         } else {
-            type_decl
+            expr.type_decl.unwrap()
         }
     }
-    fn evaluate_unary(&mut self, right: &Expr) -> Result<Types, Error> {
+    fn cast_to(&self, expr: &mut Expr, type_decl: Types) {
+        *expr = Expr {
+            kind: ExprKind::Cast {
+                expr: Box::new(expr.clone()),
+            },
+            type_decl: Some(type_decl),
+        }
+    }
+    fn evaluate_unary(&mut self, right: &mut Expr) -> Result<Types, Error> {
         self.expr_type(right)
     }
-    fn evaluate_grouping(&mut self, expr: &Expr) -> Result<Types, Error> {
+    fn evaluate_grouping(&mut self, expr: &mut Expr) -> Result<Types, Error> {
         self.expr_type(expr)
     }
     fn check_return(&mut self, keyword: &Token, body_return: Types) -> Result<(), Error> {

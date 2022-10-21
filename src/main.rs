@@ -35,13 +35,13 @@ fn main() {
     };
 
     // Parse statements
-    let statements = match Parser::new(tokens).parse() {
+    let mut statements = match Parser::new(tokens).parse() {
         Some(s) => s,
         None => return,
     };
 
     // Check for errors
-    let func_stack = match TypeChecker::new().check(&statements) {
+    let func_stack = match TypeChecker::new().check(&mut statements) {
         Ok(func_stack) => func_stack,
         Err(e) => {
             for err in e {

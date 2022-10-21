@@ -1,7 +1,9 @@
+use crate::common::types::Types;
+
 pub enum Register {
-    Scratch(ScratchIndex),
+    Scratch(ScratchIndex, Types),
     Stack(StackRegister),
-    Arg(usize),
+    Arg(usize, Types),
     Void,
 }
 impl Register {
@@ -9,28 +11,46 @@ impl Register {
         match self {
             Register::Void => unimplemented!(),
             Register::Stack(_) => (),
-            Register::Arg(_) => (),
-            Register::Scratch(index) => scratch_regs.get_mut(index).free(),
+            Register::Arg(_, _) => (),
+            Register::Scratch(index, _) => scratch_regs.get_mut(index).free(),
         }
     }
     pub fn name(&self, scratch_regs: &ScratchRegisters) -> String {
         match self {
             Register::Void => unimplemented!(),
             Register::Stack(reg) => reg.name(),
-            Register::Scratch(index) => scratch_regs.get(index).name.to_string(),
-            Register::Arg(index) => self.get_arg_reg(*index).to_string(),
+            Register::Scratch(index, type_decl) => {
+                format!("{}{}", scratch_regs.get(index).name, type_decl.reg_suffix())
+            }
+            Register::Arg(index, type_decl) => self.get_arg_reg(*index, *type_decl).to_string(),
         }
     }
     // argument registers from 1st to last
-    fn get_arg_reg(&self, index: usize) -> &str {
-        match index {
-            0 => "%edi",
-            1 => "%esi",
-            2 => "%edx",
-            3 => "%ecx",
-            4 => "%r8d",
-            5 => "%r9d",
+    fn get_arg_reg(&self, index: usize, type_decl: Types) -> &str {
+        // char gets promoted to 32bit as argument
+        match (type_decl, index) {
+            (Types::Int, 0) => "%edi",
+            (Types::Int, 1) => "%esi",
+            (Types::Int, 2) => "%edx",
+            (Types::Int, 3) => "%ecx",
+            (Types::Int, 4) => "%r8d",
+            (Types::Int, 5) => "%r9d",
+
+            (Types::Char, 0) => "%dil",
+            (Types::Char, 1) => "%sil",
+            (Types::Char, 2) => "%dl",
+            (Types::Char, 3) => "%cl",
+            (Types::Char, 4) => "%r8b",
+            (Types::Char, 5) => "%r9b",
             _ => unreachable!(),
+        }
+    }
+    pub fn set_type(&mut self, type_decl: Types) {
+        match self {
+            Register::Void => unimplemented!(),
+            Register::Stack(_) => (),
+            Register::Scratch(_, old_decl) => *old_decl = type_decl,
+            Register::Arg(_, old_decl) => *old_decl = type_decl,
         }
     }
 }
@@ -79,8 +99,7 @@ impl From<usize> for ScratchIndex {
 #[derive(Clone, Debug)]
 pub struct ScratchRegister {
     pub in_use: bool,
-    name: &'static str,
-    pub name_64: &'static str,
+    pub name: &'static str,
 }
 impl ScratchRegister {
     fn free(&mut self) {
@@ -111,23 +130,19 @@ impl ScratchRegisters {
             registers: [
                 ScratchRegister {
                     in_use: false,
-                    name: "%r8d",
-                    name_64: "%r8",
+                    name: "%r8",
                 },
                 ScratchRegister {
                     in_use: false,
-                    name: "%r9d",
-                    name_64: "%r9",
+                    name: "%r9",
                 },
                 ScratchRegister {
                     in_use: false,
-                    name: "%r10d",
-                    name_64: "%r10",
+                    name: "%r10",
                 },
                 ScratchRegister {
                     in_use: false,
-                    name: "%r11d",
-                    name_64: "%r11",
+                    name: "%r11",
                 },
             ],
         }

@@ -120,7 +120,7 @@ impl Parser {
             body = Stmt::While(left_paren, cond.unwrap(), Box::new(body));
         } else {
             // if no condition then condition is true
-            body = Stmt::While(left_paren, Expr::Number(1), Box::new(body));
+            body = Stmt::While(left_paren, Expr::new(ExprKind::Number(1)), Box::new(body));
         }
         if init != None {
             body = Stmt::Block(vec![init.unwrap(), body]);
@@ -245,12 +245,12 @@ impl Parser {
 
         if self.matches(vec![TokenKind::Equal]).is_some() {
             let value = self.expression()?;
-            match expr {
-                Expr::Ident(name) => {
-                    return Ok(Expr::Assign {
+            match expr.kind {
+                ExprKind::Ident(name) => {
+                    return Ok(Expr::new(ExprKind::Assign {
                         name,
                         expr: Box::new(value),
-                    });
+                    }));
                 }
                 _ => {
                     let t = self.tokens.peek().unwrap();
@@ -265,11 +265,11 @@ impl Parser {
 
         while let Some(token) = self.matches(vec![TokenKind::PipePipe]) {
             let right = self.and()?;
-            expr = Expr::Logical {
+            expr = Expr::new(ExprKind::Logical {
                 left: Box::new(expr),
                 token,
                 right: Box::new(right),
-            }
+            })
         }
         Ok(expr)
     }
@@ -278,11 +278,11 @@ impl Parser {
 
         while let Some(token) = self.matches(vec![TokenKind::AmpAmp]) {
             let right = self.equality()?;
-            expr = Expr::Logical {
+            expr = Expr::new(ExprKind::Logical {
                 left: Box::new(expr),
                 token,
                 right: Box::new(right),
-            }
+            })
         }
         Ok(expr)
     }
@@ -292,11 +292,11 @@ impl Parser {
         while let Some(token) = self.matches(vec![TokenKind::BangEqual, TokenKind::EqualEqual]) {
             let operator = token;
             let right = self.comparison()?;
-            expr = Expr::Binary {
+            expr = Expr::new(ExprKind::Binary {
                 left: Box::new(expr),
                 token: operator,
                 right: Box::new(right),
-            }
+            })
         }
         Ok(expr)
     }
@@ -311,11 +311,11 @@ impl Parser {
         ]) {
             let operator = token;
             let right = self.term()?;
-            expr = Expr::Binary {
+            expr = Expr::new(ExprKind::Binary {
                 left: Box::new(expr),
                 token: operator,
                 right: Box::new(right),
-            };
+            });
         }
         Ok(expr)
     }
@@ -325,11 +325,11 @@ impl Parser {
         while let Some(token) = self.matches(vec![TokenKind::Minus, TokenKind::Plus]) {
             let operator = token;
             let right = self.factor()?;
-            expr = Expr::Binary {
+            expr = Expr::new(ExprKind::Binary {
                 left: Box::new(expr),
                 token: operator,
                 right: Box::new(right),
-            };
+            });
         }
         Ok(expr)
     }
@@ -339,11 +339,11 @@ impl Parser {
         while let Some(token) = self.matches(vec![TokenKind::Slash, TokenKind::Star]) {
             let operator = token;
             let right = self.unary()?;
-            expr = Expr::Binary {
+            expr = Expr::new(ExprKind::Binary {
                 left: Box::new(expr),
                 token: operator,
                 right: Box::new(right),
-            };
+            });
         }
         Ok(expr)
     }
@@ -351,10 +351,10 @@ impl Parser {
         if let Some(token) = self.matches(vec![TokenKind::Bang, TokenKind::Minus]) {
             let operator = token;
             let right = self.unary()?;
-            return Ok(Expr::Unary {
+            return Ok(Expr::new(ExprKind::Unary {
                 token: operator,
                 right: Box::new(right),
-            });
+            }));
         }
         self.call()
     }
@@ -377,30 +377,30 @@ impl Parser {
             }
         }
         self.consume(TokenKind::RightParen, "Expect ')' after function call")?;
-        Ok(Expr::Call {
+        Ok(Expr::new(ExprKind::Call {
             left_paren,
             callee: Box::new(callee),
             args,
-        })
+        }))
     }
     fn primary(&mut self) -> Result<Expr, Error> {
         //TODO: avoid repition
         if let Some(n) = self.matches(vec![TokenKind::Number]) {
-            return Ok(Expr::Number(n.unwrap_num()));
+            return Ok(Expr::new(ExprKind::Number(n.unwrap_num())));
         }
         if let Some(c) = self.matches(vec![TokenKind::CharLit]) {
-            return Ok(Expr::CharLit(c.unwrap_char()));
+            return Ok(Expr::new(ExprKind::CharLit(c.unwrap_char())));
         }
         if let Some(s) = self.matches(vec![TokenKind::Ident]) {
-            return Ok(Expr::Ident(s));
+            return Ok(Expr::new(ExprKind::Ident(s)));
         }
 
         if self.matches(vec![TokenKind::LeftParen]).is_some() {
             let expr = self.expression()?;
             self.consume(TokenKind::RightParen, "missing closing ')'")?;
-            return Ok(Expr::Grouping {
+            return Ok(Expr::new(ExprKind::Grouping {
                 expr: Box::new(expr),
-            });
+            }));
         }
         match self.tokens.peek() {
             Some(t) => Err(Error::new(
@@ -496,15 +496,15 @@ mod tests {
         let mut p = Parser::new(tokens);
 
         let result = p.expression();
-        let expected = Expr::Binary {
-            left: Box::new(Expr::Number(32)),
+        let expected = Expr::new(ExprKind::Binary {
+            left: Box::new(Expr::new(ExprKind::Number(32))),
             token: token_default!(TokenType::Plus),
-            right: Box::new(Expr::Binary {
-                left: Box::new(Expr::Number(1)),
+            right: Box::new(Expr::new(ExprKind::Binary {
+                left: Box::new(Expr::new(ExprKind::Number(1))),
                 token: token_default!(TokenType::Star),
-                right: Box::new(Expr::Number(2)),
-            }),
-        };
+                right: Box::new(Expr::new(ExprKind::Number(2))),
+            })),
+        });
         assert_eq!(result.unwrap(), expected);
     }
     #[test]
@@ -539,27 +539,27 @@ mod tests {
         let mut p = Parser::new(tokens);
 
         let result = p.expression();
-        let expected = Expr::Binary {
-            left: Box::new(Expr::Grouping {
-                expr: Box::new(Expr::Binary {
-                    left: Box::new(Expr::Binary {
-                        left: Box::new(Expr::Number(3)),
+        let expected = Expr::new(ExprKind::Binary {
+            left: Box::new(Expr::new(ExprKind::Grouping {
+                expr: Box::new(Expr::new(ExprKind::Binary {
+                    left: Box::new(Expr::new(ExprKind::Binary {
+                        left: Box::new(Expr::new(ExprKind::Number(3))),
                         token: token_default!(TokenType::Slash),
-                        right: Box::new(Expr::Grouping {
-                            expr: Box::new(Expr::Binary {
-                                left: Box::new(Expr::Number(6)),
+                        right: Box::new(Expr::new(ExprKind::Grouping {
+                            expr: Box::new(Expr::new(ExprKind::Binary {
+                                left: Box::new(Expr::new(ExprKind::Number(6))),
                                 token: token_default!(TokenType::Minus),
-                                right: Box::new(Expr::Number(7)),
-                            }),
-                        }),
-                    }),
+                                right: Box::new(Expr::new(ExprKind::Number(7))),
+                            })),
+                        })),
+                    })),
                     token: token_default!(TokenType::Star),
-                    right: Box::new(Expr::Number(2)),
-                }),
-            }),
+                    right: Box::new(Expr::new(ExprKind::Number(2))),
+                })),
+            })),
             token: token_default!(TokenType::Plus),
-            right: Box::new(Expr::Number(1)),
-        };
+            right: Box::new(Expr::new(ExprKind::Number(1))),
+        });
 
         assert_eq!(result.unwrap(), expected);
     }

@@ -1,7 +1,7 @@
 use crate::common::token::TokenKind;
 use std::fmt::Display;
 
-#[derive(Copy, Clone, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub enum Types {
     Void, // type-promotion order
     Char,
@@ -17,6 +17,20 @@ impl Types {
             Types::Void => 0,
             Types::Char => 1,
             Types::Int => 4,
+        }
+    }
+    pub fn reg_suffix(&self) -> &str {
+        match self {
+            Types::Void => unreachable!(),
+            Types::Char => "b",
+            Types::Int => "d",
+        }
+    }
+    pub fn suffix(&self) -> &str {
+        match self {
+            Types::Void => unreachable!(),
+            Types::Char => "b",
+            Types::Int => "l",
         }
     }
 }

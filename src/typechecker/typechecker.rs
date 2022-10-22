@@ -5,6 +5,7 @@ use std::collections::HashMap;
 #[derive(PartialEq)]
 enum Scope {
     Global,
+    Block,
     Function(String, Types), // function name and return type
 }
 pub struct TypeChecker {
@@ -79,6 +80,12 @@ impl TypeChecker {
         Ok(())
     }
     fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
+        if !matches!(statement, Stmt::Function(_, _, _, _)) && self.find_function() == None {
+            return Err(Error::new(
+                statement.get_token(),
+                &format!("can't have {} in global scope", statement),
+            ));
+        }
         match statement {
             Stmt::DeclareVar(type_decl, var_name) => self.declare_var(type_decl, var_name),
             Stmt::InitVar(type_decl, name, ref mut expr) => self.init_var(type_decl, name, expr),
@@ -91,10 +98,14 @@ impl TypeChecker {
                 Ok(_) => Ok(()),
                 Err(e) => Err(e),
             },
-            Stmt::Block(statements) => self.block(
-                statements,
-                Environment::new(Some(Box::new(self.env.clone()))),
-            ),
+            Stmt::Block(left_paren, statements) => {
+                self.scope.push(Scope::Block);
+                self.block(
+                    left_paren,
+                    statements,
+                    Environment::new(Some(Box::new(self.env.clone()))),
+                )
+            }
             Stmt::If(keyword, ref mut cond, then_branch, else_branch) => {
                 self.if_statement(keyword, cond, then_branch, else_branch)
             }
@@ -242,24 +253,23 @@ impl TypeChecker {
             self.found_main = true;
         }
 
-        self.scope
-            .push(Scope::Function(name.unwrap_string(), return_type));
-
         self.global_env
             .declare_func(return_type, &name.unwrap_string(), params.clone());
 
+        // have to push scope before declaring local variables
+        self.scope
+            .push(Scope::Function(name.unwrap_string(), return_type));
+        let mut env = Environment::new(Some(Box::new(self.env.clone()))); // create new scope for function body
+
         // initialize stack size for current function-scope
         self.func_stack_size.insert(name.unwrap_string(), 0);
-
-        let mut env = Environment::new(Some(Box::new(self.env.clone()))); // create new scope for function body
         for (type_decl, name) in params.iter() {
             self.increment_stack_size(name, type_decl)?; // add params to stack-size
             env.init_var(name.unwrap_string(), *type_decl) // initialize params in local scope
         }
 
-        self.block(body, env)?;
-
-        self.scope.pop();
+        // check function body
+        self.block(name, body, env)?;
 
         if return_type != Types::Void && !self.returns_all_paths {
             Err(Error::new(
@@ -374,11 +384,20 @@ impl TypeChecker {
         }
         Ok(())
     }
-    fn block(&mut self, body: &mut Vec<Stmt>, env: Environment) -> Result<(), Error> {
+    fn block(
+        &mut self,
+        token: &Token,
+        body: &mut Vec<Stmt>,
+        env: Environment,
+    ) -> Result<(), Error> {
+        if self.find_function() == None {
+            return Err(Error::new(token, "can't declare block in global scope"));
+        }
         self.env = env;
         let result = self.check_statements(body);
 
         self.env = *self.env.enclosing.as_ref().unwrap().clone();
+        self.scope.pop();
 
         result
     }

@@ -74,8 +74,8 @@ impl Parser {
         if self.matches(vec![TokenKind::While]).is_some() {
             return self.while_statement();
         }
-        if self.matches(vec![TokenKind::LeftBrace]).is_some() {
-            return Ok(Stmt::Block(self.block()?));
+        if let Some(t) = self.matches(vec![TokenKind::LeftBrace]) {
+            return Ok(Stmt::Block(t, self.block()?));
         }
         self.expression_statement()
     }
@@ -114,16 +114,20 @@ impl Parser {
         // for loop is syntax sugar for while loop
         let mut body = self.statement()?;
         if inc != None {
-            body = Stmt::Block(vec![body, Stmt::Expr(inc.unwrap())]);
+            body = Stmt::Block(left_paren.clone(), vec![body, Stmt::Expr(inc.unwrap())]);
         }
         if cond != None {
-            body = Stmt::While(left_paren, cond.unwrap(), Box::new(body));
+            body = Stmt::While(left_paren.clone(), cond.unwrap(), Box::new(body));
         } else {
             // if no condition then condition is true
-            body = Stmt::While(left_paren, Expr::new(ExprKind::Number(1)), Box::new(body));
+            body = Stmt::While(
+                left_paren.clone(),
+                Expr::new(ExprKind::Number(1)),
+                Box::new(body),
+            );
         }
         if init != None {
-            body = Stmt::Block(vec![init.unwrap(), body]);
+            body = Stmt::Block(left_paren.clone(), vec![init.unwrap(), body]);
         }
 
         Ok(body)

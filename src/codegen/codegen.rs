@@ -9,7 +9,6 @@ pub struct Compiler {
     scratch: ScratchRegisters,
     output: String,
     env: Environment,
-    global_env: Environment,
     function_name: Option<String>,
     label_index: usize,
     func_stack_size: HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
@@ -17,8 +16,6 @@ pub struct Compiler {
 }
 impl Compiler {
     pub fn new(func_stack_size: HashMap<String, usize>) -> Self {
-        let mut global_env = Environment::new(None);
-        global_env.declare_func("printint".to_string(), Types::Void);
         Compiler {
             output: String::new(),
             scratch: ScratchRegisters::new(),
@@ -27,7 +24,6 @@ impl Compiler {
             env: Environment::new(None),
             function_name: None,
             func_stack_size,
-            global_env,
         }
     }
     fn preamble() -> &'static str {
@@ -89,12 +85,12 @@ impl Compiler {
                 let mut value_reg = self.execute(expr)?;
                 self.init_var(type_decl, name.unwrap_string(), &mut value_reg)
             }
-            Stmt::Block(statements) => self.block(
+            Stmt::Block(_, statements) => self.block(
                 statements,
                 Environment::new(Some(Box::new(self.env.clone()))),
             ),
-            Stmt::Function(return_type, name, params, body) => {
-                self.function_definition(return_type, name.unwrap_string(), params, body)
+            Stmt::Function(_, name, params, body) => {
+                self.function_definition(name.unwrap_string(), params, body)
             }
             Stmt::Return(_, expr) => self.return_statement(expr), // jump to function postamble
             Stmt::If(_, cond, then_branch, else_branch) => {
@@ -204,7 +200,7 @@ impl Compiler {
             "\tmov{}    {}, {}",
             type_decl.suffix(),
             value_reg.name(&self.scratch),
-            self.env.get_var(name).register.name() // since var-declaration set everything up we just need declared register
+            self.env.get_var(name).name(&self.scratch) // since var-declaration set everything up we just need declared register
         )?;
         value_reg.free(&mut self.scratch);
 
@@ -212,18 +208,15 @@ impl Compiler {
     }
     fn function_definition(
         &mut self,
-        return_type: &Types,
         name: String,
         params: &[(Types, Token)],
         body: &Vec<Stmt>,
     ) -> Result<(), std::fmt::Error> {
-        self.global_env.declare_func(name.clone(), *return_type);
-
         self.function_name = Some(name.clone()); // save function name for return label jump
 
         // generate function code
         self.cg_func_preamble(&name, params)?;
-        self.visit(&Stmt::Block(body.clone()))?;
+        self.cg_stmts(body)?;
         self.cg_func_postamble(&name)?;
 
         self.current_bp_offset = 0;
@@ -337,7 +330,7 @@ impl Compiler {
                 left_paren: _,
                 callee,
                 args,
-            } => self.cg_call(callee, args),
+            } => self.cg_call(callee, args, ast.type_decl.unwrap()),
             ExprKind::CastUp { expr } => self.cg_cast_up(expr, ast.type_decl.unwrap()),
             ExprKind::CastDown { expr } => self.cg_cast_down(expr, ast.type_decl.unwrap()),
         }
@@ -379,7 +372,7 @@ impl Compiler {
         let new_reg = self.env.get_var(name.clone()); // since stack pos is the same we don't have to change env
 
         // can't move from mem to mem so make temp scratch-register
-        if matches!(value_reg, Register::Stack(_)) {
+        if matches!(value_reg, Register::Stack(_, _)) {
             let temp_scratch =
                 Register::Scratch(self.scratch.scratch_alloc(), expr.type_decl.unwrap());
 
@@ -395,26 +388,31 @@ impl Compiler {
             self.output,
             "\tmovl    {}, {}",
             value_reg.name(&self.scratch),
-            new_reg.register.name(),
+            new_reg.name(&self.scratch),
         )?;
         value_reg.free(&mut self.scratch);
-        Ok(Register::Stack(new_reg.register))
+        Ok(new_reg)
     }
     fn cg_ident(&mut self, name: String) -> Result<Register, std::fmt::Error> {
         let stack_reg = self.env.get_var(name);
         let dest_reg_index = self.scratch.scratch_alloc();
-        let reg = Register::Scratch(dest_reg_index, stack_reg.type_decl);
+        let reg = Register::Scratch(dest_reg_index, stack_reg.get_type());
 
         writeln!(
             self.output,
             "\tmov{}    {}, {}",
-            stack_reg.type_decl.suffix(),
-            stack_reg.register.name(),
+            stack_reg.get_type().suffix(),
+            stack_reg.name(&self.scratch),
             reg.name(&self.scratch)
         )?;
         Ok(reg)
     }
-    fn cg_call(&mut self, callee: &Expr, args: &Vec<Expr>) -> Result<Register, std::fmt::Error> {
+    fn cg_call(
+        &mut self,
+        callee: &Expr,
+        args: &Vec<Expr>,
+        return_type: Types,
+    ) -> Result<Register, std::fmt::Error> {
         let func_name = match &callee.kind {
             ExprKind::Ident(func_name) => func_name.unwrap_string(),
             _ => unreachable!("typechecker"),
@@ -459,7 +457,6 @@ impl Compiler {
             writeln!(self.output, "\tpopq   {}", reg.name)?;
         }
 
-        let return_type = self.global_env.get_func(func_name);
         if return_type != Types::Void {
             let reg_index = self.scratch.scratch_alloc();
             let return_reg = Register::Scratch(reg_index, return_type);
@@ -467,11 +464,7 @@ impl Compiler {
                 self.output,
                 "\tmov{}    {}, {}",
                 return_type.suffix(),
-                match return_type {
-                    Types::Char => "%al",
-                    Types::Int => "%eax",
-                    Types::Void => unreachable!(),
-                },
+                return_type.return_reg(),
                 return_reg.name(&self.scratch)
             )?;
             Ok(return_reg)

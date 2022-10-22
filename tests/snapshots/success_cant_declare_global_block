@@ -1,0 +1,4 @@
+Error: can't have 'block-statement' in global scope
+|
+2 {
+| ^

@@ -1,8 +1,9 @@
 use crate::common::types::Types;
 
+#[derive(Clone)]
 pub enum Register {
     Scratch(ScratchIndex, Types),
-    Stack(StackRegister),
+    Stack(StackRegister, Types),
     Arg(usize, Types),
     Void,
 }
@@ -10,7 +11,7 @@ impl Register {
     pub fn free(&self, scratch_regs: &mut ScratchRegisters) {
         match self {
             Register::Void => unimplemented!(),
-            Register::Stack(_) => (),
+            Register::Stack(_, _) => (),
             Register::Arg(_, _) => (),
             Register::Scratch(index, _) => scratch_regs.get_mut(index).free(),
         }
@@ -18,7 +19,7 @@ impl Register {
     pub fn name(&self, scratch_regs: &ScratchRegisters) -> String {
         match self {
             Register::Void => unimplemented!(),
-            Register::Stack(reg) => reg.name(),
+            Register::Stack(reg, _) => reg.name(),
             Register::Scratch(index, type_decl) => {
                 format!("{}{}", scratch_regs.get(index).name, type_decl.reg_suffix())
             }
@@ -48,13 +49,21 @@ impl Register {
     pub fn set_type(&mut self, type_decl: Types) {
         match self {
             Register::Void => unimplemented!(),
-            Register::Stack(_) => (),
+            Register::Stack(_, _) => (),
             Register::Scratch(_, old_decl) => *old_decl = type_decl,
             Register::Arg(_, old_decl) => *old_decl = type_decl,
         }
     }
+    pub fn get_type(&self) -> Types {
+        match self {
+            Register::Void => unimplemented!(),
+            Register::Stack(_, type_decl) => *type_decl,
+            Register::Scratch(_, type_decl) => *type_decl,
+            Register::Arg(_, type_decl) => *type_decl,
+        }
+    }
 }
-#[derive(PartialEq, Clone)]
+#[derive(Clone)]
 pub struct StackRegister {
     bp_offset: usize,
 }

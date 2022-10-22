@@ -33,6 +33,13 @@ impl Types {
             Types::Int => "l",
         }
     }
+    pub fn return_reg(&self) -> &str {
+        match self {
+            Types::Void => unreachable!(),
+            Types::Char => "%al",
+            Types::Int => "%eax",
+        }
+    }
 }
 impl Display for Types {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -28,7 +28,10 @@ pub enum ExprKind {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
-    Cast {
+    CastUp {
+        expr: Box<Expr>,
+    },
+    CastDown {
         expr: Box<Expr>,
     },
     Number(i32),

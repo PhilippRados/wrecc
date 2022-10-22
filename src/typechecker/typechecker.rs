@@ -17,6 +17,16 @@ pub struct TypeChecker {
     func_stack_size: HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
     found_main: bool,
 }
+macro_rules! cast {
+    ($ex:expr,$new_type:expr,$kind:ident) => {
+        *$ex = Expr {
+            kind: ExprKind::$kind {
+                expr: Box::new($ex.clone()),
+            },
+            type_decl: Some($new_type),
+        }
+    };
+}
 impl TypeChecker {
     pub fn new() -> Self {
         TypeChecker {
@@ -157,7 +167,9 @@ impl TypeChecker {
             ))
         } else {
             if value < *type_decl {
-                self.cast_to(expr, *type_decl);
+                cast!(expr, *type_decl, CastUp);
+            } else if value > *type_decl {
+                cast!(expr, *type_decl, CastDown);
             }
             self.increment_stack_size(var_name, type_decl)?;
             // currently only type-checks for void since int and char are interchangeable
@@ -289,7 +301,8 @@ impl TypeChecker {
                 callee,
                 args,
             } => self.evaluate_call(left_paren, callee, args)?,
-            ExprKind::Cast { expr: _ } => unimplemented!("explicit casts"),
+            ExprKind::CastUp { expr: _ } => unimplemented!("explicit casts"),
+            ExprKind::CastDown { expr: _ } => unimplemented!("explicit casts"),
         });
         Ok(ast.type_decl.unwrap())
     }
@@ -399,26 +412,19 @@ impl TypeChecker {
         left_type = self.maybe_int_promote(left);
         right_type = self.maybe_int_promote(right);
 
+        // TODO: translate this into codegen
         Ok(if left_type > right_type {
             left_type
         } else {
             right_type
-        }) // implicit type conversion
+        })
     }
     fn maybe_int_promote(&self, expr: &mut Expr) -> Types {
         if expr.type_decl.unwrap() < Types::Int {
-            self.cast_to(expr, Types::Int);
+            cast!(expr, Types::Int, CastUp);
             Types::Int
         } else {
             expr.type_decl.unwrap()
-        }
-    }
-    fn cast_to(&self, expr: &mut Expr, type_decl: Types) {
-        *expr = Expr {
-            kind: ExprKind::Cast {
-                expr: Box::new(expr.clone()),
-            },
-            type_decl: Some(type_decl),
         }
     }
     fn evaluate_unary(&mut self, right: &mut Expr) -> Result<Types, Error> {

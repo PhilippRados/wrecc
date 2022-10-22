@@ -198,7 +198,6 @@ impl Compiler {
         value_reg: &mut Register,
     ) -> Result<(), std::fmt::Error> {
         self.declare_var(type_decl, name.clone())?;
-        value_reg.set_type(*type_decl); // change type of rvalue to be lvalue
 
         writeln!(
             self.output,
@@ -339,16 +338,33 @@ impl Compiler {
                 callee,
                 args,
             } => self.cg_call(callee, args),
-            ExprKind::Cast { expr } => self.cg_cast(expr, ast.type_decl.unwrap()),
+            ExprKind::CastUp { expr } => self.cg_cast_up(expr, ast.type_decl.unwrap()),
+            ExprKind::CastDown { expr } => self.cg_cast_down(expr, ast.type_decl.unwrap()),
         }
     }
-    fn cg_cast(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
+    fn cg_cast_down(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
+        let mut value_reg = self.execute(expr)?;
+        let dest_reg = Register::Scratch(self.scratch.scratch_alloc(), new_type);
+        value_reg.set_type(new_type);
+
+        writeln!(
+            self.output,
+            "mov{}   {}, {}", // cut off first n bytes of value-register
+            new_type.suffix(),
+            value_reg.name(&self.scratch),
+            dest_reg.name(&self.scratch)
+        )?;
+        value_reg.free(&mut self.scratch);
+
+        Ok(dest_reg)
+    }
+    fn cg_cast_up(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
         let value_reg = self.execute(expr)?;
         let dest_reg = Register::Scratch(self.scratch.scratch_alloc(), new_type);
 
         writeln!(
             self.output,
-            "movs{}{}   {}, {}",
+            "movs{}{}   {}, {}", //sign extend smaller type
             expr.type_decl.unwrap().suffix(),
             new_type.suffix(),
             value_reg.name(&self.scratch),

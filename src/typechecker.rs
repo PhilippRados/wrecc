@@ -1,5 +1,4 @@
-use crate::common::{error::*, expr::*, stmt::*, token::*, types::*};
-use crate::typechecker::environment::*;
+use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
 use std::collections::HashMap;
 
 #[derive(PartialEq)]
@@ -11,8 +10,8 @@ enum Scope {
 pub struct TypeChecker {
     errors: Vec<Error>,
     scope: Vec<Scope>,
-    env: Environment,
-    global_env: Environment,
+    env: Environment<Types>,
+    global_env: Environment<Types>,
     returns_all_paths: bool,
     builtins: Vec<(&'static str, Function)>,
     func_stack_size: HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
@@ -388,7 +387,7 @@ impl TypeChecker {
         &mut self,
         token: &Token,
         body: &mut Vec<Stmt>,
-        env: Environment,
+        env: Environment<Types>,
     ) -> Result<(), Error> {
         if self.find_function() == None {
             return Err(Error::new(token, "can't declare block in global scope"));

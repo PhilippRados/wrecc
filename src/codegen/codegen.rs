@@ -1,5 +1,5 @@
-use crate::codegen::{environment::*, register::*};
-use crate::common::{error::*, expr::*, stmt::*, token::*, types::*};
+use crate::codegen::register::*;
+use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::fs::File;
@@ -8,7 +8,7 @@ use std::io::Write as _;
 pub struct Compiler {
     scratch: ScratchRegisters,
     output: String,
-    env: Environment,
+    env: Environment<Register>,
     function_name: Option<String>,
     label_index: usize,
     func_stack_size: HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
@@ -83,7 +83,7 @@ impl Compiler {
             Stmt::DeclareVar(type_decl, name) => self.declare_var(type_decl, name.unwrap_string()),
             Stmt::InitVar(type_decl, name, expr) => {
                 let mut value_reg = self.execute(expr)?;
-                self.init_var(type_decl, name.unwrap_string(), &mut value_reg)
+                self.init_var(type_decl, name, &mut value_reg)
             }
             Stmt::Block(_, statements) => self.block(
                 statements,
@@ -183,24 +183,26 @@ impl Compiler {
     fn declare_var(&mut self, type_decl: &Types, name: String) -> Result<(), std::fmt::Error> {
         self.current_bp_offset += type_decl.size();
 
-        self.env
-            .declare_var(name, self.current_bp_offset, *type_decl);
+        self.env.declare_var(
+            name,
+            Register::Stack(StackRegister::new(self.current_bp_offset), *type_decl),
+        );
         Ok(())
     }
     fn init_var(
         &mut self,
         type_decl: &Types,
-        name: String,
+        name: &Token,
         value_reg: &mut Register,
     ) -> Result<(), std::fmt::Error> {
-        self.declare_var(type_decl, name.clone())?;
+        self.declare_var(type_decl, name.unwrap_string())?;
 
         writeln!(
             self.output,
             "\tmov{}    {}, {}",
             type_decl.suffix(),
             value_reg.name(&self.scratch),
-            self.env.get_var(name).name(&self.scratch) // since var-declaration set everything up we just need declared register
+            self.env.get_var(name).unwrap().name(&self.scratch) // since var-declaration set everything up we just need declared register
         )?;
         value_reg.free(&mut self.scratch);
 
@@ -270,11 +272,7 @@ impl Compiler {
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
-            self.init_var(
-                type_decl,
-                param_name.unwrap_string(),
-                &mut Register::Arg(i, *type_decl),
-            )?;
+            self.init_var(type_decl, param_name, &mut Register::Arg(i, *type_decl))?;
         }
         Ok(())
     }
@@ -293,7 +291,7 @@ impl Compiler {
     pub fn block(
         &mut self,
         statements: &Vec<Stmt>,
-        env: Environment,
+        env: Environment<Register>,
     ) -> Result<(), std::fmt::Error> {
         self.env = env;
         let result = self.cg_stmts(statements);
@@ -324,8 +322,8 @@ impl Compiler {
             ExprKind::Grouping { expr } => self.execute(expr),
             ExprKind::Unary { token, right } => self.cg_unary(token, right),
             ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
-            ExprKind::Assign { name, expr } => self.cg_assign(name.unwrap_string(), expr),
-            ExprKind::Ident(name) => self.cg_ident(name.unwrap_string()),
+            ExprKind::Assign { name, expr } => self.cg_assign(name, expr),
+            ExprKind::Ident(name) => self.cg_ident(name),
             ExprKind::Call {
                 left_paren: _,
                 callee,
@@ -367,9 +365,9 @@ impl Compiler {
 
         Ok(dest_reg)
     }
-    fn cg_assign(&mut self, name: String, expr: &Expr) -> Result<Register, std::fmt::Error> {
+    fn cg_assign(&mut self, name: &Token, expr: &Expr) -> Result<Register, std::fmt::Error> {
         let mut value_reg = self.execute(expr)?;
-        let new_reg = self.env.get_var(name.clone()); // since stack pos is the same we don't have to change env
+        let new_reg = self.env.get_var(name).unwrap(); // since stack pos is the same we don't have to change env
 
         // can't move from mem to mem so make temp scratch-register
         if matches!(value_reg, Register::Stack(_, _)) {
@@ -393,8 +391,8 @@ impl Compiler {
         value_reg.free(&mut self.scratch);
         Ok(new_reg)
     }
-    fn cg_ident(&mut self, name: String) -> Result<Register, std::fmt::Error> {
-        let stack_reg = self.env.get_var(name);
+    fn cg_ident(&mut self, name: &Token) -> Result<Register, std::fmt::Error> {
+        let stack_reg = self.env.get_var(name).unwrap();
         let dest_reg_index = self.scratch.scratch_alloc();
         let reg = Register::Scratch(dest_reg_index, stack_reg.get_type());
 

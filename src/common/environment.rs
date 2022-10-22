@@ -1,4 +1,6 @@
-use crate::common::{error::*, symbol_table::*, token::*, types::*};
+use crate::common::{error::*, token::*, types::*};
+
+use std::collections::HashMap;
 
 #[derive(Clone, PartialEq)]
 pub struct Function {
@@ -18,28 +20,37 @@ impl Function {
 }
 
 #[derive(Clone, PartialEq)]
-pub struct Environment {
-    pub current: Table<Types, Function>,
-    pub enclosing: Option<Box<Environment>>,
+pub struct Table<T> {
+    pub vars: HashMap<String, T>,
+    pub funcs: HashMap<String, Function>,
 }
-impl Environment {
-    pub fn new(enclosing: Option<Box<Environment>>) -> Self {
+impl<T> Table<T> {
+    pub fn new() -> Self {
+        Table {
+            vars: HashMap::<String, T>::new(),
+            funcs: HashMap::<String, Function>::new(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub struct Environment<T> {
+    pub current: Table<T>,
+    pub enclosing: Option<Box<Environment<T>>>,
+}
+impl<T: Clone> Environment<T> {
+    pub fn new(enclosing: Option<Box<Environment<T>>>) -> Self {
         Environment {
             current: Table::new(),
             enclosing,
         }
     }
-    pub fn declare_var(&mut self, name: String, type_decl: Types) {
-        self.current.vars.insert(name, type_decl);
+    // methods used for typechecker AND codegen
+    pub fn declare_var(&mut self, name: String, value: T) {
+        self.current.vars.insert(name, value);
     }
 
-    pub fn declare_func(&mut self, return_type: Types, name: &str, params: Vec<(Types, Token)>) {
-        let f = Function::new(return_type, params);
-
-        self.current.funcs.insert(name.to_string(), f);
-    }
-
-    pub fn get_var(&self, var_name: &Token) -> Result<Types, Error> {
+    pub fn get_var(&self, var_name: &Token) -> Result<T, Error> {
         let name = var_name.unwrap_string();
         match self.current.vars.get(&name) {
             Some(v) => Ok(v.clone()),
@@ -49,7 +60,8 @@ impl Environment {
             },
         }
     }
-    pub fn assign_var(&mut self, var_name: &Token, value: Types) -> Result<Types, Error> {
+    // methods for only typechecker
+    pub fn assign_var(&mut self, var_name: &Token, value: T) -> Result<T, Error> {
         let name = var_name.unwrap_string();
         match self.current.vars.contains_key(&name) {
             true => {
@@ -62,7 +74,13 @@ impl Environment {
             },
         }
     }
-    pub fn init_var(&mut self, name: String, value: Types) {
+    pub fn init_var(&mut self, name: String, value: T) {
         self.current.vars.insert(name, value);
+    }
+
+    pub fn declare_func(&mut self, return_type: Types, name: &str, params: Vec<(Types, Token)>) {
+        let f = Function::new(return_type, params);
+
+        self.current.funcs.insert(name.to_string(), f);
     }
 }

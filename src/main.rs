@@ -10,7 +10,7 @@ use codegen::codegen::*;
 use common::error::*;
 use parser::*;
 use scanner::*;
-use typechecker::typechecker::*;
+use typechecker::*;
 
 fn main() {
     // read input file

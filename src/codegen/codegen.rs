@@ -77,7 +77,7 @@ impl Compiler {
     fn visit(&mut self, statement: &Stmt) -> Result<(), std::fmt::Error> {
         match statement {
             Stmt::Expr(expr) => {
-                self.execute(expr)?;
+                self.execute(expr)?.free(&mut self.scratch); // result isn't used
                 Ok(())
             }
             Stmt::DeclareVar(type_decl, name) => self.declare_var(type_decl, name.unwrap_string()),

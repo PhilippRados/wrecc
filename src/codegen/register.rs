@@ -10,7 +10,7 @@ pub enum Register {
 impl Register {
     pub fn free(&self, scratch_regs: &mut ScratchRegisters) {
         match self {
-            Register::Void => unimplemented!(),
+            Register::Void => (),
             Register::Stack(_, _) => (),
             Register::Arg(_, _) => (),
             Register::Scratch(index, _) => scratch_regs.get_mut(index).free(),

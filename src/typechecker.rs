@@ -78,18 +78,31 @@ impl TypeChecker {
         }
         Ok(())
     }
-    fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
-        if !matches!(statement, Stmt::Function(_, _, _, _)) && self.find_function() == None {
+    fn check_global(&self, statement: &Stmt) -> Result<(), Error> {
+        if !matches!(statement, Stmt::Function(_, _, _, _))
+            && !matches!(statement, Stmt::FunctionDeclaration(_, _, _))
+            && self.find_function() == None
+        {
             return Err(Error::new(
                 statement.get_token(),
                 &format!("can't have {} in global scope", statement),
             ));
         }
+        Ok(())
+    }
+    fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
+        self.check_global(&statement)?;
+
         match statement {
             Stmt::DeclareVar(type_decl, var_name) => self.declare_var(type_decl, var_name),
             Stmt::InitVar(type_decl, name, ref mut expr) => self.init_var(type_decl, name, expr),
             Stmt::Function(return_type, name, params, body) => {
                 self.function_definition(*return_type, name, params.clone(), body)
+            }
+            Stmt::FunctionDeclaration(return_type, name, params) => {
+                self.global_env
+                    .declare_func(*return_type, &name.unwrap_string(), params.clone());
+                Ok(())
             }
             Stmt::Return(keyword, ref mut value) => self.return_statement(keyword, value),
             Stmt::Print(token, ref mut expr) => self.print_statement(token, expr),
@@ -238,45 +251,69 @@ impl TypeChecker {
     fn function_definition(
         &mut self,
         return_type: Types,
-        name: &Token,
+        name_token: &Token,
         params: Vec<(Types, Token)>,
         body: &mut Vec<Stmt>,
     ) -> Result<(), Error> {
         if *self.scope.last().unwrap() != Scope::Global {
             return Err(Error::new(
-                name,
+                name_token,
                 "can only define functions in global scope",
             ));
         }
-        if name.unwrap_string() == "main" {
+        let name = name_token.unwrap_string();
+        if name == "main" {
             self.found_main = true;
         }
-
-        self.global_env
-            .declare_func(return_type, &name.unwrap_string(), params.clone());
+        if let Some(f) = self.global_env.get_func(&name) {
+            // compare function_definition with declaration and see if they match
+            self.cmp_func_def_with_decl(name_token, f, return_type, &params)?;
+        } else {
+            self.global_env
+                .declare_func(return_type, &name, params.clone());
+        }
 
         // have to push scope before declaring local variables
-        self.scope
-            .push(Scope::Function(name.unwrap_string(), return_type));
+        self.scope.push(Scope::Function(name.clone(), return_type));
         let mut env = Environment::new(Some(Box::new(self.env.clone()))); // create new scope for function body
 
         // initialize stack size for current function-scope
-        self.func_stack_size.insert(name.unwrap_string(), 0);
-        for (type_decl, name) in params.iter() {
+        self.func_stack_size.insert(name, 0);
+        for (type_decl, name) in params.iter().by_ref() {
             self.increment_stack_size(name, type_decl)?; // add params to stack-size
             env.init_var(name.unwrap_string(), *type_decl) // initialize params in local scope
         }
 
         // check function body
-        self.block(name, body, env)?;
+        self.block(name_token, body, env)?;
 
         if return_type != Types::Void && !self.returns_all_paths {
             Err(Error::new(
-                name,
+                name_token,
                 "non-void function doesnt return in all code paths",
             ))
         } else {
             self.returns_all_paths = false;
+            Ok(())
+        }
+    }
+    fn cmp_func_def_with_decl(
+        &self,
+        name_token: &Token,
+        declaration: &Function,
+        return_type: Types,
+        params: &Vec<(Types, Token)>,
+    ) -> Result<(), Error> {
+        if declaration.return_type != return_type {
+            Err(Error::new(name_token,&format!("Conflicting types in function-declaration and function-definition: expected {}, found {}",declaration.return_type,return_type)))
+        } else if declaration.arity() != params.len() {
+            Err(Error::new(name_token,&format!("Mismatched number of parameters in function-declaration and function-definition: expected {}, found {}",declaration.arity(),params.len())))
+        } else {
+            for (i, (types, token)) in params.iter().enumerate() {
+                if *types != declaration.params[i].0 {
+                    return Err(Error::new(token,&format!("Mismatched parameter-types in function-declaration and function-definition: expected {}, found {}",declaration.params[i].0,types)));
+                }
+            }
             Ok(())
         }
     }

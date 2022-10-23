@@ -97,6 +97,7 @@ impl Compiler {
                 self.if_statement(cond, then_branch, else_branch)
             }
             Stmt::While(_, cond, body) => self.while_statement(cond, body),
+            Stmt::FunctionDeclaration(_, _, _) => Ok(()),
             _ => unimplemented!(),
         }
     }

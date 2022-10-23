@@ -235,10 +235,15 @@ impl Parser {
             TokenKind::RightParen,
             "Expect ')' after function parameters",
         )?;
-        self.consume(TokenKind::LeftBrace, "Expect '{' before function body.")?;
-        let body = self.block()?;
 
-        Ok(Stmt::Function(type_decl, name, params, body))
+        if self.matches(vec![TokenKind::Semicolon]).is_some() {
+            Ok(Stmt::FunctionDeclaration(type_decl, name, params))
+        } else {
+            self.consume(TokenKind::LeftBrace, "Expect '{' before function body.")?;
+            let body = self.block()?;
+
+            Ok(Stmt::Function(type_decl, name, params, body))
+        }
     }
 
     fn expression(&mut self) -> Result<Expr, Error> {

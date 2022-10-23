@@ -115,6 +115,7 @@ impl ScratchRegister {
         self.in_use = false;
     }
 }
+#[derive(Debug)]
 pub struct ScratchRegisters {
     pub registers: [ScratchRegister; 4],
 }
@@ -126,7 +127,7 @@ impl ScratchRegisters {
                 return ScratchIndex::from(i);
             }
         }
-        panic!("no free regesiter");
+        panic!("no free register");
     }
     fn get_mut(&mut self, reg: &ScratchIndex) -> &mut ScratchRegister {
         &mut self.registers[reg.index()]

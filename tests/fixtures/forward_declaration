@@ -1,0 +1,10 @@
+int some();
+
+void main(){
+    some();
+}
+
+int some(){
+    printint(3);
+    return 0;
+}

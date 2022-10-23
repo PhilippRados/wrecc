@@ -83,4 +83,8 @@ impl<T: Clone> Environment<T> {
 
         self.current.funcs.insert(name.to_string(), f);
     }
+    pub fn get_func(&self, name: &str) -> Option<&Function> {
+        // has to be called from global_env because functions can only be declared in global scope
+        self.current.funcs.get(name)
+    }
 }

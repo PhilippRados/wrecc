@@ -1,4 +1,4 @@
-void main(){
+int main(){
   print 2 +;
   print (2 * 1 -12;
 }

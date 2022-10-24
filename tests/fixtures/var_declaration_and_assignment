@@ -1,4 +1,4 @@
-void main(){
+int main(){
   int uwe;
   uwe = 2 * (1 -4);
   printint(uwe);

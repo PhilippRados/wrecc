@@ -1,4 +1,4 @@
-void main(){
+int main(){
     int a = 0 || 0;
     printint(a);
     int b = 0 || 1;

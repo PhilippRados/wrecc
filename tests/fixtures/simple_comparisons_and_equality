@@ -1,4 +1,4 @@
-void main(){
+int main(){
   printint(3 != 2);
   printint(2 == 2);
   printint(3 != 3);

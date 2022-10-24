@@ -281,10 +281,6 @@ impl Compiler {
         writeln!(self.output, "{}_epilogue:", name)?;
         self.dealloc_stack(name)?;
 
-        match name {
-            "main" => writeln!(self.output, "\tmovl    $0, %eax")?, // if main return 0 success code
-            _ => writeln!(self.output, "\tnop")?,
-        }
         writeln!(self.output, "\tpopq    %rbp\n\tret")?;
         Ok(())
     }

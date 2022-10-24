@@ -1,4 +1,4 @@
-void main(){
+int main(){
   {
     int some() {
       printint(1);

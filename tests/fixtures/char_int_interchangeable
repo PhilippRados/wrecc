@@ -1,4 +1,4 @@
-void main(){
+int main(){
   char combined = 'c' + 2;
   char p = 'A' + '!';
   int ip = p;

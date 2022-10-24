@@ -1,4 +1,4 @@
-void main(){
+int main(){
   int test = 2 - 1 * (2 / 4);
   printint(test);
 }

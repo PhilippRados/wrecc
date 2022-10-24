@@ -1,4 +1,4 @@
-void main(){
+int main(){
   printint((3 / (6-7) * 2) + 1);
 
   printint(7 / 3);

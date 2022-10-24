@@ -278,7 +278,7 @@ impl TypeChecker {
         let mut env = Environment::new(Some(Box::new(self.env.clone()))); // create new scope for function body
 
         // initialize stack size for current function-scope
-        self.func_stack_size.insert(name, 0);
+        self.func_stack_size.insert(name.clone(), 0);
         for (type_decl, name) in params.iter().by_ref() {
             self.increment_stack_size(name, type_decl)?; // add params to stack-size
             env.init_var(name.unwrap_string(), *type_decl) // initialize params in local scope
@@ -286,6 +286,9 @@ impl TypeChecker {
 
         // check function body
         self.block(name_token, body, env)?;
+
+        self.main_returns_int(name_token, &return_type)?;
+        self.implicit_return_main(name_token, body);
 
         if return_type != Types::Void && !self.returns_all_paths {
             Err(Error::new(
@@ -295,6 +298,26 @@ impl TypeChecker {
         } else {
             self.returns_all_paths = false;
             Ok(())
+        }
+    }
+    fn main_returns_int(&self, name_token: &Token, return_type: &Types) -> Result<(), Error> {
+        if name_token.unwrap_string() == "main" && *return_type != Types::Int {
+            Err(Error::new(
+                name_token,
+                &format!("expected 'main' return type 'int', found: {}", *return_type),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+    fn implicit_return_main(&mut self, name_token: &Token, body: &mut Vec<Stmt>) {
+        if name_token.unwrap_string() == "main" && !self.returns_all_paths {
+            self.returns_all_paths = true;
+
+            body.push(Stmt::Return(
+                name_token.clone(),
+                Some(Expr::new(ExprKind::Number(0))),
+            ));
         }
     }
     fn cmp_func_def_with_decl(

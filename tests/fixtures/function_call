@@ -9,7 +9,7 @@ void some_func(int test) {
       printint(-1);
     }
 }
-void main(){
+int main(){
   some_func(10);
   some_func(5);
   some_func(6);

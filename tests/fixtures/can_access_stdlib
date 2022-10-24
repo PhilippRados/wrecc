@@ -1,6 +1,6 @@
 int putchar(int c);
 
-void main() {
+int main() {
     putchar(72);
     putchar(101);
     putchar(108);

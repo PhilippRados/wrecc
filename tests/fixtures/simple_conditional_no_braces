@@ -1,4 +1,4 @@
-void main(){
+int main(){
   if (0)
     if (1)
       printint(1);

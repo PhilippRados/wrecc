@@ -1,6 +1,6 @@
 int some();
 
-void main(){
+int main(){
     some();
 }
 

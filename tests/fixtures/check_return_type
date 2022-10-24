@@ -5,6 +5,6 @@ int some() {
   return 2;
 }
 
-void main(){
+int main(){
   print some();
 }

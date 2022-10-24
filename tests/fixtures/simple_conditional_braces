@@ -1,4 +1,4 @@
-void main(){
+int main(){
   if (2 > 2) {
       printint(1);
   } else {

@@ -52,7 +52,7 @@ impl Parser {
         }
     }
     fn declaration(&mut self) -> Result<Stmt, Error> {
-        if let Some(t) = self.matches_type() {
+        if let Some(t) = &mut self.matches_type() {
             // returns OPtion<Types>
             return self.type_declaration(t);
         }
@@ -91,7 +91,7 @@ impl Parser {
         let left_paren = self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
 
         let mut init = None;
-        if let Some(token) = self.matches_type() {
+        if let Some(token) = &mut self.matches_type() {
             init = Some(self.type_declaration(token)?);
         } else if !self.check(TokenKind::Semicolon) {
             init = Some(self.expression_statement()?)
@@ -187,7 +187,10 @@ impl Parser {
             Box::new(else_branch),
         ))
     }
-    fn type_declaration(&mut self, type_decl: Types) -> Result<Stmt, Error> {
+    fn type_declaration(&mut self, type_decl: &mut Types) -> Result<Stmt, Error> {
+        while self.matches(vec![TokenKind::Star]).is_some() {
+            type_decl.pointer_to();
+        }
         let name = self.consume(
             TokenKind::Ident,
             "Expect identifier following type-specifier",
@@ -197,14 +200,14 @@ impl Parser {
             // variable defintion
             let value = self.expression()?;
             self.consume(TokenKind::Semicolon, "Expect ';' after expression")?;
-            Ok(Stmt::InitVar(type_decl, name, value))
+            Ok(Stmt::InitVar(type_decl.clone(), name, value))
         } else if self.matches(vec![TokenKind::LeftParen]).is_some() {
             // function defintion
-            self.function(type_decl, name)
+            self.function(type_decl.clone(), name)
         } else {
             // var declaration
             self.consume(TokenKind::Semicolon, "Expect ';' after type declaration")?;
-            Ok(Stmt::DeclareVar(type_decl, name))
+            Ok(Stmt::DeclareVar(type_decl.clone(), name))
         }
     }
     fn function(&mut self, type_decl: Types, name: Token) -> Result<Stmt, Error> {
@@ -357,7 +360,12 @@ impl Parser {
         Ok(expr)
     }
     fn unary(&mut self) -> Result<Expr, Error> {
-        if let Some(token) = self.matches(vec![TokenKind::Bang, TokenKind::Minus]) {
+        while let Some(token) = self.matches(vec![
+            TokenKind::Star,
+            TokenKind::Amp,
+            TokenKind::Bang,
+            TokenKind::Minus,
+        ]) {
             let operator = token;
             let right = self.unary()?;
             return Ok(Expr::new(ExprKind::Unary {

@@ -95,13 +95,18 @@ impl TypeChecker {
 
         match statement {
             Stmt::DeclareVar(type_decl, var_name) => self.declare_var(type_decl, var_name),
-            Stmt::InitVar(type_decl, name, ref mut expr) => self.init_var(type_decl, name, expr),
+            Stmt::InitVar(type_decl, name, ref mut expr) => {
+                self.init_var(type_decl.clone(), name, expr)
+            }
             Stmt::Function(return_type, name, params, body) => {
-                self.function_definition(*return_type, name, params.clone(), body)
+                self.function_definition(return_type, name, params.clone(), body)
             }
             Stmt::FunctionDeclaration(return_type, name, params) => {
-                self.global_env
-                    .declare_func(*return_type, &name.unwrap_string(), params.clone());
+                self.global_env.declare_func(
+                    return_type.clone(),
+                    &name.unwrap_string(),
+                    params.clone(),
+                );
                 Ok(())
             }
             Stmt::Return(keyword, ref mut value) => self.return_statement(keyword, value),
@@ -158,12 +163,12 @@ impl TypeChecker {
             ));
         }
         self.increment_stack_size(var_name, type_decl)?;
-        self.env.declare_var(name, *type_decl);
+        self.env.declare_var(name, type_decl.clone());
         Ok(())
     }
     fn init_var(
         &mut self,
-        type_decl: &Types,
+        type_decl: Types,
         var_name: &Token,
         expr: &mut Expr,
     ) -> Result<(), Error> {
@@ -175,7 +180,7 @@ impl TypeChecker {
                 var_name,
                 &format!("Redefinition of variable '{}'", name),
             ))
-        } else if *type_decl == Types::Void {
+        } else if type_decl == Types::Void {
             Err(Error::new(
                 var_name,
                 &format!("Can't assign to 'void' {}", name),
@@ -189,14 +194,14 @@ impl TypeChecker {
                 ),
             ))
         } else {
-            if value < *type_decl {
-                cast!(expr, *type_decl, CastUp);
-            } else if value > *type_decl {
-                cast!(expr, *type_decl, CastDown);
+            if value < type_decl {
+                cast!(expr, type_decl.clone(), CastUp);
+            } else if value > type_decl {
+                cast!(expr, type_decl.clone(), CastDown);
             }
-            self.increment_stack_size(var_name, type_decl)?;
+            self.increment_stack_size(var_name, &type_decl)?;
             // currently only type-checks for void since int and char are interchangeable
-            self.env.init_var(name, *type_decl);
+            self.env.init_var(name, type_decl);
             Ok(())
         }
     }
@@ -250,7 +255,7 @@ impl TypeChecker {
     }
     fn function_definition(
         &mut self,
-        return_type: Types,
+        return_type: &Types,
         name_token: &Token,
         params: Vec<(Types, Token)>,
         body: &mut Vec<Stmt>,
@@ -270,18 +275,19 @@ impl TypeChecker {
             self.cmp_func_def_with_decl(name_token, f, return_type, &params)?;
         } else {
             self.global_env
-                .declare_func(return_type, &name, params.clone());
+                .declare_func(return_type.clone(), &name, params.clone());
         }
 
         // have to push scope before declaring local variables
-        self.scope.push(Scope::Function(name.clone(), return_type));
+        self.scope
+            .push(Scope::Function(name.clone(), return_type.clone()));
         let mut env = Environment::new(Some(Box::new(self.env.clone()))); // create new scope for function body
 
         // initialize stack size for current function-scope
         self.func_stack_size.insert(name.clone(), 0);
         for (type_decl, name) in params.iter().by_ref() {
             self.increment_stack_size(name, type_decl)?; // add params to stack-size
-            env.init_var(name.unwrap_string(), *type_decl) // initialize params in local scope
+            env.init_var(name.unwrap_string(), type_decl.clone()) // initialize params in local scope
         }
 
         // check function body
@@ -290,7 +296,7 @@ impl TypeChecker {
         self.main_returns_int(name_token, &return_type)?;
         self.implicit_return_main(name_token, body);
 
-        if return_type != Types::Void && !self.returns_all_paths {
+        if *return_type != Types::Void && !self.returns_all_paths {
             Err(Error::new(
                 name_token,
                 "non-void function doesnt return in all code paths",
@@ -324,10 +330,10 @@ impl TypeChecker {
         &self,
         name_token: &Token,
         declaration: &Function,
-        return_type: Types,
+        return_type: &Types,
         params: &Vec<(Types, Token)>,
     ) -> Result<(), Error> {
-        if declaration.return_type != return_type {
+        if declaration.return_type != *return_type {
             Err(Error::new(name_token,&format!("Conflicting types in function-declaration and function-definition: expected {}, found {}",declaration.return_type,return_type)))
         } else if declaration.arity() != params.len() {
             Err(Error::new(name_token,&format!("Mismatched number of parameters in function-declaration and function-definition: expected {}, found {}",declaration.arity(),params.len())))
@@ -353,7 +359,7 @@ impl TypeChecker {
     pub fn expr_type(&mut self, ast: &mut Expr) -> Result<Types, Error> {
         ast.type_decl = Some(match &mut ast.kind {
             ExprKind::Binary { left, token, right } => self.evaluate_binary(left, token, right)?,
-            ExprKind::Unary { token: _, right } => self.evaluate_unary(right)?,
+            ExprKind::Unary { token, right } => self.evaluate_unary(token, right)?,
             ExprKind::Grouping { expr } => self.evaluate_grouping(expr)?,
             ExprKind::Number(_) => Types::Int,
             ExprKind::CharLit(_) => Types::Char,
@@ -373,7 +379,7 @@ impl TypeChecker {
             ExprKind::CastUp { expr: _ } => unimplemented!("explicit casts"),
             ExprKind::CastDown { expr: _ } => unimplemented!("explicit casts"),
         });
-        Ok(ast.type_decl.unwrap())
+        Ok(ast.type_decl.clone().unwrap())
     }
 
     fn evaluate_call(
@@ -401,7 +407,7 @@ impl TypeChecker {
             Some(function) => {
                 if function.arity() == args.len() {
                     self.args_and_params_match(left_paren, &function.params, args, arg_types)?;
-                    Ok(function.return_type)
+                    Ok(function.return_type.clone())
                 } else {
                     Err(Error::new(
                         left_paren,
@@ -429,7 +435,6 @@ impl TypeChecker {
     ) -> Result<(), Error> {
         // TODO: actually compare args not only testing for void
         for (i, type_decl) in args.iter().enumerate() {
-            // let type_decl = self.expr_type(expr)?;
             if *type_decl == Types::Void {
                 return Err(Error::new(
                     left_paren,
@@ -498,15 +503,22 @@ impl TypeChecker {
         })
     }
     fn maybe_int_promote(&self, expr: &mut Expr) -> Types {
-        if expr.type_decl.unwrap() < Types::Int {
+        if expr.type_decl.clone().unwrap() < Types::Int {
             cast!(expr, Types::Int, CastUp);
             Types::Int
         } else {
-            expr.type_decl.unwrap()
+            expr.type_decl.clone().unwrap()
         }
     }
-    fn evaluate_unary(&mut self, right: &mut Expr) -> Result<Types, Error> {
-        self.expr_type(right)
+    fn evaluate_unary(&mut self, token: &Token, right: &mut Expr) -> Result<Types, Error> {
+        let right = self.expr_type(right)?;
+
+        Ok(match token.token {
+            TokenType::Amp => Types::Pointer(Box::new(right)),
+            TokenType::Star => right.deref_at(),
+            TokenType::Bang | TokenType::Minus => right,
+            _ => unreachable!(),
+        })
     }
     fn evaluate_grouping(&mut self, expr: &mut Expr) -> Result<Types, Error> {
         self.expr_type(expr)

@@ -1,0 +1,15 @@
+int main() {
+  char **b;
+  int   d; int  *e; int   f;
+
+  char a= 18; 
+  char* ptr_a = &a;
+  b= &ptr_a; 
+  char c= **b; 
+
+  printint(c);
+
+  d= 12; printint(d);
+  e= &d; f= *e; printint(f);
+  return(0);
+}

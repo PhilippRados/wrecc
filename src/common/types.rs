@@ -1,11 +1,12 @@
 use crate::common::token::TokenKind;
 use std::fmt::Display;
 
-#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
+#[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Types {
     Void, // type-promotion order
     Char,
     Int,
+    Pointer(Box<Types>),
 }
 impl Types {
     pub fn into_vec() -> Vec<TokenKind> {
@@ -17,6 +18,7 @@ impl Types {
             Types::Void => 0,
             Types::Char => 1,
             Types::Int => 4,
+            Types::Pointer(_) => 8,
         }
     }
     pub fn reg_suffix(&self) -> &str {
@@ -24,6 +26,7 @@ impl Types {
             Types::Void => unreachable!(),
             Types::Char => "b",
             Types::Int => "d",
+            Types::Pointer(_) => "",
         }
     }
     pub fn suffix(&self) -> &str {
@@ -31,6 +34,7 @@ impl Types {
             Types::Void => unreachable!(),
             Types::Char => "b",
             Types::Int => "l",
+            Types::Pointer(_) => "q",
         }
     }
     pub fn return_reg(&self) -> &str {
@@ -38,6 +42,16 @@ impl Types {
             Types::Void => unreachable!(),
             Types::Char => "%al",
             Types::Int => "%eax",
+            Types::Pointer(_) => "%rax",
+        }
+    }
+    pub fn pointer_to(&mut self) {
+        *self = Types::Pointer(Box::new(self.clone()));
+    }
+    pub fn deref_at(&self) -> Types {
+        match self {
+            Types::Pointer(inner) => *inner.clone(),
+            _ => unreachable!("typechecker"),
         }
     }
 }
@@ -50,6 +64,7 @@ impl Display for Types {
                 Types::Char => "'char'",
                 Types::Int => "'int'",
                 Types::Void => "'void'",
+                Types::Pointer(_) => "'pointer'",
             }
         )
     }

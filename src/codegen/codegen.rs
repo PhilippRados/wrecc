@@ -186,7 +186,10 @@ impl Compiler {
 
         self.env.declare_var(
             name,
-            Register::Stack(StackRegister::new(self.current_bp_offset), *type_decl),
+            Register::Stack(
+                StackRegister::new(self.current_bp_offset),
+                type_decl.clone(),
+            ),
         );
         Ok(())
     }
@@ -273,7 +276,11 @@ impl Compiler {
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
-            self.init_var(type_decl, param_name, &mut Register::Arg(i, *type_decl))?;
+            self.init_var(
+                type_decl,
+                param_name,
+                &mut Register::Arg(i, type_decl.clone()),
+            )?;
         }
         Ok(())
     }
@@ -320,20 +327,20 @@ impl Compiler {
             ExprKind::Unary { token, right } => self.cg_unary(token, right),
             ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
             ExprKind::Assign { name, expr } => self.cg_assign(name, expr),
-            ExprKind::Ident(name) => self.cg_ident(name),
+            ExprKind::Ident(name) => Ok(self.env.get_var(name).unwrap()), //self.cg_ident(name),
             ExprKind::Call {
                 left_paren: _,
                 callee,
                 args,
-            } => self.cg_call(callee, args, ast.type_decl.unwrap()),
-            ExprKind::CastUp { expr } => self.cg_cast_up(expr, ast.type_decl.unwrap()),
-            ExprKind::CastDown { expr } => self.cg_cast_down(expr, ast.type_decl.unwrap()),
+            } => self.cg_call(callee, args, ast.type_decl.clone().unwrap()),
+            ExprKind::CastUp { expr } => self.cg_cast_up(expr, ast.type_decl.clone().unwrap()),
+            ExprKind::CastDown { expr } => self.cg_cast_down(expr, ast.type_decl.clone().unwrap()),
         }
     }
     fn cg_cast_down(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
         let mut value_reg = self.execute(expr)?;
-        let dest_reg = Register::Scratch(self.scratch.scratch_alloc(), new_type);
-        value_reg.set_type(new_type);
+        let dest_reg = Register::Scratch(self.scratch.scratch_alloc(), new_type.clone());
+        value_reg.set_type(new_type.clone());
 
         writeln!(
             self.output,
@@ -348,12 +355,12 @@ impl Compiler {
     }
     fn cg_cast_up(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
         let value_reg = self.execute(expr)?;
-        let dest_reg = Register::Scratch(self.scratch.scratch_alloc(), new_type);
+        let dest_reg = Register::Scratch(self.scratch.scratch_alloc(), new_type.clone());
 
         writeln!(
             self.output,
             "movs{}{}   {}, {}", //sign extend smaller type
-            expr.type_decl.unwrap().suffix(),
+            expr.type_decl.clone().unwrap().suffix(),
             new_type.suffix(),
             value_reg.name(&self.scratch),
             dest_reg.name(&self.scratch)
@@ -367,21 +374,12 @@ impl Compiler {
         let new_reg = self.env.get_var(name).unwrap(); // since stack pos is the same we don't have to change env
 
         // can't move from mem to mem so make temp scratch-register
-        if matches!(value_reg, Register::Stack(_, _)) {
-            let temp_scratch =
-                Register::Scratch(self.scratch.scratch_alloc(), expr.type_decl.unwrap());
+        value_reg = self.convert_stack_reg(value_reg)?;
 
-            writeln!(
-                self.output,
-                "\tmovl    {}, {}",
-                value_reg.name(&self.scratch),
-                temp_scratch.name(&self.scratch),
-            )?;
-            value_reg = temp_scratch;
-        }
         writeln!(
             self.output,
-            "\tmovl    {}, {}",
+            "\tmov{}    {}, {}",
+            new_reg.get_type().suffix(),
             value_reg.name(&self.scratch),
             new_reg.name(&self.scratch),
         )?;
@@ -421,9 +419,9 @@ impl Compiler {
             writeln!(
                 self.output,
                 "\tmov{}    {}, {}",
-                expr.type_decl.unwrap().suffix(),
+                expr.type_decl.clone().unwrap().suffix(),
                 reg.name(&self.scratch),
-                Register::Arg(i, expr.type_decl.unwrap()).name(&self.scratch),
+                Register::Arg(i, expr.type_decl.clone().unwrap()).name(&self.scratch),
             )?;
             reg.free(&mut self.scratch);
         }
@@ -454,7 +452,7 @@ impl Compiler {
 
         if return_type != Types::Void {
             let reg_index = self.scratch.scratch_alloc();
-            let return_reg = Register::Scratch(reg_index, return_type);
+            let return_reg = Register::Scratch(reg_index, return_type.clone());
             writeln!(
                 self.output,
                 "\tmov{}    {}, {}",
@@ -567,19 +565,69 @@ impl Compiler {
     fn cg_unary(&mut self, token: &Token, right: &Expr) -> Result<Register, std::fmt::Error> {
         let reg = self.execute(right)?;
         match token.token {
-            TokenType::Bang => {
-                writeln!(self.output, "\tcmpl $0, {}", reg.name(&self.scratch))?; // compares reg-value with 0
-                writeln!(
-                    self.output,
-                    "\tsete %al\n\tmovzbl %al, {}",
-                    reg.name(&self.scratch)
-                )?;
-                // sets %al to 1 if comparison true and to 0 when false and then copies %al to current reg
-            }
-            TokenType::Minus => writeln!(self.output, "\tnegl {}", reg.name(&self.scratch))?,
+            TokenType::Bang => self.cg_bang(reg),
+            TokenType::Minus => self.cg_negate(reg),
+            TokenType::Amp => self.cg_address_at(reg),
+            TokenType::Star => self.cg_deref_at(reg),
             _ => Error::new(token, "invalid unary operator").print_exit(),
         }
+    }
+    fn cg_bang(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
+        writeln!(
+            self.output,
+            "\tcmp{} $0, {}\n\tsete %al",
+            reg.get_type().suffix(),
+            reg.name(&self.scratch)
+        )?; // compares reg-value with 0
+
+        // sets %al to 1 if comparison true and to 0 when false and then copies %al to current reg
+        writeln!(
+            self.output,
+            "\tmovzb{} %al, {}",
+            reg.get_type().suffix(),
+            reg.name(&self.scratch)
+        )?;
+
         Ok(reg)
+    }
+    fn cg_negate(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
+        writeln!(
+            self.output,
+            "\tneg{} {}",
+            reg.get_type().suffix(),
+            reg.name(&self.scratch)
+        )?;
+        Ok(reg)
+    }
+    fn cg_address_at(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
+        let dest = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            Types::Pointer(Box::new(reg.get_type())),
+        );
+        writeln!(
+            self.output,
+            "\tleaq    {}, {}",
+            reg.name(&self.scratch),
+            dest.name(&self.scratch)
+        )?;
+
+        reg.free(&mut self.scratch);
+        Ok(dest)
+    }
+    fn cg_deref_at(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {
+        let dest = Register::Scratch(self.scratch.scratch_alloc(), reg.get_type().deref_at());
+        reg = self.scratch_temp(reg)?;
+
+        writeln!(
+            self.output,
+            "\tmov{}    ({}), {}",
+            dest.get_type().suffix(),
+            reg.name(&self.scratch),
+            dest.name(&self.scratch)
+        )?;
+
+        reg.free(&mut self.scratch);
+        Ok(dest)
     }
 
     fn cg_add(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
@@ -656,8 +704,11 @@ impl Compiler {
         token: &Token,
         right: &Expr,
     ) -> Result<Register, std::fmt::Error> {
-        let left_reg = self.execute(left)?;
-        let right_reg = self.execute(right)?;
+        let mut left_reg = self.execute(left)?;
+        let mut right_reg = self.execute(right)?;
+
+        left_reg = self.convert_stack_reg(left_reg)?;
+        right_reg = self.convert_stack_reg(right_reg)?;
 
         match token.token {
             TokenType::Plus => self.cg_add(left_reg, right_reg),
@@ -672,5 +723,25 @@ impl Compiler {
             TokenType::LessEqual => self.cg_comparison("setle", left_reg, right_reg),
             _ => Error::new(token, "invalid binary operator").print_exit(),
         }
+    }
+    fn convert_stack_reg(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
+        if matches!(reg, Register::Stack(_, _)) {
+            self.scratch_temp(reg)
+        } else {
+            Ok(reg)
+        }
+    }
+    fn scratch_temp(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
+        let temp_scratch = Register::Scratch(self.scratch.scratch_alloc(), reg.get_type());
+
+        writeln!(
+            self.output,
+            "\tmov{}    {}, {}",
+            temp_scratch.get_type().suffix(),
+            reg.name(&self.scratch),
+            temp_scratch.name(&self.scratch),
+        )?;
+        reg.free(&mut self.scratch);
+        Ok(temp_scratch)
     }
 }

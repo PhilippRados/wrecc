@@ -23,7 +23,9 @@ impl Register {
             Register::Scratch(index, type_decl) => {
                 format!("{}{}", scratch_regs.get(index).name, type_decl.reg_suffix())
             }
-            Register::Arg(index, type_decl) => self.get_arg_reg(*index, *type_decl).to_string(),
+            Register::Arg(index, type_decl) => {
+                self.get_arg_reg(*index, type_decl.clone()).to_string()
+            }
         }
     }
     // argument registers from 1st to last
@@ -57,9 +59,9 @@ impl Register {
     pub fn get_type(&self) -> Types {
         match self {
             Register::Void => unimplemented!(),
-            Register::Stack(_, type_decl) => *type_decl,
-            Register::Scratch(_, type_decl) => *type_decl,
-            Register::Arg(_, type_decl) => *type_decl,
+            Register::Stack(_, type_decl)
+            | Register::Scratch(_, type_decl)
+            | Register::Arg(_, type_decl) => type_decl.clone(),
         }
     }
 }

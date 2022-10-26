@@ -1,0 +1,4 @@
+Error: can't call '&' on r-value
+|
+6   a = &(b + 3);
+|       ^

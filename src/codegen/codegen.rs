@@ -615,7 +615,10 @@ impl Compiler {
         Ok(dest)
     }
     fn cg_deref_at(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {
-        let dest = Register::Scratch(self.scratch.scratch_alloc(), reg.get_type().deref_at());
+        let dest = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            reg.get_type().deref_at().unwrap(),
+        );
         reg = self.scratch_temp(reg)?;
 
         writeln!(

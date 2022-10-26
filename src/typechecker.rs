@@ -511,14 +511,44 @@ impl TypeChecker {
         }
     }
     fn evaluate_unary(&mut self, token: &Token, right: &mut Expr) -> Result<Types, Error> {
-        let right = self.expr_type(right)?;
+        let right_type = self.expr_type(right)?;
 
         Ok(match token.token {
-            TokenType::Amp => Types::Pointer(Box::new(right)),
-            TokenType::Star => right.deref_at(),
-            TokenType::Bang | TokenType::Minus => right,
+            TokenType::Amp => self.check_address(token, right_type, right.clone())?,
+            TokenType::Star => self.check_deref(token, right_type)?,
+            TokenType::Bang | TokenType::Minus => right_type,
             _ => unreachable!(),
         })
+    }
+    fn check_address(
+        &self,
+        token: &Token,
+        type_decl: Types,
+        mut expr: Expr,
+    ) -> Result<Types, Error> {
+        // TODO: actually check if expr is an l-value not only for idents
+        // ideally: if !is_lvalue(expr) Error
+
+        if matches!(expr.kind, ExprKind::Ident(_)) {
+            return Ok(Types::Pointer(Box::new(type_decl)));
+        }
+        while let ExprKind::Grouping { expr: new_expr } = expr.kind {
+            if matches!(new_expr.kind, ExprKind::Ident(_)) {
+                return Ok(Types::Pointer(Box::new(type_decl)));
+            }
+            expr = *new_expr;
+        }
+        Err(Error::new(token, "can't call '&' on r-value"))
+    }
+    fn check_deref(&self, token: &Token, type_decl: Types) -> Result<Types, Error> {
+        if let Some(inner) = type_decl.deref_at() {
+            Ok(inner)
+        } else {
+            Err(Error::new(
+                token,
+                &format!("can't dereference value-type {}", type_decl,),
+            ))
+        }
     }
     fn evaluate_grouping(&mut self, expr: &mut Expr) -> Result<Types, Error> {
         self.expr_type(expr)

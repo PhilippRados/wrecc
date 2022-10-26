@@ -48,10 +48,10 @@ impl Types {
     pub fn pointer_to(&mut self) {
         *self = Types::Pointer(Box::new(self.clone()));
     }
-    pub fn deref_at(&self) -> Types {
+    pub fn deref_at(&self) -> Option<Types> {
         match self {
-            Types::Pointer(inner) => *inner.clone(),
-            _ => unreachable!("typechecker"),
+            Types::Pointer(inner) => Some(*inner.clone()),
+            _ => None,
         }
     }
 }

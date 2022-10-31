@@ -1,0 +1,13 @@
+int main(){
+    int a;
+    int *b = &a;
+    *b = 15;
+    int c;
+
+    b = &c;
+    c = 2;
+
+    printint(a);
+    printint(*b);
+    printint(c);
+}

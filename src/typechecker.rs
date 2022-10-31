@@ -24,6 +24,7 @@ macro_rules! cast {
                 expr: Box::new($ex.clone()),
             },
             type_decl: Some($new_type),
+            value_kind: $ex.value_kind.clone(),
         }
     };
 }
@@ -173,7 +174,7 @@ impl TypeChecker {
         expr: &mut Expr,
     ) -> Result<(), Error> {
         let name = var_name.unwrap_string();
-        let value = self.expr_type(expr)?;
+        let value_type = self.expr_type(expr)?;
 
         if self.env.current.vars.contains_key(&name) {
             Err(Error::new(
@@ -185,7 +186,7 @@ impl TypeChecker {
                 var_name,
                 &format!("Can't assign to 'void' {}", name),
             ))
-        } else if value == Types::Void {
+        } else if value_type == Types::Void {
             Err(Error::new(
                 var_name,
                 &format!(
@@ -194,15 +195,18 @@ impl TypeChecker {
                 ),
             ))
         } else {
-            if value < type_decl {
-                cast!(expr, type_decl.clone(), CastUp);
-            } else if value > type_decl {
-                cast!(expr, type_decl.clone(), CastDown);
-            }
+            self.check_cast(&type_decl, &value_type, expr);
             self.increment_stack_size(var_name, &type_decl)?;
             // currently only type-checks for void since int and char are interchangeable
             self.env.init_var(name, type_decl);
             Ok(())
+        }
+    }
+    fn check_cast(&self, type_decl: &Types, other_type: &Types, expr: &mut Expr) {
+        if other_type < type_decl {
+            cast!(expr, type_decl.clone(), CastUp);
+        } else if other_type > type_decl {
+            cast!(expr, type_decl.clone(), CastDown);
         }
     }
     fn increment_stack_size(&mut self, var_name: &Token, type_decl: &Types) -> Result<(), Error> {
@@ -322,7 +326,7 @@ impl TypeChecker {
 
             body.push(Stmt::Return(
                 name_token.clone(),
-                Some(Expr::new(ExprKind::Number(0))),
+                Some(Expr::new(ExprKind::Number(0), ValueKind::Rvalue)),
             ));
         }
     }
@@ -367,10 +371,10 @@ impl TypeChecker {
                 self.evaluate_logical(left, token, right)?
             }
             ExprKind::Ident(v) => self.env.get_var(v)?,
-            ExprKind::Assign { name, expr } => {
-                let value = self.expr_type(expr)?;
-                self.env.assign_var(name, value)?
-            }
+            ExprKind::Assign {
+                l_expr: store_expr,
+                r_expr: expr,
+            } => self.assign_var(store_expr, expr)?,
             ExprKind::Call {
                 left_paren,
                 callee,
@@ -380,6 +384,14 @@ impl TypeChecker {
             ExprKind::CastDown { expr: _ } => unimplemented!("explicit casts"),
         });
         Ok(ast.type_decl.clone().unwrap())
+    }
+    fn assign_var(&mut self, store_expr: &mut Expr, expr: &mut Expr) -> Result<Types, Error> {
+        let type_decl = self.expr_type(store_expr)?;
+        let value = self.expr_type(expr)?;
+
+        self.check_cast(&type_decl, &value, expr);
+
+        Ok(type_decl)
     }
 
     fn evaluate_call(
@@ -514,31 +526,18 @@ impl TypeChecker {
         let right_type = self.expr_type(right)?;
 
         Ok(match token.token {
-            TokenType::Amp => self.check_address(token, right_type, right.clone())?,
+            TokenType::Amp => self.check_address(token, right_type, right)?,
             TokenType::Star => self.check_deref(token, right_type)?,
             TokenType::Bang | TokenType::Minus => right_type,
             _ => unreachable!(),
         })
     }
-    fn check_address(
-        &self,
-        token: &Token,
-        type_decl: Types,
-        mut expr: Expr,
-    ) -> Result<Types, Error> {
-        // TODO: actually check if expr is an l-value not only for idents
-        // ideally: if !is_lvalue(expr) Error
-
-        if matches!(expr.kind, ExprKind::Ident(_)) {
-            return Ok(Types::Pointer(Box::new(type_decl)));
+    fn check_address(&self, token: &Token, type_decl: Types, expr: &Expr) -> Result<Types, Error> {
+        if expr.value_kind == ValueKind::Lvalue {
+            Ok(Types::Pointer(Box::new(type_decl)))
+        } else {
+            Err(Error::new(token, "can't call '&' on r-value"))
         }
-        while let ExprKind::Grouping { expr: new_expr } = expr.kind {
-            if matches!(new_expr.kind, ExprKind::Ident(_)) {
-                return Ok(Types::Pointer(Box::new(type_decl)));
-            }
-            expr = *new_expr;
-        }
-        Err(Error::new(token, "can't call '&' on r-value"))
     }
     fn check_deref(&self, token: &Token, type_decl: Types) -> Result<Types, Error> {
         if let Some(inner) = type_decl.deref_at() {
@@ -546,7 +545,10 @@ impl TypeChecker {
         } else {
             Err(Error::new(
                 token,
-                &format!("can't dereference value-type {}", type_decl,),
+                &format!(
+                    "can't dereference value-type {}, expected type 'pointer'",
+                    type_decl,
+                ),
             ))
         }
     }

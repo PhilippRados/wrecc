@@ -60,20 +60,6 @@ impl<T: Clone> Environment<T> {
             },
         }
     }
-    // methods for only typechecker
-    pub fn assign_var(&mut self, var_name: &Token, value: T) -> Result<T, Error> {
-        let name = var_name.unwrap_string();
-        match self.current.vars.contains_key(&name) {
-            true => {
-                self.current.vars.insert(name, value.clone());
-                Ok(value)
-            }
-            false => match &mut self.enclosing {
-                Some(env) => env.assign_var(var_name, value),
-                None => Err(Error::new(var_name, "undeclared variable")),
-            },
-        }
-    }
     pub fn init_var(&mut self, name: String, value: T) {
         self.current.vars.insert(name, value);
     }

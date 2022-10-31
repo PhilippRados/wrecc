@@ -326,7 +326,7 @@ impl Compiler {
             ExprKind::Grouping { expr } => self.execute(expr),
             ExprKind::Unary { token, right } => self.cg_unary(token, right),
             ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
-            ExprKind::Assign { name, expr } => self.cg_assign(name, expr),
+            ExprKind::Assign { l_expr, r_expr } => self.cg_assign(l_expr, r_expr),
             ExprKind::Ident(name) => Ok(self.env.get_var(name).unwrap()), //self.cg_ident(name),
             ExprKind::Call {
                 left_paren: _,
@@ -369,36 +369,35 @@ impl Compiler {
 
         Ok(dest_reg)
     }
-    fn cg_assign(&mut self, name: &Token, expr: &Expr) -> Result<Register, std::fmt::Error> {
-        let mut value_reg = self.execute(expr)?;
-        let new_reg = self.env.get_var(name).unwrap(); // since stack pos is the same we don't have to change env
+    fn cg_assign(&mut self, l_expr: &Expr, r_expr: &Expr) -> Result<Register, std::fmt::Error> {
+        let l_value = self.execute_l(l_expr)?;
+        let mut r_value = self.execute(r_expr)?;
 
         // can't move from mem to mem so make temp scratch-register
-        value_reg = self.convert_stack_reg(value_reg)?;
+        r_value = self.convert_stack_reg(r_value)?;
 
         writeln!(
             self.output,
             "\tmov{}    {}, {}",
-            new_reg.get_type().suffix(),
-            value_reg.name(&self.scratch),
-            new_reg.name(&self.scratch),
+            r_value.get_type().suffix(),
+            r_value.name(&self.scratch),
+            l_value.name(&self.scratch),
         )?;
-        value_reg.free(&mut self.scratch);
-        Ok(new_reg)
+        r_value.free(&mut self.scratch);
+        Ok(l_value)
     }
-    fn cg_ident(&mut self, name: &Token) -> Result<Register, std::fmt::Error> {
-        let stack_reg = self.env.get_var(name).unwrap();
-        let dest_reg_index = self.scratch.scratch_alloc();
-        let reg = Register::Scratch(dest_reg_index, stack_reg.get_type());
-
-        writeln!(
-            self.output,
-            "\tmov{}    {}, {}",
-            stack_reg.get_type().suffix(),
-            stack_reg.name(&self.scratch),
-            reg.name(&self.scratch)
-        )?;
-        Ok(reg)
+    fn execute_l(&mut self, expr: &Expr) -> Result<Register, std::fmt::Error> {
+        if let ExprKind::Unary { token, right } = &expr.kind {
+            let reg = self.execute(right)?;
+            match token.token {
+                TokenType::Star => self.cg_deref_at_l(reg),
+                _ => unreachable!("l-value cant be {}", token.token),
+            }
+        } else if let ExprKind::Ident(name) = &expr.kind {
+            Ok(self.env.get_var(name).unwrap())
+        } else {
+            unreachable!("invalid l-value expression")
+        }
     }
     fn cg_call(
         &mut self,
@@ -614,13 +613,16 @@ impl Compiler {
         reg.free(&mut self.scratch);
         Ok(dest)
     }
-    fn cg_deref_at(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {
+    fn cg_deref_at_l(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
+        let reg = self.convert_stack_reg(reg)?;
+        Ok(reg.convert_to_deref())
+    }
+    fn cg_deref_at(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
         let dest = Register::Scratch(
             self.scratch.scratch_alloc(),
             reg.get_type().deref_at().unwrap(),
         );
-        reg = self.scratch_temp(reg)?;
-
+        let reg = self.convert_stack_reg(reg)?;
         writeln!(
             self.output,
             "\tmov{}    ({}), {}",

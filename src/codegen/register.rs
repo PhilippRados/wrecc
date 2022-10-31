@@ -2,6 +2,7 @@ use crate::common::types::Types;
 
 #[derive(Clone)]
 pub enum Register {
+    Deref(ScratchIndex, Types),
     Scratch(ScratchIndex, Types),
     Stack(StackRegister, Types),
     Arg(usize, Types),
@@ -14,6 +15,7 @@ impl Register {
             Register::Stack(_, _) => (),
             Register::Arg(_, _) => (),
             Register::Scratch(index, _) => scratch_regs.get_mut(index).free(),
+            Register::Deref(index, _) => scratch_regs.get_mut(index).free(),
         }
     }
     pub fn name(&self, scratch_regs: &ScratchRegisters) -> String {
@@ -23,6 +25,9 @@ impl Register {
             Register::Scratch(index, type_decl) => {
                 format!("{}{}", scratch_regs.get(index).name, type_decl.reg_suffix())
             }
+            Register::Deref(index, _) => {
+                format!("({})", scratch_regs.get(index).name)
+            }
             Register::Arg(index, type_decl) => {
                 self.get_arg_reg(*index, type_decl.clone()).to_string()
             }
@@ -30,7 +35,6 @@ impl Register {
     }
     // argument registers from 1st to last
     fn get_arg_reg(&self, index: usize, type_decl: Types) -> &str {
-        // char gets promoted to 32bit as argument
         match (type_decl, index) {
             (Types::Int, 0) => "%edi",
             (Types::Int, 1) => "%esi",
@@ -54,6 +58,7 @@ impl Register {
             Register::Stack(_, _) => (),
             Register::Scratch(_, old_decl) => *old_decl = type_decl,
             Register::Arg(_, old_decl) => *old_decl = type_decl,
+            Register::Deref(_, old_decl) => *old_decl = type_decl,
         }
     }
     pub fn get_type(&self) -> Types {
@@ -61,7 +66,15 @@ impl Register {
             Register::Void => unimplemented!(),
             Register::Stack(_, type_decl)
             | Register::Scratch(_, type_decl)
-            | Register::Arg(_, type_decl) => type_decl.clone(),
+            | Register::Arg(_, type_decl)
+            | Register::Deref(_, type_decl) => type_decl.clone(),
+        }
+    }
+    pub fn convert_to_deref(self) -> Register {
+        match self {
+            Register::Void | Register::Stack(_, _) | Register::Arg(_, _) => unreachable!(),
+            Register::Scratch(index, type_decl) => Register::Deref(index, type_decl),
+            Register::Deref(_, _) => self,
         }
     }
 }

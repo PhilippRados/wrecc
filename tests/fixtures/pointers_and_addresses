@@ -1,8 +1,8 @@
 int main() {
-  char **b;
+  char **b; char a;
   int   d; int  *e; int   f;
 
-  char a= 18; 
+  a= 18; 
   char* ptr_a = &a;
   b= &ptr_a; 
   char c= **b; 

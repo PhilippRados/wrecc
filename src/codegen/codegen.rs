@@ -387,16 +387,17 @@ impl Compiler {
         Ok(l_value)
     }
     fn execute_l(&mut self, expr: &Expr) -> Result<Register, std::fmt::Error> {
-        if let ExprKind::Unary { token, right } = &expr.kind {
-            let reg = self.execute(right)?;
-            match token.token {
-                TokenType::Star => self.cg_deref_at_l(reg),
-                _ => unreachable!("l-value cant be {}", token.token),
+        match &expr.kind {
+            ExprKind::Unary { token, right } => {
+                let reg = self.execute(right)?;
+                match token.token {
+                    TokenType::Star => self.cg_deref_at_l(reg),
+                    _ => unreachable!("l-value cant be {}", token.token),
+                }
             }
-        } else if let ExprKind::Ident(name) = &expr.kind {
-            Ok(self.env.get_var(name).unwrap())
-        } else {
-            unreachable!("invalid l-value expression")
+            ExprKind::Ident(name) => Ok(self.env.get_var(name).unwrap()),
+            ExprKind::Grouping { expr } => self.execute_l(expr),
+            _ => unreachable!("invalid l-value expression"),
         }
     }
     fn cg_call(

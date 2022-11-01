@@ -276,6 +276,7 @@ impl TypeChecker {
         }
         if let Some(f) = self.global_env.get_func(&name) {
             // compare function_definition with declaration and see if they match
+            // TODO: should catch function redefinition
             self.cmp_func_def_with_decl(name_token, f, return_type, &params)?;
         } else {
             self.global_env

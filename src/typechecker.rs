@@ -58,7 +58,7 @@ impl TypeChecker {
         for (name, f) in self.builtins.iter().by_ref() {
             self.global_env
                 .current
-                .funcs
+                .func_decl
                 .insert(name.to_string(), f.clone());
         }
         if let Err(e) = self.check_statements(statements) {
@@ -103,12 +103,7 @@ impl TypeChecker {
                 self.function_definition(return_type, name, params.clone(), body)
             }
             Stmt::FunctionDeclaration(return_type, name, params) => {
-                self.global_env.declare_func(
-                    return_type.clone(),
-                    &name.unwrap_string(),
-                    params.clone(),
-                );
-                Ok(())
+                self.function_declaration(return_type, name, params)
             }
             Stmt::Return(keyword, ref mut value) => self.return_statement(keyword, value),
             Stmt::Print(token, ref mut expr) => self.print_statement(token, expr),
@@ -257,6 +252,27 @@ impl TypeChecker {
             Ok(())
         }
     }
+    fn function_declaration(
+        &mut self,
+        return_type: &Types,
+        name_token: &Token,
+        params: &Vec<(Types, Token)>,
+    ) -> Result<(), Error> {
+        let name = &name_token.unwrap_string();
+        if let Some(f) = self.global_env.get_func(name, FunctionKind::Declaration) {
+            self.cmp_decl(name_token, f, return_type, params)?;
+        }
+        if let Some(f) = self.global_env.get_func(name, FunctionKind::DefDeclaration) {
+            self.cmp_decl(name_token, f, return_type, params)?;
+        }
+        self.global_env.declare_func(
+            return_type.clone(),
+            name,
+            params.clone(),
+            FunctionKind::Declaration,
+        );
+        Ok(())
+    }
     fn function_definition(
         &mut self,
         return_type: &Types,
@@ -274,13 +290,24 @@ impl TypeChecker {
         if name == "main" {
             self.found_main = true;
         }
-        if let Some(f) = self.global_env.get_func(&name) {
+        if let Some(_) = self
+            .global_env
+            .get_func(&name, FunctionKind::DefDeclaration)
+        {
+            return Err(Error::new(
+                name_token,
+                &format!("Redefinition of function '{}'", name),
+            ));
+        } else if let Some(f) = self.global_env.get_func(&name, FunctionKind::Declaration) {
             // compare function_definition with declaration and see if they match
-            // TODO: should catch function redefinition
-            self.cmp_func_def_with_decl(name_token, f, return_type, &params)?;
+            self.cmp_decl(name_token, f, return_type, &params)?;
         } else {
-            self.global_env
-                .declare_func(return_type.clone(), &name, params.clone());
+            self.global_env.declare_func(
+                return_type.clone(),
+                &name,
+                params.clone(),
+                FunctionKind::DefDeclaration,
+            );
         }
 
         // have to push scope before declaring local variables
@@ -331,7 +358,7 @@ impl TypeChecker {
             ));
         }
     }
-    fn cmp_func_def_with_decl(
+    fn cmp_decl(
         &self,
         name_token: &Token,
         declaration: &Function,
@@ -339,13 +366,19 @@ impl TypeChecker {
         params: &Vec<(Types, Token)>,
     ) -> Result<(), Error> {
         if declaration.return_type != *return_type {
-            Err(Error::new(name_token,&format!("Conflicting types in function-declaration and function-definition: expected {}, found {}",declaration.return_type,return_type)))
+            Err(Error::new(
+                name_token,
+                &format!(
+                    "Conflicting return-types in function-declarations: expected {}, found {}",
+                    declaration.return_type, return_type
+                ),
+            ))
         } else if declaration.arity() != params.len() {
-            Err(Error::new(name_token,&format!("Mismatched number of parameters in function-declaration and function-definition: expected {}, found {}",declaration.arity(),params.len())))
+            Err(Error::new(name_token,&format!("Mismatched number of parameters in function-declarations: expected {}, found {}",declaration.arity(),params.len())))
         } else {
             for (i, (types, token)) in params.iter().enumerate() {
                 if *types != declaration.params[i].0 {
-                    return Err(Error::new(token,&format!("Mismatched parameter-types in function-declaration and function-definition: expected {}, found {}",declaration.params[i].0,types)));
+                    return Err(Error::new(token,&format!("Mismatched parameter-types in function-declarations: expected {}, found {}",declaration.params[i].0,types)));
                 }
             }
             Ok(())
@@ -411,13 +444,21 @@ impl TypeChecker {
             .map(|expr| self.expr_type(expr))
             .collect::<Result<Vec<Types>, Error>>()?;
 
-        match self
-            .global_env
-            .current
-            .funcs
-            .get(&func_name.unwrap_string())
-        {
-            Some(function) => {
+        match (
+            self.global_env
+                .current
+                .func_def_decl
+                .get(&func_name.unwrap_string()),
+            self.global_env
+                .current
+                .func_decl
+                .get(&func_name.unwrap_string()),
+        ) {
+            (None, None) => Err(Error::new(
+                left_paren,
+                &format!("no function {} exists", func_name.unwrap_string()),
+            )),
+            (Some(function), None) | (None, Some(function)) | (Some(function), Some(_)) => {
                 if function.arity() == args.len() {
                     self.args_and_params_match(left_paren, &function.params, args, arg_types)?;
                     Ok(function.return_type.clone())
@@ -433,10 +474,6 @@ impl TypeChecker {
                     ))
                 }
             }
-            None => Err(Error::new(
-                left_paren,
-                &format!("no function {} exists", func_name.unwrap_string()),
-            )),
         }
     }
     fn args_and_params_match(

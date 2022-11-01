@@ -1,7 +1,10 @@
 use crate::common::{error::*, token::*, types::*};
-
 use std::collections::HashMap;
 
+pub enum FunctionKind {
+    Declaration,
+    DefDeclaration,
+}
 #[derive(Clone, PartialEq)]
 pub struct Function {
     pub params: Vec<(Types, Token)>,
@@ -22,13 +25,19 @@ impl Function {
 #[derive(Clone, PartialEq)]
 pub struct Table<T> {
     pub vars: HashMap<String, T>,
-    pub funcs: HashMap<String, Function>,
+    // for declaration;
+    // can have multiple
+    pub func_decl: HashMap<String, Function>,
+    // for declaration{}
+    // can only have single
+    pub func_def_decl: HashMap<String, Function>,
 }
 impl<T> Table<T> {
     pub fn new() -> Self {
         Table {
             vars: HashMap::<String, T>::new(),
-            funcs: HashMap::<String, Function>::new(),
+            func_decl: HashMap::<String, Function>::new(),
+            func_def_decl: HashMap::<String, Function>::new(),
         }
     }
 }
@@ -64,13 +73,25 @@ impl<T: Clone> Environment<T> {
         self.current.vars.insert(name, value);
     }
 
-    pub fn declare_func(&mut self, return_type: Types, name: &str, params: Vec<(Types, Token)>) {
+    pub fn declare_func(
+        &mut self,
+        return_type: Types,
+        name: &str,
+        params: Vec<(Types, Token)>,
+        kind: FunctionKind,
+    ) {
         let f = Function::new(return_type, params);
 
-        self.current.funcs.insert(name.to_string(), f);
+        match kind {
+            FunctionKind::Declaration => self.current.func_decl.insert(name.to_string(), f),
+            FunctionKind::DefDeclaration => self.current.func_def_decl.insert(name.to_string(), f),
+        };
     }
-    pub fn get_func(&self, name: &str) -> Option<&Function> {
+    pub fn get_func(&self, name: &str, kind: FunctionKind) -> Option<&Function> {
         // has to be called from global_env because functions can only be declared in global scope
-        self.current.funcs.get(name)
+        match kind {
+            FunctionKind::Declaration => self.current.func_decl.get(name),
+            FunctionKind::DefDeclaration => self.current.func_def_decl.get(name),
+        }
     }
 }

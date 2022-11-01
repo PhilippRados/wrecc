@@ -1,0 +1,4 @@
+Error: Redefinition of function 'main'
+|
+6 int main(){}
+|     ^

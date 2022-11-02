@@ -1,3 +1,4 @@
+use crate::codegen::codegen::align_by;
 use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
 use std::collections::HashMap;
 
@@ -82,7 +83,7 @@ impl TypeChecker {
     fn check_global(&self, statement: &Stmt) -> Result<(), Error> {
         if !matches!(statement, Stmt::Function(_, _, _, _))
             && !matches!(statement, Stmt::FunctionDeclaration(_, _, _))
-            && self.find_function() == None
+            && find_function(&self.scope) == None
         {
             return Err(Error::new(
                 statement.get_token(),
@@ -205,9 +206,11 @@ impl TypeChecker {
         }
     }
     fn increment_stack_size(&mut self, var_name: &Token, type_decl: &Types) -> Result<(), Error> {
-        match self.find_function() {
+        match find_function(&self.scope) {
             Some(Scope::Function(name, _)) => {
-                *self.func_stack_size.entry(name.to_owned()).or_default() += type_decl.size();
+                *self.func_stack_size.get_mut(name).unwrap() += type_decl.size();
+                *self.func_stack_size.get_mut(name).unwrap() =
+                    align_by(self.func_stack_size[name], type_decl.size());
                 Ok(())
             }
             _ => Err(Error::new(
@@ -504,7 +507,7 @@ impl TypeChecker {
         body: &mut Vec<Stmt>,
         env: Environment<Types>,
     ) -> Result<(), Error> {
-        if self.find_function() == None {
+        if find_function(&self.scope) == None {
             return Err(Error::new(token, "can't declare block in global scope"));
         }
         self.env = env;
@@ -594,7 +597,7 @@ impl TypeChecker {
         self.expr_type(expr)
     }
     fn check_return(&mut self, keyword: &Token, body_return: Types) -> Result<(), Error> {
-        match self.find_function() {
+        match find_function(&self.scope) {
             Some(Scope::Function(_, function_type)) => {
                 if *function_type == Types::Void && body_return != Types::Void {
                     return Err(Error::new(
@@ -623,12 +626,12 @@ impl TypeChecker {
         };
         Ok(())
     }
-    fn find_function(&self) -> Option<&Scope> {
-        for ref scope in self.scope.iter().rev() {
-            if matches!(scope, Scope::Function(_, _)) {
-                return Some(scope);
-            }
+}
+fn find_function(scopes: &Vec<Scope>) -> Option<&Scope> {
+    for ref scope in scopes.iter().rev() {
+        if matches!(scope, Scope::Function(_, _)) {
+            return Some(scope);
         }
-        None
     }
+    None
 }

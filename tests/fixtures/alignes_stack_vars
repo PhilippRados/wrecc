@@ -1,0 +1,10 @@
+int main(){
+  int c;
+  int** a;
+  int b = 3;
+  *a = &c;
+
+  *(*a) = b;
+
+  printint(*(*a));
+}

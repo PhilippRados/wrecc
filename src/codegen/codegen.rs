@@ -180,9 +180,9 @@ impl Compiler {
             None => writeln!(self.output, "\tjmp    {}", function_epilogue),
         }
     }
-
     fn declare_var(&mut self, type_decl: &Types, name: String) -> Result<(), std::fmt::Error> {
         self.current_bp_offset += type_decl.size();
+        self.current_bp_offset = align_by(self.current_bp_offset, type_decl.size());
 
         self.env.declare_var(
             name,
@@ -230,18 +230,9 @@ impl Compiler {
 
         Ok(())
     }
-    fn align_stack(&mut self, name: &str) {
-        let size = self.func_stack_size[name];
-        if size < 16 && size > 0 {
-            // self.func_stack_size[name] += 16;
-            *self.func_stack_size.entry(name.to_owned()).or_default() += 16 - size;
-        } else {
-            *self.func_stack_size.entry(name.to_owned()).or_default() += 16 - (size % 16);
-        }
-    }
     fn allocate_stack(&mut self, name: &str) -> Result<(), std::fmt::Error> {
         // stack has to be 16byte aligned
-        self.align_stack(name);
+        *self.func_stack_size.get_mut(name).unwrap() = align_by(self.func_stack_size[name], 16);
 
         if self.func_stack_size[name] > 0 {
             writeln!(
@@ -749,5 +740,46 @@ impl Compiler {
         )?;
         reg.free(&mut self.scratch);
         Ok(temp_scratch)
+    }
+}
+
+pub fn align_by(mut offset: usize, type_size: usize) -> usize {
+    let remainder = offset % type_size;
+    if remainder != 0 {
+        offset += type_size - remainder;
+    }
+    offset
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alignes_stack1() {
+        let offset = 12;
+        let result = align_by(offset, 8);
+
+        assert_eq!(result, 16);
+    }
+    #[test]
+    fn alignes_stack2() {
+        let offset = 9;
+        let result = align_by(offset, 4);
+
+        assert_eq!(result, 12);
+    }
+    #[test]
+    fn alignes_stackpointer1() {
+        let offset = 31;
+        let result = align_by(offset, 16);
+
+        assert_eq!(result, 32);
+    }
+    #[test]
+    fn alignes_stackpointer2() {
+        let offset = 5;
+        let result = align_by(offset, 16);
+
+        assert_eq!(result, 16);
     }
 }

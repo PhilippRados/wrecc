@@ -545,15 +545,31 @@ impl TypeChecker {
             ));
         }
 
-        left_type = self.maybe_int_promote(left);
-        right_type = self.maybe_int_promote(right);
+        // only int promote on arithmetic operations
+        if token.token != TokenType::EqualEqual
+            && token.token != TokenType::BangEqual
+            && token.token != TokenType::AmpAmp
+            && token.token != TokenType::PipePipe
+        {
+            left_type = self.maybe_int_promote(left);
+            right_type = self.maybe_int_promote(right);
+        }
 
-        // TODO: translate this into codegen
-        Ok(if left_type > right_type {
-            left_type
+        if token.token != TokenType::AmpAmp && token.token != TokenType::PipePipe {
+            // type promote to bigger type
+            Ok(if left_type > right_type {
+                cast!(right, left_type.clone(), CastUp);
+                left_type
+            } else if right_type > left_type {
+                cast!(left, right_type.clone(), CastUp);
+                right_type
+            } else {
+                left_type
+            })
         } else {
-            right_type
-        })
+            // logical expression always returns int
+            Ok(Types::Int)
+        }
     }
     fn maybe_int_promote(&self, expr: &mut Expr) -> Types {
         if expr.type_decl.clone().unwrap() < Types::Int {

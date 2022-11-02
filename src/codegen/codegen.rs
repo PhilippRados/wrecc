@@ -82,8 +82,8 @@ impl Compiler {
             }
             Stmt::DeclareVar(type_decl, name) => self.declare_var(type_decl, name.unwrap_string()),
             Stmt::InitVar(type_decl, name, expr) => {
-                let mut value_reg = self.execute(expr)?;
-                self.init_var(type_decl, name, &mut value_reg)
+                let value_reg = self.execute(expr)?;
+                self.init_var(type_decl, name, value_reg)
             }
             Stmt::Block(_, statements) => self.block(
                 statements,
@@ -197,9 +197,10 @@ impl Compiler {
         &mut self,
         type_decl: &Types,
         name: &Token,
-        value_reg: &mut Register,
+        value_reg: Register,
     ) -> Result<(), std::fmt::Error> {
         self.declare_var(type_decl, name.unwrap_string())?;
+        let value_reg = self.convert_stack_reg(value_reg)?;
 
         writeln!(
             self.output,
@@ -267,11 +268,7 @@ impl Compiler {
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
-            self.init_var(
-                type_decl,
-                param_name,
-                &mut Register::Arg(i, type_decl.clone()),
-            )?;
+            self.init_var(type_decl, param_name, Register::Arg(i, type_decl.clone()))?;
         }
         Ok(())
     }
@@ -475,7 +472,8 @@ impl Compiler {
         // jump to true label left is true => short circuit
         writeln!(
             self.output,
-            "\tcmpl    $0, {}\n\tjne    L{}",
+            "\tcmp{}    $0, {}\n\tjne    L{}",
+            left.get_type().suffix(),
             left.name(&self.scratch),
             true_label
         )?;
@@ -487,7 +485,8 @@ impl Compiler {
         // if right is false we know expression is false
         writeln!(
             self.output,
-            "\tcmpl    $0, {}\n\tje    L{}",
+            "\tcmp{}    $0, {}\n\tje    L{}",
+            right.get_type().suffix(),
             right.name(&self.scratch),
             false_label
         )?;
@@ -521,7 +520,8 @@ impl Compiler {
         // if left is false expression is false, we jump to false label
         writeln!(
             self.output,
-            "\tcmpl    $0, {}\n\tje    L{}",
+            "\tcmp{}    $0, {}\n\tje    L{}",
+            left.get_type().suffix(),
             left.name(&self.scratch),
             false_label
         )?;
@@ -531,7 +531,8 @@ impl Compiler {
         let right = self.execute(right)?;
         writeln!(
             self.output,
-            "\tcmpl    $0, {}\n\tje    L{}",
+            "\tcmp{}    $0, {}\n\tje    L{}",
+            right.get_type().suffix(),
             right.name(&self.scratch),
             false_label
         )?;
@@ -572,12 +573,16 @@ impl Compiler {
         )?; // compares reg-value with 0
 
         // sets %al to 1 if comparison true and to 0 when false and then copies %al to current reg
-        writeln!(
-            self.output,
-            "\tmovzb{} %al, {}",
-            reg.get_type().suffix(),
-            reg.name(&self.scratch)
-        )?;
+        if reg.get_type() == Types::Char {
+            writeln!(self.output, "\tmovb %al, {}", reg.name(&self.scratch))?;
+        } else {
+            writeln!(
+                self.output,
+                "\tmovzb{} %al, {}",
+                reg.get_type().suffix(),
+                reg.name(&self.scratch)
+            )?;
+        }
 
         Ok(reg)
     }
@@ -630,7 +635,8 @@ impl Compiler {
     fn cg_add(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
         writeln!(
             self.output,
-            "\taddl {}, {}\n",
+            "\tadd{} {}, {}\n",
+            right.get_type().suffix(),
             left.name(&self.scratch),
             right.name(&self.scratch)
         )?;
@@ -641,7 +647,8 @@ impl Compiler {
     fn cg_sub(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
         writeln!(
             self.output,
-            "\tsubl {}, {}\n",
+            "\tsub{} {}, {}\n",
+            right.get_type().suffix(),
             right.name(&self.scratch),
             left.name(&self.scratch)
         )?;
@@ -653,7 +660,8 @@ impl Compiler {
     fn cg_mult(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
         writeln!(
             self.output,
-            "\timull {}, {}\n",
+            "\timul{} {}, {}\n",
+            right.get_type().suffix(),
             left.name(&self.scratch),
             right.name(&self.scratch)
         )?;
@@ -663,9 +671,28 @@ impl Compiler {
     }
 
     fn cg_div(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
-        writeln!(self.output, "\tmovl {}, %eax", left.name(&self.scratch))?;
-        writeln!(self.output, "\tcqo\n\tidivl {}", right.name(&self.scratch))?; // rax / rcx => rax
-        writeln!(self.output, "\tmovl %eax, {}", right.name(&self.scratch))?; // move rax(int result) into right reg (remainder in rdx)
+        writeln!(
+            self.output,
+            "\tmov{} {}, {}",
+            left.get_type().suffix(),
+            left.name(&self.scratch),
+            left.get_type().return_reg(),
+        )?;
+        // rax / rcx => rax
+        writeln!(
+            self.output,
+            "\tcqo\n\tidiv{} {}",
+            right.get_type().suffix(),
+            right.name(&self.scratch)
+        )?;
+        // move rax(div result) into right reg (remainder in rdx)
+        writeln!(
+            self.output,
+            "\tmov{} {}, {}",
+            right.get_type().suffix(),
+            right.get_type().return_reg(),
+            right.name(&self.scratch)
+        )?;
 
         left.free(&mut self.scratch);
         Ok(right)
@@ -679,16 +706,23 @@ impl Compiler {
     ) -> Result<Register, std::fmt::Error> {
         writeln!(
             self.output,
-            "\tcmpl {}, {}",
+            "\tcmp{} {}, {}",
+            right.get_type().suffix(),
             right.name(&self.scratch),
             left.name(&self.scratch)
         )?;
         // write ZF to %al based on operator and zero extend %right_register with value of %al
-        writeln!(
-            self.output,
-            "\t{operator} %al\n\tmovzbl %al, {}",
-            right.name(&self.scratch)
-        )?;
+        writeln!(self.output, "\t{operator} %al",)?;
+        if right.get_type() == Types::Char {
+            writeln!(self.output, "\tmovb %al, {}", right.name(&self.scratch))?;
+        } else {
+            writeln!(
+                self.output,
+                "\tmovzb{} %al, {}",
+                right.get_type().suffix(),
+                right.name(&self.scratch)
+            )?;
+        }
 
         left.free(&mut self.scratch);
         Ok(right)

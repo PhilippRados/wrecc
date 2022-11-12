@@ -597,7 +597,16 @@ impl TypeChecker {
         Ok(match token.token {
             TokenType::Amp => self.check_address(token, right_type, right)?,
             TokenType::Star => self.check_deref(token, right_type)?,
-            TokenType::Bang | TokenType::Minus => right_type,
+            TokenType::Bang => Types::Int,
+            TokenType::Minus => {
+                if matches!(right_type, Types::Pointer(_)) {
+                    return Err(Error::new(
+                        token,
+                        "Invalid unary-expression '-' with type 'pointer'",
+                    ));
+                }
+                right_type
+            }
             _ => unreachable!(),
         })
     }

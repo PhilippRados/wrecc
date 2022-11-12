@@ -17,6 +17,7 @@ pub enum ExprKind {
     },
     Assign {
         l_expr: Box<Expr>,
+        token: Token,
         r_expr: Box<Expr>,
     },
     Logical {
@@ -65,29 +66,13 @@ impl Display for ExprKind {
             f,
             "{}",
             match self {
-                ExprKind::Binary {
-                    left: _,
-                    token,
-                    right: _,
-                } => format!("'binary-expression': {}", token.token),
-                ExprKind::Unary { token, right: _ } =>
-                    format!("'unary-expression': {}", token.token),
-                ExprKind::Grouping { expr: _ } => "'grouping-expression'".to_string(),
-                ExprKind::Assign {
-                    l_expr: _,
-                    r_expr: _,
-                } => "'assign-expression'".to_string(),
-                ExprKind::Logical {
-                    left: _,
-                    token,
-                    right: _,
-                } => format!("'logical-expression': {}", token.token),
-                ExprKind::Call {
-                    left_paren: _,
-                    callee: _,
-                    args: _,
-                } => "'call-expression'".to_string(),
-                ExprKind::CastUp { expr: _ } | ExprKind::CastDown { expr: _ } =>
+                ExprKind::Binary { token, .. } => format!("'binary-expression': {}", token.token),
+                ExprKind::Unary { token, .. } => format!("'unary-expression': {}", token.token),
+                ExprKind::Grouping { .. } => "'grouping-expression'".to_string(),
+                ExprKind::Assign { .. } => "'assign-expression'".to_string(),
+                ExprKind::Logical { token, .. } => format!("'logical-expression': {}", token.token),
+                ExprKind::Call { .. } => "'call-expression'".to_string(),
+                ExprKind::CastUp { .. } | ExprKind::CastDown { .. } =>
                     "'cast-expression'".to_string(),
                 ExprKind::Number(_) => "'number-literal'".to_string(),
                 ExprKind::CharLit(_) => "'character-literal'".to_string(),

@@ -261,6 +261,7 @@ impl Parser {
                 return Ok(Expr::new(
                     ExprKind::Assign {
                         l_expr: Box::new(expr),
+                        token: t,
                         r_expr: Box::new(value),
                     },
                     ValueKind::Rvalue,

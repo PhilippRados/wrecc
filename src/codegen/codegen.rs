@@ -314,8 +314,8 @@ impl Compiler {
             ExprKind::Grouping { expr } => self.execute(expr),
             ExprKind::Unary { token, right } => self.cg_unary(token, right),
             ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
-            ExprKind::Assign { l_expr, r_expr } => self.cg_assign(l_expr, r_expr),
-            ExprKind::Ident(name) => Ok(self.env.get_var(name).unwrap()), //self.cg_ident(name),
+            ExprKind::Assign { l_expr, r_expr, .. } => self.cg_assign(l_expr, r_expr),
+            ExprKind::Ident(name) => Ok(self.env.get_var(name).unwrap()),
             ExprKind::Call {
                 left_paren: _,
                 callee,

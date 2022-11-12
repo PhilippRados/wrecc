@@ -173,30 +173,40 @@ impl TypeChecker {
         let value_type = self.expr_type(expr)?;
 
         if self.env.current.vars.contains_key(&name) {
-            Err(Error::new(
+            return Err(Error::new(
                 var_name,
                 &format!("Redefinition of variable '{}'", name),
-            ))
-        } else if type_decl == Types::Void {
-            Err(Error::new(
-                var_name,
-                &format!("Can't assign to 'void' {}", name),
-            ))
-        } else if value_type == Types::Void {
-            Err(Error::new(
-                var_name,
-                &format!(
-                    "'void' cant be assigned to variable {} of type {}",
-                    name, type_decl
-                ),
-            ))
-        } else {
-            self.check_cast(&type_decl, &value_type, expr);
-            self.increment_stack_size(var_name, &type_decl)?;
-            // currently only type-checks for void since int and char are interchangeable
-            self.env.init_var(name, type_decl);
-            Ok(())
+            ));
         }
+        match (&type_decl, &value_type) {
+            (Types::Void, _) | (_, Types::Void) => {
+                return Err(Error::new(
+                    var_name,
+                    &format!(
+                        "Can't initialize type {} with type {}",
+                        type_decl, value_type
+                    ),
+                ))
+            }
+            (Types::Pointer(_), t) | (t, Types::Pointer(_)) => {
+                if !matches!(t, Types::Pointer(_)) {
+                    return Err(Error::new(
+                        var_name,
+                        &format!(
+                            "Can't initialize type {} with type {}",
+                            type_decl, value_type
+                        ),
+                    ));
+                }
+            }
+            _ => (),
+        }
+
+        self.check_cast(&type_decl, &value_type, expr);
+        self.increment_stack_size(var_name, &type_decl)?;
+        // currently only type-checks for void since int and char are interchangeable
+        self.env.init_var(name, type_decl);
+        Ok(())
     }
     fn check_cast(&self, type_decl: &Types, other_type: &Types, expr: &mut Expr) {
         if other_type < type_decl {
@@ -410,8 +420,9 @@ impl TypeChecker {
             ExprKind::Ident(v) => self.env.get_var(v)?,
             ExprKind::Assign {
                 l_expr: store_expr,
+                token,
                 r_expr: expr,
-            } => self.assign_var(store_expr, expr)?,
+            } => self.assign_var(store_expr, token, expr)?,
             ExprKind::Call {
                 left_paren,
                 callee,
@@ -422,10 +433,26 @@ impl TypeChecker {
         });
         Ok(ast.type_decl.clone().unwrap())
     }
-    fn assign_var(&mut self, store_expr: &mut Expr, expr: &mut Expr) -> Result<Types, Error> {
+    fn assign_var(
+        &mut self,
+        store_expr: &mut Expr,
+        token: &Token,
+        expr: &mut Expr,
+    ) -> Result<Types, Error> {
         let type_decl = self.expr_type(store_expr)?;
         let value = self.expr_type(expr)?;
 
+        match (&type_decl, &value) {
+            (Types::Pointer(_), t) | (t, Types::Pointer(_)) => {
+                if !matches!(t, Types::Pointer(_)) {
+                    return Err(Error::new(
+                        token,
+                        &format!("Can't assign to type {} with type {}", type_decl, value),
+                    ));
+                }
+            }
+            _ => (),
+        }
         self.check_cast(&type_decl, &value, expr);
 
         Ok(type_decl)

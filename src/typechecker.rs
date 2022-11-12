@@ -535,7 +535,19 @@ impl TypeChecker {
         let mut left_type = self.expr_type(left)?;
         let mut right_type = self.expr_type(right)?;
 
-        if left_type == Types::Void || right_type == Types::Void {
+        if !match (&left_type, &right_type) {
+            (Types::Void, Types::Void) | (Types::Void, _) | (_, Types::Void) => false,
+            (Types::Pointer(_), Types::Pointer(_)) => {
+                token.token == TokenType::Minus
+                    || token.token == TokenType::EqualEqual
+                    || token.token == TokenType::BangEqual
+            }
+            (_, Types::Pointer(_)) => token.token == TokenType::Plus,
+            (Types::Pointer(_), _) => {
+                token.token == TokenType::Plus || token.token == TokenType::Minus
+            }
+            _ => true,
+        } {
             return Err(Error::new(
                 token,
                 &format!(

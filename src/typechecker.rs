@@ -163,6 +163,30 @@ impl TypeChecker {
         self.env.declare_var(name, type_decl.clone());
         Ok(())
     }
+    fn check_type_compatibility(
+        &self,
+        token: &Token,
+        left: &Types,
+        right: &Types,
+    ) -> Result<(), Error> {
+        match (left, right) {
+            (Types::Void, _) | (_, Types::Void) => Err(Error::new(
+                token,
+                &format!("Can't assign to type {} with type {}", left, right,),
+            )),
+            (Types::Pointer(_), t) | (t, Types::Pointer(_)) => {
+                if !matches!(t, Types::Pointer(_)) {
+                    Err(Error::new(
+                        token,
+                        &format!("Can't assign to type {} with type {}", left, right),
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            _ => Ok(()),
+        }
+    }
     fn init_var(
         &mut self,
         type_decl: Types,
@@ -178,31 +202,9 @@ impl TypeChecker {
                 &format!("Redefinition of variable '{}'", name),
             ));
         }
-        match (&type_decl, &value_type) {
-            (Types::Void, _) | (_, Types::Void) => {
-                return Err(Error::new(
-                    var_name,
-                    &format!(
-                        "Can't initialize type {} with type {}",
-                        type_decl, value_type
-                    ),
-                ))
-            }
-            (Types::Pointer(_), t) | (t, Types::Pointer(_)) => {
-                if !matches!(t, Types::Pointer(_)) {
-                    return Err(Error::new(
-                        var_name,
-                        &format!(
-                            "Can't initialize type {} with type {}",
-                            type_decl, value_type
-                        ),
-                    ));
-                }
-            }
-            _ => (),
-        }
-
+        self.check_type_compatibility(var_name, &type_decl, &value_type)?;
         self.check_cast(&type_decl, &value_type, expr);
+
         self.increment_stack_size(var_name, &type_decl)?;
         // currently only type-checks for void since int and char are interchangeable
         self.env.init_var(name, type_decl);
@@ -442,17 +444,7 @@ impl TypeChecker {
         let type_decl = self.expr_type(store_expr)?;
         let value = self.expr_type(expr)?;
 
-        match (&type_decl, &value) {
-            (Types::Pointer(_), t) | (t, Types::Pointer(_)) => {
-                if !matches!(t, Types::Pointer(_)) {
-                    return Err(Error::new(
-                        token,
-                        &format!("Can't assign to type {} with type {}", type_decl, value),
-                    ));
-                }
-            }
-            _ => (),
-        }
+        self.check_type_compatibility(token, &type_decl, &value)?;
         self.check_cast(&type_decl, &value, expr);
 
         Ok(type_decl)
@@ -513,17 +505,8 @@ impl TypeChecker {
         expressions: &mut Vec<Expr>,
         args: Vec<Types>,
     ) -> Result<(), Error> {
-        // TODO: actually compare args not only testing for void
         for (i, type_decl) in args.iter().enumerate() {
-            if *type_decl == Types::Void {
-                return Err(Error::new(
-                    left_paren,
-                    &format!(
-                        "expected argument to be of type {} found {}",
-                        params[i].0, type_decl
-                    ),
-                ));
-            }
+            self.check_type_compatibility(left_paren, type_decl, &params[i].0)?;
             self.maybe_int_promote(&mut expressions[i]);
         }
         Ok(())

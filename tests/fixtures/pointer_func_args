@@ -1,0 +1,8 @@
+void some(int* a) { *a = 3; }
+
+int main() {
+  int a = 2;
+  some(&a);
+
+  printint(a);
+}

@@ -36,6 +36,13 @@ impl Register {
     // argument registers from 1st to last
     fn get_arg_reg(&self, index: usize, type_decl: Types) -> &str {
         match (type_decl, index) {
+            (Types::Char, 0) => "%dil",
+            (Types::Char, 1) => "%sil",
+            (Types::Char, 2) => "%dl",
+            (Types::Char, 3) => "%cl",
+            (Types::Char, 4) => "%r8b",
+            (Types::Char, 5) => "%r9b",
+
             (Types::Int, 0) => "%edi",
             (Types::Int, 1) => "%esi",
             (Types::Int, 2) => "%edx",
@@ -43,12 +50,12 @@ impl Register {
             (Types::Int, 4) => "%r8d",
             (Types::Int, 5) => "%r9d",
 
-            (Types::Char, 0) => "%dil",
-            (Types::Char, 1) => "%sil",
-            (Types::Char, 2) => "%dl",
-            (Types::Char, 3) => "%cl",
-            (Types::Char, 4) => "%r8b",
-            (Types::Char, 5) => "%r9b",
+            (Types::Pointer(_), 0) => "%rdi",
+            (Types::Pointer(_), 1) => "%rsi",
+            (Types::Pointer(_), 2) => "%rdx",
+            (Types::Pointer(_), 3) => "%rcx",
+            (Types::Pointer(_), 4) => "%r8",
+            (Types::Pointer(_), 5) => "%r9",
             _ => unreachable!(),
         }
     }

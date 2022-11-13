@@ -53,7 +53,6 @@ impl Parser {
     }
     fn declaration(&mut self) -> Result<Stmt, Error> {
         if let Some(t) = &mut self.matches_type() {
-            // returns OPtion<Types>
             return self.type_declaration(t);
         }
         self.statement()
@@ -188,9 +187,6 @@ impl Parser {
         ))
     }
     fn type_declaration(&mut self, type_decl: &mut Types) -> Result<Stmt, Error> {
-        while self.matches(vec![TokenKind::Star]).is_some() {
-            type_decl.pointer_to();
-        }
         let name = self.consume(
             TokenKind::Ident,
             "Expect identifier following type-specifier",
@@ -210,7 +206,7 @@ impl Parser {
             Ok(Stmt::DeclareVar(type_decl.clone(), name))
         }
     }
-    fn function(&mut self, type_decl: Types, name: Token) -> Result<Stmt, Error> {
+    fn function(&mut self, return_type: Types, name: Token) -> Result<Stmt, Error> {
         let mut params = Vec::new();
 
         if !self.check(TokenKind::RightParen) {
@@ -240,12 +236,12 @@ impl Parser {
         )?;
 
         if self.matches(vec![TokenKind::Semicolon]).is_some() {
-            Ok(Stmt::FunctionDeclaration(type_decl, name, params))
+            Ok(Stmt::FunctionDeclaration(return_type, name, params))
         } else {
             self.consume(TokenKind::LeftBrace, "Expect '{' before function body.")?;
             let body = self.block()?;
 
-            Ok(Stmt::Function(type_decl, name, params, body))
+            Ok(Stmt::Function(return_type, name, params, body))
         }
     }
 
@@ -516,12 +512,16 @@ impl Parser {
             }
             None => return None,
         }
-        Some(
-            self.tokens
-                .next()
-                .expect("can only be types because of previous check")
-                .into_type(),
-        )
+        let mut type_decl = self
+            .tokens
+            .next()
+            .expect("can only be types because of previous check")
+            .into_type();
+
+        while self.matches(vec![TokenKind::Star]).is_some() {
+            type_decl.pointer_to();
+        }
+        Some(type_decl)
     }
 }
 

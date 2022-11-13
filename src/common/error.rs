@@ -29,12 +29,13 @@ impl Error {
     pub fn print_error(&self) {
         eprintln!("Error: {}", self.msg);
 
-        // Change to Option<>
         if self.line_index != -1 {
+            let line_length = self.line_index.to_string().len();
+
             eprintln!("|");
             eprintln!("{} {}", self.line_index, self.line_string);
             eprint!("|");
-            for _ in 0..self.column {
+            for _ in 1..self.column as usize + line_length {
                 eprint!(" ");
             }
             eprintln!("^");

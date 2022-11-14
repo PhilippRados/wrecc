@@ -61,10 +61,10 @@ impl Display for Types {
             f,
             "{}",
             match self {
-                Types::Char => "'char'",
-                Types::Int => "'int'",
-                Types::Void => "'void'",
-                Types::Pointer(_) => "'pointer'",
+                Types::Char => "char".to_string(),
+                Types::Int => "int".to_string(),
+                Types::Void => "void".to_string(),
+                Types::Pointer(inside) => format!("{}*", inside),
             }
         )
     }

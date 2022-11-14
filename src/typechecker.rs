@@ -172,13 +172,13 @@ impl TypeChecker {
         match (left, right) {
             (Types::Void, _) | (_, Types::Void) => Err(Error::new(
                 token,
-                &format!("Can't assign to type {} with type {}", left, right,),
+                &format!("Can't assign to type '{}' with type '{}'", left, right),
             )),
             (Types::Pointer(_), t) | (t, Types::Pointer(_)) => {
                 if !matches!(t, Types::Pointer(_)) {
                     Err(Error::new(
                         token,
-                        &format!("Can't assign to type {} with type {}", left, right),
+                        &format!("Can't assign to type '{}' with type '{}'", left, right),
                     ))
                 } else {
                     Ok(())
@@ -203,14 +203,14 @@ impl TypeChecker {
             ));
         }
         self.check_type_compatibility(var_name, &type_decl, &value_type)?;
-        self.check_cast(&type_decl, &value_type, expr);
+        self.maybe_cast(&type_decl, &value_type, expr);
 
         self.increment_stack_size(var_name, &type_decl)?;
         // currently only type-checks for void since int and char are interchangeable
         self.env.init_var(name, type_decl);
         Ok(())
     }
-    fn check_cast(&self, type_decl: &Types, other_type: &Types, expr: &mut Expr) {
+    fn maybe_cast(&self, type_decl: &Types, other_type: &Types, expr: &mut Expr) {
         if other_type.size() < type_decl.size() {
             cast!(expr, type_decl.clone(), CastUp);
         } else if other_type.size() > type_decl.size() {
@@ -357,7 +357,10 @@ impl TypeChecker {
         if name_token.unwrap_string() == "main" && *return_type != Types::Int {
             Err(Error::new(
                 name_token,
-                &format!("expected 'main' return type 'int', found: {}", *return_type),
+                &format!(
+                    "expected 'main()' return type 'int', found: '{}'",
+                    *return_type
+                ),
             ))
         } else {
             Ok(())
@@ -393,20 +396,35 @@ impl TypeChecker {
         } else {
             for (i, (types, token)) in params.iter().enumerate() {
                 if *types != declaration.params[i].0 {
-                    return Err(Error::new(token,&format!("Mismatched parameter-types in function-declarations: expected {}, found {}",declaration.params[i].0,types)));
+                    return Err(Error::new(token,&format!("Mismatched parameter-types in function-declarations: expected '{}', found '{}'",declaration.params[i].0,types)));
                 }
             }
             Ok(())
         }
     }
+    fn get_function_type(&self, token: &Token) -> Result<&Types, Error> {
+        if let Some(Scope::Function(_, function_type)) = find_function(&self.scope) {
+            Ok(function_type)
+        } else {
+            Err(Error::new(
+                token,
+                "can only define return statements inside a function",
+            ))
+        }
+    }
     fn return_statement(&mut self, keyword: &Token, expr: &mut Option<Expr>) -> Result<(), Error> {
         self.returns_all_paths = true;
+        let function_type = self.get_function_type(keyword)?.clone();
+
         if let Some(expr) = expr {
-            let type_decl = self.expr_type(expr)?;
-            self.check_return(keyword, type_decl)
+            let body_return = self.expr_type(expr)?;
+
+            self.check_return_compatibility(keyword, &function_type, &body_return)?;
+            self.maybe_cast(&body_return, &function_type, expr);
         } else {
-            self.check_return(keyword, Types::Void)
+            self.check_return_compatibility(keyword, &function_type, &Types::Void)?;
         }
+        Ok(())
     }
 
     pub fn expr_type(&mut self, ast: &mut Expr) -> Result<Types, Error> {
@@ -445,7 +463,7 @@ impl TypeChecker {
         let value = self.expr_type(expr)?;
 
         self.check_type_compatibility(token, &type_decl, &value)?;
-        self.check_cast(&type_decl, &value, expr);
+        self.maybe_cast(&type_decl, &value, expr);
 
         Ok(type_decl)
     }
@@ -561,7 +579,7 @@ impl TypeChecker {
             return Err(Error::new(
                 token,
                 &format!(
-                    "invalid binary expression: {} {} {}",
+                    "invalid binary expression: '{}' {} '{}'",
                     left_type, token.token, right_type
                 ),
             ));
@@ -634,7 +652,7 @@ impl TypeChecker {
             Err(Error::new(
                 token,
                 &format!(
-                    "can't dereference value-type {}, expected type 'pointer'",
+                    "can't dereference value-type '{}', expected type 'pointer'",
                     type_decl,
                 ),
             ))
@@ -643,34 +661,29 @@ impl TypeChecker {
     fn evaluate_grouping(&mut self, expr: &mut Expr) -> Result<Types, Error> {
         self.expr_type(expr)
     }
-    fn check_return(&mut self, keyword: &Token, body_return: Types) -> Result<(), Error> {
-        match find_function(&self.scope) {
-            Some(Scope::Function(_, function_type)) => {
-                if *function_type == Types::Void && body_return != Types::Void {
-                    return Err(Error::new(
-                        keyword,
-                        &format!(
-                            "function return expects type:'void', found: {}",
-                            body_return
-                        ),
-                    ));
-                } else if *function_type != Types::Void && body_return == Types::Void {
-                    return Err(Error::new(
-                        keyword,
-                        &format!(
-                            "function return expects type:{}, found: 'void'",
-                            function_type
-                        ),
-                    ));
-                }
-            }
-            _ => {
-                return Err(Error::new(
-                    keyword,
-                    "can only define return statements inside a function",
-                ));
-            }
-        };
+    fn check_return_compatibility(
+        &mut self,
+        keyword: &Token,
+        function_type: &Types,
+        body_return: &Types,
+    ) -> Result<(), Error> {
+        if *function_type == Types::Void && *body_return != Types::Void {
+            return Err(Error::new(
+                keyword,
+                &format!(
+                    "function return expects type: 'void', found: '{}'",
+                    body_return
+                ),
+            ));
+        } else if *function_type != Types::Void && *body_return == Types::Void {
+            return Err(Error::new(
+                keyword,
+                &format!(
+                    "function return expects type: '{}', found: 'void'",
+                    function_type
+                ),
+            ));
+        }
         Ok(())
     }
 }

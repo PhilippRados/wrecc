@@ -1,4 +1,4 @@
-Error: expected 'main' return type 'int', found: 'char'
+Error: expected 'main()' return type 'int', found: 'char'
 |
 1 char main() {
 |      ^

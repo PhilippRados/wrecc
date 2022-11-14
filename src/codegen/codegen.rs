@@ -170,8 +170,10 @@ impl Compiler {
                 let return_value = self.execute(expr)?;
                 writeln!(
                     self.output,
-                    "\tmovl    {}, %eax\n\tjmp    {}",
+                    "\tmov{}    {}, {}\n\tjmp    {}",
+                    return_value.get_type().suffix(),
                     return_value.name(&self.scratch),
+                    return_value.get_type().return_reg(),
                     function_epilogue
                 )?;
                 return_value.free(&mut self.scratch);

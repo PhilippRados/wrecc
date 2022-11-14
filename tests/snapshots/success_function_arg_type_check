@@ -1,4 +1,4 @@
-Error: Can't assign to type 'int' with type 'pointer'
+Error: Can't assign to type 'int' with type 'int*'
 |
 8   a = *some(a);
 |            ^

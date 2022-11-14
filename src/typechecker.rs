@@ -211,9 +211,9 @@ impl TypeChecker {
         Ok(())
     }
     fn check_cast(&self, type_decl: &Types, other_type: &Types, expr: &mut Expr) {
-        if other_type < type_decl {
+        if other_type.size() < type_decl.size() {
             cast!(expr, type_decl.clone(), CastUp);
-        } else if other_type > type_decl {
+        } else if other_type.size() > type_decl.size() {
             cast!(expr, type_decl.clone(), CastDown);
         }
     }

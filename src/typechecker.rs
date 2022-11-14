@@ -174,15 +174,11 @@ impl TypeChecker {
                 token,
                 &format!("Can't assign to type '{}' with type '{}'", left, right),
             )),
-            (Types::Pointer(_), t) | (t, Types::Pointer(_)) => {
-                if !matches!(t, Types::Pointer(_)) {
-                    Err(Error::new(
-                        token,
-                        &format!("Can't assign to type '{}' with type '{}'", left, right),
-                    ))
-                } else {
-                    Ok(())
-                }
+            (Types::Pointer(_), t) | (t, Types::Pointer(_)) if !matches!(t, Types::Pointer(_)) => {
+                Err(Error::new(
+                    token,
+                    &format!("Can't assign to type '{}' with type '{}'", left, right),
+                ))
             }
             _ => Ok(()),
         }
@@ -667,24 +663,25 @@ impl TypeChecker {
         function_type: &Types,
         body_return: &Types,
     ) -> Result<(), Error> {
-        if *function_type == Types::Void && *body_return != Types::Void {
-            return Err(Error::new(
+        match (function_type, body_return) {
+            (Types::Void, t) | (t, Types::Void) if !matches!(t, Types::Void) => Err(Error::new(
                 keyword,
                 &format!(
-                    "function return expects type: 'void', found: '{}'",
-                    body_return
+                    "Mismatched function return type: '{}', found: '{}'",
+                    function_type, body_return
                 ),
-            ));
-        } else if *function_type != Types::Void && *body_return == Types::Void {
-            return Err(Error::new(
-                keyword,
-                &format!(
-                    "function return expects type: '{}', found: 'void'",
-                    function_type
-                ),
-            ));
+            )),
+            (Types::Pointer(_), t) | (t, Types::Pointer(_)) if !matches!(t, Types::Pointer(_)) => {
+                Err(Error::new(
+                    keyword,
+                    &format!(
+                        "Mismatched function return type: '{}', found: '{}'",
+                        function_type, body_return
+                    ),
+                ))
+            }
+            _ => Ok(()),
         }
-        Ok(())
     }
 }
 fn find_function(scopes: &Vec<Scope>) -> Option<&Scope> {

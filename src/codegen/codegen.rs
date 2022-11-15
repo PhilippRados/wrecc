@@ -202,7 +202,7 @@ impl Compiler {
         value_reg: Register,
     ) -> Result<(), std::fmt::Error> {
         self.declare_var(type_decl, name.unwrap_string())?;
-        let value_reg = self.convert_stack_reg(value_reg)?;
+        let value_reg = self.maybe_convert_stack_reg(value_reg)?;
 
         writeln!(
             self.output,
@@ -325,7 +325,23 @@ impl Compiler {
             } => self.cg_call(callee, args, ast.type_decl.clone().unwrap()),
             ExprKind::CastUp { expr } => self.cg_cast_up(expr, ast.type_decl.clone().unwrap()),
             ExprKind::CastDown { expr } => self.cg_cast_down(expr, ast.type_decl.clone().unwrap()),
+            ExprKind::Scale { expr, by_amount } => self.cg_scale(expr, by_amount),
         }
+    }
+    fn cg_scale(&mut self, expr: &Expr, by_amount: &usize) -> Result<Register, std::fmt::Error> {
+        let value_reg = self.execute(expr)?;
+
+        let value_reg = self.maybe_convert_stack_reg(value_reg)?;
+
+        writeln!(
+            self.output,
+            "imul{}   ${}, {}", // cut off first n bytes of value-register
+            value_reg.get_type().suffix(),
+            by_amount,
+            value_reg.name(&self.scratch)
+        )?;
+
+        Ok(value_reg)
     }
     fn cg_cast_down(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
         let mut value_reg = self.execute(expr)?;
@@ -364,7 +380,7 @@ impl Compiler {
         let mut r_value = self.execute(r_expr)?;
 
         // can't move from mem to mem so make temp scratch-register
-        r_value = self.convert_stack_reg(r_value)?;
+        r_value = self.maybe_convert_stack_reg(r_value)?;
 
         writeln!(
             self.output,
@@ -613,7 +629,7 @@ impl Compiler {
         Ok(dest)
     }
     fn cg_deref_at_l(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
-        let reg = self.convert_stack_reg(reg)?;
+        let reg = self.maybe_convert_stack_reg(reg)?;
         Ok(reg.convert_to_deref())
     }
     fn cg_deref_at(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
@@ -621,7 +637,7 @@ impl Compiler {
             self.scratch.scratch_alloc(),
             reg.get_type().deref_at().unwrap(),
         );
-        let reg = self.convert_stack_reg(reg)?;
+        let reg = self.maybe_convert_stack_reg(reg)?;
         writeln!(
             self.output,
             "\tmov{}    ({}), {}",
@@ -740,8 +756,8 @@ impl Compiler {
         let mut left_reg = self.execute(left)?;
         let mut right_reg = self.execute(right)?;
 
-        left_reg = self.convert_stack_reg(left_reg)?;
-        right_reg = self.convert_stack_reg(right_reg)?;
+        left_reg = self.maybe_convert_stack_reg(left_reg)?;
+        right_reg = self.maybe_convert_stack_reg(right_reg)?;
 
         match token.token {
             TokenType::Plus => self.cg_add(left_reg, right_reg),
@@ -757,7 +773,7 @@ impl Compiler {
             _ => Error::new(token, "invalid binary operator").print_exit(),
         }
     }
-    fn convert_stack_reg(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
+    fn maybe_convert_stack_reg(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
         if matches!(reg, Register::Stack(_, _)) {
             self.scratch_temp(reg)
         } else {

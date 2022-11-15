@@ -1,8 +1,15 @@
 int main(){
   int a = 0;
   int b = 3;
+  int c = 'a';
 
   int* p = &a - 1;
+  int* p2 = &b + 1;
+  int* p3 = &a - 2;
+  int* p4 = 1 + &c;
 
   printint(*p);
+  printint(*p2);
+  printint(*p3);
+  printint(*p4);
 }

@@ -444,8 +444,9 @@ impl TypeChecker {
                 callee,
                 args,
             } => self.evaluate_call(left_paren, callee, args)?,
-            ExprKind::CastUp { expr: _ } => unimplemented!("explicit casts"),
-            ExprKind::CastDown { expr: _ } => unimplemented!("explicit casts"),
+            ExprKind::CastUp { .. } => unimplemented!("explicit casts"),
+            ExprKind::CastDown { .. } => unimplemented!("explicit casts"),
+            ExprKind::Scale { .. } => unreachable!("is only used in codegen"),
         });
         Ok(ast.type_decl.clone().unwrap())
     }
@@ -542,6 +543,46 @@ impl TypeChecker {
 
         result
     }
+    fn is_valid_op(token: &Token, left_type: &Types, right_type: &Types) -> bool {
+        match (&left_type, &right_type) {
+            (Types::Void, Types::Void) | (Types::Void, _) | (_, Types::Void) => false,
+            (Types::Pointer(_), Types::Pointer(_)) => {
+                token.token == TokenType::Minus
+                    || token.token == TokenType::EqualEqual
+                    || token.token == TokenType::BangEqual
+            }
+            (_, Types::Pointer(_)) => token.token == TokenType::Plus,
+            (Types::Pointer(_), _) => {
+                token.token == TokenType::Plus || token.token == TokenType::Minus
+            }
+            _ => true,
+        }
+    }
+    fn maybe_scale(left: &Types, right: &Types, left_expr: &mut Expr, right_expr: &mut Expr) {
+        match (left, right) {
+            (t, Types::Pointer(inner)) if !matches!(t, Types::Pointer(_)) => {
+                *left_expr = Expr {
+                    kind: ExprKind::Scale {
+                        by_amount: inner.size(),
+                        expr: Box::new(left_expr.clone()),
+                    },
+                    type_decl: left_expr.type_decl.clone(),
+                    value_kind: left_expr.value_kind.clone(),
+                }
+            }
+            (Types::Pointer(inner), t) if !matches!(t, Types::Pointer(_)) => {
+                *right_expr = Expr {
+                    kind: ExprKind::Scale {
+                        by_amount: inner.size(),
+                        expr: Box::new(right_expr.clone()),
+                    },
+                    type_decl: right_expr.type_decl.clone(),
+                    value_kind: right_expr.value_kind.clone(),
+                }
+            }
+            _ => (),
+        }
+    }
     fn evaluate_logical(
         &mut self,
         left: &mut Expr,
@@ -559,19 +600,8 @@ impl TypeChecker {
         let mut left_type = self.expr_type(left)?;
         let mut right_type = self.expr_type(right)?;
 
-        if !match (&left_type, &right_type) {
-            (Types::Void, Types::Void) | (Types::Void, _) | (_, Types::Void) => false,
-            (Types::Pointer(_), Types::Pointer(_)) => {
-                token.token == TokenType::Minus
-                    || token.token == TokenType::EqualEqual
-                    || token.token == TokenType::BangEqual
-            }
-            (_, Types::Pointer(_)) => token.token == TokenType::Plus,
-            (Types::Pointer(_), _) => {
-                token.token == TokenType::Plus || token.token == TokenType::Minus
-            }
-            _ => true,
-        } {
+        // check valid operations
+        if !Self::is_valid_op(token, &left_type, &right_type) {
             return Err(Error::new(
                 token,
                 &format!(
@@ -590,6 +620,9 @@ impl TypeChecker {
             left_type = self.maybe_int_promote(left);
             right_type = self.maybe_int_promote(right);
         }
+
+        // scale index when pointer arithmetic
+        Self::maybe_scale(&left_type, &right_type, left, right);
 
         if token.token != TokenType::AmpAmp && token.token != TokenType::PipePipe {
             // type promote to bigger type

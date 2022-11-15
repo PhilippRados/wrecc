@@ -7,13 +7,13 @@ int* twoSum(int* nums, int numsSize, int target, int* returnSize){
 
     for (int i=0; i<numsSize; i = i + 1)
     {
-        int x = target - *(nums + i * 4);
+        int x = target - *(nums + i);
         for (int j=i+1; j<numsSize; j = j + 1)
         {
-            if (x == *(nums + j * 4))
+            if (x == *(nums + j))
             {
                 *res = i;
-                *(res + 4) = j;
+                *(res + 1) = j;
                 return res;
             }
         }
@@ -23,15 +23,15 @@ int* twoSum(int* nums, int numsSize, int target, int* returnSize){
 int main(){
   int* nums = malloc(3 * 4);
   *(nums) = 3;
-  *(nums + 4) = 2;
-  *(nums + 8) = 4;
+  *(nums + 1) = 2;
+  *(nums + 2) = 4;
 
   int return_size;
 
   int* result = twoSum(nums, 3, 6, &return_size);
   printint(return_size);
   printint(*result);
-  printint(*(result + 4));
+  printint(*(result + 1));
 
   free(result);
   free(nums);

@@ -559,28 +559,23 @@ impl TypeChecker {
         }
     }
     fn maybe_scale(left: &Types, right: &Types, left_expr: &mut Expr, right_expr: &mut Expr) {
-        match (left, right) {
-            (t, Types::Pointer(inner)) if !matches!(t, Types::Pointer(_)) => {
-                *left_expr = Expr {
-                    kind: ExprKind::Scale {
-                        by_amount: inner.size(),
-                        expr: Box::new(left_expr.clone()),
-                    },
-                    type_decl: left_expr.type_decl.clone(),
-                    value_kind: left_expr.value_kind.clone(),
-                }
+        let (expr, amount) = match (left, right) {
+            (t, Types::Pointer(inner)) if !matches!(t, Types::Pointer(_)) && inner.size() > 1 => {
+                (left_expr, inner.size())
             }
-            (Types::Pointer(inner), t) if !matches!(t, Types::Pointer(_)) => {
-                *right_expr = Expr {
-                    kind: ExprKind::Scale {
-                        by_amount: inner.size(),
-                        expr: Box::new(right_expr.clone()),
-                    },
-                    type_decl: right_expr.type_decl.clone(),
-                    value_kind: right_expr.value_kind.clone(),
-                }
+            (Types::Pointer(inner), t) if !matches!(t, Types::Pointer(_)) && inner.size() > 1 => {
+                (right_expr, inner.size())
             }
-            _ => (),
+            _ => return,
+        };
+
+        *expr = Expr {
+            kind: ExprKind::Scale {
+                by_amount: amount,
+                expr: Box::new(expr.clone()),
+            },
+            type_decl: expr.type_decl.clone(),
+            value_kind: expr.value_kind.clone(),
         }
     }
     fn evaluate_logical(

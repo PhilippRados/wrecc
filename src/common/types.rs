@@ -11,7 +11,12 @@ pub enum Types {
 }
 impl Types {
     pub fn into_vec() -> Vec<TokenKind> {
-        vec![TokenKind::Char, TokenKind::Int, TokenKind::Void]
+        vec![
+            TokenKind::Char,
+            TokenKind::Int,
+            TokenKind::Void,
+            TokenKind::Long,
+        ]
     }
     // returns type-size in bytes
     pub fn size(&self) -> usize {

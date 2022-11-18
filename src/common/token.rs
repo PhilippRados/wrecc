@@ -251,6 +251,7 @@ impl Token {
             TokenType::Int => Types::Int,
             TokenType::Char => Types::Char,
             TokenType::Void => Types::Void,
+            TokenType::Long => Types::Long,
             _ => unreachable!("only types are checked"),
         }
     }

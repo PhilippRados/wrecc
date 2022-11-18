@@ -36,7 +36,11 @@ pub enum ExprKind {
     CastDown {
         expr: Box<Expr>,
     },
-    Scale {
+    ScaleUp {
+        by_amount: usize,
+        expr: Box<Expr>,
+    },
+    ScaleDown {
         by_amount: usize,
         expr: Box<Expr>,
     },
@@ -81,7 +85,8 @@ impl Display for ExprKind {
                 ExprKind::Number(_) => "'number-literal'".to_string(),
                 ExprKind::CharLit(_) => "'character-literal'".to_string(),
                 ExprKind::Ident(_) => "'identifier'".to_string(),
-                ExprKind::Scale { .. } => "'scaling'".to_string(),
+                ExprKind::ScaleUp { .. } => "'scaling-up'".to_string(),
+                ExprKind::ScaleDown { .. } => "'scaling-down'".to_string(),
             }
         )
     }

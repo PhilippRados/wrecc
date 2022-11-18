@@ -425,7 +425,18 @@ impl TypeChecker {
 
     pub fn expr_type(&mut self, ast: &mut Expr) -> Result<Types, Error> {
         ast.type_decl = Some(match &mut ast.kind {
-            ExprKind::Binary { left, token, right } => self.evaluate_binary(left, token, right)?,
+            ExprKind::Binary { left, token, right } => {
+                match self.evaluate_binary(left, token, right)? {
+                    (result_type, None) => result_type,
+                    (result_type, Some(scale_size)) => {
+                        ast.kind = ExprKind::ScaleDown {
+                            by_amount: log_2(scale_size as i32),
+                            expr: Box::new(ast.clone()),
+                        };
+                        result_type
+                    }
+                }
+            }
             ExprKind::Unary { token, right } => self.evaluate_unary(token, right)?,
             ExprKind::Grouping { expr } => self.evaluate_grouping(expr)?,
             ExprKind::Number(_) => Types::Int,
@@ -446,7 +457,8 @@ impl TypeChecker {
             } => self.evaluate_call(left_paren, callee, args)?,
             ExprKind::CastUp { .. } => unimplemented!("explicit casts"),
             ExprKind::CastDown { .. } => unimplemented!("explicit casts"),
-            ExprKind::Scale { .. } => unreachable!("is only used in codegen"),
+            ExprKind::ScaleUp { .. } => unreachable!("is only used in codegen"),
+            ExprKind::ScaleDown { .. } => unreachable!("is only used in codegen"),
         });
         Ok(ast.type_decl.clone().unwrap())
     }
@@ -569,14 +581,10 @@ impl TypeChecker {
             _ => return,
         };
 
-        *expr = Expr {
-            kind: ExprKind::Scale {
-                by_amount: amount,
-                expr: Box::new(expr.clone()),
-            },
-            type_decl: expr.type_decl.clone(),
-            value_kind: expr.value_kind.clone(),
-        }
+        expr.kind = ExprKind::ScaleUp {
+            by_amount: amount,
+            expr: Box::new(expr.clone()),
+        };
     }
     fn evaluate_logical(
         &mut self,
@@ -584,14 +592,30 @@ impl TypeChecker {
         token: &Token,
         right: &mut Expr,
     ) -> Result<Types, Error> {
-        self.evaluate_binary(left, token, right)
+        let mut left_type = self.expr_type(left)?;
+        let mut right_type = self.expr_type(right)?;
+
+        match (&left_type, &right_type) {
+            (Types::Void, Types::Void) | (Types::Void, _) | (_, Types::Void) => {
+                return Err(Error::new(
+                    token,
+                    &format!(
+                        "invalid logical expression: '{}' {} '{}'",
+                        left_type, token.token, right_type
+                    ),
+                ));
+            }
+            _ => (),
+        }
+
+        Ok(Types::Int)
     }
     fn evaluate_binary(
         &mut self,
         left: &mut Expr,
         token: &Token,
         right: &mut Expr,
-    ) -> Result<Types, Error> {
+    ) -> Result<(Types, Option<usize>), Error> {
         let mut left_type = self.expr_type(left)?;
         let mut right_type = self.expr_type(right)?;
 
@@ -607,11 +631,7 @@ impl TypeChecker {
         }
 
         // only int promote on arithmetic operations
-        if token.token != TokenType::EqualEqual
-            && token.token != TokenType::BangEqual
-            && token.token != TokenType::AmpAmp
-            && token.token != TokenType::PipePipe
-        {
+        if token.token != TokenType::EqualEqual && token.token != TokenType::BangEqual {
             left_type = self.maybe_int_promote(left);
             right_type = self.maybe_int_promote(right);
         }
@@ -619,26 +639,18 @@ impl TypeChecker {
         // scale index when pointer arithmetic
         Self::maybe_scale(&left_type, &right_type, left, right);
 
-        if token.token != TokenType::AmpAmp && token.token != TokenType::PipePipe {
-            // type promote to bigger type
-            Ok(if left_type.size() > right_type.size() {
-                cast!(right, left_type.clone(), CastUp);
-                left_type
-            } else if right_type.size() > left_type.size() {
-                cast!(left, right_type.clone(), CastUp);
-                right_type
-            } else {
-                if matches!(left_type, Types::Pointer(_)) && matches!(right_type, Types::Pointer(_))
-                {
-                    // when subtracting two pointers always return long
-                    Types::Long
-                } else {
-                    left_type
-                }
-            })
+        // type promote to bigger type
+        if left_type.size() > right_type.size() {
+            cast!(right, left_type.clone(), CastUp);
+            Ok((left_type, None))
+        } else if right_type.size() > left_type.size() {
+            cast!(left, right_type.clone(), CastUp);
+            Ok((right_type, None))
         } else {
-            // logical expression always returns int
-            Ok(Types::Int)
+            match (&left_type, &right_type) {
+                (Types::Pointer(inner), Types::Pointer(_)) => Ok((Types::Long, Some(inner.size()))),
+                _ => Ok((left_type, None)),
+            }
         }
     }
     fn maybe_int_promote(&self, expr: &mut Expr) -> Types {
@@ -725,4 +737,13 @@ fn find_function(scopes: &Vec<Scope>) -> Option<&Scope> {
         }
     }
     None
+}
+// helper function for calculating log2
+const fn num_bits<T>() -> usize {
+    std::mem::size_of::<T>() * 8
+}
+
+fn log_2(x: i32) -> usize {
+    assert!(x > 0);
+    (num_bits::<i32>() as u32 - x.leading_zeros() - 1) as usize
 }

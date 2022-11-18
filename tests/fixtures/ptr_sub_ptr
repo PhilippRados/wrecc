@@ -1,8 +1,15 @@
 int main(){
-  int a = 0;
-  int b = 3;
+  long a = 0;
+  long b = 3;
 
   int p = &b - &a;
 
+  int c;
+  long e;
+  int t;
+
+  int p2 = &c - &t;
+
   printint(p);
+  printint(p2);
 }

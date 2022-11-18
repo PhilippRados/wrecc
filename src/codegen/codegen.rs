@@ -325,10 +325,30 @@ impl Compiler {
             } => self.cg_call(callee, args, ast.type_decl.clone().unwrap()),
             ExprKind::CastUp { expr } => self.cg_cast_up(expr, ast.type_decl.clone().unwrap()),
             ExprKind::CastDown { expr } => self.cg_cast_down(expr, ast.type_decl.clone().unwrap()),
-            ExprKind::Scale { expr, by_amount } => self.cg_scale(expr, by_amount),
+            ExprKind::ScaleUp { expr, by_amount } => self.cg_scale_up(expr, by_amount),
+            ExprKind::ScaleDown { expr, by_amount } => self.cg_scale_down(expr, by_amount),
         }
     }
-    fn cg_scale(&mut self, expr: &Expr, by_amount: &usize) -> Result<Register, std::fmt::Error> {
+    fn cg_scale_down(
+        &mut self,
+        expr: &Expr,
+        by_amount: &usize,
+    ) -> Result<Register, std::fmt::Error> {
+        let value_reg = self.execute(expr)?;
+
+        let value_reg = self.maybe_convert_stack_reg(value_reg)?;
+
+        writeln!(
+            self.output,
+            "sar{}   ${}, {}", // right shift number, equivalent to division (works bc type-size is 2^n)
+            value_reg.get_type().suffix(),
+            by_amount,
+            value_reg.name(&self.scratch)
+        )?;
+
+        Ok(value_reg)
+    }
+    fn cg_scale_up(&mut self, expr: &Expr, by_amount: &usize) -> Result<Register, std::fmt::Error> {
         let value_reg = self.execute(expr)?;
 
         let value_reg = self.maybe_convert_stack_reg(value_reg)?;
@@ -348,19 +368,6 @@ impl Compiler {
         value_reg.set_type(new_type.clone());
 
         Ok(value_reg)
-        // let dest_reg = Register::Scratch(self.scratch.scratch_alloc(), new_type.clone());
-        // value_reg.set_type(new_type.clone());
-
-        // writeln!(
-        //     self.output,
-        //     "mov{}   {}, {}", // cut off first n bytes of value-register
-        //     new_type.suffix(),
-        //     value_reg.name(&self.scratch),
-        //     dest_reg.name(&self.scratch)
-        // )?;
-        // value_reg.free(&mut self.scratch);
-
-        // Ok(dest_reg)
     }
     fn cg_cast_up(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
         let value_reg = self.execute(expr)?;

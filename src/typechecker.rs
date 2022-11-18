@@ -632,11 +632,8 @@ impl TypeChecker {
             ));
         }
 
-        // only int promote on arithmetic operations
-        if token.token != TokenType::EqualEqual && token.token != TokenType::BangEqual {
-            left_type = self.maybe_int_promote(left);
-            right_type = self.maybe_int_promote(right);
-        }
+        left_type = self.maybe_int_promote(left);
+        right_type = self.maybe_int_promote(right);
 
         // scale index when pointer arithmetic
         Self::maybe_scale(&left_type, &right_type, left, right);

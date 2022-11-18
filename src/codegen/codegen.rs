@@ -122,6 +122,7 @@ impl Compiler {
             cond_reg.name(&self.scratch),
             start_label
         )?;
+        cond_reg.free(&mut self.scratch);
 
         Ok(())
     }
@@ -365,7 +366,7 @@ impl Compiler {
     }
     fn cg_cast_down(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
         let mut value_reg = self.execute(expr)?;
-        value_reg.set_type(new_type.clone());
+        value_reg.set_type(new_type);
 
         Ok(value_reg)
     }

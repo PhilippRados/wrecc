@@ -50,12 +50,12 @@ impl Register {
             (Types::Int, 4) => "%r8d",
             (Types::Int, 5) => "%r9d",
 
-            (Types::Pointer(_), 0) => "%rdi",
-            (Types::Pointer(_), 1) => "%rsi",
-            (Types::Pointer(_), 2) => "%rdx",
-            (Types::Pointer(_), 3) => "%rcx",
-            (Types::Pointer(_), 4) => "%r8",
-            (Types::Pointer(_), 5) => "%r9",
+            (Types::Pointer(_) | Types::Long, 0) => "%rdi",
+            (Types::Pointer(_) | Types::Long, 1) => "%rsi",
+            (Types::Pointer(_) | Types::Long, 2) => "%rdx",
+            (Types::Pointer(_) | Types::Long, 3) => "%rcx",
+            (Types::Pointer(_) | Types::Long, 4) => "%r8",
+            (Types::Pointer(_) | Types::Long, 5) => "%r9",
             _ => unreachable!(),
         }
     }

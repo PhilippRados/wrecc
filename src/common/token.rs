@@ -43,6 +43,7 @@ pub enum TokenKind {
     Void,
     Int,
     Char,
+    Long,
     Else,
     For,
     If,
@@ -95,6 +96,7 @@ impl From<&TokenType> for TokenKind {
             TokenType::CharLit(_) => TokenKind::CharLit,
             TokenType::Char => TokenKind::Char,
             TokenType::Int => TokenKind::Int,
+            TokenType::Long => TokenKind::Long,
             TokenType::Void => TokenKind::Void,
         }
     }
@@ -140,6 +142,7 @@ pub enum TokenType {
 
     // Keywords.
     Void,
+    Long,
     Int,
     Char,
     Else,
@@ -180,6 +183,7 @@ impl Display for TokenType {
                 TokenType::Char => "'char'",
                 TokenType::CharLit(_) => "'char'",
                 TokenType::Int => "'int'",
+                TokenType::Long => "'long'",
                 TokenType::Equal => "'='",
                 TokenType::EqualEqual => "'=='",
                 TokenType::Greater => "'>'",

@@ -621,14 +621,20 @@ impl TypeChecker {
 
         if token.token != TokenType::AmpAmp && token.token != TokenType::PipePipe {
             // type promote to bigger type
-            Ok(if left_type > right_type {
+            Ok(if left_type.size() > right_type.size() {
                 cast!(right, left_type.clone(), CastUp);
                 left_type
-            } else if right_type > left_type {
+            } else if right_type.size() > left_type.size() {
                 cast!(left, right_type.clone(), CastUp);
                 right_type
             } else {
-                left_type
+                if matches!(left_type, Types::Pointer(_)) && matches!(right_type, Types::Pointer(_))
+                {
+                    // when subtracting two pointers always return long
+                    Types::Long
+                } else {
+                    left_type
+                }
             })
         } else {
             // logical expression always returns int

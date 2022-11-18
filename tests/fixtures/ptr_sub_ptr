@@ -1,0 +1,8 @@
+int main(){
+  int a = 0;
+  int b = 3;
+
+  int p = &b - &a;
+
+  printint(p);
+}

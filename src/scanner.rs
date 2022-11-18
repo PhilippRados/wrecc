@@ -25,6 +25,7 @@ impl<'a> Scanner<'a> {
             keywords: HashMap::from([
                 ("void", TokenType::Void),
                 ("int", TokenType::Int),
+                ("long", TokenType::Long),
                 ("char", TokenType::Char),
                 ("if", TokenType::If),
                 ("else", TokenType::Else),

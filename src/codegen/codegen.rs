@@ -345,19 +345,22 @@ impl Compiler {
     }
     fn cg_cast_down(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
         let mut value_reg = self.execute(expr)?;
-        let dest_reg = Register::Scratch(self.scratch.scratch_alloc(), new_type.clone());
         value_reg.set_type(new_type.clone());
 
-        writeln!(
-            self.output,
-            "mov{}   {}, {}", // cut off first n bytes of value-register
-            new_type.suffix(),
-            value_reg.name(&self.scratch),
-            dest_reg.name(&self.scratch)
-        )?;
-        value_reg.free(&mut self.scratch);
+        Ok(value_reg)
+        // let dest_reg = Register::Scratch(self.scratch.scratch_alloc(), new_type.clone());
+        // value_reg.set_type(new_type.clone());
 
-        Ok(dest_reg)
+        // writeln!(
+        //     self.output,
+        //     "mov{}   {}, {}", // cut off first n bytes of value-register
+        //     new_type.suffix(),
+        //     value_reg.name(&self.scratch),
+        //     dest_reg.name(&self.scratch)
+        // )?;
+        // value_reg.free(&mut self.scratch);
+
+        // Ok(dest_reg)
     }
     fn cg_cast_up(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
         let value_reg = self.execute(expr)?;

@@ -6,6 +6,7 @@ pub enum Types {
     Void, // type-promotion order
     Char,
     Int,
+    Long,
     Pointer(Box<Types>),
 }
 impl Types {
@@ -18,7 +19,7 @@ impl Types {
             Types::Void => 0,
             Types::Char => 1,
             Types::Int => 4,
-            Types::Pointer(_) => 8,
+            Types::Pointer(_) | Types::Long => 8,
         }
     }
     pub fn reg_suffix(&self) -> &str {
@@ -26,7 +27,7 @@ impl Types {
             Types::Void => unreachable!(),
             Types::Char => "b",
             Types::Int => "d",
-            Types::Pointer(_) => "",
+            Types::Pointer(_) | Types::Long => "",
         }
     }
     pub fn suffix(&self) -> &str {
@@ -34,7 +35,7 @@ impl Types {
             Types::Void => unreachable!(),
             Types::Char => "b",
             Types::Int => "l",
-            Types::Pointer(_) => "q",
+            Types::Pointer(_) | Types::Long => "q",
         }
     }
     pub fn return_reg(&self) -> &str {
@@ -42,7 +43,7 @@ impl Types {
             Types::Void => unreachable!(),
             Types::Char => "%al",
             Types::Int => "%eax",
-            Types::Pointer(_) => "%rax",
+            Types::Pointer(_) | Types::Long => "%rax",
         }
     }
     pub fn pointer_to(&mut self) {
@@ -61,9 +62,10 @@ impl Display for Types {
             f,
             "{}",
             match self {
+                Types::Void => "void".to_string(),
                 Types::Char => "char".to_string(),
                 Types::Int => "int".to_string(),
-                Types::Void => "void".to_string(),
+                Types::Long => "long".to_string(),
                 Types::Pointer(inside) => format!("{}*", inside),
             }
         )

@@ -326,8 +326,8 @@ impl Compiler {
             } => self.cg_call(callee, args, ast.type_decl.clone().unwrap()),
             ExprKind::CastUp { expr } => self.cg_cast_up(expr, ast.type_decl.clone().unwrap()),
             ExprKind::CastDown { expr } => self.cg_cast_down(expr, ast.type_decl.clone().unwrap()),
-            ExprKind::ScaleUp { expr, by_amount } => self.cg_scale_up(expr, by_amount),
-            ExprKind::ScaleDown { expr, by_amount } => self.cg_scale_down(expr, by_amount),
+            ExprKind::ScaleUp { expr, shift_amount } => self.cg_scale_up(expr, shift_amount),
+            ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(expr, shift_amount),
         }
     }
     fn cg_scale_down(
@@ -356,7 +356,7 @@ impl Compiler {
 
         writeln!(
             self.output,
-            "imul{}   ${}, {}", // cut off first n bytes of value-register
+            "sal{}   ${}, {}", // cut off first n bytes of value-register
             value_reg.get_type().suffix(),
             by_amount,
             value_reg.name(&self.scratch)

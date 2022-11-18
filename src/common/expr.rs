@@ -37,11 +37,11 @@ pub enum ExprKind {
         expr: Box<Expr>,
     },
     ScaleUp {
-        by_amount: usize,
+        shift_amount: usize,
         expr: Box<Expr>,
     },
     ScaleDown {
-        by_amount: usize,
+        shift_amount: usize,
         expr: Box<Expr>,
     },
     Number(i32),

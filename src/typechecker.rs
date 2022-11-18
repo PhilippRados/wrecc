@@ -432,7 +432,7 @@ impl TypeChecker {
                     (result_type, None) => result_type,
                     (result_type, Some(scale_size)) => {
                         ast.kind = ExprKind::ScaleDown {
-                            by_amount: log_2(scale_size as i32),
+                            shift_amount: log_2(scale_size as i32),
                             expr: Box::new(ast.clone()),
                         };
                         result_type
@@ -584,7 +584,7 @@ impl TypeChecker {
         };
 
         expr.kind = ExprKind::ScaleUp {
-            by_amount: amount,
+            shift_amount: log_2(amount as i32),
             expr: Box::new(expr.clone()),
         };
     }

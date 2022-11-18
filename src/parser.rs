@@ -126,7 +126,7 @@ impl Parser {
             );
         }
         if init != None {
-            body = Stmt::Block(left_paren.clone(), vec![init.unwrap(), body]);
+            body = Stmt::Block(left_paren, vec![init.unwrap(), body]);
         }
 
         Ok(body)
@@ -251,7 +251,7 @@ impl Parser {
     fn var_assignment(&mut self) -> Result<Expr, Error> {
         let expr = self.or()?;
 
-        while let Some(t) = self.matches(vec![TokenKind::Equal]) {
+        if let Some(t) = self.matches(vec![TokenKind::Equal]) {
             let value = self.expression()?;
             if let ValueKind::Lvalue = expr.value_kind.clone() {
                 return Ok(Expr::new(
@@ -377,7 +377,7 @@ impl Parser {
         Ok(expr)
     }
     fn unary(&mut self) -> Result<Expr, Error> {
-        while let Some(token) = self.matches(vec![
+        if let Some(token) = self.matches(vec![
             TokenKind::Star,
             TokenKind::Amp,
             TokenKind::Bang,
@@ -386,7 +386,7 @@ impl Parser {
             let right = self.unary()?;
             return Ok(Expr::new(
                 ExprKind::Unary {
-                    right: Box::new(right.clone()),
+                    right: Box::new(right),
                     token: token.clone(),
                 },
                 match token.token {
@@ -441,7 +441,7 @@ impl Parser {
             ));
         }
         if let Some(s) = self.matches(vec![TokenKind::Ident]) {
-            return Ok(Expr::new(ExprKind::Ident(s.clone()), ValueKind::Lvalue));
+            return Ok(Expr::new(ExprKind::Ident(s), ValueKind::Lvalue));
         }
 
         if self.matches(vec![TokenKind::LeftParen]).is_some() {

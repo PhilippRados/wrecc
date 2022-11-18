@@ -1,5 +1,6 @@
 use crate::codegen::codegen::align_by;
 use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 #[derive(PartialEq)]
@@ -93,7 +94,7 @@ impl TypeChecker {
         Ok(())
     }
     fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
-        self.check_global(&statement)?;
+        self.check_global(statement)?;
 
         match statement {
             Stmt::DeclareVar(type_decl, var_name) => self.declare_var(type_decl, var_name),
@@ -207,10 +208,10 @@ impl TypeChecker {
         Ok(())
     }
     fn maybe_cast(&self, type_decl: &Types, other_type: &Types, expr: &mut Expr) {
-        if other_type.size() < type_decl.size() {
-            cast!(expr, type_decl.clone(), CastUp);
-        } else if other_type.size() > type_decl.size() {
-            cast!(expr, type_decl.clone(), CastDown);
+        match other_type.size().cmp(&type_decl.size()) {
+            Ordering::Less => cast!(expr, type_decl.clone(), CastUp),
+            Ordering::Greater => cast!(expr, type_decl.clone(), CastDown),
+            Ordering::Equal => (),
         }
     }
     fn increment_stack_size(&mut self, var_name: &Token, type_decl: &Types) -> Result<(), Error> {
@@ -301,9 +302,10 @@ impl TypeChecker {
         if name == "main" {
             self.found_main = true;
         }
-        if let Some(_) = self
+        if self
             .global_env
             .get_func(&name, FunctionKind::DefDeclaration)
+            .is_some()
         {
             return Err(Error::new(
                 name_token,
@@ -336,7 +338,7 @@ impl TypeChecker {
         // check function body
         self.block(name_token, body, env)?;
 
-        self.main_returns_int(name_token, &return_type)?;
+        self.main_returns_int(name_token, return_type)?;
         self.implicit_return_main(name_token, body);
 
         if *return_type != Types::Void && !self.returns_all_paths {
@@ -528,8 +530,8 @@ impl TypeChecker {
     fn args_and_params_match(
         &self,
         left_paren: &Token,
-        params: &Vec<(Types, Token)>,
-        expressions: &mut Vec<Expr>,
+        params: &[(Types, Token)],
+        expressions: &mut [Expr],
         args: Vec<Types>,
     ) -> Result<(), Error> {
         for (i, type_decl) in args.iter().enumerate() {
@@ -592,8 +594,8 @@ impl TypeChecker {
         token: &Token,
         right: &mut Expr,
     ) -> Result<Types, Error> {
-        let mut left_type = self.expr_type(left)?;
-        let mut right_type = self.expr_type(right)?;
+        let left_type = self.expr_type(left)?;
+        let right_type = self.expr_type(right)?;
 
         match (&left_type, &right_type) {
             (Types::Void, Types::Void) | (Types::Void, _) | (_, Types::Void) => {
@@ -640,17 +642,19 @@ impl TypeChecker {
         Self::maybe_scale(&left_type, &right_type, left, right);
 
         // type promote to bigger type
-        if left_type.size() > right_type.size() {
-            cast!(right, left_type.clone(), CastUp);
-            Ok((left_type, None))
-        } else if right_type.size() > left_type.size() {
-            cast!(left, right_type.clone(), CastUp);
-            Ok((right_type, None))
-        } else {
-            match (&left_type, &right_type) {
+        match left_type.size().cmp(&right_type.size()) {
+            Ordering::Greater => {
+                cast!(right, left_type.clone(), CastUp);
+                Ok((left_type, None))
+            }
+            Ordering::Less => {
+                cast!(left, right_type.clone(), CastUp);
+                Ok((right_type, None))
+            }
+            Ordering::Equal => match (&left_type, &right_type) {
                 (Types::Pointer(inner), Types::Pointer(_)) => Ok((Types::Long, Some(inner.size()))),
                 _ => Ok((left_type, None)),
-            }
+            },
         }
     }
     fn maybe_int_promote(&self, expr: &mut Expr) -> Types {
@@ -730,7 +734,7 @@ impl TypeChecker {
         }
     }
 }
-fn find_function(scopes: &Vec<Scope>) -> Option<&Scope> {
+fn find_function(scopes: &[Scope]) -> Option<&Scope> {
     for ref scope in scopes.iter().rev() {
         if matches!(scope, Scope::Function(_, _)) {
             return Some(scope);

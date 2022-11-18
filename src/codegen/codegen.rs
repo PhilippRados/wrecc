@@ -432,7 +432,7 @@ impl Compiler {
 
         // moving the arguments into their designated registers
         for (i, expr) in args.iter().enumerate() {
-            let reg = self.execute(&expr)?;
+            let reg = self.execute(expr)?;
             writeln!(
                 self.output,
                 "\tmov{}    {}, {}",
@@ -452,13 +452,13 @@ impl Compiler {
         }
 
         // have to 16byte align stack depending on amount of pushs before
-        if pushed_regs.len() > 0 && pushed_regs.len() % 2 != 0 {
+        if !pushed_regs.is_empty() && pushed_regs.len() % 2 != 0 {
             writeln!(self.output, "\tsubq    $8,%rsp")?;
         }
         writeln!(self.output, "\tcall    _{}", func_name)?;
 
         // undo the stack alignment from before call
-        if pushed_regs.len() > 0 && pushed_regs.len() % 2 != 0 {
+        if !pushed_regs.is_empty() && pushed_regs.len() % 2 != 0 {
             writeln!(self.output, "\taddq    $8,%rsp")?;
         }
 

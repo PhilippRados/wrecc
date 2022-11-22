@@ -7,11 +7,11 @@ pub enum FunctionKind {
 }
 #[derive(Clone, PartialEq)]
 pub struct Function {
-    pub params: Vec<(Types, Token)>,
-    pub return_type: Types,
+    pub params: Vec<(NEWTypes, Token)>,
+    pub return_type: NEWTypes,
 }
 impl Function {
-    pub fn new(return_type: Types, params: Vec<(Types, Token)>) -> Self {
+    pub fn new(return_type: NEWTypes, params: Vec<(NEWTypes, Token)>) -> Self {
         Function {
             return_type,
             params,
@@ -75,9 +75,9 @@ impl<T: Clone> Environment<T> {
 
     pub fn declare_func(
         &mut self,
-        return_type: Types,
+        return_type: NEWTypes,
         name: &str,
-        params: Vec<(Types, Token)>,
+        params: Vec<(NEWTypes, Token)>,
         kind: FunctionKind,
     ) {
         let f = Function::new(return_type, params);

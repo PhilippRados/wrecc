@@ -98,7 +98,6 @@ impl Compiler {
             }
             Stmt::While(_, cond, body) => self.while_statement(cond, body),
             Stmt::FunctionDeclaration(_, _, _) => Ok(()),
-            _ => unimplemented!(),
         }
     }
     fn create_label(&mut self) -> usize {
@@ -183,7 +182,7 @@ impl Compiler {
             None => writeln!(self.output, "\tjmp    {}", function_epilogue),
         }
     }
-    fn declare_var(&mut self, type_decl: &Types, name: String) -> Result<(), std::fmt::Error> {
+    fn declare_var(&mut self, type_decl: &NEWTypes, name: String) -> Result<(), std::fmt::Error> {
         self.current_bp_offset += type_decl.size();
         self.current_bp_offset = align_by(self.current_bp_offset, type_decl.size());
 
@@ -198,7 +197,7 @@ impl Compiler {
     }
     fn init_var(
         &mut self,
-        type_decl: &Types,
+        type_decl: &NEWTypes,
         name: &Token,
         value_reg: Register,
     ) -> Result<(), std::fmt::Error> {
@@ -219,7 +218,7 @@ impl Compiler {
     fn function_definition(
         &mut self,
         name: String,
-        params: &[(Types, Token)],
+        params: &[(NEWTypes, Token)],
         body: &Vec<Stmt>,
     ) -> Result<(), std::fmt::Error> {
         self.function_name = Some(name.clone()); // save function name for return label jump
@@ -260,7 +259,7 @@ impl Compiler {
     fn cg_func_preamble(
         &mut self,
         name: &str,
-        params: &[(Types, Token)],
+        params: &[(NEWTypes, Token)],
     ) -> Result<(), std::fmt::Error> {
         writeln!(self.output, "\n\t.text\n\t.globl _{}", name)?;
         writeln!(self.output, "_{}:", name)?; // generate function label
@@ -298,13 +297,19 @@ impl Compiler {
     }
 
     fn cg_literal_num(&mut self, num: i32) -> Result<Register, std::fmt::Error> {
-        let reg = Register::Scratch(self.scratch.scratch_alloc(), Types::Int);
+        let reg = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            NEWTypes::Primitive(Types::Int),
+        );
 
         writeln!(self.output, "\tmovl    ${num}, {}", reg.name(&self.scratch))?;
         Ok(reg)
     }
     fn cg_literal_char(&mut self, num: i8) -> Result<Register, std::fmt::Error> {
-        let reg = Register::Scratch(self.scratch.scratch_alloc(), Types::Char);
+        let reg = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            NEWTypes::Primitive(Types::Char),
+        );
 
         writeln!(self.output, "\tmovb    ${num}, {}", reg.name(&self.scratch))?;
         Ok(reg)
@@ -364,13 +369,17 @@ impl Compiler {
 
         Ok(value_reg)
     }
-    fn cg_cast_down(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
+    fn cg_cast_down(
+        &mut self,
+        expr: &Expr,
+        new_type: NEWTypes,
+    ) -> Result<Register, std::fmt::Error> {
         let mut value_reg = self.execute(expr)?;
         value_reg.set_type(new_type);
 
         Ok(value_reg)
     }
-    fn cg_cast_up(&mut self, expr: &Expr, new_type: Types) -> Result<Register, std::fmt::Error> {
+    fn cg_cast_up(&mut self, expr: &Expr, new_type: NEWTypes) -> Result<Register, std::fmt::Error> {
         let value_reg = self.execute(expr)?;
         let dest_reg = Register::Scratch(self.scratch.scratch_alloc(), new_type.clone());
 
@@ -421,7 +430,7 @@ impl Compiler {
         &mut self,
         callee: &Expr,
         args: &Vec<Expr>,
-        return_type: Types,
+        return_type: NEWTypes,
     ) -> Result<Register, std::fmt::Error> {
         let func_name = match &callee.kind {
             ExprKind::Ident(func_name) => func_name.unwrap_string(),
@@ -467,7 +476,7 @@ impl Compiler {
             writeln!(self.output, "\tpopq   {}", reg.name)?;
         }
 
-        if return_type != Types::Void {
+        if !return_type.is_void() {
             let reg_index = self.scratch.scratch_alloc();
             let return_reg = Register::Scratch(reg_index, return_type.clone());
             writeln!(
@@ -522,7 +531,10 @@ impl Compiler {
         right.free(&mut self.scratch);
 
         let done_label = self.create_label();
-        let result = Register::Scratch(self.scratch.scratch_alloc(), Types::Int);
+        let result = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            NEWTypes::Primitive(Types::Int),
+        );
         // if expression true write 1 in result and skip false label
         writeln!(
             self.output,
@@ -569,7 +581,10 @@ impl Compiler {
 
         // if no prior jump was taken expression is true
         let true_label = self.create_label();
-        let result = Register::Scratch(self.scratch.scratch_alloc(), Types::Int);
+        let result = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            NEWTypes::Primitive(Types::Int),
+        );
         writeln!(
             self.output,
             "\tmovl    $1, {}\n\tjmp    L{}",
@@ -602,7 +617,7 @@ impl Compiler {
         )?; // compares reg-value with 0
 
         // sets %al to 1 if comparison true and to 0 when false and then copies %al to current reg
-        if reg.get_type() == Types::Char {
+        if reg.get_type() == NEWTypes::Primitive(Types::Char) {
             writeln!(self.output, "\tmovb %al, {}", reg.name(&self.scratch))?;
         } else {
             writeln!(
@@ -627,7 +642,7 @@ impl Compiler {
     fn cg_address_at(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
         let dest = Register::Scratch(
             self.scratch.scratch_alloc(),
-            Types::Pointer(Box::new(reg.get_type())),
+            NEWTypes::Pointer(Box::new(reg.get_type())),
         );
         writeln!(
             self.output,
@@ -742,7 +757,7 @@ impl Compiler {
         )?;
         // write ZF to %al based on operator and zero extend %right_register with value of %al
         writeln!(self.output, "\t{operator} %al",)?;
-        if right.get_type() == Types::Char {
+        if right.get_type() == NEWTypes::Primitive(Types::Char) {
             writeln!(self.output, "\tmovb %al, {}", right.name(&self.scratch))?;
         } else {
             writeln!(

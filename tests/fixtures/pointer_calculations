@@ -1,17 +1,14 @@
-void* calloc(int amount,int of);
-void* malloc(int size);
-void free(void* ptr);
+int* calloc(int amount,int of);
+int* malloc(int size);
+void free(int* ptr);
 
 int* twoSum(int* nums, int numsSize, int target, int* returnSize){
-    int *res = calloc((*returnSize=2), 4);
+    int *res = calloc(*returnSize = 2, 4);
 
-    for (int i=0; i<numsSize; i = i + 1)
-    {
+    for (int i=0; i<numsSize; i = i + 1){
         int x = target - *(nums + i);
-        for (int j=i+1; j<numsSize; j = j + 1)
-        {
-            if (x == *(nums + j))
-            {
+        for (int j=i+1; j<numsSize; j = j + 1) {
+            if (x == *(nums + j)) {
                 *res = i;
                 *(res + 1) = j;
                 return res;

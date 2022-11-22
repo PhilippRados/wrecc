@@ -40,7 +40,6 @@ impl Parser {
                 match v.token {
                     TokenType::If
                     | TokenType::Return
-                    | TokenType::Print
                     | TokenType::While
                     | TokenType::For
                     | TokenType::Char
@@ -52,7 +51,7 @@ impl Parser {
         }
     }
     fn declaration(&mut self) -> Result<Stmt, Error> {
-        if let Some(t) = &mut self.matches_type() {
+        if let Some(t) = self.matches_type() {
             return self.type_declaration(t);
         }
         self.statement()
@@ -66,9 +65,6 @@ impl Parser {
         }
         if let Some(t) = self.matches(vec![TokenKind::If]) {
             return self.if_statement(t);
-        }
-        if let Some(t) = self.matches(vec![TokenKind::Print]) {
-            return self.print_statement(t);
         }
         if self.matches(vec![TokenKind::While]).is_some() {
             return self.while_statement();
@@ -90,7 +86,7 @@ impl Parser {
         let left_paren = self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
 
         let mut init = None;
-        if let Some(token) = &mut self.matches_type() {
+        if let Some(token) = self.matches_type() {
             init = Some(self.type_declaration(token)?);
         } else if !self.check(TokenKind::Semicolon) {
             init = Some(self.expression_statement()?)
@@ -160,11 +156,6 @@ impl Parser {
         self.consume(TokenKind::Semicolon, "Expect ';' after expression")?;
         Ok(Stmt::Expr(expr))
     }
-    fn print_statement(&mut self, token: Token) -> Result<Stmt, Error> {
-        let value = self.expression()?;
-        self.consume(TokenKind::Semicolon, "Expect ';' after value.")?;
-        Ok(Stmt::Print(token, value))
-    }
     fn if_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
         self.consume(TokenKind::LeftParen, "Expect '(' after 'if'")?;
         let condition = self.expression()?;
@@ -186,27 +177,55 @@ impl Parser {
             Box::new(else_branch),
         ))
     }
-    fn type_declaration(&mut self, type_decl: &mut Types) -> Result<Stmt, Error> {
+    fn maybe_parse_arr(&mut self, type_decl: &mut NEWTypes) -> Result<(), Error> {
+        if self.matches(vec![TokenKind::LeftBracket]).is_some() {
+            let size = self.consume(
+                TokenKind::Number,
+                "Expect array-size following array-declaration",
+            )?;
+            self.consume(
+                TokenKind::RightBracket,
+                "Expect closing ']' after array initialization",
+            )?;
+
+            if size.unwrap_num() > 0 {
+                type_decl.to_array(size.unwrap_num() as usize);
+            } else {
+                return Err(Error::new(&size, "Can't initialize array with size <= 0"));
+            }
+        }
+        Ok(())
+    }
+    fn type_declaration(&mut self, mut type_decl: NEWTypes) -> Result<Stmt, Error> {
         let name = self.consume(
             TokenKind::Ident,
             "Expect identifier following type-specifier",
         )?;
 
-        if self.matches(vec![TokenKind::Equal]).is_some() {
-            // variable defintion
-            let value = self.expression()?;
-            self.consume(TokenKind::Semicolon, "Expect ';' after expression")?;
-            Ok(Stmt::InitVar(type_decl.clone(), name, value))
-        } else if self.matches(vec![TokenKind::LeftParen]).is_some() {
-            // function defintion
-            self.function(type_decl.clone(), name)
+        if self.matches(vec![TokenKind::LeftParen]).is_some() {
+            // function
+            self.function(type_decl, name)
         } else {
-            // var declaration
-            self.consume(TokenKind::Semicolon, "Expect ';' after type declaration")?;
-            Ok(Stmt::DeclareVar(type_decl.clone(), name))
+            // variable
+            self.maybe_parse_arr(&mut type_decl)?;
+
+            if self.matches(vec![TokenKind::Equal]).is_some() {
+                let value = self.expression()?;
+                self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
+                Ok(Stmt::InitVar(type_decl, name, value))
+            } else {
+                self.consume(
+                    TokenKind::Semicolon,
+                    "Expect ';' after variable declaration",
+                )?;
+                Ok(Stmt::DeclareVar(type_decl, name))
+            }
         }
     }
-    fn function(&mut self, return_type: Types, name: Token) -> Result<Stmt, Error> {
+    fn function(&mut self, return_type: NEWTypes, name: Token) -> Result<Stmt, Error> {
+        if matches!(return_type, NEWTypes::Array { .. }) {
+            return Err(Error::new(&name, "function can't return array-type"));
+        }
         let mut params = Vec::new();
 
         if !self.check(TokenKind::RightParen) {
@@ -503,7 +522,7 @@ impl Parser {
         }
         self.tokens.next()
     }
-    fn matches_type(&mut self) -> Option<Types> {
+    fn matches_type(&mut self) -> Option<NEWTypes> {
         match self.tokens.peek() {
             Some(v) => {
                 if !v.is_type() {

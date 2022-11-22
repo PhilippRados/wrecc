@@ -6,5 +6,5 @@ int some() {
 }
 
 int main(){
-  print some();
+  printint(some());
 }

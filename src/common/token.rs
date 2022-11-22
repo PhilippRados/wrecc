@@ -1,4 +1,4 @@
-use crate::common::types::Types;
+use crate::common::types::*;
 use std::fmt::Display;
 
 #[derive(PartialEq, Clone, Debug)]
@@ -49,7 +49,6 @@ pub enum TokenKind {
     If,
     Return,
     While,
-    Print,
 
     Eof,
 }
@@ -84,7 +83,6 @@ impl From<&TokenType> for TokenKind {
             TokenType::Else => TokenKind::Else,
             TokenType::For => TokenKind::For,
             TokenType::If => TokenKind::If,
-            TokenType::Print => TokenKind::Print,
             TokenType::Return => TokenKind::Return,
             TokenType::While => TokenKind::While,
             TokenType::Eof => TokenKind::Eof,
@@ -150,7 +148,6 @@ pub enum TokenType {
     If,
     Return,
     While,
-    Print,
 
     Eof,
 }
@@ -196,7 +193,6 @@ impl Display for TokenType {
                 TokenType::Else => "'else'",
                 TokenType::For => "'for'",
                 TokenType::If => "'if'",
-                TokenType::Print => "'print'",
                 TokenType::Return => "'return'",
                 TokenType::While => "'while'",
                 TokenType::Eof => "<EOF>",
@@ -244,15 +240,15 @@ impl Token {
     pub fn is_type(&self) -> bool {
         Types::into_vec().contains(&TokenKind::from(&self.token))
     }
-    pub fn into_type(self) -> Types {
+    pub fn into_type(self) -> NEWTypes {
         assert!(self.is_type());
 
-        match self.token {
+        NEWTypes::Primitive(match self.token {
             TokenType::Int => Types::Int,
             TokenType::Char => Types::Char,
             TokenType::Void => Types::Void,
             TokenType::Long => Types::Long,
             _ => unreachable!("only types are checked"),
-        }
+        })
     }
 }

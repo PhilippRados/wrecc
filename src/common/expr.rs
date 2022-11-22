@@ -1,4 +1,4 @@
-use crate::common::{token::Token, types::Types};
+use crate::common::{token::Token, types::NEWTypes};
 use std::fmt::Display;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -56,7 +56,7 @@ pub enum ValueKind {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Expr {
     pub kind: ExprKind,
-    pub type_decl: Option<Types>,
+    pub type_decl: Option<NEWTypes>,
     pub value_kind: ValueKind,
 }
 impl Expr {

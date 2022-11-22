@@ -7,13 +7,13 @@ use std::collections::HashMap;
 enum Scope {
     Global,
     Block,
-    Function(String, Types), // function name and return type
+    Function(String, NEWTypes), // function name and return type
 }
 pub struct TypeChecker {
     errors: Vec<Error>,
     scope: Vec<Scope>,
-    env: Environment<Types>,
-    global_env: Environment<Types>,
+    env: Environment<NEWTypes>,
+    global_env: Environment<NEWTypes>,
     returns_all_paths: bool,
     builtins: Vec<(&'static str, Function)>,
     func_stack_size: HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
@@ -43,9 +43,9 @@ impl TypeChecker {
             builtins: vec![(
                 "printint",
                 Function::new(
-                    Types::Void,
+                    NEWTypes::Primitive(Types::Void),
                     vec![(
-                        Types::Char,
+                        NEWTypes::Primitive(Types::Char),
                         Token::new(TokenType::Ident("".to_string()), -1, -1, "".to_string()),
                     )],
                 ),
@@ -108,7 +108,6 @@ impl TypeChecker {
                 self.function_declaration(return_type, name, params)
             }
             Stmt::Return(keyword, ref mut value) => self.return_statement(keyword, value),
-            Stmt::Print(token, ref mut expr) => self.print_statement(token, expr),
             Stmt::Expr(ref mut expr) => match self.expr_type(expr) {
                 Ok(_) => Ok(()),
                 Err(e) => Err(e),
@@ -135,7 +134,7 @@ impl TypeChecker {
         cond: &mut Expr,
         body: &mut Stmt,
     ) -> Result<(), Error> {
-        if self.expr_type(cond)? == Types::Void {
+        if self.expr_type(cond)?.is_void() {
             return Err(Error::new(
                 left_paren,
                 "conditional expected scalar type found ‘void'",
@@ -145,7 +144,7 @@ impl TypeChecker {
         self.returns_all_paths = false;
         Ok(())
     }
-    fn declare_var(&mut self, type_decl: &Types, var_name: &Token) -> Result<(), Error> {
+    fn declare_var(&mut self, type_decl: &NEWTypes, var_name: &Token) -> Result<(), Error> {
         let name = var_name.unwrap_string();
 
         if self.env.current.vars.contains_key(&name) {
@@ -154,39 +153,39 @@ impl TypeChecker {
                 &format!("Redefinition of variable '{}'", var_name.unwrap_string()),
             ));
         }
-        if *type_decl == Types::Void {
+        if *type_decl == NEWTypes::Primitive(Types::Void) {
             return Err(Error::new(
                 var_name,
                 &format!("Can't assign to 'void' {}", var_name.unwrap_string()),
             ));
         }
-        self.increment_stack_size(var_name, type_decl)?;
+        self.increment_stack_size(var_name, type_decl.size())?;
         self.env.declare_var(name, type_decl.clone());
         Ok(())
     }
     fn check_type_compatibility(
         &self,
         token: &Token,
-        left: &Types,
-        right: &Types,
+        left: &NEWTypes,
+        right: &NEWTypes,
     ) -> Result<(), Error> {
-        match (left, right) {
-            (Types::Void, _) | (_, Types::Void) => Err(Error::new(
+        if left.is_void() || right.is_void() {
+            Err(Error::new(
                 token,
                 &format!("Can't assign to type '{}' with type '{}'", left, right),
-            )),
-            (Types::Pointer(_), t) | (t, Types::Pointer(_)) if !matches!(t, Types::Pointer(_)) => {
-                Err(Error::new(
-                    token,
-                    &format!("Can't assign to type '{}' with type '{}'", left, right),
-                ))
-            }
-            _ => Ok(()),
+            ))
+        } else if !left.type_compatible(right) {
+            Err(Error::new(
+                token,
+                &format!("Can't assign to type '{}' with type '{}'", left, right),
+            ))
+        } else {
+            Ok(())
         }
     }
     fn init_var(
         &mut self,
-        type_decl: Types,
+        type_decl: NEWTypes,
         var_name: &Token,
         expr: &mut Expr,
     ) -> Result<(), Error> {
@@ -202,24 +201,24 @@ impl TypeChecker {
         self.check_type_compatibility(var_name, &type_decl, &value_type)?;
         self.maybe_cast(&type_decl, &value_type, expr);
 
-        self.increment_stack_size(var_name, &type_decl)?;
+        self.increment_stack_size(var_name, type_decl.size())?;
         // currently only type-checks for void since int and char are interchangeable
         self.env.init_var(name, type_decl);
         Ok(())
     }
-    fn maybe_cast(&self, type_decl: &Types, other_type: &Types, expr: &mut Expr) {
+    fn maybe_cast(&self, type_decl: &NEWTypes, other_type: &NEWTypes, expr: &mut Expr) {
         match other_type.size().cmp(&type_decl.size()) {
             Ordering::Less => cast!(expr, type_decl.clone(), CastUp),
             Ordering::Greater => cast!(expr, type_decl.clone(), CastDown),
             Ordering::Equal => (),
         }
     }
-    fn increment_stack_size(&mut self, var_name: &Token, type_decl: &Types) -> Result<(), Error> {
+    fn increment_stack_size(&mut self, var_name: &Token, type_size: usize) -> Result<(), Error> {
         match find_function(&self.scope) {
             Some(Scope::Function(name, _)) => {
-                *self.func_stack_size.get_mut(name).unwrap() += type_decl.size();
+                *self.func_stack_size.get_mut(name).unwrap() += type_size;
                 *self.func_stack_size.get_mut(name).unwrap() =
-                    align_by(self.func_stack_size[name], type_decl.size());
+                    align_by(self.func_stack_size[name], type_size);
                 Ok(())
             }
             _ => Err(Error::new(
@@ -236,7 +235,7 @@ impl TypeChecker {
         else_branch: &mut Option<Stmt>,
     ) -> Result<(), Error> {
         let cond = self.expr_type(cond)?;
-        if cond == Types::Void {
+        if cond.is_void() {
             return Err(Error::new(
                 keyword,
                 "expected Expression inside of condition, found 'void'",
@@ -256,19 +255,11 @@ impl TypeChecker {
         }
         Ok(())
     }
-    fn print_statement(&mut self, token: &Token, expr: &mut Expr) -> Result<(), Error> {
-        let t = self.expr_type(expr)?;
-        if t == Types::Void {
-            Err(Error::new(token, "can't print 'void' expression"))
-        } else {
-            Ok(())
-        }
-    }
     fn function_declaration(
         &mut self,
-        return_type: &Types,
+        return_type: &NEWTypes,
         name_token: &Token,
-        params: &Vec<(Types, Token)>,
+        params: &Vec<(NEWTypes, Token)>,
     ) -> Result<(), Error> {
         let name = &name_token.unwrap_string();
         if let Some(f) = self.global_env.get_func(name, FunctionKind::Declaration) {
@@ -287,9 +278,9 @@ impl TypeChecker {
     }
     fn function_definition(
         &mut self,
-        return_type: &Types,
+        return_type: &NEWTypes,
         name_token: &Token,
-        params: Vec<(Types, Token)>,
+        params: Vec<(NEWTypes, Token)>,
         body: &mut Vec<Stmt>,
     ) -> Result<(), Error> {
         if *self.scope.last().unwrap() != Scope::Global {
@@ -331,7 +322,7 @@ impl TypeChecker {
         // initialize stack size for current function-scope
         self.func_stack_size.insert(name.clone(), 0);
         for (type_decl, name) in params.iter().by_ref() {
-            self.increment_stack_size(name, type_decl)?; // add params to stack-size
+            self.increment_stack_size(name, type_decl.size())?; // add params to stack-size
             env.init_var(name.unwrap_string(), type_decl.clone()) // initialize params in local scope
         }
 
@@ -341,7 +332,7 @@ impl TypeChecker {
         self.main_returns_int(name_token, return_type)?;
         self.implicit_return_main(name_token, body);
 
-        if *return_type != Types::Void && !self.returns_all_paths {
+        if !return_type.is_void() && !self.returns_all_paths {
             Err(Error::new(
                 name_token,
                 "non-void function doesnt return in all code paths",
@@ -351,8 +342,8 @@ impl TypeChecker {
             Ok(())
         }
     }
-    fn main_returns_int(&self, name_token: &Token, return_type: &Types) -> Result<(), Error> {
-        if name_token.unwrap_string() == "main" && *return_type != Types::Int {
+    fn main_returns_int(&self, name_token: &Token, return_type: &NEWTypes) -> Result<(), Error> {
+        if name_token.unwrap_string() == "main" && *return_type != NEWTypes::Primitive(Types::Int) {
             Err(Error::new(
                 name_token,
                 &format!(
@@ -378,8 +369,8 @@ impl TypeChecker {
         &self,
         name_token: &Token,
         declaration: &Function,
-        return_type: &Types,
-        params: &Vec<(Types, Token)>,
+        return_type: &NEWTypes,
+        params: &Vec<(NEWTypes, Token)>,
     ) -> Result<(), Error> {
         if declaration.return_type != *return_type {
             Err(Error::new(
@@ -400,7 +391,7 @@ impl TypeChecker {
             Ok(())
         }
     }
-    fn get_function_type(&self, token: &Token) -> Result<&Types, Error> {
+    fn get_function_type(&self, token: &Token) -> Result<&NEWTypes, Error> {
         if let Some(Scope::Function(_, function_type)) = find_function(&self.scope) {
             Ok(function_type)
         } else {
@@ -420,12 +411,16 @@ impl TypeChecker {
             self.check_return_compatibility(keyword, &function_type, &body_return)?;
             self.maybe_cast(&body_return, &function_type, expr);
         } else {
-            self.check_return_compatibility(keyword, &function_type, &Types::Void)?;
+            self.check_return_compatibility(
+                keyword,
+                &function_type,
+                &NEWTypes::Primitive(Types::Void),
+            )?;
         }
         Ok(())
     }
 
-    pub fn expr_type(&mut self, ast: &mut Expr) -> Result<Types, Error> {
+    pub fn expr_type(&mut self, ast: &mut Expr) -> Result<NEWTypes, Error> {
         ast.type_decl = Some(match &mut ast.kind {
             ExprKind::Binary { left, token, right } => {
                 match self.evaluate_binary(left, token, right)? {
@@ -441,8 +436,8 @@ impl TypeChecker {
             }
             ExprKind::Unary { token, right } => self.evaluate_unary(token, right)?,
             ExprKind::Grouping { expr } => self.evaluate_grouping(expr)?,
-            ExprKind::Number(_) => Types::Int,
-            ExprKind::CharLit(_) => Types::Char,
+            ExprKind::Number(_) => NEWTypes::Primitive(Types::Int),
+            ExprKind::CharLit(_) => NEWTypes::Primitive(Types::Char),
             ExprKind::Logical { left, token, right } => {
                 self.evaluate_logical(left, token, right)?
             }
@@ -469,10 +464,16 @@ impl TypeChecker {
         store_expr: &mut Expr,
         token: &Token,
         expr: &mut Expr,
-    ) -> Result<Types, Error> {
+    ) -> Result<NEWTypes, Error> {
         let type_decl = self.expr_type(store_expr)?;
         let value = self.expr_type(expr)?;
 
+        if matches!(type_decl, NEWTypes::Array { .. }) {
+            return Err(Error::new(
+                token,
+                &format!("array {} is not assignable", type_decl),
+            ));
+        }
         self.check_type_compatibility(token, &type_decl, &value)?;
         self.maybe_cast(&type_decl, &value, expr);
 
@@ -484,16 +485,16 @@ impl TypeChecker {
         left_paren: &Token,
         callee: &mut Expr,
         args: &mut Vec<Expr>,
-    ) -> Result<Types, Error> {
+    ) -> Result<NEWTypes, Error> {
         let func_name = match &callee.kind {
             ExprKind::Ident(func_name) => func_name,
             _ => return Err(Error::new(left_paren, "function-name has to be identifier")),
         };
 
-        let arg_types = args
+        let mut arg_types = args
             .iter_mut()
             .map(|expr| self.expr_type(expr))
-            .collect::<Result<Vec<Types>, Error>>()?;
+            .collect::<Result<Vec<NEWTypes>, Error>>()?;
 
         match (
             self.global_env
@@ -511,7 +512,7 @@ impl TypeChecker {
             )),
             (Some(function), None) | (None, Some(function)) | (Some(function), Some(_)) => {
                 if function.arity() == args.len() {
-                    self.args_and_params_match(left_paren, &function.params, args, arg_types)?;
+                    self.args_and_params_match(left_paren, &function.params, args, &mut arg_types)?;
                     Ok(function.return_type.clone())
                 } else {
                     Err(Error::new(
@@ -530,13 +531,13 @@ impl TypeChecker {
     fn args_and_params_match(
         &self,
         left_paren: &Token,
-        params: &[(Types, Token)],
+        params: &[(NEWTypes, Token)],
         expressions: &mut [Expr],
-        args: Vec<Types>,
+        args: &mut Vec<NEWTypes>,
     ) -> Result<(), Error> {
-        for (i, type_decl) in args.iter().enumerate() {
+        for (i, type_decl) in args.iter_mut().enumerate() {
             self.check_type_compatibility(left_paren, type_decl, &params[i].0)?;
-            self.maybe_int_promote(&mut expressions[i]);
+            self.maybe_int_promote(&mut expressions[i], type_decl);
         }
         Ok(())
     }
@@ -544,7 +545,7 @@ impl TypeChecker {
         &mut self,
         token: &Token,
         body: &mut Vec<Stmt>,
-        env: Environment<Types>,
+        env: Environment<NEWTypes>,
     ) -> Result<(), Error> {
         if find_function(&self.scope) == None {
             return Err(Error::new(token, "can't declare block in global scope"));
@@ -557,29 +558,44 @@ impl TypeChecker {
 
         result
     }
-    fn is_valid_op(token: &Token, left_type: &Types, right_type: &Types) -> bool {
+    fn is_valid_bin(token: &Token, left_type: &NEWTypes, right_type: &NEWTypes) -> bool {
         match (&left_type, &right_type) {
-            (Types::Void, Types::Void) | (Types::Void, _) | (_, Types::Void) => false,
-            (Types::Pointer(_), Types::Pointer(_)) => {
+            (NEWTypes::Primitive(Types::Void), _) | (_, NEWTypes::Primitive(Types::Void)) => false,
+            (NEWTypes::Pointer(_), NEWTypes::Pointer(_))
+            | (NEWTypes::Array { .. }, NEWTypes::Array { .. })
+                if left_type.type_compatible(right_type) =>
+            {
                 token.token == TokenType::Minus
                     || token.token == TokenType::EqualEqual
                     || token.token == TokenType::BangEqual
             }
-            (_, Types::Pointer(_)) => token.token == TokenType::Plus,
-            (Types::Pointer(_), _) => {
+            (_, NEWTypes::Pointer(_)) | (_, NEWTypes::Array { .. }) => {
+                token.token == TokenType::Plus
+            }
+            (NEWTypes::Pointer(_), _) | (NEWTypes::Array { .. }, _) => {
                 token.token == TokenType::Plus || token.token == TokenType::Minus
             }
             _ => true,
         }
     }
-    fn maybe_scale(left: &Types, right: &Types, left_expr: &mut Expr, right_expr: &mut Expr) {
+    fn maybe_scale(left: &NEWTypes, right: &NEWTypes, left_expr: &mut Expr, right_expr: &mut Expr) {
         let (expr, amount) = match (left, right) {
-            (t, Types::Pointer(inner)) if !matches!(t, Types::Pointer(_)) && inner.size() > 1 => {
-                (left_expr, inner.size())
-            }
-            (Types::Pointer(inner), t) if !matches!(t, Types::Pointer(_)) && inner.size() > 1 => {
-                (right_expr, inner.size())
-            }
+            (
+                t,
+                NEWTypes::Pointer(inner)
+                | NEWTypes::Array {
+                    element_type: inner,
+                    ..
+                },
+            ) if !t.is_ptr() && inner.size() > 1 => (left_expr, inner.size()),
+            (
+                NEWTypes::Pointer(inner)
+                | NEWTypes::Array {
+                    element_type: inner,
+                    ..
+                },
+                t,
+            ) if !t.is_ptr() && inner.size() > 1 => (right_expr, inner.size()),
             _ => return,
         };
 
@@ -593,36 +609,33 @@ impl TypeChecker {
         left: &mut Expr,
         token: &Token,
         right: &mut Expr,
-    ) -> Result<Types, Error> {
+    ) -> Result<NEWTypes, Error> {
         let left_type = self.expr_type(left)?;
         let right_type = self.expr_type(right)?;
 
-        match (&left_type, &right_type) {
-            (Types::Void, Types::Void) | (Types::Void, _) | (_, Types::Void) => {
-                return Err(Error::new(
-                    token,
-                    &format!(
-                        "invalid logical expression: '{}' {} '{}'",
-                        left_type, token.token, right_type
-                    ),
-                ));
-            }
-            _ => (),
+        if left_type.is_void() || right_type.is_void() {
+            return Err(Error::new(
+                token,
+                &format!(
+                    "invalid logical expression: '{}' {} '{}'",
+                    left_type, token.token, right_type
+                ),
+            ));
         }
 
-        Ok(Types::Int)
+        Ok(NEWTypes::Primitive(Types::Int))
     }
     fn evaluate_binary(
         &mut self,
         left: &mut Expr,
         token: &Token,
         right: &mut Expr,
-    ) -> Result<(Types, Option<usize>), Error> {
+    ) -> Result<(NEWTypes, Option<usize>), Error> {
         let mut left_type = self.expr_type(left)?;
         let mut right_type = self.expr_type(right)?;
 
         // check valid operations
-        if !Self::is_valid_op(token, &left_type, &right_type) {
+        if !Self::is_valid_bin(token, &left_type, &right_type) {
             return Err(Error::new(
                 token,
                 &format!(
@@ -632,8 +645,8 @@ impl TypeChecker {
             ));
         }
 
-        left_type = self.maybe_int_promote(left);
-        right_type = self.maybe_int_promote(right);
+        self.maybe_int_promote(left, &mut left_type);
+        self.maybe_int_promote(right, &mut right_type);
 
         // scale index when pointer arithmetic
         Self::maybe_scale(&left_type, &right_type, left, right);
@@ -649,31 +662,43 @@ impl TypeChecker {
                 Ok((right_type, None))
             }
             Ordering::Equal => match (&left_type, &right_type) {
-                (Types::Pointer(inner), Types::Pointer(_)) => Ok((Types::Long, Some(inner.size()))),
+                (NEWTypes::Pointer(inner), NEWTypes::Pointer(_)) => {
+                    Ok((NEWTypes::Primitive(Types::Long), Some(inner.size())))
+                }
+                (
+                    NEWTypes::Array {
+                        element_type: inner,
+                        ..
+                    },
+                    NEWTypes::Array { .. },
+                ) => Ok((NEWTypes::Primitive(Types::Long), Some(inner.size()))),
                 _ => Ok((left_type, None)),
             },
         }
     }
-    fn maybe_int_promote(&self, expr: &mut Expr) -> Types {
-        if expr.type_decl.clone().unwrap() < Types::Int {
-            cast!(expr, Types::Int, CastUp);
-            Types::Int
-        } else {
-            expr.type_decl.clone().unwrap()
+    fn maybe_int_promote(&self, expr: &mut Expr, type_decl: &mut NEWTypes) {
+        if !matches!(type_decl, NEWTypes::Primitive(_)) {
+            return;
+        }
+        if type_decl.size() < NEWTypes::Primitive(Types::Int).size() {
+            cast!(expr, NEWTypes::Primitive(Types::Int), CastUp);
+            *type_decl = NEWTypes::Primitive(Types::Int);
         }
     }
-    fn evaluate_unary(&mut self, token: &Token, right: &mut Expr) -> Result<Types, Error> {
+    fn evaluate_unary(&mut self, token: &Token, right: &mut Expr) -> Result<NEWTypes, Error> {
         let right_type = self.expr_type(right)?;
 
         Ok(match token.token {
             TokenType::Amp => self.check_address(token, right_type, right)?,
             TokenType::Star => self.check_deref(token, right_type)?,
-            TokenType::Bang => Types::Int,
+            TokenType::Bang => NEWTypes::Primitive(Types::Int),
             TokenType::Minus => {
-                if matches!(right_type, Types::Pointer(_)) {
+                if matches!(right_type, NEWTypes::Pointer(_))
+                    || matches!(right_type, NEWTypes::Array { .. })
+                {
                     return Err(Error::new(
                         token,
-                        "Invalid unary-expression '-' with type 'pointer'",
+                        &format!("Invalid unary-expression '-' with type '{}'", right_type),
                     ));
                 }
                 right_type
@@ -681,14 +706,19 @@ impl TypeChecker {
             _ => unreachable!(),
         })
     }
-    fn check_address(&self, token: &Token, type_decl: Types, expr: &Expr) -> Result<Types, Error> {
+    fn check_address(
+        &self,
+        token: &Token,
+        type_decl: NEWTypes,
+        expr: &Expr,
+    ) -> Result<NEWTypes, Error> {
         if expr.value_kind == ValueKind::Lvalue {
-            Ok(Types::Pointer(Box::new(type_decl)))
+            Ok(NEWTypes::Pointer(Box::new(type_decl)))
         } else {
             Err(Error::new(token, "can't call '&' on r-value"))
         }
     }
-    fn check_deref(&self, token: &Token, type_decl: Types) -> Result<Types, Error> {
+    fn check_deref(&self, token: &Token, type_decl: NEWTypes) -> Result<NEWTypes, Error> {
         if let Some(inner) = type_decl.deref_at() {
             Ok(inner)
         } else {
@@ -701,33 +731,30 @@ impl TypeChecker {
             ))
         }
     }
-    fn evaluate_grouping(&mut self, expr: &mut Expr) -> Result<Types, Error> {
+    fn evaluate_grouping(&mut self, expr: &mut Expr) -> Result<NEWTypes, Error> {
         self.expr_type(expr)
     }
     fn check_return_compatibility(
         &mut self,
         keyword: &Token,
-        function_type: &Types,
-        body_return: &Types,
+        function_type: &NEWTypes,
+        body_return: &NEWTypes,
     ) -> Result<(), Error> {
-        match (function_type, body_return) {
-            (Types::Void, t) | (t, Types::Void) if !matches!(t, Types::Void) => Err(Error::new(
+        if matches!(function_type, NEWTypes::Array { .. }) {
+            Err(Error::new(
+                keyword,
+                &format!("Can't return stack-array from function"),
+            ))
+        } else if !function_type.type_compatible(&body_return) {
+            Err(Error::new(
                 keyword,
                 &format!(
                     "Mismatched function return type: '{}', found: '{}'",
                     function_type, body_return
                 ),
-            )),
-            (Types::Pointer(_), t) | (t, Types::Pointer(_)) if !matches!(t, Types::Pointer(_)) => {
-                Err(Error::new(
-                    keyword,
-                    &format!(
-                        "Mismatched function return type: '{}', found: '{}'",
-                        function_type, body_return
-                    ),
-                ))
-            }
-            _ => Ok(()),
+            ))
+        } else {
+            Ok(())
         }
     }
 }

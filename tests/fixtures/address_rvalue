@@ -1,6 +1,6 @@
 int main() {
   char b = 10;
-  int* a = &(b);
+  char* a = &(b);
   printint(*a);
 
   a = &(b + 3);

@@ -1,4 +1,4 @@
 Error: missing closing ')'
 |
-2   print (2 + 1;
-|               ^
+2   int a = (2 + 1;
+|                 ^

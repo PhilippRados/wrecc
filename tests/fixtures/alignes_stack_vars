@@ -1,10 +1,13 @@
+int** malloc(int size);
+
 int main(){
   int c;
-  int** a;
+  int** a = malloc(8);
   int b = 3;
   *a = &c;
 
   *(*a) = b;
 
   printint(*(*a));
+  printint(c);
 }

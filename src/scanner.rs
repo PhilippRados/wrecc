@@ -32,7 +32,6 @@ impl<'a> Scanner<'a> {
                 ("for", TokenType::For),
                 ("while", TokenType::While),
                 ("return", TokenType::Return),
-                ("print", TokenType::Print),
             ]),
         }
     }
@@ -62,7 +61,7 @@ impl<'a> Scanner<'a> {
             TokenType::Ident(s) => s.len() as i32,
             TokenType::Int | TokenType::For => 3,
             TokenType::Char | TokenType::Else | TokenType::Long => 4,
-            TokenType::While | TokenType::Print => 5,
+            TokenType::While => 5,
             TokenType::If => 2,
             TokenType::Return => 6,
             TokenType::Number(n) => n.to_string().len() as i32,
@@ -75,6 +74,8 @@ impl<'a> Scanner<'a> {
 
         while let Some(c) = self.source.next() {
             match c {
+                '[' => self.add_token(&mut tokens, TokenType::LeftBracket),
+                ']' => self.add_token(&mut tokens, TokenType::RightBracket),
                 '(' => self.add_token(&mut tokens, TokenType::LeftParen),
                 ')' => self.add_token(&mut tokens, TokenType::RightParen),
                 '{' => self.add_token(&mut tokens, TokenType::LeftBrace),
@@ -361,22 +362,6 @@ mod tests {
                 12,
                 "int some = \"this is a string\"".to_string(),
             ),
-        ];
-        assert_eq!(result, expected);
-    }
-    #[test]
-    fn matches_print_keyword() {
-        let source = "print 2 +;";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => v,
-            Err(e) => panic!("test"),
-        };
-        let expected = vec![
-            Token::new(TokenType::Print, 1, 1, "print 2 +;".to_string()),
-            Token::new(TokenType::Number(2), 1, 7, "print 2 +;".to_string()),
-            Token::new(TokenType::Plus, 1, 9, "print 2 +;".to_string()),
-            Token::new(TokenType::Semicolon, 1, 10, "print 2 +;".to_string()),
         ];
         assert_eq!(result, expected);
     }

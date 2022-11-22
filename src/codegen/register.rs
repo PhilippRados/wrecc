@@ -1,11 +1,11 @@
-use crate::common::types::Types;
+use crate::common::types::*;
 
 #[derive(Clone)]
 pub enum Register {
-    Deref(ScratchIndex, Types),
-    Scratch(ScratchIndex, Types),
-    Stack(StackRegister, Types),
-    Arg(usize, Types),
+    Deref(ScratchIndex, NEWTypes),
+    Scratch(ScratchIndex, NEWTypes),
+    Stack(StackRegister, NEWTypes),
+    Arg(usize, NEWTypes),
     Void,
 }
 impl Register {
@@ -28,38 +28,10 @@ impl Register {
             Register::Deref(index, _) => {
                 format!("({})", scratch_regs.get(index).name)
             }
-            Register::Arg(index, type_decl) => {
-                self.get_arg_reg(*index, type_decl.clone()).to_string()
-            }
+            Register::Arg(index, type_decl) => type_decl.get_arg_reg(*index).to_string(),
         }
     }
-    // argument registers from 1st to last
-    fn get_arg_reg(&self, index: usize, type_decl: Types) -> &str {
-        match (type_decl, index) {
-            (Types::Char, 0) => "%dil",
-            (Types::Char, 1) => "%sil",
-            (Types::Char, 2) => "%dl",
-            (Types::Char, 3) => "%cl",
-            (Types::Char, 4) => "%r8b",
-            (Types::Char, 5) => "%r9b",
-
-            (Types::Int, 0) => "%edi",
-            (Types::Int, 1) => "%esi",
-            (Types::Int, 2) => "%edx",
-            (Types::Int, 3) => "%ecx",
-            (Types::Int, 4) => "%r8d",
-            (Types::Int, 5) => "%r9d",
-
-            (Types::Pointer(_) | Types::Long, 0) => "%rdi",
-            (Types::Pointer(_) | Types::Long, 1) => "%rsi",
-            (Types::Pointer(_) | Types::Long, 2) => "%rdx",
-            (Types::Pointer(_) | Types::Long, 3) => "%rcx",
-            (Types::Pointer(_) | Types::Long, 4) => "%r8",
-            (Types::Pointer(_) | Types::Long, 5) => "%r9",
-            _ => unreachable!(),
-        }
-    }
-    pub fn set_type(&mut self, type_decl: Types) {
+    pub fn set_type(&mut self, type_decl: NEWTypes) {
         match self {
             Register::Void => unimplemented!(),
             Register::Stack(_, _) => (),
@@ -68,7 +40,7 @@ impl Register {
             Register::Deref(_, old_decl) => *old_decl = type_decl,
         }
     }
-    pub fn get_type(&self) -> Types {
+    pub fn get_type(&self) -> NEWTypes {
         match self {
             Register::Void => unimplemented!(),
             Register::Stack(_, type_decl)

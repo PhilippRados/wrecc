@@ -1,23 +1,21 @@
-use crate::common::{expr::Expr, token::Token, types::Types};
+use crate::common::{expr::Expr, token::Token, types::NEWTypes};
 use std::fmt::Display;
 
 #[derive(PartialEq, Clone)]
 pub enum Stmt {
-    Print(Token, Expr),
     Expr(Expr),
-    DeclareVar(Types, Token),
-    InitVar(Types, Token, Expr),
+    DeclareVar(NEWTypes, Token),
+    InitVar(NEWTypes, Token, Expr),
     Block(Token, Vec<Stmt>),
     If(Token, Expr, Box<Stmt>, Box<Option<Stmt>>),
     While(Token, Expr, Box<Stmt>),
-    Function(Types, Token, Vec<(Types, Token)>, Vec<Stmt>),
-    FunctionDeclaration(Types, Token, Vec<(Types, Token)>),
+    Function(NEWTypes, Token, Vec<(NEWTypes, Token)>, Vec<Stmt>),
+    FunctionDeclaration(NEWTypes, Token, Vec<(NEWTypes, Token)>),
     Return(Token, Option<Expr>),
 }
 impl Stmt {
     pub fn get_token(&self) -> &Token {
         match self {
-            Stmt::Print(t, _) => t,
             Stmt::DeclareVar(_, t) => t,
             Stmt::InitVar(_, t, _) => t,
             Stmt::Block(t, _) => t,
@@ -36,7 +34,6 @@ impl Display for Stmt {
             f,
             "{}",
             match self {
-                Stmt::Print(_, _) => "'print-statemnet'",
                 Stmt::DeclareVar(_, _) => "'variable-declaration'",
                 Stmt::InitVar(_, _, _) => "'variable-initialization'",
                 Stmt::Block(_, _) => "'block-statement'",

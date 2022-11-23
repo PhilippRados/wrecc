@@ -422,7 +422,20 @@ impl Parser {
                 },
             ));
         }
-        self.call()
+        self.postfix()
+    }
+    fn postfix(&mut self) -> Result<Expr, Error> {
+        let expr = self.call()?;
+
+        while let Some(token) = self.matches(vec![TokenKind::LeftBracket]) {
+            let index = self.expression()?;
+            self.consume(
+                TokenKind::RightBracket,
+                "Expect closing ']' after array-index",
+            )?;
+            return Ok(index_sugar(token, expr, index));
+        }
+        Ok(expr)
     }
     fn call(&mut self) -> Result<Expr, Error> {
         let mut expr = self.primary()?;
@@ -549,6 +562,38 @@ impl Parser {
         }
         Some(type_decl)
     }
+}
+
+fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
+    Expr::new(
+        ExprKind::Unary {
+            token: Token::new(
+                TokenType::Star,
+                token.line_index,
+                token.column,
+                token.line_string.clone(),
+            ),
+            right: Box::new(Expr::new(
+                ExprKind::Grouping {
+                    expr: Box::new(Expr::new(
+                        ExprKind::Binary {
+                            left: Box::new(expr),
+                            token: Token::new(
+                                TokenType::Plus,
+                                token.line_index,
+                                token.column,
+                                token.line_string,
+                            ),
+                            right: Box::new(index),
+                        },
+                        ValueKind::Lvalue,
+                    )),
+                },
+                ValueKind::Lvalue,
+            )),
+        },
+        ValueKind::Lvalue,
+    )
 }
 
 #[cfg(test)]

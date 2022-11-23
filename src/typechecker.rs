@@ -1,4 +1,4 @@
-use crate::codegen::codegen::align_by;
+use crate::codegen::codegen::align;
 use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -153,13 +153,13 @@ impl TypeChecker {
                 &format!("Redefinition of variable '{}'", var_name.unwrap_string()),
             ));
         }
-        if *type_decl == NEWTypes::Primitive(Types::Void) {
+        if type_decl.is_void() {
             return Err(Error::new(
                 var_name,
                 &format!("Can't assign to 'void' {}", var_name.unwrap_string()),
             ));
         }
-        self.increment_stack_size(var_name, type_decl.size())?;
+        self.increment_stack_size(var_name, type_decl)?;
         self.env.declare_var(name, type_decl.clone());
         Ok(())
     }
@@ -201,8 +201,7 @@ impl TypeChecker {
         self.check_type_compatibility(var_name, &type_decl, &value_type)?;
         self.maybe_cast(&type_decl, &value_type, expr);
 
-        self.increment_stack_size(var_name, type_decl.size())?;
-        // currently only type-checks for void since int and char are interchangeable
+        self.increment_stack_size(var_name, &type_decl)?;
         self.env.init_var(name, type_decl);
         Ok(())
     }
@@ -213,12 +212,16 @@ impl TypeChecker {
             Ordering::Equal => (),
         }
     }
-    fn increment_stack_size(&mut self, var_name: &Token, type_size: usize) -> Result<(), Error> {
+    fn increment_stack_size(
+        &mut self,
+        var_name: &Token,
+        type_decl: &NEWTypes,
+    ) -> Result<(), Error> {
         match find_function(&self.scope) {
             Some(Scope::Function(name, _)) => {
-                *self.func_stack_size.get_mut(name).unwrap() += type_size;
+                *self.func_stack_size.get_mut(name).unwrap() += type_decl.size();
                 *self.func_stack_size.get_mut(name).unwrap() =
-                    align_by(self.func_stack_size[name], type_size);
+                    align(self.func_stack_size[name], type_decl);
                 Ok(())
             }
             _ => Err(Error::new(
@@ -322,7 +325,7 @@ impl TypeChecker {
         // initialize stack size for current function-scope
         self.func_stack_size.insert(name.clone(), 0);
         for (type_decl, name) in params.iter().by_ref() {
-            self.increment_stack_size(name, type_decl.size())?; // add params to stack-size
+            self.increment_stack_size(name, type_decl)?; // add params to stack-size
             env.init_var(name.unwrap_string(), type_decl.clone()) // initialize params in local scope
         }
 
@@ -408,6 +411,12 @@ impl TypeChecker {
         if let Some(expr) = expr {
             let body_return = self.expr_type(expr)?;
 
+            if matches!(body_return, NEWTypes::Array { .. }) {
+                return Err(Error::new(
+                    keyword,
+                    &format!("Can't return local stack-array '{}'", body_return),
+                ));
+            }
             self.check_return_compatibility(keyword, &function_type, &body_return)?;
             self.maybe_cast(&body_return, &function_type, expr);
         } else {
@@ -425,6 +434,7 @@ impl TypeChecker {
             ExprKind::Binary { left, token, right } => {
                 match self.evaluate_binary(left, token, right)? {
                     (result_type, None) => result_type,
+                    // if pointer 'op' primitive, scale primitive before operation
                     (result_type, Some(scale_size)) => {
                         ast.kind = ExprKind::ScaleDown {
                             shift_amount: log_2(scale_size as i32),
@@ -441,7 +451,22 @@ impl TypeChecker {
             ExprKind::Logical { left, token, right } => {
                 self.evaluate_logical(left, token, right)?
             }
-            ExprKind::Ident(v) => self.env.get_var(v)?,
+            ExprKind::Ident(token) => {
+                let type_decl = self.env.get_var(token)?;
+                // evaluate array as pointer to first element
+                if matches!(type_decl, NEWTypes::Array { .. }) {
+                    ast.kind = ExprKind::Unary {
+                        token: Token::new(
+                            TokenType::Amp,
+                            token.line_index,
+                            token.column,
+                            token.line_string.clone(),
+                        ),
+                        right: Box::new(ast.clone()),
+                    }
+                }
+                type_decl
+            }
             ExprKind::Assign {
                 l_expr: store_expr,
                 token,
@@ -491,10 +516,13 @@ impl TypeChecker {
             _ => return Err(Error::new(left_paren, "function-name has to be identifier")),
         };
 
-        let mut arg_types = args
-            .iter_mut()
-            .map(|expr| self.expr_type(expr))
-            .collect::<Result<Vec<NEWTypes>, Error>>()?;
+        let mut arg_types: Vec<NEWTypes> = Vec::new();
+        for expr in args.iter_mut() {
+            let mut t = self.expr_type(expr)?;
+            crate::arr_decay!(t);
+            self.maybe_int_promote(expr, &mut t);
+            arg_types.push(t);
+        }
 
         match (
             self.global_env
@@ -512,7 +540,7 @@ impl TypeChecker {
             )),
             (Some(function), None) | (None, Some(function)) | (Some(function), Some(_)) => {
                 if function.arity() == args.len() {
-                    self.args_and_params_match(left_paren, &function.params, args, &mut arg_types)?;
+                    self.args_and_params_match(left_paren, &function.params, arg_types)?;
                     Ok(function.return_type.clone())
                 } else {
                     Err(Error::new(
@@ -532,12 +560,10 @@ impl TypeChecker {
         &self,
         left_paren: &Token,
         params: &[(NEWTypes, Token)],
-        expressions: &mut [Expr],
-        args: &mut Vec<NEWTypes>,
+        args: Vec<NEWTypes>,
     ) -> Result<(), Error> {
-        for (i, type_decl) in args.iter_mut().enumerate() {
+        for (i, type_decl) in args.iter().enumerate() {
             self.check_type_compatibility(left_paren, type_decl, &params[i].0)?;
-            self.maybe_int_promote(&mut expressions[i], type_decl);
         }
         Ok(())
     }
@@ -562,17 +588,14 @@ impl TypeChecker {
         match (&left_type, &right_type) {
             (NEWTypes::Primitive(Types::Void), _) | (_, NEWTypes::Primitive(Types::Void)) => false,
             (NEWTypes::Pointer(_), NEWTypes::Pointer(_))
-            | (NEWTypes::Array { .. }, NEWTypes::Array { .. })
                 if left_type.type_compatible(right_type) =>
             {
                 token.token == TokenType::Minus
                     || token.token == TokenType::EqualEqual
                     || token.token == TokenType::BangEqual
             }
-            (_, NEWTypes::Pointer(_)) | (_, NEWTypes::Array { .. }) => {
-                token.token == TokenType::Plus
-            }
-            (NEWTypes::Pointer(_), _) | (NEWTypes::Array { .. }, _) => {
+            (_, NEWTypes::Pointer(_)) => token.token == TokenType::Plus,
+            (NEWTypes::Pointer(_), _) => {
                 token.token == TokenType::Plus || token.token == TokenType::Minus
             }
             _ => true,
@@ -580,22 +603,12 @@ impl TypeChecker {
     }
     fn maybe_scale(left: &NEWTypes, right: &NEWTypes, left_expr: &mut Expr, right_expr: &mut Expr) {
         let (expr, amount) = match (left, right) {
-            (
-                t,
-                NEWTypes::Pointer(inner)
-                | NEWTypes::Array {
-                    element_type: inner,
-                    ..
-                },
-            ) if !t.is_ptr() && inner.size() > 1 => (left_expr, inner.size()),
-            (
-                NEWTypes::Pointer(inner)
-                | NEWTypes::Array {
-                    element_type: inner,
-                    ..
-                },
-                t,
-            ) if !t.is_ptr() && inner.size() > 1 => (right_expr, inner.size()),
+            (t, NEWTypes::Pointer(inner)) if !t.is_ptr() && inner.size() > 1 => {
+                (left_expr, inner.size())
+            }
+            (NEWTypes::Pointer(inner), t) if !t.is_ptr() && inner.size() > 1 => {
+                (right_expr, inner.size())
+            }
             _ => return,
         };
 
@@ -634,6 +647,9 @@ impl TypeChecker {
         let mut left_type = self.expr_type(left)?;
         let mut right_type = self.expr_type(right)?;
 
+        crate::arr_decay!(left_type);
+        crate::arr_decay!(right_type);
+
         // check valid operations
         if !Self::is_valid_bin(token, &left_type, &right_type) {
             return Err(Error::new(
@@ -665,13 +681,6 @@ impl TypeChecker {
                 (NEWTypes::Pointer(inner), NEWTypes::Pointer(_)) => {
                     Ok((NEWTypes::Primitive(Types::Long), Some(inner.size())))
                 }
-                (
-                    NEWTypes::Array {
-                        element_type: inner,
-                        ..
-                    },
-                    NEWTypes::Array { .. },
-                ) => Ok((NEWTypes::Primitive(Types::Long), Some(inner.size()))),
                 _ => Ok((left_type, None)),
             },
         }
@@ -686,16 +695,15 @@ impl TypeChecker {
         }
     }
     fn evaluate_unary(&mut self, token: &Token, right: &mut Expr) -> Result<NEWTypes, Error> {
-        let right_type = self.expr_type(right)?;
+        let mut right_type = self.expr_type(right)?;
+        crate::arr_decay!(right_type);
 
         Ok(match token.token {
             TokenType::Amp => self.check_address(token, right_type, right)?,
             TokenType::Star => self.check_deref(token, right_type)?,
             TokenType::Bang => NEWTypes::Primitive(Types::Int),
             TokenType::Minus => {
-                if matches!(right_type, NEWTypes::Pointer(_))
-                    || matches!(right_type, NEWTypes::Array { .. })
-                {
+                if matches!(right_type, NEWTypes::Pointer(_)) {
                     return Err(Error::new(
                         token,
                         &format!("Invalid unary-expression '-' with type '{}'", right_type),

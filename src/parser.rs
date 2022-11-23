@@ -52,6 +52,12 @@ impl Parser {
     }
     fn declaration(&mut self) -> Result<Stmt, Error> {
         if let Some(t) = self.matches_type() {
+            if let Some(left) = self.matches(vec![TokenKind::LeftBracket]) {
+                return Err(Error::new(
+                    &left,
+                    "Brackets not allowed here; Put them after the Identifier",
+                ));
+            }
             return self.type_declaration(t);
         }
         self.statement()
@@ -230,7 +236,7 @@ impl Parser {
 
         if !self.check(TokenKind::RightParen) {
             loop {
-                let param_type = match self.matches_type() {
+                let mut param_type = match self.matches_type() {
                     Some(type_decl) => type_decl,
                     None => {
                         let actual = self.tokens.peek().expect("Expected Type");
@@ -240,10 +246,11 @@ impl Parser {
                         ));
                     }
                 };
-                params.push((
-                    param_type,
-                    self.consume(TokenKind::Ident, "Expect identifier after type")?,
-                ));
+                let name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
+                self.maybe_parse_arr(&mut param_type)?;
+                crate::arr_decay!(param_type);
+
+                params.push((param_type, name));
                 if self.matches(vec![TokenKind::Comma]) == None {
                     break;
                 }

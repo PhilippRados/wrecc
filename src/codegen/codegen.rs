@@ -184,7 +184,7 @@ impl Compiler {
     }
     fn declare_var(&mut self, type_decl: &NEWTypes, name: String) -> Result<(), std::fmt::Error> {
         self.current_bp_offset += type_decl.size();
-        self.current_bp_offset = align_by(self.current_bp_offset, type_decl.size());
+        self.current_bp_offset = align(self.current_bp_offset, type_decl);
 
         self.env.declare_var(
             name,
@@ -821,6 +821,13 @@ impl Compiler {
     }
 }
 
+pub fn align(offset: usize, type_decl: &NEWTypes) -> usize {
+    let size = match type_decl {
+        NEWTypes::Array { element_type, .. } => element_type.size(),
+        _ => type_decl.size(),
+    };
+    align_by(offset, size)
+}
 pub fn align_by(mut offset: usize, type_size: usize) -> usize {
     let remainder = offset % type_size;
     if remainder != 0 {

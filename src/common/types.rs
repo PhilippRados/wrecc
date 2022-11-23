@@ -80,6 +80,14 @@ impl Display for NEWTypes {
     }
 }
 
+#[macro_export]
+macro_rules! arr_decay {
+    ($arr:expr) => {
+        if let NEWTypes::Array { element_type, .. } = $arr {
+            $arr = NEWTypes::Pointer(element_type)
+        }
+    };
+}
 impl NEWTypes {
     pub fn to_array(&mut self, amount: usize) {
         *self = NEWTypes::Array {
@@ -115,8 +123,7 @@ impl NEWTypes {
         matches!(*self, NEWTypes::Pointer(_)) || matches!(*self, NEWTypes::Array { .. })
     }
     pub fn type_compatible(&self, other: &NEWTypes) -> bool {
-        #[rustfmt::skip]
-        return match (self, other) {
+        match (self, other) {
             (NEWTypes::Primitive(Types::Void), NEWTypes::Primitive(Types::Void)) => true,
 
             (NEWTypes::Primitive(Types::Void), NEWTypes::Primitive(_))
@@ -126,12 +133,8 @@ impl NEWTypes {
 
             (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => *self == *other,
 
-            (NEWTypes::Array {element_type: l, ..}, NEWTypes::Array {element_type: r, ..}) => *l == *r,
-
-            (NEWTypes::Pointer(to), NEWTypes::Array { element_type, .. })
-            | (NEWTypes::Array { element_type, .. }, NEWTypes::Pointer(to)) => *to == *element_type,
             _ => false,
-        };
+        }
     }
 }
 

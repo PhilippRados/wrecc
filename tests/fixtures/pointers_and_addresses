@@ -1,11 +1,14 @@
 int main() {
-  char **b; char a;
-  int   d; int  *e; int   f;
+  char **b;
+  char a;
+  int d;
+  int *e;
+  int f;
 
-  a= 18; 
+  a = 18; 
   char* ptr_a = &a;
-  b= &ptr_a; 
-  char c= **b; 
+  b = &ptr_a; 
+  char c = **b; 
 
   printint(c);
 

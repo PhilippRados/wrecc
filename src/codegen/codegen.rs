@@ -77,12 +77,12 @@ impl Compiler {
     fn visit(&mut self, statement: &Stmt) -> Result<(), std::fmt::Error> {
         match statement {
             Stmt::Expr(expr) => {
-                self.execute(expr)?.free(&mut self.scratch); // result isn't used
+                self.execute_expr(expr)?.free(&mut self.scratch); // result isn't used
                 Ok(())
             }
             Stmt::DeclareVar(type_decl, name) => self.declare_var(type_decl, name.unwrap_string()),
             Stmt::InitVar(type_decl, name, expr) => {
-                let value_reg = self.execute(expr)?;
+                let value_reg = self.execute_expr(expr)?;
                 self.init_var(type_decl, name, value_reg)
             }
             Stmt::Block(_, statements) => self.block(
@@ -114,7 +114,7 @@ impl Compiler {
         self.visit(body)?;
 
         writeln!(self.output, "L{}:", end_label)?;
-        let cond_reg = self.execute(cond)?;
+        let cond_reg = self.execute_expr(cond)?;
         writeln!(
             self.output,
             "\tcmpl    $0, {}\n\tjne      L{}",
@@ -132,7 +132,7 @@ impl Compiler {
         then_branch: &Stmt,
         else_branch: &Option<Stmt>,
     ) -> Result<(), std::fmt::Error> {
-        let cond_reg = self.execute(cond)?;
+        let cond_reg = self.execute_expr(cond)?;
         let done_label = self.create_label();
         let mut else_label = done_label;
 
@@ -167,7 +167,7 @@ impl Compiler {
         );
         match value {
             Some(expr) => {
-                let return_value = self.execute(expr)?;
+                let return_value = self.execute_expr(expr)?;
                 writeln!(
                     self.output,
                     "\tmov{}    {}, {}\n\tjmp    {}",
@@ -199,10 +199,12 @@ impl Compiler {
         &mut self,
         type_decl: &NEWTypes,
         name: &Token,
-        value_reg: Register,
+        mut value_reg: Register,
     ) -> Result<(), std::fmt::Error> {
         self.declare_var(type_decl, name.unwrap_string())?;
-        let value_reg = self.maybe_convert_stack_reg(value_reg)?;
+
+        value_reg = self.maybe_convert_stack_reg(value_reg)?;
+        value_reg = self.convert_to_rval(value_reg)?;
 
         writeln!(
             self.output,
@@ -300,6 +302,7 @@ impl Compiler {
         let reg = Register::Scratch(
             self.scratch.scratch_alloc(),
             NEWTypes::Primitive(Types::Int),
+            ValueKind::Rvalue,
         );
 
         writeln!(self.output, "\tmovl    ${num}, {}", reg.name(&self.scratch))?;
@@ -309,17 +312,18 @@ impl Compiler {
         let reg = Register::Scratch(
             self.scratch.scratch_alloc(),
             NEWTypes::Primitive(Types::Char),
+            ValueKind::Rvalue,
         );
 
         writeln!(self.output, "\tmovb    ${num}, {}", reg.name(&self.scratch))?;
         Ok(reg)
     }
-    pub fn execute(&mut self, ast: &Expr) -> Result<Register, std::fmt::Error> {
+    pub fn execute_expr(&mut self, ast: &Expr) -> Result<Register, std::fmt::Error> {
         match &ast.kind {
             ExprKind::Binary { left, token, right } => self.cg_binary(left, token, right),
             ExprKind::Number(v) => self.cg_literal_num(*v),
             ExprKind::CharLit(c) => self.cg_literal_char(*c),
-            ExprKind::Grouping { expr } => self.execute(expr),
+            ExprKind::Grouping { expr } => self.execute_expr(expr),
             ExprKind::Unary { token, right } => self.cg_unary(token, right),
             ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
             ExprKind::Assign { l_expr, r_expr, .. } => self.cg_assign(l_expr, r_expr),
@@ -340,7 +344,7 @@ impl Compiler {
         expr: &Expr,
         by_amount: &usize,
     ) -> Result<Register, std::fmt::Error> {
-        let value_reg = self.execute(expr)?;
+        let value_reg = self.execute_expr(expr)?;
 
         let value_reg = self.maybe_convert_stack_reg(value_reg)?;
 
@@ -355,7 +359,7 @@ impl Compiler {
         Ok(value_reg)
     }
     fn cg_scale_up(&mut self, expr: &Expr, by_amount: &usize) -> Result<Register, std::fmt::Error> {
-        let value_reg = self.execute(expr)?;
+        let value_reg = self.execute_expr(expr)?;
 
         let value_reg = self.maybe_convert_stack_reg(value_reg)?;
 
@@ -374,14 +378,19 @@ impl Compiler {
         expr: &Expr,
         new_type: NEWTypes,
     ) -> Result<Register, std::fmt::Error> {
-        let mut value_reg = self.execute(expr)?;
+        let mut value_reg = self.execute_expr(expr)?;
         value_reg.set_type(new_type);
+        value_reg.set_value_kind(ValueKind::Rvalue);
 
         Ok(value_reg)
     }
     fn cg_cast_up(&mut self, expr: &Expr, new_type: NEWTypes) -> Result<Register, std::fmt::Error> {
-        let value_reg = self.execute(expr)?;
-        let dest_reg = Register::Scratch(self.scratch.scratch_alloc(), new_type.clone());
+        let value_reg = self.execute_expr(expr)?;
+        let dest_reg = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            new_type.clone(),
+            ValueKind::Rvalue,
+        );
 
         writeln!(
             self.output,
@@ -396,11 +405,12 @@ impl Compiler {
         Ok(dest_reg)
     }
     fn cg_assign(&mut self, l_expr: &Expr, r_expr: &Expr) -> Result<Register, std::fmt::Error> {
-        let l_value = self.execute_l(l_expr)?;
-        let mut r_value = self.execute(r_expr)?;
+        let l_value = self.execute_expr(l_expr)?;
+        let mut r_value = self.execute_expr(r_expr)?;
 
         // can't move from mem to mem so make temp scratch-register
         r_value = self.maybe_convert_stack_reg(r_value)?;
+        r_value = self.convert_to_rval(r_value)?;
 
         writeln!(
             self.output,
@@ -411,20 +421,6 @@ impl Compiler {
         )?;
         r_value.free(&mut self.scratch);
         Ok(l_value)
-    }
-    fn execute_l(&mut self, expr: &Expr) -> Result<Register, std::fmt::Error> {
-        match &expr.kind {
-            ExprKind::Unary { token, right } => {
-                let reg = self.execute(right)?;
-                match token.token {
-                    TokenType::Star => self.cg_deref_at_l(reg),
-                    _ => unreachable!("l-value cant be {}", token.token),
-                }
-            }
-            ExprKind::Ident(name) => Ok(self.env.get_var(name).unwrap()),
-            ExprKind::Grouping { expr } => self.execute_l(expr),
-            _ => unreachable!("invalid l-value expression"),
-        }
     }
     fn cg_call(
         &mut self,
@@ -441,7 +437,7 @@ impl Compiler {
 
         // moving the arguments into their designated registers
         for (i, expr) in args.iter().enumerate() {
-            let reg = self.execute(expr)?;
+            let reg = self.execute_expr(expr)?;
             writeln!(
                 self.output,
                 "\tmov{}    {}, {}",
@@ -478,7 +474,7 @@ impl Compiler {
 
         if !return_type.is_void() {
             let reg_index = self.scratch.scratch_alloc();
-            let return_reg = Register::Scratch(reg_index, return_type.clone());
+            let return_reg = Register::Scratch(reg_index, return_type.clone(), ValueKind::Rvalue);
             writeln!(
                 self.output,
                 "\tmov{}    {}, {}",
@@ -504,7 +500,7 @@ impl Compiler {
         }
     }
     fn cg_or(&mut self, left: &Expr, right: &Expr) -> Result<Register, std::fmt::Error> {
-        let left = self.execute(left)?;
+        let left = self.execute_expr(left)?;
         let true_label = self.create_label();
 
         // jump to true label left is true => short circuit
@@ -517,7 +513,7 @@ impl Compiler {
         )?;
         left.free(&mut self.scratch);
 
-        let right = self.execute(right)?;
+        let right = self.execute_expr(right)?;
         let false_label = self.create_label();
 
         // if right is false we know expression is false
@@ -534,6 +530,7 @@ impl Compiler {
         let result = Register::Scratch(
             self.scratch.scratch_alloc(),
             NEWTypes::Primitive(Types::Int),
+            ValueKind::Rvalue,
         );
         // if expression true write 1 in result and skip false label
         writeln!(
@@ -555,7 +552,7 @@ impl Compiler {
         Ok(result)
     }
     fn cg_and(&mut self, left: &Expr, right: &Expr) -> Result<Register, std::fmt::Error> {
-        let left = self.execute(left)?;
+        let left = self.execute_expr(left)?;
         let false_label = self.create_label();
 
         // if left is false expression is false, we jump to false label
@@ -569,7 +566,7 @@ impl Compiler {
         left.free(&mut self.scratch);
 
         // left is true if right false jump to false label
-        let right = self.execute(right)?;
+        let right = self.execute_expr(right)?;
         writeln!(
             self.output,
             "\tcmp{}    $0, {}\n\tje    L{}",
@@ -584,6 +581,7 @@ impl Compiler {
         let result = Register::Scratch(
             self.scratch.scratch_alloc(),
             NEWTypes::Primitive(Types::Int),
+            ValueKind::Rvalue,
         );
         writeln!(
             self.output,
@@ -599,12 +597,12 @@ impl Compiler {
         Ok(result)
     }
     fn cg_unary(&mut self, token: &Token, right: &Expr) -> Result<Register, std::fmt::Error> {
-        let reg = self.execute(right)?;
+        let reg = self.execute_expr(right)?;
         match token.token {
             TokenType::Bang => self.cg_bang(reg),
             TokenType::Minus => self.cg_negate(reg),
             TokenType::Amp => self.cg_address_at(reg),
-            TokenType::Star => self.cg_deref_at(reg),
+            TokenType::Star => self.cg_deref(reg),
             _ => Error::new(token, "invalid unary operator").print_exit(),
         }
     }
@@ -643,6 +641,7 @@ impl Compiler {
         let dest = Register::Scratch(
             self.scratch.scratch_alloc(),
             NEWTypes::Pointer(Box::new(reg.get_type())),
+            ValueKind::Rvalue,
         );
         writeln!(
             self.output,
@@ -654,26 +653,13 @@ impl Compiler {
         reg.free(&mut self.scratch);
         Ok(dest)
     }
-    fn cg_deref_at_l(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
-        let reg = self.maybe_convert_stack_reg(reg)?;
-        Ok(reg.convert_to_deref())
-    }
-    fn cg_deref_at(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
-        let dest = Register::Scratch(
-            self.scratch.scratch_alloc(),
-            reg.get_type().deref_at().unwrap(),
-        );
-        let reg = self.maybe_convert_stack_reg(reg)?;
-        writeln!(
-            self.output,
-            "\tmov{}    ({}), {}",
-            dest.get_type().suffix(),
-            reg.name(&self.scratch),
-            dest.name(&self.scratch)
-        )?;
+    fn cg_deref(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {
+        reg = self.maybe_convert_stack_reg(reg)?;
+        reg = self.convert_to_rval(reg)?;
 
-        reg.free(&mut self.scratch);
-        Ok(dest)
+        reg.set_type(reg.get_type().deref_at().unwrap());
+        reg.set_value_kind(ValueKind::Lvalue);
+        Ok(reg)
     }
 
     fn cg_add(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
@@ -779,11 +765,14 @@ impl Compiler {
         token: &Token,
         right: &Expr,
     ) -> Result<Register, std::fmt::Error> {
-        let mut left_reg = self.execute(left)?;
-        let mut right_reg = self.execute(right)?;
+        let mut left_reg = self.execute_expr(left)?;
+        let mut right_reg = self.execute_expr(right)?;
 
         left_reg = self.maybe_convert_stack_reg(left_reg)?;
         right_reg = self.maybe_convert_stack_reg(right_reg)?;
+
+        left_reg = self.convert_to_rval(left_reg)?;
+        right_reg = self.convert_to_rval(right_reg)?;
 
         match token.token {
             TokenType::Plus => self.cg_add(left_reg, right_reg),
@@ -799,6 +788,12 @@ impl Compiler {
             _ => Error::new(token, "invalid binary operator").print_exit(),
         }
     }
+    fn convert_to_rval(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {
+        if reg.is_lval() {
+            reg = self.scratch_temp(reg)?
+        }
+        Ok(reg)
+    }
     fn maybe_convert_stack_reg(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
         if matches!(reg, Register::Stack(_, _)) {
             self.scratch_temp(reg)
@@ -807,7 +802,11 @@ impl Compiler {
         }
     }
     fn scratch_temp(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
-        let temp_scratch = Register::Scratch(self.scratch.scratch_alloc(), reg.get_type());
+        let temp_scratch = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            reg.get_type(),
+            ValueKind::Rvalue,
+        );
 
         writeln!(
             self.output,

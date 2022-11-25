@@ -101,7 +101,6 @@ impl NEWTypes {
     pub fn deref_at(&self) -> Option<NEWTypes> {
         match self {
             NEWTypes::Pointer(inner) => Some(*inner.clone()),
-            NEWTypes::Array { element_type, .. } => Some(*element_type.clone()),
             _ => None,
         }
     }

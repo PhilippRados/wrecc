@@ -486,23 +486,26 @@ impl TypeChecker {
     }
     fn assign_var(
         &mut self,
-        store_expr: &mut Expr,
+        l_expr: &mut Expr,
         token: &Token,
-        expr: &mut Expr,
+        r_expr: &mut Expr,
     ) -> Result<NEWTypes, Error> {
-        let type_decl = self.expr_type(store_expr)?;
-        let value = self.expr_type(expr)?;
+        let l_type = self.expr_type(l_expr)?;
+        let r_type = self.expr_type(r_expr)?;
+        if l_expr.value_kind != ValueKind::Lvalue {
+            return Err(Error::new(token, "Expect Lvalue left of assignment"));
+        }
 
-        if matches!(type_decl, NEWTypes::Array { .. }) {
+        if matches!(l_type, NEWTypes::Array { .. }) {
             return Err(Error::new(
                 token,
-                &format!("array {} is not assignable", type_decl),
+                &format!("array {} is not assignable", l_type),
             ));
         }
-        self.check_type_compatibility(token, &type_decl, &value)?;
-        self.maybe_cast(&type_decl, &value, expr);
+        self.check_type_compatibility(token, &l_type, &r_type)?;
+        self.maybe_cast(&l_type, &r_type, r_expr);
 
-        Ok(type_decl)
+        Ok(l_type)
     }
 
     fn evaluate_call(
@@ -626,6 +629,9 @@ impl TypeChecker {
         let left_type = self.expr_type(left)?;
         let right_type = self.expr_type(right)?;
 
+        Self::lval_to_rval(left);
+        Self::lval_to_rval(right);
+
         if left_type.is_void() || right_type.is_void() {
             return Err(Error::new(
                 token,
@@ -638,6 +644,12 @@ impl TypeChecker {
 
         Ok(NEWTypes::Primitive(Types::Int))
     }
+    fn lval_to_rval(expr: &mut Expr) {
+        expr.value_kind = ValueKind::Rvalue;
+    }
+    fn rval_to_lval(expr: &mut Expr) {
+        expr.value_kind = ValueKind::Lvalue;
+    }
     fn evaluate_binary(
         &mut self,
         left: &mut Expr,
@@ -646,6 +658,9 @@ impl TypeChecker {
     ) -> Result<(NEWTypes, Option<usize>), Error> {
         let mut left_type = self.expr_type(left)?;
         let mut right_type = self.expr_type(right)?;
+
+        Self::lval_to_rval(left);
+        Self::lval_to_rval(right);
 
         crate::arr_decay!(left_type);
         crate::arr_decay!(right_type);
@@ -700,9 +715,13 @@ impl TypeChecker {
 
         Ok(match token.token {
             TokenType::Amp => self.check_address(token, right_type, right)?,
-            TokenType::Star => self.check_deref(token, right_type)?,
-            TokenType::Bang => NEWTypes::Primitive(Types::Int),
+            TokenType::Star => self.check_deref(token, right_type, right)?,
+            TokenType::Bang => {
+                Self::lval_to_rval(right);
+                NEWTypes::Primitive(Types::Int)
+            }
             TokenType::Minus => {
+                Self::lval_to_rval(right);
                 if matches!(right_type, NEWTypes::Pointer(_)) {
                     return Err(Error::new(
                         token,
@@ -718,16 +737,23 @@ impl TypeChecker {
         &self,
         token: &Token,
         type_decl: NEWTypes,
-        expr: &Expr,
+        expr: &mut Expr,
     ) -> Result<NEWTypes, Error> {
         if expr.value_kind == ValueKind::Lvalue {
+            Self::lval_to_rval(expr);
             Ok(NEWTypes::Pointer(Box::new(type_decl)))
         } else {
             Err(Error::new(token, "can't call '&' on r-value"))
         }
     }
-    fn check_deref(&self, token: &Token, type_decl: NEWTypes) -> Result<NEWTypes, Error> {
+    fn check_deref(
+        &self,
+        token: &Token,
+        type_decl: NEWTypes,
+        expr: &mut Expr,
+    ) -> Result<NEWTypes, Error> {
         if let Some(inner) = type_decl.deref_at() {
+            Self::rval_to_lval(expr);
             Ok(inner)
         } else {
             Err(Error::new(
@@ -766,6 +792,7 @@ impl TypeChecker {
         }
     }
 }
+
 fn find_function(scopes: &[Scope]) -> Option<&Scope> {
     for ref scope in scopes.iter().rev() {
         if matches!(scope, Scope::Function(_, _)) {

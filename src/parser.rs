@@ -279,21 +279,14 @@ impl Parser {
 
         if let Some(t) = self.matches(vec![TokenKind::Equal]) {
             let value = self.expression()?;
-            if let ValueKind::Lvalue = expr.value_kind.clone() {
-                return Ok(Expr::new(
-                    ExprKind::Assign {
-                        l_expr: Box::new(expr),
-                        token: t,
-                        r_expr: Box::new(value),
-                    },
-                    ValueKind::Rvalue,
-                ));
-            } else {
-                return Err(Error::new(
-                    &t,
-                    &format!("cant assign to {}, can only assign to lvalues", expr.kind),
-                ));
-            }
+            return Ok(Expr::new(
+                ExprKind::Assign {
+                    l_expr: Box::new(expr),
+                    token: t,
+                    r_expr: Box::new(value),
+                },
+                ValueKind::Rvalue,
+            ));
         }
         Ok(expr)
     }

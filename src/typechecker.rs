@@ -18,6 +18,8 @@ pub struct TypeChecker {
     builtins: Vec<(&'static str, Function)>,
     func_stack_size: HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
     found_main: bool,
+    const_labels: HashMap<String, usize>,
+    const_label_count: usize,
 }
 macro_rules! cast {
     ($ex:expr,$new_type:expr,$kind:ident) => {
@@ -40,6 +42,8 @@ impl TypeChecker {
             returns_all_paths: false,
             found_main: false,
             func_stack_size: HashMap::new(),
+            const_labels: HashMap::new(),
+            const_label_count: 0,
             builtins: vec![(
                 "printint",
                 Function::new(
@@ -55,7 +59,7 @@ impl TypeChecker {
     pub fn check(
         &mut self,
         statements: &mut Vec<Stmt>,
-    ) -> Result<HashMap<String, usize>, Vec<Error>> {
+    ) -> Result<(&HashMap<String, usize>, &HashMap<String, usize>), Vec<Error>> {
         // initialze builtins so typechecker doesnt throw error when it doesnt find them in the program
         for (name, f) in self.builtins.iter().by_ref() {
             self.global_env
@@ -72,7 +76,7 @@ impl TypeChecker {
         } else if !self.found_main {
             Err(vec![Error::missing_entrypoint()])
         } else {
-            Ok(self.func_stack_size.clone())
+            Ok((&self.func_stack_size, &self.const_labels))
         }
     }
     fn check_statements(&mut self, statements: &mut Vec<Stmt>) -> Result<(), Error> {
@@ -335,6 +339,9 @@ impl TypeChecker {
         self.main_returns_int(name_token, return_type)?;
         self.implicit_return_main(name_token, body);
 
+        // align function stack by 16Bytes
+        *self.func_stack_size.get_mut(&name).unwrap() = align_by(self.func_stack_size[&name], 16);
+
         if !return_type.is_void() && !self.returns_all_paths {
             Err(Error::new(
                 name_token,
@@ -448,6 +455,7 @@ impl TypeChecker {
             ExprKind::Grouping { expr } => self.evaluate_grouping(expr)?,
             ExprKind::Number(_) => NEWTypes::Primitive(Types::Int),
             ExprKind::CharLit(_) => NEWTypes::Primitive(Types::Char),
+            ExprKind::String(token) => self.string(token.unwrap_string())?,
             ExprKind::Logical { left, token, right } => {
                 self.evaluate_logical(left, token, right)?
             }
@@ -483,6 +491,14 @@ impl TypeChecker {
             ExprKind::ScaleDown { .. } => unreachable!("is only used in codegen"),
         });
         Ok(ast.type_decl.clone().unwrap())
+    }
+    fn string(&mut self, data: String) -> Result<NEWTypes, Error> {
+        self.const_labels
+            .insert(data, create_label(&mut self.const_label_count));
+
+        Ok(NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
+            Types::Char,
+        ))))
     }
     fn assign_var(
         &mut self,
@@ -793,6 +809,18 @@ impl TypeChecker {
     }
 }
 
+pub fn align_by(mut offset: usize, type_size: usize) -> usize {
+    let remainder = offset % type_size;
+    if remainder != 0 {
+        offset += type_size - remainder;
+    }
+    offset
+}
+pub fn create_label(index: &mut usize) -> usize {
+    let prev = index.clone();
+    *index += 1;
+    prev
+}
 fn find_function(scopes: &[Scope]) -> Option<&Scope> {
     for ref scope in scopes.iter().rev() {
         if matches!(scope, Scope::Function(_, _)) {
@@ -809,4 +837,38 @@ const fn num_bits<T>() -> usize {
 fn log_2(x: i32) -> usize {
     assert!(x > 0);
     (num_bits::<i32>() as u32 - x.leading_zeros() - 1) as usize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alignes_stack1() {
+        let offset = 12;
+        let result = align_by(offset, 8);
+
+        assert_eq!(result, 16);
+    }
+    #[test]
+    fn alignes_stack2() {
+        let offset = 9;
+        let result = align_by(offset, 4);
+
+        assert_eq!(result, 12);
+    }
+    #[test]
+    fn alignes_stackpointer1() {
+        let offset = 31;
+        let result = align_by(offset, 16);
+
+        assert_eq!(result, 32);
+    }
+    #[test]
+    fn alignes_stackpointer2() {
+        let offset = 5;
+        let result = align_by(offset, 16);
+
+        assert_eq!(result, 16);
+    }
 }

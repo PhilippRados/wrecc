@@ -1,9 +1,11 @@
+void printf(char* format, int input);
+
 int main(){
   char combined = 'c' + 2;
   char p = 'A' + '!';
   int ip = p;
 
-  printint(combined);
-  printint(p);
-  printint(ip);
+  printf("%d\n",combined);
+  printf("%c\n",p);
+  printf("%d\n",ip);
 }

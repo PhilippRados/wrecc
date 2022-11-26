@@ -41,7 +41,8 @@ fn main() {
     };
 
     // Check for errors
-    let func_stack = match TypeChecker::new().check(&mut statements) {
+    let mut typechecker = TypeChecker::new();
+    let (func_stack, const_labels) = match typechecker.check(&mut statements) {
         Ok(func_stack) => func_stack,
         Err(e) => {
             for err in e {
@@ -52,5 +53,5 @@ fn main() {
     };
 
     // generate x8664 assembly
-    Compiler::new(func_stack).compile(&statements);
+    Compiler::new(func_stack, const_labels).compile(&statements);
 }

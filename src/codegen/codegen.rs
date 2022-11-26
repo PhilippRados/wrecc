@@ -1,21 +1,26 @@
 use crate::codegen::register::*;
 use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
+use crate::typechecker::{align_by, create_label};
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::fs::File;
 use std::io::Write as _;
 
-pub struct Compiler {
+pub struct Compiler<'a> {
     scratch: ScratchRegisters,
     output: String,
     env: Environment<Register>,
     function_name: Option<String>,
     label_index: usize,
-    func_stack_size: HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
-    pub current_bp_offset: usize,            // offset from base-pointer where variable stays
+    func_stack_size: &'a HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
+    const_labels: &'a HashMap<String, usize>,
+    pub current_bp_offset: usize, // offset from base-pointer where variable stays
 }
-impl Compiler {
-    pub fn new(func_stack_size: HashMap<String, usize>) -> Self {
+impl<'a> Compiler<'a> {
+    pub fn new(
+        func_stack_size: &'a HashMap<String, usize>,
+        const_labels: &'a HashMap<String, usize>,
+    ) -> Self {
         Compiler {
             output: String::new(),
             scratch: ScratchRegisters::new(),
@@ -23,8 +28,34 @@ impl Compiler {
             label_index: 0,
             env: Environment::new(None),
             function_name: None,
+            const_labels,
             func_stack_size,
         }
+    }
+
+    pub fn compile(&mut self, statements: &Vec<Stmt>) {
+        if let Err(e) = self.cg_const_labels() {
+            eprintln!("{:?}", e);
+            return;
+        }
+        if let Err(e) = self.cg_stmts(statements) {
+            eprintln!("{:?}", e);
+            return;
+        }
+        let mut output = File::create("/Users/philipprados/documents/coding/Rust/rucc/generated.s")
+            .expect("create failed");
+
+        self.output.insert_str(0, Compiler::preamble());
+
+        output
+            .write_all(self.output.as_bytes())
+            .expect("write failed");
+    }
+    fn cg_const_labels(&mut self) -> Result<(), std::fmt::Error> {
+        for (data, label_index) in self.const_labels {
+            writeln!(self.output, "LS{}:\n\t.string \"{}\"", label_index, data)?;
+        }
+        Ok(())
     }
     fn preamble() -> &'static str {
         "\t.text\n\
@@ -60,20 +91,6 @@ impl Compiler {
         }
         Ok(())
     }
-    pub fn compile(&mut self, statements: &Vec<Stmt>) {
-        if let Err(e) = self.cg_stmts(statements) {
-            eprintln!("{:?}", e);
-            return;
-        }
-        let mut output = File::create("/Users/philipprados/documents/coding/Rust/rucc/generated.s")
-            .expect("create failed");
-
-        self.output.insert_str(0, Compiler::preamble());
-
-        output
-            .write_all(self.output.as_bytes())
-            .expect("write failed");
-    }
     fn visit(&mut self, statement: &Stmt) -> Result<(), std::fmt::Error> {
         match statement {
             Stmt::Expr(expr) => {
@@ -100,15 +117,10 @@ impl Compiler {
             Stmt::FunctionDeclaration(_, _, _) => Ok(()),
         }
     }
-    fn create_label(&mut self) -> usize {
-        let result = self.label_index;
-        self.label_index += 1;
-        result
-    }
 
     fn while_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), std::fmt::Error> {
-        let start_label = self.create_label();
-        let end_label = self.create_label();
+        let start_label = create_label(&mut self.label_index);
+        let end_label = create_label(&mut self.label_index);
 
         writeln!(self.output, "\tjmp    L{}\nL{}:", end_label, start_label)?;
         self.visit(body)?;
@@ -133,7 +145,7 @@ impl Compiler {
         else_branch: &Option<Stmt>,
     ) -> Result<(), std::fmt::Error> {
         let cond_reg = self.execute_expr(cond)?;
-        let done_label = self.create_label();
+        let done_label = create_label(&mut self.label_index);
         let mut else_label = done_label;
 
         writeln!(
@@ -144,7 +156,7 @@ impl Compiler {
         cond_reg.free(&mut self.scratch);
 
         if !else_branch.is_none() {
-            else_label = self.create_label();
+            else_label = create_label(&mut self.label_index);
         }
         writeln!(self.output, "\tje    L{}", else_label)?;
         self.visit(then_branch)?;
@@ -236,9 +248,6 @@ impl Compiler {
         Ok(())
     }
     fn allocate_stack(&mut self, name: &str) -> Result<(), std::fmt::Error> {
-        // stack has to be 16byte aligned
-        *self.func_stack_size.get_mut(name).unwrap() = align_by(self.func_stack_size[name], 16);
-
         if self.func_stack_size[name] > 0 {
             writeln!(
                 self.output,
@@ -337,7 +346,24 @@ impl Compiler {
             ExprKind::CastDown { expr } => self.cg_cast_down(expr, ast.type_decl.clone().unwrap()),
             ExprKind::ScaleUp { expr, shift_amount } => self.cg_scale_up(expr, shift_amount),
             ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(expr, shift_amount),
+            ExprKind::String(token) => self.cg_string(token.unwrap_string()),
         }
+    }
+    fn cg_string(&mut self, name: String) -> Result<Register, std::fmt::Error> {
+        let dest = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
+            ValueKind::Rvalue,
+        );
+
+        writeln!(
+            self.output,
+            "\tleaq    LS{}(%rip), {}",
+            self.const_labels[&name],
+            dest.name(&self.scratch)
+        )?;
+
+        Ok(dest)
     }
     fn cg_scale_down(
         &mut self,
@@ -501,7 +527,7 @@ impl Compiler {
     }
     fn cg_or(&mut self, left: &Expr, right: &Expr) -> Result<Register, std::fmt::Error> {
         let left = self.execute_expr(left)?;
-        let true_label = self.create_label();
+        let true_label = create_label(&mut self.label_index);
 
         // jump to true label left is true => short circuit
         writeln!(
@@ -514,7 +540,7 @@ impl Compiler {
         left.free(&mut self.scratch);
 
         let right = self.execute_expr(right)?;
-        let false_label = self.create_label();
+        let false_label = create_label(&mut self.label_index);
 
         // if right is false we know expression is false
         writeln!(
@@ -526,7 +552,7 @@ impl Compiler {
         )?;
         right.free(&mut self.scratch);
 
-        let done_label = self.create_label();
+        let done_label = create_label(&mut self.label_index);
         let result = Register::Scratch(
             self.scratch.scratch_alloc(),
             NEWTypes::Primitive(Types::Int),
@@ -553,7 +579,7 @@ impl Compiler {
     }
     fn cg_and(&mut self, left: &Expr, right: &Expr) -> Result<Register, std::fmt::Error> {
         let left = self.execute_expr(left)?;
-        let false_label = self.create_label();
+        let false_label = create_label(&mut self.label_index);
 
         // if left is false expression is false, we jump to false label
         writeln!(
@@ -577,7 +603,7 @@ impl Compiler {
         right.free(&mut self.scratch);
 
         // if no prior jump was taken expression is true
-        let true_label = self.create_label();
+        let true_label = create_label(&mut self.label_index);
         let result = Register::Scratch(
             self.scratch.scratch_alloc(),
             NEWTypes::Primitive(Types::Int),
@@ -826,44 +852,4 @@ pub fn align(offset: usize, type_decl: &NEWTypes) -> usize {
         _ => type_decl.size(),
     };
     align_by(offset, size)
-}
-pub fn align_by(mut offset: usize, type_size: usize) -> usize {
-    let remainder = offset % type_size;
-    if remainder != 0 {
-        offset += type_size - remainder;
-    }
-    offset
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn alignes_stack1() {
-        let offset = 12;
-        let result = align_by(offset, 8);
-
-        assert_eq!(result, 16);
-    }
-    #[test]
-    fn alignes_stack2() {
-        let offset = 9;
-        let result = align_by(offset, 4);
-
-        assert_eq!(result, 12);
-    }
-    #[test]
-    fn alignes_stackpointer1() {
-        let offset = 31;
-        let result = align_by(offset, 16);
-
-        assert_eq!(result, 32);
-    }
-    #[test]
-    fn alignes_stackpointer2() {
-        let offset = 5;
-        let result = align_by(offset, 16);
-
-        assert_eq!(result, 16);
-    }
 }

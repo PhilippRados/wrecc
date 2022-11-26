@@ -475,6 +475,9 @@ impl Parser {
         if let Some(s) = self.matches(vec![TokenKind::Ident]) {
             return Ok(Expr::new(ExprKind::Ident(s), ValueKind::Lvalue));
         }
+        if let Some(s) = self.matches(vec![TokenKind::String]) {
+            return Ok(Expr::new(ExprKind::String(s), ValueKind::Rvalue));
+        }
 
         if self.matches(vec![TokenKind::LeftParen]).is_some() {
             let expr = self.expression()?;

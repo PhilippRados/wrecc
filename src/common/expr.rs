@@ -44,6 +44,7 @@ pub enum ExprKind {
         shift_amount: usize,
         expr: Box<Expr>,
     },
+    String(Token),
     Number(i32),
     CharLit(i8),
     Ident(Token),
@@ -87,6 +88,7 @@ impl Display for ExprKind {
                 ExprKind::Ident(_) => "'identifier'".to_string(),
                 ExprKind::ScaleUp { .. } => "'scaling-up'".to_string(),
                 ExprKind::ScaleDown { .. } => "'scaling-down'".to_string(),
+                ExprKind::String(token) => token.unwrap_string(),
             }
         )
     }

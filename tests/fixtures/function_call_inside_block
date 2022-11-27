@@ -1,7 +1,9 @@
+void printf(char* format, int input);
+
 int main(){
   {
     int some() {
-      printint(1);
+      printf("%d\n",1);
     }
     some();
   }

@@ -1,4 +1,5 @@
 int** malloc(int size);
+void printf(char* s, int digit);
 
 int main(){
   int c;
@@ -8,6 +9,6 @@ int main(){
 
   *(*a) = b;
 
-  printint(*(*a));
-  printint(c);
+  printf("%d\n",*(*a));
+  printf("%d\n",c);
 }

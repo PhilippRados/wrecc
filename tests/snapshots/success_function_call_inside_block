@@ -1,4 +1,4 @@
 Error: can only define functions in global scope
 |
-3     int some() {
+5     int some() {
 |         ^

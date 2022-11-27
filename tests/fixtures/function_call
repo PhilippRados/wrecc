@@ -1,12 +1,14 @@
+void printf(char* format, int input);
+
 void is_bigger(int input) {
-    printint(input);
+    printf("%d\n",input);
 }
 void some_func(int test) {
     int thresh = 5;
     if (test > thresh){
       is_bigger(test);
     } else {
-      printint(-1);
+      printf("%d\n",-1);
     }
 }
 int main(){

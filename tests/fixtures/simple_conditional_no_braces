@@ -1,19 +1,21 @@
+void printf(char* format, int digit);
+
 int main(){
   if (0)
     if (1)
-      printint(1);
+      printf("%d\n",1);
     else
-      printint(0);
+      printf("%d\n",0);
 
   if (1)
     if (0)
-      printint(1);
+      printf("%d\n",1);
     else
-      printint(0);
+      printf("%d\n",0);
 
   if (1)
     if (1)
-      printint(1);
+      printf("%d\n",1);
     else
-      printint(0);
+      printf("%d\n",0);
 }

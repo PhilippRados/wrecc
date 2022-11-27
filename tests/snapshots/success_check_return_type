@@ -1,4 +1,4 @@
 Error: Mismatched function return type: 'int', found: 'void'
 |
-3     return;
+5     return;
 |     ^

@@ -1,3 +1,5 @@
+void printf(char* s, int digit);
+
 int calc_sum(int arr[10],int n){
   int result = 0;
   for(int i=0; i < n; i = i + 1) {
@@ -18,8 +20,8 @@ int main() {
   sum = calc_sum(marks,n);
 
   average = sum / n;
-  printint(sum);
-  printint(n);
+  printf("%d\n",sum);
+  printf("%d\n",n);
 
-  printint(average);
+  printf("%d\n",average);
 }

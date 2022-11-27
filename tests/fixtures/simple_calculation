@@ -1,3 +1,5 @@
+void printf(char* format, int digit);
+
 int main(){
-  printint(3 - 1 * 2);
+  printf("%d\n",3 - 1 * 2);
 }

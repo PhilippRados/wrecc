@@ -1,3 +1,5 @@
+void printf(char* format, int input);
+
 int main(){
   long a = 0;
   long b = 3;
@@ -10,6 +12,6 @@ int main(){
 
   int p2 = &c - &t;
 
-  printint(p);
-  printint(p2);
+  printf("%d\n",p);
+  printf("%d\n",p2);
 }

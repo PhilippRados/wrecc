@@ -1,0 +1,18 @@
+void printf(char* s, int d);
+long strlen(char* s);
+
+char* name(int age, int color){
+  printf("age:%d\n",age);
+  printf("color:%d\n",color);
+  
+  return "otto";
+}
+long more(long e,int d){return e + d;}
+
+long some(char* s){
+  return strlen(s);
+}
+
+int main(){
+  printf("assert: %d\n",more(strlen(name(4,2)),some("uwe")));
+}

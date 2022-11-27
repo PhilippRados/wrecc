@@ -1,41 +1,50 @@
 use crate::common::expr::ValueKind;
 use crate::common::types::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
-#[derive(Clone, Debug)]
+pub trait RegName {
+    fn name(&self, type_decl: &NEWTypes) -> String;
+}
+
 pub enum Register {
-    Scratch(ScratchIndex, NEWTypes, ValueKind),
-    Stack(StackRegister, NEWTypes),
-    Arg(usize, NEWTypes),
+    Scratch(Rc<Rc<RefCell<ScratchRegister>>>, NEWTypes, ValueKind),
+    Stack(StackRegister),
+    Arg(Rc<Rc<RefCell<ArgRegister>>>, NEWTypes),
     Void,
 }
 impl Register {
-    pub fn free(&self, scratch_regs: &mut ScratchRegisters) {
+    pub fn free(&self) {
         match self {
             Register::Void => (),
-            Register::Stack(_, _) => (),
+            Register::Stack(_) => (),
             Register::Arg(_, _) => (),
-            Register::Scratch(index, _, _) => scratch_regs.get_mut(index).free(),
+            Register::Scratch(reg, _, _) => reg.borrow_mut().free(), //scratch_regs.get_mut(index).free(),
         }
     }
-    pub fn name(&self, scratch_regs: &ScratchRegisters) -> String {
+    pub fn name(&self) -> String {
         match self {
             Register::Void => unimplemented!(),
-            Register::Stack(reg, _) => reg.name(),
-            Register::Scratch(index, type_decl, valuekind) => match valuekind {
-                ValueKind::Rvalue => {
-                    format!("{}{}", scratch_regs.get(index).name, type_decl.reg_suffix())
-                }
+            Register::Stack(reg) => reg.name(),
+            Register::Scratch(reg, type_decl, valuekind) => match valuekind {
+                ValueKind::Rvalue => reg.borrow().name(type_decl).to_string(),
                 ValueKind::Lvalue => {
-                    format!("({})", scratch_regs.get(index).name)
+                    format!(
+                        "({})",
+                        reg.borrow()
+                            .name(&NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
+                                Types::Void
+                            ))))
+                    )
                 }
             },
-            Register::Arg(index, type_decl) => type_decl.get_arg_reg(*index).to_string(),
+            Register::Arg(reg, type_decl) => reg.borrow().name(type_decl).to_string(),
         }
     }
     pub fn set_type(&mut self, type_decl: NEWTypes) {
         match self {
             Register::Void => unimplemented!(),
-            Register::Stack(_, _) => (),
+            Register::Stack(_) => (),
             Register::Scratch(_, old_decl, _) => *old_decl = type_decl,
             Register::Arg(_, old_decl) => *old_decl = type_decl,
         }
@@ -43,9 +52,8 @@ impl Register {
     pub fn get_type(&self) -> NEWTypes {
         match self {
             Register::Void => unimplemented!(),
-            Register::Stack(_, type_decl)
-            | Register::Scratch(_, type_decl, _)
-            | Register::Arg(_, type_decl) => type_decl.clone(),
+            Register::Stack(reg) => reg.type_decl.clone(),
+            Register::Scratch(_, type_decl, _) | Register::Arg(_, type_decl) => type_decl.clone(),
         }
     }
     pub fn is_lval(&self) -> bool {
@@ -61,13 +69,91 @@ impl Register {
         }
     }
 }
+#[derive(Debug)]
+pub struct ArgRegisters {
+    pub registers: [Rc<RefCell<ArgRegister>>; 6],
+}
+impl ArgRegisters {
+    pub fn new() -> Self {
+        ArgRegisters {
+            registers: [
+                Rc::new(RefCell::new(ArgRegister {
+                    in_use: false,
+                    index: 0,
+                })),
+                Rc::new(RefCell::new(ArgRegister {
+                    in_use: false,
+                    index: 1,
+                })),
+                Rc::new(RefCell::new(ArgRegister {
+                    in_use: false,
+                    index: 2,
+                })),
+                Rc::new(RefCell::new(ArgRegister {
+                    in_use: false,
+                    index: 3,
+                })),
+                Rc::new(RefCell::new(ArgRegister {
+                    in_use: false,
+                    index: 4,
+                })),
+                Rc::new(RefCell::new(ArgRegister {
+                    in_use: false,
+                    index: 5,
+                })),
+            ],
+        }
+    }
+}
+
+static ARG_REGISTER_MAP: &[[&'static str; 6]] = &[
+    ["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"],
+    ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"],
+    ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"],
+];
 #[derive(Clone, Debug)]
+pub struct ArgRegister {
+    pub in_use: bool,
+    index: usize,
+}
+impl RegName for ArgRegister {
+    fn name(&self, type_decl: &NEWTypes) -> String {
+        match type_decl {
+            NEWTypes::Primitive(Types::Char) => ARG_REGISTER_MAP[0][self.index].to_string(),
+            NEWTypes::Primitive(Types::Int) => ARG_REGISTER_MAP[1][self.index].to_string(),
+            NEWTypes::Primitive(Types::Long) | NEWTypes::Pointer(_) | NEWTypes::Array { .. } => {
+                ARG_REGISTER_MAP[2][self.index].to_string()
+            }
+            _ => unreachable!("cant pass void argument"),
+        }
+    }
+}
+impl ArgRegisters {
+    pub fn alloc(&self, index: usize) -> Rc<Rc<RefCell<ArgRegister>>> {
+        self.registers[index].borrow_mut().in_use = true;
+        Rc::new(Rc::clone(&self.registers[index]))
+    }
+    pub fn get(&self, index: usize) -> Rc<Rc<RefCell<ArgRegister>>> {
+        Rc::new(Rc::clone(&self.registers[index]))
+    }
+    pub fn free_all(&mut self) {
+        for r in self.registers.iter_mut() {
+            r.borrow_mut().in_use = false;
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct StackRegister {
     bp_offset: usize,
+    type_decl: NEWTypes,
 }
 impl StackRegister {
-    pub fn new(bp_offset: usize) -> Self {
-        StackRegister { bp_offset }
+    pub fn new(bp_offset: usize, type_decl: NEWTypes) -> Self {
+        StackRegister {
+            bp_offset,
+            type_decl,
+        }
     }
     pub fn name(&self) -> String {
         format!("-{}(%rbp)", self.bp_offset)
@@ -75,83 +161,54 @@ impl StackRegister {
 }
 
 #[derive(Clone, Debug)]
-pub enum ScratchIndex {
-    R8,
-    R9,
-    R10,
-    R11,
-}
-impl ScratchIndex {
-    fn index(&self) -> usize {
-        match self {
-            ScratchIndex::R8 => 0,
-            ScratchIndex::R9 => 1,
-            ScratchIndex::R10 => 2,
-            ScratchIndex::R11 => 3,
-        }
-    }
-}
-impl From<usize> for ScratchIndex {
-    fn from(index: usize) -> Self {
-        match index {
-            0 => ScratchIndex::R8,
-            1 => ScratchIndex::R9,
-            2 => ScratchIndex::R10,
-            3 => ScratchIndex::R11,
-            _ => unreachable!(),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
 pub struct ScratchRegister {
     pub in_use: bool,
-    pub name: &'static str,
+    pub base_name: &'static str,
 }
 impl ScratchRegister {
     fn free(&mut self) {
         self.in_use = false;
     }
 }
+impl RegName for ScratchRegister {
+    fn name(&self, type_decl: &NEWTypes) -> String {
+        format!("{}{}", self.base_name, type_decl.reg_suffix())
+    }
+}
+
 #[derive(Debug)]
 pub struct ScratchRegisters {
-    pub registers: [ScratchRegister; 4],
+    pub registers: [Rc<RefCell<ScratchRegister>>; 4],
 }
 impl ScratchRegisters {
-    pub fn scratch_alloc(&mut self) -> ScratchIndex {
-        for (i, r) in self.registers.iter_mut().enumerate() {
-            if !r.in_use {
-                r.in_use = true;
-                return ScratchIndex::from(i);
+    pub fn scratch_alloc(&self) -> Rc<Rc<RefCell<ScratchRegister>>> {
+        for (i, r) in self.registers.iter().enumerate() {
+            if !r.borrow().in_use {
+                r.borrow_mut().in_use = true;
+                return Rc::new(Rc::clone(&self.registers[i]));
             }
         }
         panic!("no free register");
     }
-    fn get_mut(&mut self, reg: &ScratchIndex) -> &mut ScratchRegister {
-        &mut self.registers[reg.index()]
-    }
-    fn get(&self, reg: &ScratchIndex) -> &ScratchRegister {
-        &self.registers[reg.index()]
-    }
     pub fn new() -> Self {
         ScratchRegisters {
             registers: [
-                ScratchRegister {
+                Rc::new(RefCell::new(ScratchRegister {
                     in_use: false,
-                    name: "%r8",
-                },
-                ScratchRegister {
+                    base_name: "%r8",
+                })),
+                Rc::new(RefCell::new(ScratchRegister {
                     in_use: false,
-                    name: "%r9",
-                },
-                ScratchRegister {
+                    base_name: "%r9",
+                })),
+                Rc::new(RefCell::new(ScratchRegister {
                     in_use: false,
-                    name: "%r10",
-                },
-                ScratchRegister {
+                    base_name: "%r10",
+                })),
+                Rc::new(RefCell::new(ScratchRegister {
                     in_use: false,
-                    name: "%r11",
-                },
+                    base_name: "%r11",
+                })),
             ],
         }
     }

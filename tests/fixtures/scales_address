@@ -1,3 +1,5 @@
+void printf(char* format, int digit);
+
 int main(){
   int a = 0;
   int b = 3;
@@ -8,8 +10,8 @@ int main(){
   int* p3 = &a - 2;
   int* p4 = 1 + &c;
 
-  printint(*p);
-  printint(*p2);
-  printint(*p3);
-  printint(*p4);
+  printf("%d\n",*p);
+  printf("%d\n",*p2);
+  printf("%d\n",*p3);
+  printf("%d\n",*p4);
 }

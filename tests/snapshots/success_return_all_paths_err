@@ -1,4 +1,4 @@
 Error: non-void function doesnt return in all code paths
 |
-1 int some(char a){
+3 int some(char a){
 |     ^

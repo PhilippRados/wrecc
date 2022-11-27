@@ -1,3 +1,5 @@
+void printf(char* format, int input);
+
 int some() {
   if (1 > 2) {
     return;
@@ -6,5 +8,5 @@ int some() {
 }
 
 int main(){
-  printint(some());
+  printf("%d\n",some());
 }

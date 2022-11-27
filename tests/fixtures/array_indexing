@@ -1,3 +1,5 @@
+void printf(char* s, int digit);
+
 int main(){
   int a[3];
 
@@ -5,6 +7,6 @@ int main(){
   a[1] = 4;
   a[2] = 0;
 
-  printint(a[2] - a[1]);
-  printint(a[0]);
+  printf("%d\n",a[2] - a[1]);
+  printf("%d\n",a[0]);
 }

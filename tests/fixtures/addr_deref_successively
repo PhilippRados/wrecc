@@ -1,3 +1,5 @@
+void printf(char* s, int digit);
+
 int main(){
   int a[5];
   int* b;
@@ -8,6 +10,6 @@ int main(){
   a[3] = 0;
   b = &*(a + 2);
 
-  printint(*b);
-  printint(b[-2]);
+  printf("%d\n",*b);
+  printf("%d\n",b[-2]);
 }

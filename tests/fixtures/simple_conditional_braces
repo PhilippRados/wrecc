@@ -1,10 +1,12 @@
+void printf(char* format, int digit);
+
 int main(){
   if (2 > 2) {
-      printint(1);
+      printf("%d\n",1);
   } else {
-      printint(0);
+      printf("%d\n",0);
       if (3 == 3){
-        printint(3);
+        printf("%d\n",3);
       }
   }
 }

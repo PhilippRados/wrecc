@@ -1,12 +1,6 @@
 use crate::common::token::TokenKind;
 use std::fmt::Display;
 
-// Argument registers starting with return register
-static ARG_REGISTER_MAP: &[[&'static str; 6]] = &[
-    ["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"],
-    ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"],
-    ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"],
-];
 static RETURN_REG: &[&'static str; 3] = &["%al", "%eax", "%rax"];
 
 pub trait TypeInfo {
@@ -102,17 +96,6 @@ impl NEWTypes {
         match self {
             NEWTypes::Pointer(inner) => Some(*inner.clone()),
             _ => None,
-        }
-    }
-    // returns the register-name of function argument
-    pub fn get_arg_reg(&self, index: usize) -> &str {
-        match self {
-            NEWTypes::Primitive(Types::Char) => ARG_REGISTER_MAP[0][index],
-            NEWTypes::Primitive(Types::Int) => ARG_REGISTER_MAP[1][index],
-            NEWTypes::Primitive(Types::Long) | NEWTypes::Pointer(_) | NEWTypes::Array { .. } => {
-                ARG_REGISTER_MAP[2][index]
-            }
-            _ => unreachable!("cant pass void argument"),
         }
     }
     pub fn is_void(&self) -> bool {

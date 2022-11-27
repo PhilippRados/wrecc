@@ -1,9 +1,11 @@
+void printf(char* format, int digit);
+
 int main(){
   int a = 0;
   {
       int a;
-      printint(a);
+      printf("%d\n",a);
   }
   int a = 2;
-  printint(a);
+  printf("%d\n",a);
 }

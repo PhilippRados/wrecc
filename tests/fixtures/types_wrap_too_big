@@ -1,7 +1,9 @@
+void printf(char* format, int digit);
+
 int main(){
   char a = 'a';
   int b = 110;
   char c = a + b;
 
-  printint(c);
+  printf("%d\n",c);
 }

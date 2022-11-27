@@ -1,3 +1,4 @@
+void printf(char* format, int input);
 int* calloc(int amount,int of);
 int* malloc(int size);
 void free(int* ptr);
@@ -26,9 +27,9 @@ int main(){
   int return_size;
 
   int* result = twoSum(nums, 3, 6, &return_size);
-  printint(return_size);
-  printint(*result);
-  printint(*(result + 1));
+  printf("%d\n",return_size);
+  printf("%d\n",*result);
+  printf("%d\n",*(result + 1));
 
   free(result);
   free(nums);

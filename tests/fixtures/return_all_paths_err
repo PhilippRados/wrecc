@@ -1,3 +1,5 @@
+void printf(char* format, int digit);
+
 int some(char a){
   if (2 > 1) {
     if (2){
@@ -14,5 +16,5 @@ int some(char a){
   }
 }
 int main(){
-  printint(some(1));
+  printf("%d\n",some(1));
 }

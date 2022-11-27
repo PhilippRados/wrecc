@@ -1,3 +1,5 @@
+void printf(char* format, int input);
+
 int fib(int n) {
   if (n <= 1) return n;
   return fib(n - 2) + fib(n - 1);
@@ -5,6 +7,7 @@ int fib(int n) {
 
 int main(){
   for (int i = 0; i < 10; i = i + 1) {
-    printint(fib(i));
+    printf("%d\n",fib(i));
+    //printint(fib(i));
   }
 }

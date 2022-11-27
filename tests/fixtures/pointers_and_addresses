@@ -1,3 +1,5 @@
+void printf(char* format, int input);
+
 int main() {
   char **b;
   char a;
@@ -10,9 +12,9 @@ int main() {
   b = &ptr_a; 
   char c = **b; 
 
-  printint(c);
+  printf("%d\n",c);
 
-  d= 12; printint(d);
-  e= &d; f= *e; printint(f);
+  d= 12; printf("%d\n",d);
+  e= &d; f= *e; printf("%d\n",f);
   return(0);
 }

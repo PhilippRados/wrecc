@@ -1,3 +1,5 @@
+void printf(char* s, int digit);
+
 int main() {
   int x[5];
   x[0] = 1;
@@ -10,7 +12,7 @@ int main() {
 
   ptr = x + 2; 
 
-  printint(*ptr);
-  printint(*(ptr+1));
-  printint(ptr[-1]);
+  printf("%d\n",*ptr);
+  printf("%d\n",*(ptr+1));
+  printf("%d\n",ptr[-1]);
 }

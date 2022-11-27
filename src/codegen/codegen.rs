@@ -8,8 +8,9 @@ use std::io::Write as _;
 
 pub struct Compiler<'a> {
     scratch: ScratchRegisters,
+    args: ArgRegisters,
     output: String,
-    env: Environment<Register>,
+    env: Environment<StackRegister>,
     function_name: Option<String>,
     label_index: usize,
     func_stack_size: &'a HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
@@ -24,6 +25,7 @@ impl<'a> Compiler<'a> {
         Compiler {
             output: String::new(),
             scratch: ScratchRegisters::new(),
+            args: ArgRegisters::new(),
             current_bp_offset: 0,
             label_index: 0,
             env: Environment::new(None),
@@ -94,7 +96,7 @@ impl<'a> Compiler<'a> {
     fn visit(&mut self, statement: &Stmt) -> Result<(), std::fmt::Error> {
         match statement {
             Stmt::Expr(expr) => {
-                self.execute_expr(expr)?.free(&mut self.scratch); // result isn't used
+                self.execute_expr(expr)?.free(); // result isn't used
                 Ok(())
             }
             Stmt::DeclareVar(type_decl, name) => self.declare_var(type_decl, name.unwrap_string()),
@@ -130,10 +132,10 @@ impl<'a> Compiler<'a> {
         writeln!(
             self.output,
             "\tcmpl    $0, {}\n\tjne      L{}",
-            cond_reg.name(&self.scratch),
+            cond_reg.name(),
             start_label
         )?;
-        cond_reg.free(&mut self.scratch);
+        cond_reg.free();
 
         Ok(())
     }
@@ -148,12 +150,8 @@ impl<'a> Compiler<'a> {
         let done_label = create_label(&mut self.label_index);
         let mut else_label = done_label;
 
-        writeln!(
-            self.output,
-            "\tcmpl    $0, {}",
-            cond_reg.name(&self.scratch)
-        )?;
-        cond_reg.free(&mut self.scratch);
+        writeln!(self.output, "\tcmpl    $0, {}", cond_reg.name())?;
+        cond_reg.free();
 
         if !else_branch.is_none() {
             else_label = create_label(&mut self.label_index);
@@ -184,11 +182,11 @@ impl<'a> Compiler<'a> {
                     self.output,
                     "\tmov{}    {}, {}\n\tjmp    {}",
                     return_value.get_type().suffix(),
-                    return_value.name(&self.scratch),
+                    return_value.name(),
                     return_value.get_type().return_reg(),
                     function_epilogue
                 )?;
-                return_value.free(&mut self.scratch);
+                return_value.free();
                 Ok(())
             }
             None => writeln!(self.output, "\tjmp    {}", function_epilogue),
@@ -200,10 +198,7 @@ impl<'a> Compiler<'a> {
 
         self.env.declare_var(
             name,
-            Register::Stack(
-                StackRegister::new(self.current_bp_offset),
-                type_decl.clone(),
-            ),
+            StackRegister::new(self.current_bp_offset, type_decl.clone()),
         );
         Ok(())
     }
@@ -222,10 +217,10 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tmov{}    {}, {}",
             type_decl.suffix(),
-            value_reg.name(&self.scratch),
-            self.env.get_var(name).unwrap().name(&self.scratch) // since var-declaration set everything up we just need declared register
+            value_reg.name(),
+            self.env.get_var(name).unwrap().name() // since var-declaration set everything up we just need declared register
         )?;
-        value_reg.free(&mut self.scratch);
+        value_reg.free();
 
         Ok(())
     }
@@ -281,7 +276,11 @@ impl<'a> Compiler<'a> {
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
-            self.init_var(type_decl, param_name, Register::Arg(i, type_decl.clone()))?;
+            self.init_var(
+                type_decl,
+                param_name,
+                Register::Arg(self.args.get(i), type_decl.clone()), // not actually allocate register
+            )?;
         }
         Ok(())
     }
@@ -296,7 +295,7 @@ impl<'a> Compiler<'a> {
     pub fn block(
         &mut self,
         statements: &Vec<Stmt>,
-        env: Environment<Register>,
+        env: Environment<StackRegister>,
     ) -> Result<(), std::fmt::Error> {
         self.env = env;
         let result = self.cg_stmts(statements);
@@ -314,7 +313,7 @@ impl<'a> Compiler<'a> {
             ValueKind::Rvalue,
         );
 
-        writeln!(self.output, "\tmovl    ${num}, {}", reg.name(&self.scratch))?;
+        writeln!(self.output, "\tmovl    ${num}, {}", reg.name())?;
         Ok(reg)
     }
     fn cg_literal_char(&mut self, num: i8) -> Result<Register, std::fmt::Error> {
@@ -324,7 +323,7 @@ impl<'a> Compiler<'a> {
             ValueKind::Rvalue,
         );
 
-        writeln!(self.output, "\tmovb    ${num}, {}", reg.name(&self.scratch))?;
+        writeln!(self.output, "\tmovb    ${num}, {}", reg.name())?;
         Ok(reg)
     }
     pub fn execute_expr(&mut self, ast: &Expr) -> Result<Register, std::fmt::Error> {
@@ -336,7 +335,7 @@ impl<'a> Compiler<'a> {
             ExprKind::Unary { token, right } => self.cg_unary(token, right),
             ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
             ExprKind::Assign { l_expr, r_expr, .. } => self.cg_assign(l_expr, r_expr),
-            ExprKind::Ident(name) => Ok(self.env.get_var(name).unwrap()),
+            ExprKind::Ident(name) => Ok(Register::Stack(self.env.get_var(name).unwrap())),
             ExprKind::Call {
                 left_paren: _,
                 callee,
@@ -360,7 +359,7 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tleaq    LS{}(%rip), {}",
             self.const_labels[&name],
-            dest.name(&self.scratch)
+            dest.name()
         )?;
 
         Ok(dest)
@@ -379,7 +378,7 @@ impl<'a> Compiler<'a> {
             "sar{}   ${}, {}", // right shift number, equivalent to division (works bc type-size is 2^n)
             value_reg.get_type().suffix(),
             by_amount,
-            value_reg.name(&self.scratch)
+            value_reg.name()
         )?;
 
         Ok(value_reg)
@@ -394,7 +393,7 @@ impl<'a> Compiler<'a> {
             "sal{}   ${}, {}", // cut off first n bytes of value-register
             value_reg.get_type().suffix(),
             by_amount,
-            value_reg.name(&self.scratch)
+            value_reg.name()
         )?;
 
         Ok(value_reg)
@@ -423,10 +422,10 @@ impl<'a> Compiler<'a> {
             "movs{}{}   {}, {}", //sign extend smaller type
             expr.type_decl.clone().unwrap().suffix(),
             new_type.suffix(),
-            value_reg.name(&self.scratch),
-            dest_reg.name(&self.scratch)
+            value_reg.name(),
+            dest_reg.name()
         )?;
-        value_reg.free(&mut self.scratch);
+        value_reg.free();
 
         Ok(dest_reg)
     }
@@ -442,10 +441,10 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tmov{}    {}, {}",
             r_value.get_type().suffix(),
-            r_value.name(&self.scratch),
-            l_value.name(&self.scratch),
+            r_value.name(),
+            l_value.name(),
         )?;
-        r_value.free(&mut self.scratch);
+        r_value.free();
         Ok(l_value)
     }
     fn cg_call(
@@ -461,6 +460,36 @@ impl<'a> Compiler<'a> {
         // TODO: implement args by pushing on stack
         assert!(args.len() <= 6, "function cant have more than 6 args");
 
+        let mut callee_saved_regs: Vec<Box<dyn RegName>> = Vec::new();
+        for i in 0..args.len() {
+            // if argument-reg already in-use by other function call save it on stack
+            if self.args.registers[i].borrow().in_use {
+                callee_saved_regs.push(Box::new(self.args.registers[i].borrow().clone()));
+            }
+        }
+
+        self.scratch.registers.iter().for_each(|r| {
+            if r.borrow().in_use {
+                callee_saved_regs.push(Box::new(r.borrow().clone()));
+            }
+        });
+
+        // push registers that are in use currently onto stack so they won't be overwritten during function
+        for reg in callee_saved_regs.iter().by_ref() {
+            writeln!(
+                self.output,
+                "\tpushq   {}",
+                reg.name(&NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
+                    Types::Char
+                ))))
+            )?;
+        }
+
+        // have to 16byte align stack depending on amount of pushs before
+        if !callee_saved_regs.is_empty() && callee_saved_regs.len() % 2 != 0 {
+            writeln!(self.output, "\tsubq    $8,%rsp")?;
+        }
+
         // moving the arguments into their designated registers
         for (i, expr) in args.iter().enumerate() {
             let reg = self.execute_expr(expr)?;
@@ -468,34 +497,29 @@ impl<'a> Compiler<'a> {
                 self.output,
                 "\tmov{}    {}, {}",
                 expr.type_decl.clone().unwrap().suffix(),
-                reg.name(&self.scratch),
-                Register::Arg(i, expr.type_decl.clone().unwrap()).name(&self.scratch),
+                reg.name(),
+                Register::Arg(self.args.alloc(i), expr.type_decl.clone().unwrap()).name(),
             )?;
-            reg.free(&mut self.scratch);
+            reg.free();
         }
 
-        // push registers that are in use currently onto stack so they won't be overwritten during function
-        let pushed_regs: Vec<&ScratchRegister> =
-            self.scratch.registers.iter().filter(|r| r.in_use).collect();
-
-        for reg in pushed_regs.iter().by_ref() {
-            writeln!(self.output, "\tpushq   {}", reg.name)?;
-        }
-
-        // have to 16byte align stack depending on amount of pushs before
-        if !pushed_regs.is_empty() && pushed_regs.len() % 2 != 0 {
-            writeln!(self.output, "\tsubq    $8,%rsp")?;
-        }
         writeln!(self.output, "\tcall    _{}", func_name)?;
+        self.args.free_all();
 
         // undo the stack alignment from before call
-        if !pushed_regs.is_empty() && pushed_regs.len() % 2 != 0 {
+        if !callee_saved_regs.is_empty() && callee_saved_regs.len() % 2 != 0 {
             writeln!(self.output, "\taddq    $8,%rsp")?;
         }
 
         // pop registers from before function call back to scratch registers
-        for reg in pushed_regs.iter().rev().by_ref() {
-            writeln!(self.output, "\tpopq   {}", reg.name)?;
+        for reg in callee_saved_regs.iter().rev().by_ref() {
+            writeln!(
+                self.output,
+                "\tpopq   {}",
+                reg.name(&NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
+                    Types::Char
+                ))))
+            )?;
         }
 
         if !return_type.is_void() {
@@ -506,7 +530,7 @@ impl<'a> Compiler<'a> {
                 "\tmov{}    {}, {}",
                 return_type.suffix(),
                 return_type.return_reg(),
-                return_reg.name(&self.scratch)
+                return_reg.name()
             )?;
             Ok(return_reg)
         } else {
@@ -534,10 +558,10 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tcmp{}    $0, {}\n\tjne    L{}",
             left.get_type().suffix(),
-            left.name(&self.scratch),
+            left.name(),
             true_label
         )?;
-        left.free(&mut self.scratch);
+        left.free();
 
         let right = self.execute_expr(right)?;
         let false_label = create_label(&mut self.label_index);
@@ -547,10 +571,10 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tcmp{}    $0, {}\n\tje    L{}",
             right.get_type().suffix(),
-            right.name(&self.scratch),
+            right.name(),
             false_label
         )?;
-        right.free(&mut self.scratch);
+        right.free();
 
         let done_label = create_label(&mut self.label_index);
         let result = Register::Scratch(
@@ -563,7 +587,7 @@ impl<'a> Compiler<'a> {
             self.output,
             "L{}:\n\tmovl    $1, {}",
             true_label,
-            result.name(&self.scratch)
+            result.name()
         )?;
         writeln!(self.output, "\tjmp     L{}", done_label)?;
 
@@ -571,7 +595,7 @@ impl<'a> Compiler<'a> {
             self.output,
             "L{}:\n\tmovl    $0, {}",
             false_label,
-            result.name(&self.scratch)
+            result.name()
         )?;
         writeln!(self.output, "L{}:", done_label)?;
 
@@ -586,10 +610,10 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tcmp{}    $0, {}\n\tje    L{}",
             left.get_type().suffix(),
-            left.name(&self.scratch),
+            left.name(),
             false_label
         )?;
-        left.free(&mut self.scratch);
+        left.free();
 
         // left is true if right false jump to false label
         let right = self.execute_expr(right)?;
@@ -597,10 +621,10 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tcmp{}    $0, {}\n\tje    L{}",
             right.get_type().suffix(),
-            right.name(&self.scratch),
+            right.name(),
             false_label
         )?;
-        right.free(&mut self.scratch);
+        right.free();
 
         // if no prior jump was taken expression is true
         let true_label = create_label(&mut self.label_index);
@@ -612,12 +636,12 @@ impl<'a> Compiler<'a> {
         writeln!(
             self.output,
             "\tmovl    $1, {}\n\tjmp    L{}",
-            result.name(&self.scratch),
+            result.name(),
             true_label
         )?;
 
         writeln!(self.output, "L{}:", false_label)?;
-        writeln!(self.output, "\tmovl    $0, {}", result.name(&self.scratch))?;
+        writeln!(self.output, "\tmovl    $0, {}", result.name())?;
 
         writeln!(self.output, "L{}:", true_label)?;
         Ok(result)
@@ -637,18 +661,18 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tcmp{} $0, {}\n\tsete %al",
             reg.get_type().suffix(),
-            reg.name(&self.scratch)
+            reg.name()
         )?; // compares reg-value with 0
 
         // sets %al to 1 if comparison true and to 0 when false and then copies %al to current reg
         if reg.get_type() == NEWTypes::Primitive(Types::Char) {
-            writeln!(self.output, "\tmovb %al, {}", reg.name(&self.scratch))?;
+            writeln!(self.output, "\tmovb %al, {}", reg.name())?;
         } else {
             writeln!(
                 self.output,
                 "\tmovzb{} %al, {}",
                 reg.get_type().suffix(),
-                reg.name(&self.scratch)
+                reg.name()
             )?;
         }
 
@@ -659,7 +683,7 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tneg{} {}",
             reg.get_type().suffix(),
-            reg.name(&self.scratch)
+            reg.name()
         )?;
         Ok(reg)
     }
@@ -669,14 +693,9 @@ impl<'a> Compiler<'a> {
             NEWTypes::Pointer(Box::new(reg.get_type())),
             ValueKind::Rvalue,
         );
-        writeln!(
-            self.output,
-            "\tleaq    {}, {}",
-            reg.name(&self.scratch),
-            dest.name(&self.scratch)
-        )?;
+        writeln!(self.output, "\tleaq    {}, {}", reg.name(), dest.name())?;
 
-        reg.free(&mut self.scratch);
+        reg.free();
         Ok(dest)
     }
     fn cg_deref(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {
@@ -693,11 +712,11 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tadd{} {}, {}\n",
             right.get_type().suffix(),
-            left.name(&self.scratch),
-            right.name(&self.scratch)
+            left.name(),
+            right.name()
         )?;
 
-        left.free(&mut self.scratch);
+        left.free();
         Ok(right)
     }
     fn cg_sub(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
@@ -705,11 +724,11 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tsub{} {}, {}\n",
             right.get_type().suffix(),
-            right.name(&self.scratch),
-            left.name(&self.scratch)
+            right.name(),
+            left.name()
         )?;
 
-        right.free(&mut self.scratch);
+        right.free();
         Ok(left)
     }
 
@@ -718,11 +737,11 @@ impl<'a> Compiler<'a> {
             self.output,
             "\timul{} {}, {}\n",
             right.get_type().suffix(),
-            left.name(&self.scratch),
-            right.name(&self.scratch)
+            left.name(),
+            right.name()
         )?;
 
-        left.free(&mut self.scratch);
+        left.free();
         Ok(right)
     }
 
@@ -731,7 +750,7 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tmov{} {}, {}",
             left.get_type().suffix(),
-            left.name(&self.scratch),
+            left.name(),
             left.get_type().return_reg(),
         )?;
         // rax / rcx => rax
@@ -739,7 +758,7 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tcqo\n\tidiv{} {}",
             right.get_type().suffix(),
-            right.name(&self.scratch)
+            right.name()
         )?;
         // move rax(div result) into right reg (remainder in rdx)
         writeln!(
@@ -747,10 +766,10 @@ impl<'a> Compiler<'a> {
             "\tmov{} {}, {}",
             right.get_type().suffix(),
             right.get_type().return_reg(),
-            right.name(&self.scratch)
+            right.name()
         )?;
 
-        left.free(&mut self.scratch);
+        left.free();
         Ok(right)
     }
 
@@ -764,23 +783,23 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tcmp{} {}, {}",
             right.get_type().suffix(),
-            right.name(&self.scratch),
-            left.name(&self.scratch)
+            right.name(),
+            left.name()
         )?;
         // write ZF to %al based on operator and zero extend %right_register with value of %al
         writeln!(self.output, "\t{operator} %al",)?;
         if right.get_type() == NEWTypes::Primitive(Types::Char) {
-            writeln!(self.output, "\tmovb %al, {}", right.name(&self.scratch))?;
+            writeln!(self.output, "\tmovb %al, {}", right.name())?;
         } else {
             writeln!(
                 self.output,
                 "\tmovzb{} %al, {}",
                 right.get_type().suffix(),
-                right.name(&self.scratch)
+                right.name()
             )?;
         }
 
-        left.free(&mut self.scratch);
+        left.free();
         Ok(right)
     }
 
@@ -821,7 +840,7 @@ impl<'a> Compiler<'a> {
         Ok(reg)
     }
     fn maybe_convert_stack_reg(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
-        if matches!(reg, Register::Stack(_, _)) {
+        if matches!(reg, Register::Stack(_)) {
             self.scratch_temp(reg)
         } else {
             Ok(reg)
@@ -838,10 +857,10 @@ impl<'a> Compiler<'a> {
             self.output,
             "\tmov{}    {}, {}",
             temp_scratch.get_type().suffix(),
-            reg.name(&self.scratch),
-            temp_scratch.name(&self.scratch),
+            reg.name(),
+            temp_scratch.name(),
         )?;
-        reg.free(&mut self.scratch);
+        reg.free();
         Ok(temp_scratch)
     }
 }

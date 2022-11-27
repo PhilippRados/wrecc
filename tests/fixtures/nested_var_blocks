@@ -1,3 +1,5 @@
+void printf(char* format, int input);
+
 int main(){
   int a = 1;
   int b = 2;
@@ -7,15 +9,15 @@ int main(){
     int b = 5;
     {
       int a = 6;
-      printint(a);
-      printint(b);
-      printint(c);
+      printf("%d\n",a);
+      printf("%d\n",b);
+      printf("%d\n",c);
     }
-    printint(a);
-    printint(b);
-    printint(c);
+    printf("%d\n",a);
+    printf("%d\n",b);
+    printf("%d\n",c);
   }
-  printint(a);
-  printint(b);
-  printint(c);
+  printf("%d\n",a);
+  printf("%d\n",b);
+  printf("%d\n",c);
 }

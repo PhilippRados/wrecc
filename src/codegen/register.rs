@@ -10,7 +10,7 @@ pub trait RegName {
 pub enum Register {
     Scratch(Rc<Rc<RefCell<ScratchRegister>>>, NEWTypes, ValueKind),
     Stack(StackRegister),
-    Arg(Rc<Rc<RefCell<ArgRegister>>>, NEWTypes),
+    Arg(ArgRegister, NEWTypes),
     Void,
 }
 impl Register {
@@ -38,7 +38,7 @@ impl Register {
                     )
                 }
             },
-            Register::Arg(reg, type_decl) => reg.borrow().name(type_decl).to_string(),
+            Register::Arg(reg, type_decl) => reg.name(type_decl).to_string(),
         }
     }
     pub fn set_type(&mut self, type_decl: NEWTypes) {
@@ -71,36 +71,18 @@ impl Register {
 }
 #[derive(Debug)]
 pub struct ArgRegisters {
-    pub registers: [Rc<RefCell<ArgRegister>>; 6],
+    pub registers: [ArgRegister; 6],
 }
 impl ArgRegisters {
     pub fn new() -> Self {
         ArgRegisters {
             registers: [
-                Rc::new(RefCell::new(ArgRegister {
-                    in_use: false,
-                    index: 0,
-                })),
-                Rc::new(RefCell::new(ArgRegister {
-                    in_use: false,
-                    index: 1,
-                })),
-                Rc::new(RefCell::new(ArgRegister {
-                    in_use: false,
-                    index: 2,
-                })),
-                Rc::new(RefCell::new(ArgRegister {
-                    in_use: false,
-                    index: 3,
-                })),
-                Rc::new(RefCell::new(ArgRegister {
-                    in_use: false,
-                    index: 4,
-                })),
-                Rc::new(RefCell::new(ArgRegister {
-                    in_use: false,
-                    index: 5,
-                })),
+                ArgRegister { index: 0 },
+                ArgRegister { index: 1 },
+                ArgRegister { index: 2 },
+                ArgRegister { index: 3 },
+                ArgRegister { index: 4 },
+                ArgRegister { index: 5 },
             ],
         }
     }
@@ -111,9 +93,8 @@ static ARG_REGISTER_MAP: &[[&'static str; 6]] = &[
     ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"],
     ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"],
 ];
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub struct ArgRegister {
-    pub in_use: bool,
     index: usize,
 }
 impl RegName for ArgRegister {
@@ -129,17 +110,8 @@ impl RegName for ArgRegister {
     }
 }
 impl ArgRegisters {
-    pub fn alloc(&self, index: usize) -> Rc<Rc<RefCell<ArgRegister>>> {
-        self.registers[index].borrow_mut().in_use = true;
-        Rc::new(Rc::clone(&self.registers[index]))
-    }
-    pub fn get(&self, index: usize) -> Rc<Rc<RefCell<ArgRegister>>> {
-        Rc::new(Rc::clone(&self.registers[index]))
-    }
-    pub fn free_all(&mut self) {
-        for r in self.registers.iter_mut() {
-            r.borrow_mut().in_use = false;
-        }
+    pub fn get(&self, index: usize) -> ArgRegister {
+        self.registers[index].clone()
     }
 }
 

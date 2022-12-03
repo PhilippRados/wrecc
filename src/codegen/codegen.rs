@@ -15,6 +15,7 @@ pub struct Compiler<'a> {
     label_index: usize,
     func_stack_size: &'a HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
     const_labels: &'a HashMap<String, usize>,
+    saved_args: Vec<ArgRegister>,
     pub current_bp_offset: usize, // offset from base-pointer where variable stays
 }
 impl<'a> Compiler<'a> {
@@ -30,6 +31,7 @@ impl<'a> Compiler<'a> {
             label_index: 0,
             env: Environment::new(None),
             function_name: None,
+            saved_args: Vec::new(),
             const_labels,
             func_stack_size,
         }
@@ -461,18 +463,18 @@ impl<'a> Compiler<'a> {
         assert!(args.len() <= 6, "function cant have more than 6 args");
 
         let mut callee_saved_regs: Vec<Box<dyn RegName>> = Vec::new();
-        for i in 0..args.len() {
-            // if argument-reg already in-use by other function call save it on stack
-            if self.args.registers[i].borrow().in_use {
-                callee_saved_regs.push(Box::new(self.args.registers[i].borrow().clone()));
-            }
-        }
 
-        self.scratch.registers.iter().for_each(|r| {
-            if r.borrow().in_use {
-                callee_saved_regs.push(Box::new(r.borrow().clone()));
-            }
+        unique(&self.saved_args).into_iter().for_each(|r| {
+            callee_saved_regs.push(Box::new(r));
         });
+
+        self.scratch
+            .registers
+            .iter()
+            .filter(|r| r.borrow().in_use)
+            .for_each(|r| {
+                callee_saved_regs.push(Box::new(r.borrow().clone()));
+            });
 
         // push registers that are in use currently onto stack so they won't be overwritten during function
         for reg in callee_saved_regs.iter().by_ref() {
@@ -491,20 +493,22 @@ impl<'a> Compiler<'a> {
         }
 
         // moving the arguments into their designated registers
-        for (i, expr) in args.iter().enumerate() {
+        for (i, expr) in args.iter().enumerate().rev() {
             let reg = self.execute_expr(expr)?;
+
             writeln!(
                 self.output,
                 "\tmov{}    {}, {}",
                 expr.type_decl.clone().unwrap().suffix(),
                 reg.name(),
-                Register::Arg(self.args.alloc(i), expr.type_decl.clone().unwrap()).name(),
+                Register::Arg(self.args.get(i), expr.type_decl.clone().unwrap()).name(),
             )?;
             reg.free();
+
+            self.saved_args.push(self.args.get(i).clone());
         }
 
         writeln!(self.output, "\tcall    _{}", func_name)?;
-        self.args.free_all();
 
         // undo the stack alignment from before call
         if !callee_saved_regs.is_empty() && callee_saved_regs.len() % 2 != 0 {
@@ -520,6 +524,9 @@ impl<'a> Compiler<'a> {
                     Types::Char
                 ))))
             )?;
+        }
+        for _ in 0..args.len() {
+            self.saved_args.pop();
         }
 
         if !return_type.is_void() {
@@ -863,6 +870,17 @@ impl<'a> Compiler<'a> {
         reg.free();
         Ok(temp_scratch)
     }
+}
+fn unique(vec: &Vec<ArgRegister>) -> Vec<ArgRegister> {
+    let mut result = Vec::new();
+
+    vec.iter().for_each(|r| {
+        if !result.contains(r) {
+            result.push(r.clone());
+        }
+    });
+
+    result
 }
 
 pub fn align(offset: usize, type_decl: &NEWTypes) -> usize {

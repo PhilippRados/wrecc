@@ -48,8 +48,6 @@ impl<'a> Compiler<'a> {
         let mut output = File::create("/Users/philipprados/documents/coding/Rust/rucc/generated.s")
             .expect("create failed");
 
-        self.output.insert_str(0, Compiler::preamble());
-
         output
             .write_all(self.output.as_bytes())
             .expect("write failed");
@@ -60,32 +58,6 @@ impl<'a> Compiler<'a> {
         }
         Ok(())
     }
-    fn preamble() -> &'static str {
-        "\t.text\n\
-         \t.cstring\n\
-        lC0:\n\
-          \t.string \"%d\\n\"\n\
-          \t.text\n\
-        \n\
-        _printint:\n\
-          \tpushq   %rbp\n\
-          \tmovq    %rsp, %rbp\n\
-        \n\
-          \tsubq    $16, %rsp\n\
-          \tmovl    %edi, -4(%rbp)\n\
-          \tmovl    -4(%rbp), %eax\n\
-          \tmovl    %eax, %esi\n\
-          \tleaq	lC0(%rip), %rax\n\
-          \tmovq	%rax, %rdi\n\
-          \taddq    $16, %rsp\n\
-        \n\
-          \tmovl    $0, %eax\n\
-          \tcall    _printf\n\
-          \tnop\n\
-          \tleave\n\
-          \tret\n"
-    }
-
     fn cg_stmts(&mut self, statements: &Vec<Stmt>) -> Result<(), std::fmt::Error> {
         for s in statements {
             if let Err(e) = self.visit(s) {

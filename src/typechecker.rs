@@ -15,7 +15,6 @@ pub struct TypeChecker {
     env: Environment<NEWTypes>,
     global_env: Environment<NEWTypes>,
     returns_all_paths: bool,
-    builtins: Vec<(&'static str, Function)>,
     func_stack_size: HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
     found_main: bool,
     const_labels: HashMap<String, usize>,
@@ -44,29 +43,12 @@ impl TypeChecker {
             func_stack_size: HashMap::new(),
             const_labels: HashMap::new(),
             const_label_count: 0,
-            builtins: vec![(
-                "printint",
-                Function::new(
-                    NEWTypes::Primitive(Types::Void),
-                    vec![(
-                        NEWTypes::Primitive(Types::Char),
-                        Token::new(TokenType::Ident("".to_string()), -1, -1, "".to_string()),
-                    )],
-                ),
-            )],
         }
     }
     pub fn check(
         &mut self,
         statements: &mut Vec<Stmt>,
     ) -> Result<(&HashMap<String, usize>, &HashMap<String, usize>), Vec<Error>> {
-        // initialze builtins so typechecker doesnt throw error when it doesnt find them in the program
-        for (name, f) in self.builtins.iter().by_ref() {
-            self.global_env
-                .current
-                .func_decl
-                .insert(name.to_string(), f.clone());
-        }
         if let Err(e) = self.check_statements(statements) {
             self.errors.push(e);
             // synchronize

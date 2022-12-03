@@ -5,17 +5,17 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::fs::File;
 use std::io::Write as _;
+use std::rc::Rc;
 
 pub struct Compiler<'a> {
     scratch: ScratchRegisters,
-    args: ArgRegisters,
     output: String,
     env: Environment<StackRegister>,
     function_name: Option<String>,
     label_index: usize,
     func_stack_size: &'a HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
     const_labels: &'a HashMap<String, usize>,
-    saved_args: Vec<ArgRegister>,
+    saved_args: Vec<Register>,
     pub current_bp_offset: usize, // offset from base-pointer where variable stays
 }
 impl<'a> Compiler<'a> {
@@ -26,7 +26,6 @@ impl<'a> Compiler<'a> {
         Compiler {
             output: String::new(),
             scratch: ScratchRegisters::new(),
-            args: ArgRegisters::new(),
             current_bp_offset: 0,
             label_index: 0,
             env: Environment::new(None),
@@ -278,11 +277,7 @@ impl<'a> Compiler<'a> {
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
-            self.init_var(
-                type_decl,
-                param_name,
-                Register::Arg(self.args.get(i), type_decl.clone()), // not actually allocate register
-            )?;
+            self.init_var(type_decl, param_name, Register::Arg(i, type_decl.clone()))?;
         }
         Ok(())
     }
@@ -462,10 +457,10 @@ impl<'a> Compiler<'a> {
         // TODO: implement args by pushing on stack
         assert!(args.len() <= 6, "function cant have more than 6 args");
 
-        let mut callee_saved_regs: Vec<Box<dyn RegName>> = Vec::new();
+        let mut callee_saved_regs: Vec<Register> = Vec::new();
 
         unique(&self.saved_args).into_iter().for_each(|r| {
-            callee_saved_regs.push(Box::new(r));
+            callee_saved_regs.push(r);
         });
 
         self.scratch
@@ -473,18 +468,16 @@ impl<'a> Compiler<'a> {
             .iter()
             .filter(|r| r.borrow().in_use)
             .for_each(|r| {
-                callee_saved_regs.push(Box::new(r.borrow().clone()));
+                callee_saved_regs.push(Register::Scratch(
+                    Rc::new(Rc::clone(r)),
+                    NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
+                    ValueKind::Rvalue,
+                ));
             });
 
         // push registers that are in use currently onto stack so they won't be overwritten during function
         for reg in callee_saved_regs.iter().by_ref() {
-            writeln!(
-                self.output,
-                "\tpushq   {}",
-                reg.name(&NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
-                    Types::Char
-                ))))
-            )?;
+            writeln!(self.output, "\tpushq   {}", reg.name())?;
         }
 
         // have to 16byte align stack depending on amount of pushs before
@@ -496,16 +489,17 @@ impl<'a> Compiler<'a> {
         for (i, expr) in args.iter().enumerate().rev() {
             let reg = self.execute_expr(expr)?;
 
+            let arg = Register::Arg(i, expr.type_decl.clone().unwrap());
             writeln!(
                 self.output,
                 "\tmov{}    {}, {}",
                 expr.type_decl.clone().unwrap().suffix(),
                 reg.name(),
-                Register::Arg(self.args.get(i), expr.type_decl.clone().unwrap()).name(),
+                arg.name(),
             )?;
             reg.free();
 
-            self.saved_args.push(self.args.get(i).clone());
+            self.saved_args.push(arg);
         }
 
         writeln!(self.output, "\tcall    _{}", func_name)?;
@@ -517,13 +511,7 @@ impl<'a> Compiler<'a> {
 
         // pop registers from before function call back to scratch registers
         for reg in callee_saved_regs.iter().rev().by_ref() {
-            writeln!(
-                self.output,
-                "\tpopq   {}",
-                reg.name(&NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
-                    Types::Char
-                ))))
-            )?;
+            writeln!(self.output, "\tpopq   {}", reg.name())?;
         }
         for _ in 0..args.len() {
             self.saved_args.pop();
@@ -871,7 +859,7 @@ impl<'a> Compiler<'a> {
         Ok(temp_scratch)
     }
 }
-fn unique(vec: &Vec<ArgRegister>) -> Vec<ArgRegister> {
+fn unique(vec: &Vec<Register>) -> Vec<Register> {
     let mut result = Vec::new();
 
     vec.iter().for_each(|r| {

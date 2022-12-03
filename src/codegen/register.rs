@@ -3,14 +3,17 @@ use crate::common::types::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub trait RegName {
-    fn name(&self, type_decl: &NEWTypes) -> String;
-}
+static ARG_REGISTER_MAP: &[[&'static str; 6]] = &[
+    ["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"],
+    ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"],
+    ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"],
+];
 
+#[derive(PartialEq, Clone)]
 pub enum Register {
     Scratch(Rc<Rc<RefCell<ScratchRegister>>>, NEWTypes, ValueKind),
     Stack(StackRegister),
-    Arg(ArgRegister, NEWTypes),
+    Arg(usize, NEWTypes),
     Void,
 }
 impl Register {
@@ -38,7 +41,14 @@ impl Register {
                     )
                 }
             },
-            Register::Arg(reg, type_decl) => reg.name(type_decl).to_string(),
+            Register::Arg(i, type_decl) => match type_decl {
+                NEWTypes::Primitive(Types::Char) => ARG_REGISTER_MAP[0][*i].to_string(),
+                NEWTypes::Primitive(Types::Int) => ARG_REGISTER_MAP[1][*i].to_string(),
+                NEWTypes::Primitive(Types::Long)
+                | NEWTypes::Pointer(_)
+                | NEWTypes::Array { .. } => ARG_REGISTER_MAP[2][*i].to_string(),
+                _ => unreachable!("cant pass void argument"),
+            },
         }
     }
     pub fn set_type(&mut self, type_decl: NEWTypes) {
@@ -69,53 +79,8 @@ impl Register {
         }
     }
 }
-#[derive(Debug)]
-pub struct ArgRegisters {
-    pub registers: [ArgRegister; 6],
-}
-impl ArgRegisters {
-    pub fn new() -> Self {
-        ArgRegisters {
-            registers: [
-                ArgRegister { index: 0 },
-                ArgRegister { index: 1 },
-                ArgRegister { index: 2 },
-                ArgRegister { index: 3 },
-                ArgRegister { index: 4 },
-                ArgRegister { index: 5 },
-            ],
-        }
-    }
-}
 
-static ARG_REGISTER_MAP: &[[&'static str; 6]] = &[
-    ["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"],
-    ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"],
-    ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"],
-];
-#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
-pub struct ArgRegister {
-    index: usize,
-}
-impl RegName for ArgRegister {
-    fn name(&self, type_decl: &NEWTypes) -> String {
-        match type_decl {
-            NEWTypes::Primitive(Types::Char) => ARG_REGISTER_MAP[0][self.index].to_string(),
-            NEWTypes::Primitive(Types::Int) => ARG_REGISTER_MAP[1][self.index].to_string(),
-            NEWTypes::Primitive(Types::Long) | NEWTypes::Pointer(_) | NEWTypes::Array { .. } => {
-                ARG_REGISTER_MAP[2][self.index].to_string()
-            }
-            _ => unreachable!("cant pass void argument"),
-        }
-    }
-}
-impl ArgRegisters {
-    pub fn get(&self, index: usize) -> ArgRegister {
-        self.registers[index].clone()
-    }
-}
-
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct StackRegister {
     bp_offset: usize,
     type_decl: NEWTypes,
@@ -132,7 +97,7 @@ impl StackRegister {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ScratchRegister {
     pub in_use: bool,
     pub base_name: &'static str,
@@ -141,8 +106,6 @@ impl ScratchRegister {
     fn free(&mut self) {
         self.in_use = false;
     }
-}
-impl RegName for ScratchRegister {
     fn name(&self, type_decl: &NEWTypes) -> String {
         format!("{}{}", self.base_name, type_decl.reg_suffix())
     }

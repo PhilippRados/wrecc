@@ -22,7 +22,7 @@ impl Register {
             Register::Void => (),
             Register::Stack(_) => (),
             Register::Arg(_, _) => (),
-            Register::Scratch(reg, _, _) => reg.borrow_mut().free(), //scratch_regs.get_mut(index).free(),
+            Register::Scratch(reg, _, _) => reg.borrow_mut().free(),
         }
     }
     pub fn name(&self) -> String {
@@ -31,6 +31,30 @@ impl Register {
             Register::Stack(reg) => reg.name(),
             Register::Scratch(reg, type_decl, valuekind) => match valuekind {
                 ValueKind::Rvalue => reg.borrow().name(type_decl).to_string(),
+                ValueKind::Lvalue => self.base_name(),
+            },
+            Register::Arg(i, type_decl) => match type_decl {
+                NEWTypes::Primitive(Types::Char) => ARG_REGISTER_MAP[0][*i].to_string(),
+                NEWTypes::Primitive(Types::Int) => ARG_REGISTER_MAP[1][*i].to_string(),
+                NEWTypes::Primitive(Types::Long)
+                | NEWTypes::Pointer(_)
+                | NEWTypes::Array { .. } => ARG_REGISTER_MAP[2][*i].to_string(),
+                _ => unreachable!("cant pass void argument"),
+            },
+        }
+    }
+    // name as 64bit register
+    pub fn base_name(&self) -> String {
+        match self {
+            Register::Void => unimplemented!(),
+            Register::Stack(reg) => reg.name(),
+            Register::Scratch(reg, _, valuekind) => match valuekind {
+                ValueKind::Rvalue => reg
+                    .borrow()
+                    .name(&NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
+                        Types::Void,
+                    ))))
+                    .to_string(),
                 ValueKind::Lvalue => {
                     format!(
                         "({})",
@@ -41,14 +65,7 @@ impl Register {
                     )
                 }
             },
-            Register::Arg(i, type_decl) => match type_decl {
-                NEWTypes::Primitive(Types::Char) => ARG_REGISTER_MAP[0][*i].to_string(),
-                NEWTypes::Primitive(Types::Int) => ARG_REGISTER_MAP[1][*i].to_string(),
-                NEWTypes::Primitive(Types::Long)
-                | NEWTypes::Pointer(_)
-                | NEWTypes::Array { .. } => ARG_REGISTER_MAP[2][*i].to_string(),
-                _ => unreachable!("cant pass void argument"),
-            },
+            Register::Arg(i, _) => ARG_REGISTER_MAP[2][*i].to_string(),
         }
     }
     pub fn set_type(&mut self, type_decl: NEWTypes) {

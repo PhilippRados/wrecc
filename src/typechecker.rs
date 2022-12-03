@@ -407,7 +407,7 @@ impl TypeChecker {
                 ));
             }
             self.check_return_compatibility(keyword, &function_type, &body_return)?;
-            self.maybe_cast(&body_return, &function_type, expr);
+            self.maybe_cast(&function_type, &body_return, expr);
         } else {
             self.check_return_compatibility(
                 keyword,

@@ -491,7 +491,7 @@ impl<'a> Compiler<'a> {
     fn spill_regs(&mut self, callee_saved_regs: &Vec<Register>) -> Result<(), std::fmt::Error> {
         // push registers that are in use currently onto stack so they won't be overwritten during function
         for reg in callee_saved_regs.iter().by_ref() {
-            writeln!(self.output, "\tpushq   {}", reg.name())?;
+            writeln!(self.output, "\tpushq   {}", reg.base_name())?;
         }
 
         // have to 16byte align stack depending on amount of pushs before
@@ -512,7 +512,7 @@ impl<'a> Compiler<'a> {
 
         // pop registers from before function call back to scratch registers
         for reg in callee_saved_regs.iter().rev().by_ref() {
-            writeln!(self.output, "\tpopq   {}", reg.name())?;
+            writeln!(self.output, "\tpopq   {}", reg.base_name())?;
         }
         // pop all argument registers from current function-call of stack
         for _ in 0..args_len {

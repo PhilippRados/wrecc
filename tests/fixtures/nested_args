@@ -7,9 +7,9 @@ char* name(int age, int color){
   
   return "otto";
 }
-long more(long e,int d){return e + d;}
+int more(long e,int d){return e + d;}
 
-long some(char* s){
+char some(char* s){
   return strlen(s);
 }
 

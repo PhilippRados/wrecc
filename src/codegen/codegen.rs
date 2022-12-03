@@ -457,33 +457,8 @@ impl<'a> Compiler<'a> {
         // TODO: implement args by pushing on stack
         assert!(args.len() <= 6, "function cant have more than 6 args");
 
-        let mut callee_saved_regs: Vec<Register> = Vec::new();
-
-        unique(&self.saved_args).into_iter().for_each(|r| {
-            callee_saved_regs.push(r);
-        });
-
-        self.scratch
-            .registers
-            .iter()
-            .filter(|r| r.borrow().in_use)
-            .for_each(|r| {
-                callee_saved_regs.push(Register::Scratch(
-                    Rc::new(Rc::clone(r)),
-                    NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
-                    ValueKind::Rvalue,
-                ));
-            });
-
-        // push registers that are in use currently onto stack so they won't be overwritten during function
-        for reg in callee_saved_regs.iter().by_ref() {
-            writeln!(self.output, "\tpushq   {}", reg.name())?;
-        }
-
-        // have to 16byte align stack depending on amount of pushs before
-        if !callee_saved_regs.is_empty() && callee_saved_regs.len() % 2 != 0 {
-            writeln!(self.output, "\tsubq    $8,%rsp")?;
-        }
+        let callee_saved_regs = self.registers_in_use();
+        self.spill_regs(&callee_saved_regs)?;
 
         // moving the arguments into their designated registers
         for (i, expr) in args.iter().enumerate().rev() {
@@ -504,18 +479,7 @@ impl<'a> Compiler<'a> {
 
         writeln!(self.output, "\tcall    _{}", func_name)?;
 
-        // undo the stack alignment from before call
-        if !callee_saved_regs.is_empty() && callee_saved_regs.len() % 2 != 0 {
-            writeln!(self.output, "\taddq    $8,%rsp")?;
-        }
-
-        // pop registers from before function call back to scratch registers
-        for reg in callee_saved_regs.iter().rev().by_ref() {
-            writeln!(self.output, "\tpopq   {}", reg.name())?;
-        }
-        for _ in 0..args.len() {
-            self.saved_args.pop();
-        }
+        self.unspill_regs(&callee_saved_regs, args.len())?;
 
         if !return_type.is_void() {
             let reg_index = self.scratch.scratch_alloc();
@@ -532,6 +496,60 @@ impl<'a> Compiler<'a> {
             Ok(Register::Void)
         }
     }
+    fn registers_in_use(&self) -> Vec<Register> {
+        let mut regs = Vec::new();
+
+        unique(&self.saved_args).into_iter().for_each(|r| {
+            regs.push(r);
+        });
+
+        self.scratch
+            .registers
+            .iter()
+            .filter(|r| r.borrow().in_use)
+            .for_each(|r| {
+                regs.push(Register::Scratch(
+                    Rc::new(Rc::clone(r)),
+                    NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
+                    ValueKind::Rvalue,
+                ));
+            });
+        regs
+    }
+    fn spill_regs(&mut self, callee_saved_regs: &Vec<Register>) -> Result<(), std::fmt::Error> {
+        // push registers that are in use currently onto stack so they won't be overwritten during function
+        for reg in callee_saved_regs.iter().by_ref() {
+            writeln!(self.output, "\tpushq   {}", reg.name())?;
+        }
+
+        // have to 16byte align stack depending on amount of pushs before
+        if !callee_saved_regs.is_empty() && callee_saved_regs.len() % 2 != 0 {
+            writeln!(self.output, "\tsubq    $8,%rsp")?;
+        }
+        Ok(())
+    }
+    fn unspill_regs(
+        &mut self,
+        callee_saved_regs: &Vec<Register>,
+        args_len: usize,
+    ) -> Result<(), std::fmt::Error> {
+        // undo the stack alignment from before call
+        if !callee_saved_regs.is_empty() && callee_saved_regs.len() % 2 != 0 {
+            writeln!(self.output, "\taddq    $8,%rsp")?;
+        }
+
+        // pop registers from before function call back to scratch registers
+        for reg in callee_saved_regs.iter().rev().by_ref() {
+            writeln!(self.output, "\tpopq   {}", reg.name())?;
+        }
+        // pop all argument registers from current function-call of stack
+        for _ in 0..args_len {
+            self.saved_args.pop();
+        }
+
+        Ok(())
+    }
+
     fn cg_logical(
         &mut self,
         left: &Expr,

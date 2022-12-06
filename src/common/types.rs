@@ -20,10 +20,7 @@ pub trait TypeInfo {
 #[derive(Clone, PartialEq, Debug)]
 pub enum NEWTypes {
     Primitive(Types),
-    Array {
-        amount: usize,
-        element_type: Box<NEWTypes>,
-    },
+    Array { amount: usize, of: Box<NEWTypes> },
     Pointer(Box<NEWTypes>),
 }
 
@@ -34,7 +31,7 @@ impl TypeInfo for NEWTypes {
             NEWTypes::Pointer(_) => 8,
             NEWTypes::Array {
                 amount,
-                element_type,
+                of: element_type,
             } => amount * element_type.size(),
         }
     }
@@ -64,10 +61,7 @@ impl Display for NEWTypes {
             "{}",
             match self {
                 NEWTypes::Primitive(t) => t.fmt().to_string(),
-                NEWTypes::Array {
-                    element_type,
-                    amount,
-                } => format!("{}[{}]", element_type, amount),
+                NEWTypes::Array { of, amount } => format!("{}[{}]", of, amount),
                 NEWTypes::Pointer(to) => format!("{}*", to),
             }
         )
@@ -76,9 +70,19 @@ impl Display for NEWTypes {
 
 #[macro_export]
 macro_rules! arr_decay {
-    ($arr:expr) => {
-        if let NEWTypes::Array { element_type, .. } = $arr {
-            $arr = NEWTypes::Pointer(element_type)
+    ($arr:expr,$ast:expr,$token:expr) => {
+        if let NEWTypes::Array { of, .. } = $arr {
+            $arr = NEWTypes::Pointer(of);
+
+            $ast.kind = ExprKind::Unary {
+                token: Token::new(
+                    TokenType::Amp,
+                    $token.line_index,
+                    $token.column,
+                    $token.line_string.clone(),
+                ),
+                right: Box::new($ast.clone()),
+            };
         }
     };
 }
@@ -86,7 +90,7 @@ impl NEWTypes {
     pub fn to_array(&mut self, amount: usize) {
         *self = NEWTypes::Array {
             amount,
-            element_type: Box::new(self.clone()),
+            of: Box::new(self.clone()),
         }
     }
     pub fn pointer_to(&mut self) {

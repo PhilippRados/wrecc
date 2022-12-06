@@ -354,12 +354,11 @@ impl<'a> Compiler<'a> {
     }
     fn cg_scale_up(&mut self, expr: &Expr, by_amount: &usize) -> Result<Register, std::fmt::Error> {
         let value_reg = self.execute_expr(expr)?;
-
         let value_reg = self.maybe_convert_stack_reg(value_reg)?;
 
         writeln!(
             self.output,
-            "sal{}   ${}, {}", // cut off first n bytes of value-register
+            "imul{}   ${}, {}",
             value_reg.get_type().suffix(),
             by_amount,
             value_reg.name()
@@ -863,7 +862,7 @@ fn unique(vec: &Vec<Register>) -> Vec<Register> {
 
 pub fn align(offset: usize, type_decl: &NEWTypes) -> usize {
     let size = match type_decl {
-        NEWTypes::Array { element_type, .. } => element_type.size(),
+        NEWTypes::Array { of, .. } => of.size(),
         _ => type_decl.size(),
     };
     align_by(offset, size)

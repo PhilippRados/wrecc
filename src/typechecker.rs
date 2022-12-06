@@ -441,22 +441,7 @@ impl TypeChecker {
             ExprKind::Logical { left, token, right } => {
                 self.evaluate_logical(left, token, right)?
             }
-            ExprKind::Ident(token) => {
-                let type_decl = self.env.get_var(token)?;
-                // evaluate array as pointer to first element
-                if matches!(type_decl, NEWTypes::Array { .. }) {
-                    ast.kind = ExprKind::Unary {
-                        token: Token::new(
-                            TokenType::Amp,
-                            token.line_index,
-                            token.column,
-                            token.line_string.clone(),
-                        ),
-                        right: Box::new(ast.clone()),
-                    }
-                }
-                type_decl
-            }
+            ExprKind::Ident(token) => self.env.get_var(token)?,
             ExprKind::Assign {
                 l_expr: store_expr,
                 token,
@@ -520,7 +505,8 @@ impl TypeChecker {
         let mut arg_types: Vec<NEWTypes> = Vec::new();
         for expr in args.iter_mut() {
             let mut t = self.expr_type(expr)?;
-            crate::arr_decay!(t);
+
+            crate::arr_decay!(t, expr, left_paren);
             self.maybe_int_promote(expr, &mut t);
             arg_types.push(t);
         }
@@ -614,7 +600,7 @@ impl TypeChecker {
         };
 
         expr.kind = ExprKind::ScaleUp {
-            shift_amount: log_2(amount as i32),
+            shift_amount: amount,
             expr: Box::new(expr.clone()),
         };
     }
@@ -660,8 +646,8 @@ impl TypeChecker {
         Self::lval_to_rval(left);
         Self::lval_to_rval(right);
 
-        crate::arr_decay!(left_type);
-        crate::arr_decay!(right_type);
+        crate::arr_decay!(left_type, left, token);
+        crate::arr_decay!(right_type, left, token);
 
         // check valid operations
         if !Self::is_valid_bin(token, &left_type, &right_type) {
@@ -709,7 +695,7 @@ impl TypeChecker {
     }
     fn evaluate_unary(&mut self, token: &Token, right: &mut Expr) -> Result<NEWTypes, Error> {
         let mut right_type = self.expr_type(right)?;
-        crate::arr_decay!(right_type);
+        crate::arr_decay!(right_type, right, token);
 
         Ok(match token.token {
             TokenType::Amp => self.check_address(token, right_type, right)?,

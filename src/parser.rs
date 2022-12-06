@@ -183,7 +183,7 @@ impl Parser {
             Box::new(else_branch),
         ))
     }
-    fn maybe_parse_arr(&mut self, type_decl: &mut NEWTypes) -> Result<(), Error> {
+    fn parse_arr(&mut self, type_decl: NEWTypes) -> Result<NEWTypes, Error> {
         if self.matches(vec![TokenKind::LeftBracket]).is_some() {
             let size = self.consume(
                 TokenKind::Number,
@@ -195,12 +195,13 @@ impl Parser {
             )?;
 
             if size.unwrap_num() > 0 {
-                type_decl.to_array(size.unwrap_num() as usize);
+                Ok(array_of(self.parse_arr(type_decl)?, size.unwrap_num()))
             } else {
                 return Err(Error::new(&size, "Can't initialize array with size <= 0"));
             }
+        } else {
+            Ok(type_decl)
         }
-        Ok(())
     }
     fn type_declaration(&mut self, mut type_decl: NEWTypes) -> Result<Stmt, Error> {
         let name = self.consume(
@@ -213,7 +214,7 @@ impl Parser {
             self.function(type_decl, name)
         } else {
             // variable
-            self.maybe_parse_arr(&mut type_decl)?;
+            type_decl = self.parse_arr(type_decl)?;
 
             if self.matches(vec![TokenKind::Equal]).is_some() {
                 let value = self.expression()?;
@@ -247,8 +248,11 @@ impl Parser {
                     }
                 };
                 let name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
-                self.maybe_parse_arr(&mut param_type)?;
-                crate::arr_decay!(param_type);
+
+                param_type = self.parse_arr(param_type)?;
+                if let NEWTypes::Array { of, .. } = param_type {
+                    param_type = NEWTypes::Pointer(of);
+                }
 
                 params.push((param_type, name));
                 if self.matches(vec![TokenKind::Comma]) == None {
@@ -418,7 +422,7 @@ impl Parser {
         self.postfix()
     }
     fn postfix(&mut self) -> Result<Expr, Error> {
-        let expr = self.call()?;
+        let mut expr = self.call()?;
 
         while let Some(token) = self.matches(vec![TokenKind::LeftBracket]) {
             let index = self.expression()?;
@@ -426,7 +430,7 @@ impl Parser {
                 TokenKind::RightBracket,
                 "Expect closing ']' after array-index",
             )?;
-            return Ok(index_sugar(token, expr, index));
+            expr = index_sugar(token, expr, index);
         }
         Ok(expr)
     }
@@ -557,6 +561,13 @@ impl Parser {
             type_decl.pointer_to();
         }
         Some(type_decl)
+    }
+}
+
+fn array_of(type_decl: NEWTypes, size: i32) -> NEWTypes {
+    NEWTypes::Array {
+        amount: size as usize,
+        of: Box::new(type_decl),
     }
 }
 

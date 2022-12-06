@@ -312,7 +312,7 @@ impl<'a> Compiler<'a> {
             } => self.cg_call(callee, args, ast.type_decl.clone().unwrap()),
             ExprKind::CastUp { expr } => self.cg_cast_up(expr, ast.type_decl.clone().unwrap()),
             ExprKind::CastDown { expr } => self.cg_cast_down(expr, ast.type_decl.clone().unwrap()),
-            ExprKind::ScaleUp { expr, shift_amount } => self.cg_scale_up(expr, shift_amount),
+            ExprKind::ScaleUp { expr, by } => self.cg_scale_up(expr, by),
             ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(expr, shift_amount),
             ExprKind::String(token) => self.cg_string(token.unwrap_string()),
         }

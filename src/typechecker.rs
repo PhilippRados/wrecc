@@ -574,12 +574,14 @@ impl TypeChecker {
     fn is_valid_bin(token: &Token, left_type: &NEWTypes, right_type: &NEWTypes) -> bool {
         match (&left_type, &right_type) {
             (NEWTypes::Primitive(Types::Void), _) | (_, NEWTypes::Primitive(Types::Void)) => false,
-            (NEWTypes::Pointer(_), NEWTypes::Pointer(_))
-                if left_type.type_compatible(right_type) =>
-            {
-                token.token == TokenType::Minus
-                    || token.token == TokenType::EqualEqual
-                    || token.token == TokenType::BangEqual
+            (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => {
+                if left_type.type_compatible(right_type) {
+                    token.token == TokenType::Minus
+                        || token.token == TokenType::EqualEqual
+                        || token.token == TokenType::BangEqual
+                } else {
+                    false
+                }
             }
             (_, NEWTypes::Pointer(_)) => token.token == TokenType::Plus,
             (NEWTypes::Pointer(_), _) => {
@@ -600,7 +602,7 @@ impl TypeChecker {
         };
 
         expr.kind = ExprKind::ScaleUp {
-            shift_amount: amount,
+            by: amount,
             expr: Box::new(expr.clone()),
         };
     }
@@ -647,7 +649,7 @@ impl TypeChecker {
         Self::lval_to_rval(right);
 
         crate::arr_decay!(left_type, left, token);
-        crate::arr_decay!(right_type, left, token);
+        crate::arr_decay!(right_type, right, token);
 
         // check valid operations
         if !Self::is_valid_bin(token, &left_type, &right_type) {

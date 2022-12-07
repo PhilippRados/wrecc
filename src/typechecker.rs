@@ -687,7 +687,7 @@ impl TypeChecker {
         }
     }
     fn maybe_int_promote(&self, expr: &mut Expr, type_decl: &mut NEWTypes) {
-        if !matches!(type_decl, NEWTypes::Primitive(_)) {
+        if !matches!(type_decl, NEWTypes::Primitive(_)) || type_decl.is_void() {
             return;
         }
         if type_decl.size() < NEWTypes::Primitive(Types::Int).size() {

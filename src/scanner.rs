@@ -82,10 +82,19 @@ impl<'a> Scanner<'a> {
                 '}' => self.add_token(&mut tokens, TokenType::RightBrace),
                 ',' => self.add_token(&mut tokens, TokenType::Comma),
                 '.' => self.add_token(&mut tokens, TokenType::Dot),
-                '-' => self.add_token(&mut tokens, TokenType::Minus),
-                '+' => self.add_token(&mut tokens, TokenType::Plus),
                 ';' => self.add_token(&mut tokens, TokenType::Semicolon),
-                '*' => self.add_token(&mut tokens, TokenType::Star),
+                '-' => {
+                    let token = self.match_next('=', TokenType::MinusEqual, TokenType::Minus);
+                    self.add_token(&mut tokens, token);
+                }
+                '+' => {
+                    let token = self.match_next('=', TokenType::PlusEqual, TokenType::Plus);
+                    self.add_token(&mut tokens, token);
+                }
+                '*' => {
+                    let token = self.match_next('=', TokenType::StarEqual, TokenType::Star);
+                    self.add_token(&mut tokens, token);
+                }
 
                 '!' => {
                     let token = self.match_next('=', TokenType::BangEqual, TokenType::Bang);
@@ -118,7 +127,8 @@ impl<'a> Scanner<'a> {
                             .is_some()
                         {}
                     } else {
-                        self.add_token(&mut tokens, TokenType::Slash)
+                        let token = self.match_next('=', TokenType::SlashEqual, TokenType::Slash);
+                        self.add_token(&mut tokens, token);
                     }
                 }
                 ' ' | '\r' | '\t' => self.column += 1,

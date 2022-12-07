@@ -740,7 +740,11 @@ impl<'a> Compiler<'a> {
         // rax / rcx => rax
         writeln!(
             self.output,
-            "\tcqo\n\tidiv{} {}",
+            "\t{}\n\tidiv{} {}",
+            match right.get_type().size() {
+                0..=7 => "cdq",
+                _ => "cqo",
+            },
             right.get_type().suffix(),
             right.name()
         )?;

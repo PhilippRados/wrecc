@@ -291,6 +291,15 @@ impl Parser {
                 },
                 ValueKind::Rvalue,
             ));
+        } else if let Some(t) = self.matches(vec![
+            TokenKind::PlusEqual,
+            TokenKind::MinusEqual,
+            TokenKind::StarEqual,
+            TokenKind::SlashEqual,
+        ]) {
+            let value = self.expression()?;
+
+            return Ok(compound_assignment(t, expr, value));
         }
         Ok(expr)
     }
@@ -569,6 +578,34 @@ fn array_of(type_decl: NEWTypes, size: i32) -> NEWTypes {
         amount: size as usize,
         of: Box::new(type_decl),
     }
+}
+fn compound_assignment(token: Token, l_expr: Expr, r_expr: Expr) -> Expr {
+    Expr::new(
+        ExprKind::Assign {
+            l_expr: Box::new(l_expr.clone()),
+            r_expr: Box::new(Expr::new(
+                ExprKind::Binary {
+                    left: Box::new(l_expr),
+                    token: Token {
+                        token: match token.token {
+                            TokenType::SlashEqual => TokenType::Slash,
+                            TokenType::StarEqual => TokenType::Star,
+                            TokenType::MinusEqual => TokenType::Minus,
+                            TokenType::PlusEqual => TokenType::Plus,
+                            _ => unreachable!(),
+                        },
+                        line_string: token.line_string.clone(),
+                        line_index: token.line_index,
+                        column: token.column,
+                    },
+                    right: Box::new(r_expr),
+                },
+                ValueKind::Rvalue,
+            )),
+            token,
+        },
+        ValueKind::Rvalue,
+    )
 }
 
 fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {

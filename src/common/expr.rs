@@ -20,6 +20,11 @@ pub enum ExprKind {
         token: Token,
         r_expr: Box<Expr>,
     },
+    CompoundAssign {
+        l_expr: Box<Expr>,
+        token: Token,
+        r_expr: Box<Expr>,
+    },
     Logical {
         left: Box<Expr>,
         token: Token,
@@ -43,6 +48,11 @@ pub enum ExprKind {
     ScaleDown {
         shift_amount: usize,
         expr: Box<Expr>,
+    },
+    PostUnary {
+        token: Token,
+        left: Box<Expr>,
+        by_amount: usize,
     },
     String(Token),
     Number(i32),
@@ -89,6 +99,9 @@ impl Display for ExprKind {
                 ExprKind::ScaleUp { .. } => "'scaling-up'".to_string(),
                 ExprKind::ScaleDown { .. } => "'scaling-down'".to_string(),
                 ExprKind::String(token) => token.unwrap_string(),
+                ExprKind::PostUnary { .. } => "'postfix-expression'".to_string(),
+                ExprKind::CompoundAssign { token, .. } =>
+                    format!("'compound-assignment: {}'", token.token),
             }
         )
     }

@@ -299,7 +299,14 @@ impl Parser {
         ]) {
             let value = self.expression()?;
 
-            return Ok(compound_assignment(t, expr, value));
+            return Ok(Expr::new(
+                ExprKind::CompoundAssign {
+                    l_expr: Box::new(expr),
+                    token: t,
+                    r_expr: Box::new(value),
+                },
+                ValueKind::Rvalue,
+            ));
         }
         Ok(expr)
     }
@@ -414,44 +421,73 @@ impl Parser {
             TokenKind::Amp,
             TokenKind::Bang,
             TokenKind::Minus,
+            TokenKind::PlusPlus,
+            TokenKind::MinusMinus,
         ]) {
             let right = self.unary()?;
-            return Ok(Expr::new(
-                ExprKind::Unary {
-                    right: Box::new(right),
-                    token: token.clone(),
-                },
-                match token.token {
-                    TokenType::Star => ValueKind::Lvalue,
-                    TokenType::Bang | TokenType::Minus | TokenType::Amp => ValueKind::Rvalue,
-                    _ => unreachable!(),
-                },
-            ));
+            return Ok(match token.token {
+                // ++a or --a is equivalent to a += 1 or a -= 1
+                TokenType::PlusPlus | TokenType::MinusMinus => Expr::new(
+                    ExprKind::CompoundAssign {
+                        l_expr: Box::new(right),
+                        token,
+                        r_expr: Box::new(Expr::new(ExprKind::Number(1), ValueKind::Rvalue)),
+                    },
+                    ValueKind::Rvalue,
+                ),
+                _ => Expr::new(
+                    ExprKind::Unary {
+                        right: Box::new(right),
+                        token: token.clone(),
+                    },
+                    match token.token {
+                        TokenType::Star => ValueKind::Lvalue,
+                        _ => ValueKind::Rvalue,
+                    },
+                ),
+            });
         }
         self.postfix()
     }
     fn postfix(&mut self) -> Result<Expr, Error> {
-        let mut expr = self.call()?;
-
-        while let Some(token) = self.matches(vec![TokenKind::LeftBracket]) {
-            let index = self.expression()?;
-            self.consume(
-                TokenKind::RightBracket,
-                "Expect closing ']' after array-index",
-            )?;
-            expr = index_sugar(token, expr, index);
-        }
-        Ok(expr)
-    }
-    fn call(&mut self) -> Result<Expr, Error> {
         let mut expr = self.primary()?;
 
-        while let Some(t) = self.matches(vec![TokenKind::LeftParen]) {
-            expr = self.evaluate_args(t, expr)?;
+        while let Some(token) = self.matches(vec![
+            TokenKind::LeftBracket,
+            TokenKind::LeftParen,
+            TokenKind::PlusPlus,
+            TokenKind::MinusMinus,
+        ]) {
+            match token.token {
+                TokenType::LeftBracket => {
+                    // a[expr]
+                    let index = self.expression()?;
+                    self.consume(
+                        TokenKind::RightBracket,
+                        "Expect closing ']' after array-index",
+                    )?;
+                    expr = index_sugar(token, expr, index);
+                }
+                TokenType::LeftParen => {
+                    // a()
+                    expr = self.call(token, expr)?;
+                }
+                _ => {
+                    // a++ or a--
+                    expr = Expr::new(
+                        ExprKind::PostUnary {
+                            token,
+                            left: Box::new(expr),
+                            by_amount: 1,
+                        },
+                        ValueKind::Rvalue,
+                    )
+                }
+            }
         }
         Ok(expr)
     }
-    fn evaluate_args(&mut self, left_paren: Token, callee: Expr) -> Result<Expr, Error> {
+    fn call(&mut self, left_paren: Token, callee: Expr) -> Result<Expr, Error> {
         let mut args = Vec::new();
         if !self.check(TokenKind::RightParen) {
             loop {
@@ -578,34 +614,6 @@ fn array_of(type_decl: NEWTypes, size: i32) -> NEWTypes {
         amount: size as usize,
         of: Box::new(type_decl),
     }
-}
-fn compound_assignment(token: Token, l_expr: Expr, r_expr: Expr) -> Expr {
-    Expr::new(
-        ExprKind::Assign {
-            l_expr: Box::new(l_expr.clone()),
-            r_expr: Box::new(Expr::new(
-                ExprKind::Binary {
-                    left: Box::new(l_expr),
-                    token: Token {
-                        token: match token.token {
-                            TokenType::SlashEqual => TokenType::Slash,
-                            TokenType::StarEqual => TokenType::Star,
-                            TokenType::MinusEqual => TokenType::Minus,
-                            TokenType::PlusEqual => TokenType::Plus,
-                            _ => unreachable!(),
-                        },
-                        line_string: token.line_string.clone(),
-                        line_index: token.line_index,
-                        column: token.column,
-                    },
-                    right: Box::new(r_expr),
-                },
-                ValueKind::Rvalue,
-            )),
-            token,
-        },
-        ValueKind::Rvalue,
-    )
 }
 
 fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {

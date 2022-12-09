@@ -1,7 +1,7 @@
 use crate::common::{expr::Expr, token::Token, types::NEWTypes};
 use std::fmt::Display;
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum Stmt {
     Expr(Expr),
     DeclareVar(NEWTypes, Token),

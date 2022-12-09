@@ -443,21 +443,53 @@ impl TypeChecker {
             }
             ExprKind::Ident(token) => self.env.get_var(token)?,
             ExprKind::Assign {
-                l_expr: store_expr,
+                l_expr,
                 token,
-                r_expr: expr,
-            } => self.assign_var(store_expr, token, expr)?,
+                r_expr,
+            } => self.assign_var(l_expr, token, r_expr)?,
+            ExprKind::CompoundAssign {
+                l_expr,
+                token,
+                r_expr,
+            } => self.compound_assign(l_expr, token, r_expr)?,
             ExprKind::Call {
                 left_paren,
                 callee,
                 args,
             } => self.evaluate_call(left_paren, callee, args)?,
+            ExprKind::PostUnary {
+                left,
+                token,
+                by_amount,
+            } => self.evaluate_postunary(token, left, by_amount)?,
             ExprKind::CastUp { .. } => unimplemented!("explicit casts"),
             ExprKind::CastDown { .. } => unimplemented!("explicit casts"),
             ExprKind::ScaleUp { .. } => unreachable!("is only used in codegen"),
             ExprKind::ScaleDown { .. } => unreachable!("is only used in codegen"),
         });
         Ok(ast.type_decl.clone().unwrap())
+    }
+    fn evaluate_postunary(
+        &mut self,
+        token: &Token,
+        expr: &mut Expr,
+        by_amount: &mut usize,
+    ) -> Result<NEWTypes, Error> {
+        let mut operand = self.expr_type(expr)?;
+        if matches!(operand, NEWTypes::Array { .. }) {
+            return Err(Error::new(token, "Can't increment array-type"));
+        } else if expr.value_kind == ValueKind::Rvalue {
+            return Err(Error::new(token, "Can't increment Rvalues"));
+        }
+
+        // self.check_type_compatibility(token, &operand, &NEWTypes::Primitive(Types::Int))?;
+        self.maybe_int_promote(expr, &mut operand);
+        match &operand {
+            NEWTypes::Pointer(inner) => *by_amount *= inner.size(),
+            _ => (),
+        }
+
+        Ok(operand)
     }
     fn string(&mut self, data: String) -> Result<NEWTypes, Error> {
         self.const_labels
@@ -466,6 +498,22 @@ impl TypeChecker {
         Ok(NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
             Types::Char,
         ))))
+    }
+    fn compound_assign(
+        &mut self,
+        l_expr: &mut Expr,
+        token: &Token,
+        r_expr: &mut Expr,
+    ) -> Result<NEWTypes, Error> {
+        let l_type = self.expr_type(l_expr)?;
+        let r_type = self.expr_type(r_expr)?;
+        // let r_type = self.evaluate_binary(l_expr, token, r_expr)?;
+
+        // self.assign_var(l_expr, token, r_expr)?;
+        Self::maybe_scale(&l_type, &r_type, l_expr, r_expr);
+        self.maybe_cast(&l_type, &r_type, r_expr);
+
+        Ok(l_type)
     }
     fn assign_var(
         &mut self,
@@ -708,6 +756,8 @@ impl TypeChecker {
             }
             TokenType::Minus => {
                 Self::lval_to_rval(right);
+                self.maybe_int_promote(right, &mut right_type);
+
                 if matches!(right_type, NEWTypes::Pointer(_)) {
                     return Err(Error::new(
                         token,
@@ -716,7 +766,7 @@ impl TypeChecker {
                 }
                 right_type
             }
-            _ => unreachable!(),
+            _ => unreachable!(), // ++a or --a are evaluated as compound assignment
         })
     }
     fn check_address(

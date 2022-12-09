@@ -84,11 +84,21 @@ impl<'a> Scanner<'a> {
                 '.' => self.add_token(&mut tokens, TokenType::Dot),
                 ';' => self.add_token(&mut tokens, TokenType::Semicolon),
                 '-' => {
-                    let token = self.match_next('=', TokenType::MinusEqual, TokenType::Minus);
+                    let mut token = TokenType::Minus;
+                    if self.matches('-') {
+                        token = TokenType::MinusMinus;
+                    } else if self.matches('=') {
+                        token = TokenType::MinusEqual;
+                    }
                     self.add_token(&mut tokens, token);
                 }
                 '+' => {
-                    let token = self.match_next('=', TokenType::PlusEqual, TokenType::Plus);
+                    let mut token = TokenType::Plus;
+                    if self.matches('+') {
+                        token = TokenType::PlusPlus;
+                    } else if self.matches('=') {
+                        token = TokenType::PlusEqual;
+                    }
                     self.add_token(&mut tokens, token);
                 }
                 '*' => {

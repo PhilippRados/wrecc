@@ -87,12 +87,6 @@ macro_rules! arr_decay {
     };
 }
 impl NEWTypes {
-    pub fn to_array(&mut self, amount: usize) {
-        *self = NEWTypes::Array {
-            amount,
-            of: Box::new(self.clone()),
-        }
-    }
     pub fn pointer_to(&mut self) {
         *self = NEWTypes::Pointer(Box::new(self.clone()));
     }

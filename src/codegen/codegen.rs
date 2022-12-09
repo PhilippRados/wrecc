@@ -304,6 +304,11 @@ impl<'a> Compiler<'a> {
             ExprKind::Unary { token, right } => self.cg_unary(token, right),
             ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
             ExprKind::Assign { l_expr, r_expr, .. } => self.cg_assign(l_expr, r_expr),
+            ExprKind::CompoundAssign {
+                l_expr,
+                r_expr,
+                token,
+            } => self.cg_comp_assign(l_expr, token, r_expr),
             ExprKind::Ident(name) => Ok(Register::Stack(self.env.get_var(name).unwrap())),
             ExprKind::Call {
                 left_paren: _,
@@ -315,7 +320,123 @@ impl<'a> Compiler<'a> {
             ExprKind::ScaleUp { expr, by } => self.cg_scale_up(expr, by),
             ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(expr, shift_amount),
             ExprKind::String(token) => self.cg_string(token.unwrap_string()),
+            ExprKind::PostUnary {
+                token,
+                left,
+                by_amount,
+            } => self.cg_postunary(token, left, by_amount),
         }
+    }
+    fn cg_comp_assign(
+        &mut self,
+        l_expr: &Expr,
+        token: &Token,
+        r_expr: &Expr,
+    ) -> Result<Register, std::fmt::Error> {
+        let l_reg = self.execute_expr(l_expr)?;
+        let mut r_reg = self.execute_expr(r_expr)?;
+
+        r_reg = self.maybe_convert_stack_reg(r_reg)?;
+        r_reg = self.convert_to_rval(r_reg)?;
+
+        // copy l_reg into scratch register for arithmetic
+        let temp_scratch = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            l_reg.get_type(),
+            ValueKind::Rvalue,
+        );
+        writeln!(
+            self.output,
+            "\tmov{}    {}, {}",
+            temp_scratch.get_type().suffix(),
+            l_reg.name(),
+            temp_scratch.name(),
+        )?;
+
+        match token.token {
+            TokenType::SlashEqual => writeln!(
+                self.output,
+                "\tsub{}   {},{}",
+                l_reg.get_type().suffix(),
+                r_reg.name(),
+                l_reg.name()
+            )?,
+            TokenType::StarEqual => writeln!(
+                self.output,
+                "\timul{}   {},{}",
+                temp_scratch.get_type().suffix(),
+                r_reg.name(),
+                temp_scratch.name()
+            )?,
+            TokenType::MinusEqual | TokenType::MinusMinus => writeln!(
+                self.output,
+                "\tsub{}   {},{}",
+                temp_scratch.get_type().suffix(),
+                r_reg.name(),
+                temp_scratch.name()
+            )?,
+            TokenType::PlusEqual | TokenType::PlusPlus => writeln!(
+                self.output,
+                "\tadd{}   {},{}",
+                temp_scratch.get_type().suffix(),
+                r_reg.name(),
+                temp_scratch.name(),
+            )?,
+            _ => unreachable!(),
+        };
+        // write back result into l_reg
+        writeln!(
+            self.output,
+            "\tmov{}    {},{}",
+            l_reg.get_type().suffix(),
+            temp_scratch.name(),
+            l_reg.name()
+        )?;
+        temp_scratch.free();
+        r_reg.free();
+
+        Ok(l_reg)
+    }
+    fn cg_postunary(
+        &mut self,
+        token: &Token,
+        expr: &Expr,
+        by_amount: &usize,
+    ) -> Result<Register, std::fmt::Error> {
+        let reg = self.execute_expr(expr)?;
+        let return_reg = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            reg.get_type(),
+            ValueKind::Rvalue,
+        );
+
+        writeln!(
+            self.output,
+            "\tmov{}    {}, {}",
+            return_reg.get_type().suffix(),
+            reg.name(),
+            return_reg.name(),
+        )?;
+        match token.token {
+            TokenType::PlusPlus => writeln!(
+                self.output,
+                "\tadd{}  ${},{}",
+                reg.get_type().suffix(),
+                by_amount,
+                reg.name()
+            )?,
+            TokenType::MinusMinus => writeln!(
+                self.output,
+                "\tsub{}  ${},{}",
+                reg.get_type().suffix(),
+                by_amount,
+                reg.name()
+            )?,
+            _ => unreachable!(),
+        };
+        reg.free();
+
+        Ok(return_reg)
     }
     fn cg_string(&mut self, name: String) -> Result<Register, std::fmt::Error> {
         let dest = Register::Scratch(
@@ -648,19 +769,25 @@ impl<'a> Compiler<'a> {
             reg.name()
         )?; // compares reg-value with 0
 
+        let result = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            reg.get_type(),
+            ValueKind::Rvalue,
+        );
         // sets %al to 1 if comparison true and to 0 when false and then copies %al to current reg
         if reg.get_type() == NEWTypes::Primitive(Types::Char) {
-            writeln!(self.output, "\tmovb %al, {}", reg.name())?;
+            writeln!(self.output, "\tmovb %al, {}", result.name())?;
         } else {
             writeln!(
                 self.output,
                 "\tmovzb{} %al, {}",
-                reg.get_type().suffix(),
-                reg.name()
+                result.get_type().suffix(),
+                result.name()
             )?;
         }
+        reg.free();
 
-        Ok(reg)
+        Ok(result)
     }
     fn cg_negate(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
         writeln!(

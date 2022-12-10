@@ -446,7 +446,12 @@ impl TypeChecker {
                 l_expr,
                 token,
                 r_expr,
-            } => self.assign_var(l_expr, token, r_expr)?,
+            } => {
+                let l_type = self.expr_type(l_expr)?;
+                let r_type = self.expr_type(r_expr)?;
+
+                self.assign_var(l_expr, l_type, token, r_expr, r_type)?
+            }
             ExprKind::CompoundAssign {
                 l_expr,
                 token,
@@ -475,19 +480,20 @@ impl TypeChecker {
         expr: &mut Expr,
         by_amount: &mut usize,
     ) -> Result<NEWTypes, Error> {
-        let mut operand = self.expr_type(expr)?;
+        let operand = self.expr_type(expr)?;
+
         if matches!(operand, NEWTypes::Array { .. }) {
             return Err(Error::new(token, "Can't increment array-type"));
         } else if expr.value_kind == ValueKind::Rvalue {
             return Err(Error::new(token, "Can't increment Rvalues"));
         }
 
-        // self.check_type_compatibility(token, &operand, &NEWTypes::Primitive(Types::Int))?;
-        self.maybe_int_promote(expr, &mut operand);
+        // scale depending on type-size
         match &operand {
             NEWTypes::Pointer(inner) => *by_amount *= inner.size(),
             _ => (),
         }
+        // don't need integer promotion because l-type stays the same anyway
 
         Ok(operand)
     }
@@ -505,24 +511,40 @@ impl TypeChecker {
         token: &Token,
         r_expr: &mut Expr,
     ) -> Result<NEWTypes, Error> {
+        // create temporary-expression so that l_expr isn't overwritten
+        let mut tmp = l_expr.clone();
+
         let l_type = self.expr_type(l_expr)?;
-        let r_type = self.expr_type(r_expr)?;
-        // let r_type = self.evaluate_binary(l_expr, token, r_expr)?;
 
-        // self.assign_var(l_expr, token, r_expr)?;
-        Self::maybe_scale(&l_type, &r_type, l_expr, r_expr);
-        self.maybe_cast(&l_type, &r_type, r_expr);
+        // convert compound token into valid binary token
+        let bin_token = &Token {
+            token: match token.token {
+                TokenType::SlashEqual => TokenType::Slash,
+                TokenType::StarEqual => TokenType::Star,
+                TokenType::MinusEqual | TokenType::MinusMinus => TokenType::Minus,
+                TokenType::PlusEqual | TokenType::PlusPlus => TokenType::Plus,
+                _ => token.token.clone(),
+            },
+            line_string: token.line_string.clone(),
+            line_index: token.line_index,
+            column: token.column,
+        };
 
-        Ok(l_type)
+        // can ignore scale-down because ptr -= ptr is a type-error
+        let r_type = self.evaluate_binary(&mut tmp, bin_token, r_expr)?.0;
+
+        let type_decl = self.assign_var(l_expr, l_type, token, r_expr, r_type)?;
+
+        Ok(type_decl)
     }
     fn assign_var(
         &mut self,
         l_expr: &mut Expr,
+        l_type: NEWTypes,
         token: &Token,
         r_expr: &mut Expr,
+        r_type: NEWTypes,
     ) -> Result<NEWTypes, Error> {
-        let l_type = self.expr_type(l_expr)?;
-        let r_type = self.expr_type(r_expr)?;
         if l_expr.value_kind != ValueKind::Lvalue {
             return Err(Error::new(token, "Expect Lvalue left of assignment"));
         }

@@ -178,7 +178,7 @@ impl Display for TokenType {
                 TokenType::Comma => "','",
                 TokenType::Dot => "'.'",
                 TokenType::Minus => "'-'",
-                TokenType::MinusEqual => "'-'",
+                TokenType::MinusEqual => "'-='",
                 TokenType::MinusMinus => "'--'",
                 TokenType::Plus => "'+'",
                 TokenType::PlusEqual => "'+='",

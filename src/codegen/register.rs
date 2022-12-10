@@ -71,7 +71,7 @@ impl Register {
     pub fn set_type(&mut self, type_decl: NEWTypes) {
         match self {
             Register::Void => unimplemented!(),
-            Register::Stack(_) => (),
+            Register::Stack(reg) => reg.type_decl = type_decl,
             Register::Scratch(_, old_decl, _) => *old_decl = type_decl,
             Register::Arg(_, old_decl) => *old_decl = type_decl,
         }

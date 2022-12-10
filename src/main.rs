@@ -40,8 +40,6 @@ fn main() {
         None => return,
     };
 
-    // dbg!(&statements);
-
     // Check for errors
     let mut typechecker = TypeChecker::new();
     let (func_stack, const_labels) = match typechecker.check(&mut statements) {

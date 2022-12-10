@@ -267,4 +267,13 @@ impl Token {
             _ => unreachable!("only types are checked"),
         })
     }
+    pub fn comp_to_binary(&self) -> TokenType {
+        match self.token {
+            TokenType::SlashEqual => TokenType::Slash,
+            TokenType::StarEqual => TokenType::Star,
+            TokenType::MinusEqual | TokenType::MinusMinus => TokenType::Minus,
+            TokenType::PlusEqual | TokenType::PlusPlus => TokenType::Plus,
+            _ => unreachable!("not compound token"),
+        }
+    }
 }

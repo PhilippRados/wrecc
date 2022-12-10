@@ -297,24 +297,32 @@ impl<'a> Compiler<'a> {
     }
     pub fn execute_expr(&mut self, ast: &Expr) -> Result<Register, std::fmt::Error> {
         match &ast.kind {
-            ExprKind::Binary { left, token, right } => self.cg_binary(left, token, right),
+            ExprKind::Binary { left, token, right } => {
+                let left_reg = self.execute_expr(left)?;
+                let right_reg = self.execute_expr(right)?;
+
+                self.cg_binary(left_reg, &token.token, right_reg)
+            }
             ExprKind::Number(v) => self.cg_literal_num(*v),
             ExprKind::CharLit(c) => self.cg_literal_char(*c),
             ExprKind::Grouping { expr } => self.execute_expr(expr),
             ExprKind::Unary { token, right } => self.cg_unary(token, right),
             ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
-            ExprKind::Assign { l_expr, r_expr, .. } => self.cg_assign(l_expr, r_expr),
+            ExprKind::Assign { l_expr, r_expr, .. } => {
+                let left_reg = self.execute_expr(l_expr)?;
+                let right_reg = self.execute_expr(r_expr)?;
+
+                self.cg_assign(left_reg, right_reg)
+            }
             ExprKind::CompoundAssign {
                 l_expr,
                 r_expr,
                 token,
             } => self.cg_comp_assign(l_expr, token, r_expr),
             ExprKind::Ident(name) => Ok(Register::Stack(self.env.get_var(name).unwrap())),
-            ExprKind::Call {
-                left_paren: _,
-                callee,
-                args,
-            } => self.cg_call(callee, args, ast.type_decl.clone().unwrap()),
+            ExprKind::Call { callee, args, .. } => {
+                self.cg_call(callee, args, ast.type_decl.clone().unwrap())
+            }
             ExprKind::CastUp { expr } => self.cg_cast_up(expr, ast.type_decl.clone().unwrap()),
             ExprKind::CastDown { expr } => self.cg_cast_down(expr, ast.type_decl.clone().unwrap()),
             ExprKind::ScaleUp { expr, by } => self.cg_scale_up(expr, by),
@@ -334,68 +342,40 @@ impl<'a> Compiler<'a> {
         r_expr: &Expr,
     ) -> Result<Register, std::fmt::Error> {
         let l_reg = self.execute_expr(l_expr)?;
-        let mut r_reg = self.execute_expr(r_expr)?;
+        let r_reg = self.execute_expr(r_expr)?;
 
-        r_reg = self.maybe_convert_stack_reg(r_reg)?;
-        r_reg = self.convert_to_rval(r_reg)?;
-
-        // copy l_reg into scratch register for arithmetic
-        let temp_scratch = Register::Scratch(
+        let mut temp_scratch = Register::Scratch(
             self.scratch.scratch_alloc(),
             l_reg.get_type(),
             ValueKind::Rvalue,
         );
-        writeln!(
-            self.output,
-            "\tmov{}    {}, {}",
-            temp_scratch.get_type().suffix(),
-            l_reg.name(),
-            temp_scratch.name(),
-        )?;
-
-        match token.token {
-            TokenType::SlashEqual => writeln!(
+        // have to do integer-promotion in codegen
+        if temp_scratch.get_type().size() < 4 {
+            temp_scratch.set_type(NEWTypes::Primitive(Types::Int));
+            writeln!(
                 self.output,
-                "\tsub{}   {},{}",
+                "movs{}{}   {}, {}",
                 l_reg.get_type().suffix(),
-                r_reg.name(),
-                l_reg.name()
-            )?,
-            TokenType::StarEqual => writeln!(
-                self.output,
-                "\timul{}   {},{}",
                 temp_scratch.get_type().suffix(),
-                r_reg.name(),
+                l_reg.name(),
                 temp_scratch.name()
-            )?,
-            TokenType::MinusEqual | TokenType::MinusMinus => writeln!(
+            )?;
+        } else {
+            writeln!(
                 self.output,
-                "\tsub{}   {},{}",
+                "\tmov{}    {}, {}",
                 temp_scratch.get_type().suffix(),
-                r_reg.name(),
-                temp_scratch.name()
-            )?,
-            TokenType::PlusEqual | TokenType::PlusPlus => writeln!(
-                self.output,
-                "\tadd{}   {},{}",
-                temp_scratch.get_type().suffix(),
-                r_reg.name(),
+                l_reg.name(),
                 temp_scratch.name(),
-            )?,
-            _ => unreachable!(),
-        };
-        // write back result into l_reg
-        writeln!(
-            self.output,
-            "\tmov{}    {},{}",
-            l_reg.get_type().suffix(),
-            temp_scratch.name(),
-            l_reg.name()
-        )?;
-        temp_scratch.free();
-        r_reg.free();
+            )?;
+        }
+        let mut bin_reg = self.cg_binary(temp_scratch, &token.comp_to_binary(), r_reg)?;
 
-        Ok(l_reg)
+        // we can do this because typechecker would catch any type-errors
+        bin_reg.set_type(l_reg.get_type());
+        let result = self.cg_assign(l_reg, bin_reg)?;
+
+        Ok(result)
     }
     fn cg_postunary(
         &mut self,
@@ -404,19 +384,34 @@ impl<'a> Compiler<'a> {
         by_amount: &usize,
     ) -> Result<Register, std::fmt::Error> {
         let reg = self.execute_expr(expr)?;
-        let return_reg = Register::Scratch(
+        let mut return_reg = Register::Scratch(
             self.scratch.scratch_alloc(),
             reg.get_type(),
             ValueKind::Rvalue,
         );
 
-        writeln!(
-            self.output,
-            "\tmov{}    {}, {}",
-            return_reg.get_type().suffix(),
-            reg.name(),
-            return_reg.name(),
-        )?;
+        // assign value to return-register before binary operation
+        // have to do integer-promotion in codegen
+        if return_reg.get_type().size() < 4 {
+            return_reg.set_type(NEWTypes::Primitive(Types::Int));
+            writeln!(
+                self.output,
+                "movs{}{}   {}, {}",
+                reg.get_type().suffix(),
+                return_reg.get_type().suffix(),
+                reg.name(),
+                return_reg.name()
+            )?;
+        } else {
+            writeln!(
+                self.output,
+                "\tmov{}    {}, {}",
+                return_reg.get_type().suffix(),
+                reg.name(),
+                return_reg.name(),
+            )?;
+        }
+
         match token.token {
             TokenType::PlusPlus => writeln!(
                 self.output,
@@ -518,10 +513,11 @@ impl<'a> Compiler<'a> {
 
         Ok(dest_reg)
     }
-    fn cg_assign(&mut self, l_expr: &Expr, r_expr: &Expr) -> Result<Register, std::fmt::Error> {
-        let l_value = self.execute_expr(l_expr)?;
-        let mut r_value = self.execute_expr(r_expr)?;
-
+    fn cg_assign(
+        &mut self,
+        l_value: Register,
+        mut r_value: Register,
+    ) -> Result<Register, std::fmt::Error> {
         // can't move from mem to mem so make temp scratch-register
         r_value = self.maybe_convert_stack_reg(r_value)?;
         r_value = self.convert_to_rval(r_value)?;
@@ -918,23 +914,19 @@ impl<'a> Compiler<'a> {
         Ok(right)
     }
 
-    // returns register-index that holds result
     fn cg_binary(
         &mut self,
-        left: &Expr,
-        token: &Token,
-        right: &Expr,
+        mut left_reg: Register,
+        token: &TokenType,
+        mut right_reg: Register,
     ) -> Result<Register, std::fmt::Error> {
-        let mut left_reg = self.execute_expr(left)?;
-        let mut right_reg = self.execute_expr(right)?;
-
         left_reg = self.maybe_convert_stack_reg(left_reg)?;
         right_reg = self.maybe_convert_stack_reg(right_reg)?;
 
         left_reg = self.convert_to_rval(left_reg)?;
         right_reg = self.convert_to_rval(right_reg)?;
 
-        match token.token {
+        match token {
             TokenType::Plus => self.cg_add(left_reg, right_reg),
             TokenType::Minus => self.cg_sub(left_reg, right_reg),
             TokenType::Star => self.cg_mult(left_reg, right_reg),
@@ -945,7 +937,7 @@ impl<'a> Compiler<'a> {
             TokenType::GreaterEqual => self.cg_comparison("setge", left_reg, right_reg),
             TokenType::Less => self.cg_comparison("setl", left_reg, right_reg),
             TokenType::LessEqual => self.cg_comparison("setle", left_reg, right_reg),
-            _ => Error::new(token, "invalid binary operator").print_exit(),
+            _ => unreachable!(),
         }
     }
     fn convert_to_rval(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {
@@ -979,6 +971,7 @@ impl<'a> Compiler<'a> {
         Ok(temp_scratch)
     }
 }
+
 fn unique(vec: &Vec<Register>) -> Vec<Register> {
     let mut result = Vec::new();
 

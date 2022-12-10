@@ -493,7 +493,6 @@ impl TypeChecker {
             NEWTypes::Pointer(inner) => *by_amount *= inner.size(),
             _ => (),
         }
-        // don't need integer promotion because l-type stays the same anyway
 
         Ok(operand)
     }
@@ -518,13 +517,7 @@ impl TypeChecker {
 
         // convert compound token into valid binary token
         let bin_token = &Token {
-            token: match token.token {
-                TokenType::SlashEqual => TokenType::Slash,
-                TokenType::StarEqual => TokenType::Star,
-                TokenType::MinusEqual | TokenType::MinusMinus => TokenType::Minus,
-                TokenType::PlusEqual | TokenType::PlusPlus => TokenType::Plus,
-                _ => token.token.clone(),
-            },
+            token: token.comp_to_binary(),
             line_string: token.line_string.clone(),
             line_index: token.line_index,
             column: token.column,
@@ -533,7 +526,8 @@ impl TypeChecker {
         // can ignore scale-down because ptr -= ptr is a type-error
         let r_type = self.evaluate_binary(&mut tmp, bin_token, r_expr)?.0;
 
-        let type_decl = self.assign_var(l_expr, l_type, token, r_expr, r_type)?;
+        // have to clone r_expr so that change from evaluate_binary isn't overwritten
+        let type_decl = self.assign_var(l_expr, l_type, token, &mut r_expr.clone(), r_type)?;
 
         Ok(type_decl)
     }

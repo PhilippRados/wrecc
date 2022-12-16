@@ -112,6 +112,25 @@ impl TypeChecker {
             Stmt::While(left_paren, ref mut cond, body) => {
                 self.while_statement(left_paren, cond, body)
             }
+            Stmt::InitList(type_decl, var_name, expr_stmts) => {
+                let name = var_name.unwrap_string();
+                if self.env.current.vars.contains_key(&name) {
+                    return Err(Error::new(
+                        var_name,
+                        &format!("Redefinition of variable '{}'", name),
+                    ));
+                }
+
+                // first declare var
+                self.increment_stack_size(var_name, &type_decl)?;
+                self.env.init_var(name, type_decl.clone());
+
+                // then check all assigns
+                for s in expr_stmts {
+                    self.visit(s)?;
+                }
+                Ok(())
+            }
         }
     }
     fn while_statement(

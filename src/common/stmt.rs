@@ -6,6 +6,7 @@ pub enum Stmt {
     Expr(Expr),
     DeclareVar(NEWTypes, Token),
     InitVar(NEWTypes, Token, Expr),
+    InitList(NEWTypes, Token, Vec<Stmt>),
     Block(Token, Vec<Stmt>),
     If(Token, Expr, Box<Stmt>, Box<Option<Stmt>>),
     While(Token, Expr, Box<Stmt>),
@@ -18,6 +19,7 @@ impl Stmt {
         match self {
             Stmt::DeclareVar(_, t) => t,
             Stmt::InitVar(_, t, _) => t,
+            Stmt::InitList(_, t, _) => t,
             Stmt::Block(t, _) => t,
             Stmt::If(t, _, _, _) => t,
             Stmt::While(t, _, _) => t,
@@ -42,6 +44,7 @@ impl Display for Stmt {
                 Stmt::Function(_, _, _, _) => "'function-definition'",
                 Stmt::FunctionDeclaration(_, _, _) => "'function-declaration'",
                 Stmt::Return(_, _) => "'return-statement'",
+                Stmt::InitList(..) => "'initializer-list'",
                 Stmt::Expr(_) => unimplemented!(),
             }
         )

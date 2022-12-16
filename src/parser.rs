@@ -1,4 +1,5 @@
 use crate::common::{error::*, expr::*, stmt::*, token::*, types::*};
+use std::cmp::Ordering;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
@@ -210,23 +211,85 @@ impl Parser {
         )?;
 
         if self.matches(vec![TokenKind::LeftParen]).is_some() {
-            // function
             self.function(type_decl, name)
         } else {
-            // variable
             type_decl = self.parse_arr(type_decl)?;
 
             if self.matches(vec![TokenKind::Equal]).is_some() {
-                let value = self.expression()?;
-                self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
-                Ok(Stmt::InitVar(type_decl, name, value))
+                // variable-initialization
+                match self.matches(vec![TokenKind::LeftBrace]) {
+                    Some(_) => {
+                        let elements = self.initializer_list(&type_decl, name.clone())?;
+                        let assign_sugar = list_sugar_assign(name.clone(), elements);
+
+                        self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
+                        Ok(Stmt::InitList(type_decl, name, assign_sugar))
+                    }
+                    None => {
+                        let r_value = self.expression()?;
+
+                        self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
+                        Ok(Stmt::InitVar(type_decl, name, r_value))
+                    }
+                }
             } else {
+                // declaration
                 self.consume(
                     TokenKind::Semicolon,
                     "Expect ';' after variable declaration",
                 )?;
                 Ok(Stmt::DeclareVar(type_decl, name))
             }
+        }
+    }
+    fn initializer_list(&mut self, type_decl: &NEWTypes, token: Token) -> Result<Vec<Expr>, Error> {
+        if let NEWTypes::Array { of, amount } = type_decl {
+            let mut elements = Vec::new();
+
+            while !self.check(TokenKind::RightBrace) {
+                match self.matches(vec![TokenKind::LeftBrace]) {
+                    Some(_) => {
+                        for e in self.initializer_list(of, token.clone())? {
+                            elements.push(e);
+                        }
+                    }
+                    None => elements.push(self.expression()?),
+                };
+                self.consume(
+                    TokenKind::Comma,
+                    "Expect ',' seperating expressions in initializer_list",
+                )?;
+            }
+            match amount.cmp(&elements.len()) {
+                Ordering::Less => {
+                    return Err(Error::new(
+                        &token,
+                        &format!(
+                            "Array overflow. Expected size: {}, Actual size: {}",
+                            amount,
+                            elements.len()
+                        ),
+                    ))
+                }
+                Ordering::Greater => {
+                    for _ in elements.len()..*amount {
+                        // fill up rest with 0's
+                        elements.push(Expr::new(ExprKind::Number(0), ValueKind::Rvalue));
+                    }
+                }
+                _ => (),
+            };
+            self.consume(
+                TokenKind::RightBrace,
+                "Expected closing '}' after initializer-list",
+            )?;
+
+            Ok(elements)
+        } else {
+            Err(Error::new(
+                &token,
+                "Can't initialize non-array type with initializer-list",
+            ))
         }
     }
     fn function(&mut self, return_type: NEWTypes, name: Token) -> Result<Stmt, Error> {
@@ -616,7 +679,33 @@ fn array_of(type_decl: NEWTypes, size: i32) -> NEWTypes {
     }
 }
 
+fn list_sugar_assign(token: Token, list: Vec<Expr>) -> Vec<Stmt> {
+    // int a[3] = {1,2,3};
+    // equivalent to:
+    // int a[3];
+    // a[0] = 1;
+    // a[1] = 2;
+    // a[2] = 3;
+    list.into_iter()
+        .enumerate()
+        .map(|(i, e)| {
+            Stmt::Expr(Expr::new(
+                ExprKind::Assign {
+                    l_expr: Box::new(index_sugar(
+                        token.clone(),
+                        Expr::new(ExprKind::Ident(token.clone()), ValueKind::Lvalue),
+                        Expr::new(ExprKind::Number(i as i32), ValueKind::Rvalue),
+                    )),
+                    token: token.clone(),
+                    r_expr: Box::new(e),
+                },
+                ValueKind::Rvalue,
+            ))
+        })
+        .collect()
+}
 fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
+    // a[i] <=> *(a + i)
     Expr::new(
         ExprKind::Unary {
             token: Token::new(

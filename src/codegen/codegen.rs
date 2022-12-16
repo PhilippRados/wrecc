@@ -90,9 +90,25 @@ impl<'a> Compiler<'a> {
             }
             Stmt::While(_, cond, body) => self.while_statement(cond, body),
             Stmt::FunctionDeclaration(_, _, _) => Ok(()),
+            Stmt::InitList(type_decl, name, expr_stmts) => {
+                self.init_list(type_decl, name.unwrap_string(), expr_stmts)
+            }
         }
     }
 
+    fn init_list(
+        &mut self,
+        type_decl: &NEWTypes,
+        name: String,
+        expr_stmts: &Vec<Stmt>,
+    ) -> Result<(), std::fmt::Error> {
+        self.declare_var(type_decl, name)?;
+
+        for s in expr_stmts {
+            self.visit(s)?;
+        }
+        Ok(())
+    }
     fn while_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), std::fmt::Error> {
         let start_label = create_label(&mut self.label_index);
         let end_label = create_label(&mut self.label_index);

@@ -1,7 +1,6 @@
 void printf(char* s, char* c);
 int* malloc(int d);
 
-
 int main() {
   char* c[4];
   c[0] = "GeksQuiz";
@@ -13,9 +12,9 @@ int main() {
   cp[0] = c + 3;
   cp[1] = c + 2;
   cp[2] = c + 1;
-  cp[3] = c + 0;
+  cp[3] = c;
 
-  char*** cpp = cp + 0;
+  char*** cpp = cp;
 
   printf("%s ", **++cpp);
   printf("%s ", *--*++cpp + 3);

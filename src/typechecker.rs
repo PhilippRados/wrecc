@@ -171,7 +171,7 @@ impl TypeChecker {
         expr: &mut Expr,
     ) -> Result<(), Error> {
         let name = var_name.unwrap_string();
-        let value_type = self.expr_type(expr)?;
+        let mut value_type = self.expr_type(expr)?;
 
         if self.env.current.vars.contains_key(&name) {
             return Err(Error::new(
@@ -179,6 +179,8 @@ impl TypeChecker {
                 &format!("Redefinition of variable '{}'", name),
             ));
         }
+        crate::arr_decay!(value_type, expr, var_name);
+
         self.check_type_compatibility(var_name, &type_decl, &value_type)?;
         self.maybe_cast(&type_decl, &value_type, expr);
 
@@ -531,7 +533,7 @@ impl TypeChecker {
         l_type: NEWTypes,
         token: &Token,
         r_expr: &mut Expr,
-        r_type: NEWTypes,
+        mut r_type: NEWTypes,
     ) -> Result<NEWTypes, Error> {
         if l_expr.value_kind != ValueKind::Lvalue {
             return Err(Error::new(token, "Expect Lvalue left of assignment"));
@@ -543,6 +545,9 @@ impl TypeChecker {
                 &format!("array {} is not assignable", l_type),
             ));
         }
+
+        crate::arr_decay!(r_type, r_expr, token);
+
         self.check_type_compatibility(token, &l_type, &r_type)?;
         self.maybe_cast(&l_type, &r_type, r_expr);
 

@@ -155,12 +155,7 @@ impl TypeChecker {
         left: &NEWTypes,
         right: &NEWTypes,
     ) -> Result<(), Error> {
-        if left.is_void() || right.is_void() {
-            Err(Error::new(
-                token,
-                &format!("Can't assign to type '{}' with type '{}'", left, right),
-            ))
-        } else if !left.type_compatible(right) {
+        if left.is_void() || right.is_void() || !left.type_compatible(right) {
             Err(Error::new(
                 token,
                 &format!("Can't assign to type '{}' with type '{}'", left, right),
@@ -489,9 +484,8 @@ impl TypeChecker {
         }
 
         // scale depending on type-size
-        match &operand {
-            NEWTypes::Pointer(inner) => *by_amount *= inner.size(),
-            _ => (),
+        if let NEWTypes::Pointer(inner) = &operand {
+            *by_amount *= inner.size()
         }
 
         Ok(operand)
@@ -829,9 +823,9 @@ impl TypeChecker {
         if matches!(function_type, NEWTypes::Array { .. }) {
             Err(Error::new(
                 keyword,
-                &format!("Can't return stack-array from function"),
+                "Can't return stack-array from function",
             ))
-        } else if !function_type.type_compatible(&body_return) {
+        } else if !function_type.type_compatible(body_return) {
             Err(Error::new(
                 keyword,
                 &format!(
@@ -853,7 +847,7 @@ pub fn align_by(mut offset: usize, type_size: usize) -> usize {
     offset
 }
 pub fn create_label(index: &mut usize) -> usize {
-    let prev = index.clone();
+    let prev = *index;
     *index += 1;
     prev
 }

@@ -3,7 +3,7 @@ use crate::common::types::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-static ARG_REGISTER_MAP: &[[&'static str; 6]] = &[
+static ARG_REGISTER_MAP: &[[&str; 6]] = &[
     ["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"],
     ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"],
     ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"],
@@ -11,7 +11,7 @@ static ARG_REGISTER_MAP: &[[&'static str; 6]] = &[
 
 #[derive(PartialEq, Clone)]
 pub enum Register {
-    Scratch(Rc<Rc<RefCell<ScratchRegister>>>, NEWTypes, ValueKind),
+    Scratch(Rc<RefCell<ScratchRegister>>, NEWTypes, ValueKind),
     Stack(StackRegister),
     Arg(usize, NEWTypes),
     Void,
@@ -30,7 +30,7 @@ impl Register {
             Register::Void => unimplemented!(),
             Register::Stack(reg) => reg.name(),
             Register::Scratch(reg, type_decl, valuekind) => match valuekind {
-                ValueKind::Rvalue => reg.borrow().name(type_decl).to_string(),
+                ValueKind::Rvalue => reg.borrow().name(type_decl),
                 ValueKind::Lvalue => self.base_name(),
             },
             Register::Arg(i, type_decl) => match type_decl {
@@ -49,12 +49,12 @@ impl Register {
             Register::Void => unimplemented!(),
             Register::Stack(reg) => reg.name(),
             Register::Scratch(reg, _, valuekind) => match valuekind {
-                ValueKind::Rvalue => reg
-                    .borrow()
-                    .name(&NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
-                        Types::Void,
-                    ))))
-                    .to_string(),
+                ValueKind::Rvalue => {
+                    reg.borrow()
+                        .name(&NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
+                            Types::Void,
+                        ))))
+                }
                 ValueKind::Lvalue => {
                     format!(
                         "({})",
@@ -84,15 +84,11 @@ impl Register {
         }
     }
     pub fn is_lval(&self) -> bool {
-        match self {
-            Register::Scratch(_, _, value_kind) if *value_kind == ValueKind::Lvalue => true,
-            _ => false,
-        }
+        matches!(self, Register::Scratch(_, _, value_kind) if *value_kind == ValueKind::Lvalue)
     }
     pub fn set_value_kind(&mut self, new_val_kind: ValueKind) {
-        match self {
-            Register::Scratch(_, _, value_kind) => *value_kind = new_val_kind,
-            _ => (),
+        if let Register::Scratch(_, _, value_kind) = self {
+            *value_kind = new_val_kind
         }
     }
 }
@@ -133,11 +129,11 @@ pub struct ScratchRegisters {
     pub registers: [Rc<RefCell<ScratchRegister>>; 4],
 }
 impl ScratchRegisters {
-    pub fn scratch_alloc(&self) -> Rc<Rc<RefCell<ScratchRegister>>> {
+    pub fn scratch_alloc(&self) -> Rc<RefCell<ScratchRegister>> {
         for (i, r) in self.registers.iter().enumerate() {
             if !r.borrow().in_use {
                 r.borrow_mut().in_use = true;
-                return Rc::new(Rc::clone(&self.registers[i]));
+                return Rc::clone(&self.registers[i]);
             }
         }
         panic!("no free register");

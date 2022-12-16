@@ -53,8 +53,6 @@ pub enum TokenKind {
     If,
     Return,
     While,
-
-    Eof,
 }
 
 impl From<&TokenType> for TokenKind {
@@ -93,7 +91,6 @@ impl From<&TokenType> for TokenKind {
             TokenType::If => TokenKind::If,
             TokenType::Return => TokenKind::Return,
             TokenType::While => TokenKind::While,
-            TokenType::Eof => TokenKind::Eof,
             TokenType::PlusPlus => TokenKind::PlusPlus,
             TokenType::MinusMinus => TokenKind::MinusMinus,
             TokenType::Amp => TokenKind::Amp,
@@ -160,8 +157,6 @@ pub enum TokenType {
     If,
     Return,
     While,
-
-    Eof,
 }
 impl Display for TokenType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -211,7 +206,6 @@ impl Display for TokenType {
                 TokenType::If => "'if'",
                 TokenType::Return => "'return'",
                 TokenType::While => "'while'",
-                TokenType::Eof => "<EOF>",
                 TokenType::Void => "'void'",
             }
         )

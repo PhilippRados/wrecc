@@ -197,7 +197,7 @@ impl Parser {
             if size.unwrap_num() > 0 {
                 Ok(array_of(self.parse_arr(type_decl)?, size.unwrap_num()))
             } else {
-                return Err(Error::new(&size, "Can't initialize array with size <= 0"));
+                Err(Error::new(&size, "Can't initialize array with size <= 0"))
             }
         } else {
             Ok(type_decl)

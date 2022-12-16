@@ -597,7 +597,7 @@ impl<'a> Compiler<'a> {
             .filter(|r| r.borrow().in_use)
             .for_each(|r| {
                 regs.push(Register::Scratch(
-                    Rc::new(Rc::clone(r)),
+                    Rc::clone(r),
                     NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
                     ValueKind::Rvalue,
                 ));
@@ -972,7 +972,7 @@ impl<'a> Compiler<'a> {
     }
 }
 
-fn unique(vec: &Vec<Register>) -> Vec<Register> {
+fn unique(vec: &[Register]) -> Vec<Register> {
     let mut result = Vec::new();
 
     vec.iter().for_each(|r| {

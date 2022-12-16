@@ -1,7 +1,7 @@
 use crate::common::token::TokenKind;
 use std::fmt::Display;
 
-static RETURN_REG: &[&'static str; 3] = &["%al", "%eax", "%rax"];
+static RETURN_REG: &[&str; 3] = &["%al", "%eax", "%rax"];
 
 pub trait TypeInfo {
     // returns size in bytes of type
@@ -117,7 +117,6 @@ impl NEWTypes {
         }
     }
 }
-
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Types {
     Void,

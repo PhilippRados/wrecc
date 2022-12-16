@@ -14,6 +14,7 @@ pub enum Register {
     Scratch(Rc<RefCell<ScratchRegister>>, NEWTypes, ValueKind),
     Stack(StackRegister),
     Arg(usize, NEWTypes),
+    String(usize),
     Void,
 }
 impl Register {
@@ -22,6 +23,7 @@ impl Register {
             Register::Void => (),
             Register::Stack(_) => (),
             Register::Arg(_, _) => (),
+            Register::String(_) => (),
             Register::Scratch(reg, _, _) => reg.borrow_mut().free(),
         }
     }
@@ -29,6 +31,7 @@ impl Register {
         match self {
             Register::Void => unimplemented!(),
             Register::Stack(reg) => reg.name(),
+            Register::String(index) => format!("LS{index}(%rip)"),
             Register::Scratch(reg, type_decl, valuekind) => match valuekind {
                 ValueKind::Rvalue => reg.borrow().name(type_decl),
                 ValueKind::Lvalue => self.base_name(),
@@ -48,6 +51,7 @@ impl Register {
         match self {
             Register::Void => unimplemented!(),
             Register::Stack(reg) => reg.name(),
+            Register::String(_) => self.name(),
             Register::Scratch(reg, _, valuekind) => match valuekind {
                 ValueKind::Rvalue => {
                     reg.borrow()
@@ -71,6 +75,7 @@ impl Register {
     pub fn set_type(&mut self, type_decl: NEWTypes) {
         match self {
             Register::Void => unimplemented!(),
+            Register::String(_) => (),
             Register::Stack(reg) => reg.type_decl = type_decl,
             Register::Scratch(_, old_decl, _) => *old_decl = type_decl,
             Register::Arg(_, old_decl) => *old_decl = type_decl,
@@ -79,6 +84,7 @@ impl Register {
     pub fn get_type(&self) -> NEWTypes {
         match self {
             Register::Void => unimplemented!(),
+            Register::String(_) => NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
             Register::Stack(reg) => reg.type_decl.clone(),
             Register::Scratch(_, type_decl, _) | Register::Arg(_, type_decl) => type_decl.clone(),
         }

@@ -395,14 +395,9 @@ impl TypeChecker {
         let function_type = self.get_function_type(keyword)?.clone();
 
         if let Some(expr) = expr {
-            let body_return = self.expr_type(expr)?;
+            let mut body_return = self.expr_type(expr)?;
 
-            if matches!(body_return, NEWTypes::Array { .. }) {
-                return Err(Error::new(
-                    keyword,
-                    &format!("Can't return local stack-array '{}'", body_return),
-                ));
-            }
+            crate::arr_decay!(body_return, expr, keyword);
             self.check_return_compatibility(keyword, &function_type, &body_return)?;
             self.maybe_cast(&function_type, &body_return, expr);
         } else {
@@ -493,12 +488,14 @@ impl TypeChecker {
         Ok(operand)
     }
     fn string(&mut self, data: String) -> Result<NEWTypes, Error> {
+        let len = data.len() + 1; // extra byte for \0-Terminator
         self.const_labels
             .insert(data, create_label(&mut self.const_label_count));
 
-        Ok(NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
-            Types::Char,
-        ))))
+        Ok(NEWTypes::Array {
+            of: Box::new(NEWTypes::Primitive(Types::Char)),
+            amount: len,
+        })
     }
     fn compound_assign(
         &mut self,
@@ -535,15 +532,15 @@ impl TypeChecker {
         r_expr: &mut Expr,
         mut r_type: NEWTypes,
     ) -> Result<NEWTypes, Error> {
-        if l_expr.value_kind != ValueKind::Lvalue {
-            return Err(Error::new(token, "Expect Lvalue left of assignment"));
-        }
-
         if matches!(l_type, NEWTypes::Array { .. }) {
             return Err(Error::new(
                 token,
                 &format!("array {} is not assignable", l_type),
             ));
+        }
+
+        if l_expr.value_kind != ValueKind::Lvalue {
+            return Err(Error::new(token, "Expect Lvalue left of assignment"));
         }
 
         crate::arr_decay!(r_type, r_expr, token);

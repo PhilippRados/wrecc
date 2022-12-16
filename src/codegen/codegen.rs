@@ -434,20 +434,7 @@ impl<'a> Compiler<'a> {
         Ok(return_reg)
     }
     fn cg_string(&mut self, name: String) -> Result<Register, std::fmt::Error> {
-        let dest = Register::Scratch(
-            self.scratch.scratch_alloc(),
-            NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
-            ValueKind::Rvalue,
-        );
-
-        writeln!(
-            self.output,
-            "\tleaq    LS{}(%rip), {}",
-            self.const_labels[&name],
-            dest.name()
-        )?;
-
-        Ok(dest)
+        Ok(Register::String(self.const_labels[&name]))
     }
     fn cg_scale_down(
         &mut self,

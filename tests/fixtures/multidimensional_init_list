@@ -1,0 +1,11 @@
+void printf(char* s, int c, int d);
+
+int main(){
+  int a[3][2] = {1,1,{2,},{5,7,},};
+
+  for (int i = 0; i < 3; i++){
+    for (int j = 0; j < 2; j++){
+     printf("%d: %d\n",i,a[i][j]);
+    }
+  }
+}

@@ -220,7 +220,13 @@ impl Parser {
                 match self.matches(vec![TokenKind::LeftBrace]) {
                     Some(_) => {
                         let elements = self.initializer_list(&type_decl, name.clone())?;
-                        let assign_sugar = list_sugar_assign(name.clone(), elements);
+                        let assign_sugar = list_sugar_assign(
+                            name.clone(),
+                            &elements,
+                            type_decl.clone(),
+                            true,
+                            Expr::new(ExprKind::Ident(name.clone()), ValueKind::Lvalue),
+                        );
 
                         self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
                         Ok(Stmt::InitList(type_decl, name, assign_sugar))
@@ -262,14 +268,14 @@ impl Parser {
             }
             match amount.cmp(&elements.len()) {
                 Ordering::Less => {
-                    return Err(Error::new(
-                        &token,
-                        &format!(
-                            "Array overflow. Expected size: {}, Actual size: {}",
-                            amount,
-                            elements.len()
-                        ),
-                    ))
+                    // return Err(Error::new(
+                    //     &token,
+                    //     &format!(
+                    //         "Array overflow. Expected size: {}, Actual size: {}",
+                    //         amount,
+                    //         elements.len()
+                    //     ),
+                    // ))
                 }
                 Ordering::Greater => {
                     for _ in elements.len()..*amount {
@@ -679,30 +685,67 @@ fn array_of(type_decl: NEWTypes, size: i32) -> NEWTypes {
     }
 }
 
-fn list_sugar_assign(token: Token, list: Vec<Expr>) -> Vec<Stmt> {
+fn list_sugar_assign(
+    token: Token,
+    list: &Vec<Expr>,
+    type_decl: NEWTypes,
+    is_outer: bool,
+    left: Expr,
+) -> Vec<Expr> {
     // int a[3] = {1,2,3};
     // equivalent to:
     // int a[3];
     // a[0] = 1;
     // a[1] = 2;
     // a[2] = 3;
-    list.into_iter()
-        .enumerate()
-        .map(|(i, e)| {
-            Stmt::Expr(Expr::new(
-                ExprKind::Assign {
-                    l_expr: Box::new(index_sugar(
-                        token.clone(),
-                        Expr::new(ExprKind::Ident(token.clone()), ValueKind::Lvalue),
-                        Expr::new(ExprKind::Number(i as i32), ValueKind::Rvalue),
-                    )),
-                    token: token.clone(),
-                    r_expr: Box::new(e),
+    if let NEWTypes::Array { amount, of } = type_decl {
+        let mut result = Vec::new();
+        for ((i, _), arr_i) in list
+            .iter()
+            .enumerate()
+            .step_by(
+                if let NEWTypes::Array {
+                    amount: of_amount, ..
+                } = *of
+                {
+                    of_amount
+                } else {
+                    1
                 },
-                ValueKind::Rvalue,
-            ))
-        })
-        .collect()
+            )
+            .zip(0..amount)
+        {
+            list_sugar_assign(
+                token.clone(),
+                &list[i..list.len()].to_vec(),
+                *of.clone(),
+                false,
+                index_sugar(
+                    token.clone(),
+                    left.clone(),
+                    Expr::new(ExprKind::Number(arr_i as i32), ValueKind::Rvalue),
+                ),
+            )
+            .into_iter()
+            .enumerate()
+            .for_each(|(offset, l_expr)| {
+                result.push(match is_outer {
+                    true => Expr::new(
+                        ExprKind::Assign {
+                            l_expr: Box::new(l_expr),
+                            token: token.clone(),
+                            r_expr: Box::new(list[i + offset].clone()),
+                        },
+                        ValueKind::Rvalue,
+                    ),
+                    false => l_expr,
+                })
+            });
+        }
+        result
+    } else {
+        vec![left]
+    }
 }
 fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
     // a[i] <=> *(a + i)

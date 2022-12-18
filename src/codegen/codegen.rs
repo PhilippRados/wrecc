@@ -90,8 +90,8 @@ impl<'a> Compiler<'a> {
             }
             Stmt::While(_, cond, body) => self.while_statement(cond, body),
             Stmt::FunctionDeclaration(_, _, _) => Ok(()),
-            Stmt::InitList(type_decl, name, expr_stmts) => {
-                self.init_list(type_decl, name.unwrap_string(), expr_stmts)
+            Stmt::InitList(type_decl, name, exprs) => {
+                self.init_list(type_decl, name.unwrap_string(), exprs)
             }
         }
     }
@@ -100,12 +100,12 @@ impl<'a> Compiler<'a> {
         &mut self,
         type_decl: &NEWTypes,
         name: String,
-        expr_stmts: &Vec<Stmt>,
+        exprs: &Vec<Expr>,
     ) -> Result<(), std::fmt::Error> {
         self.declare_var(type_decl, name)?;
 
-        for s in expr_stmts {
-            self.visit(s)?;
+        for e in exprs {
+            self.execute_expr(e)?.free();
         }
         Ok(())
     }

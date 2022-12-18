@@ -6,7 +6,7 @@ pub enum Stmt {
     Expr(Expr),
     DeclareVar(NEWTypes, Token),
     InitVar(NEWTypes, Token, Expr),
-    InitList(NEWTypes, Token, Vec<Stmt>),
+    InitList(NEWTypes, Token, Vec<Expr>),
     Block(Token, Vec<Stmt>),
     If(Token, Expr, Box<Stmt>, Box<Option<Stmt>>),
     While(Token, Expr, Box<Stmt>),

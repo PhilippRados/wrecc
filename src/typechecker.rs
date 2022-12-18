@@ -112,7 +112,7 @@ impl TypeChecker {
             Stmt::While(left_paren, ref mut cond, body) => {
                 self.while_statement(left_paren, cond, body)
             }
-            Stmt::InitList(type_decl, var_name, expr_stmts) => {
+            Stmt::InitList(type_decl, var_name, exprs) => {
                 let name = var_name.unwrap_string();
                 if self.env.current.vars.contains_key(&name) {
                     return Err(Error::new(
@@ -126,8 +126,8 @@ impl TypeChecker {
                 self.env.init_var(name, type_decl.clone());
 
                 // then check all assigns
-                for s in expr_stmts {
-                    self.visit(s)?;
+                for e in exprs {
+                    self.expr_type(e)?;
                 }
                 Ok(())
             }

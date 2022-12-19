@@ -370,6 +370,7 @@ impl Parser {
             TokenKind::MinusEqual,
             TokenKind::StarEqual,
             TokenKind::SlashEqual,
+            TokenKind::ModEqual,
         ]) {
             let value = self.expression()?;
 
@@ -475,7 +476,9 @@ impl Parser {
     fn factor(&mut self) -> Result<Expr, Error> {
         let mut expr = self.unary()?;
 
-        while let Some(token) = self.matches(vec![TokenKind::Slash, TokenKind::Star]) {
+        while let Some(token) =
+            self.matches(vec![TokenKind::Slash, TokenKind::Star, TokenKind::Mod])
+        {
             let operator = token;
             let right = self.unary()?;
             expr = Expr::new(

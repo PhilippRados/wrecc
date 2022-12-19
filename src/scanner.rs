@@ -105,6 +105,10 @@ impl<'a> Scanner<'a> {
                     let token = self.match_next('=', TokenType::StarEqual, TokenType::Star);
                     self.add_token(&mut tokens, token);
                 }
+                '%' => {
+                    let token = self.match_next('=', TokenType::ModEqual, TokenType::Mod);
+                    self.add_token(&mut tokens, token);
+                }
 
                 '!' => {
                     let token = self.match_next('=', TokenType::BangEqual, TokenType::Bang);

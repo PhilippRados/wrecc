@@ -13,12 +13,14 @@ pub enum TokenKind {
     Comma,
     Dot,
     Semicolon,
+
+    // One or two character tokens.
     Slash,
     SlashEqual,
     Star,
     StarEqual,
-
-    // One or two character tokens.
+    Mod,
+    ModEqual,
     Plus,
     PlusPlus,
     PlusEqual,
@@ -75,6 +77,8 @@ impl From<&TokenType> for TokenKind {
             TokenType::SlashEqual => TokenKind::SlashEqual,
             TokenType::Star => TokenKind::Star,
             TokenType::StarEqual => TokenKind::StarEqual,
+            TokenType::Mod => TokenKind::Mod,
+            TokenType::ModEqual => TokenKind::ModEqual,
             TokenType::Bang => TokenKind::Bang,
             TokenType::BangEqual => TokenKind::BangEqual,
             TokenType::Equal => TokenKind::Equal,
@@ -117,12 +121,14 @@ pub enum TokenType {
     Comma,
     Dot,
     Semicolon,
+
+    // One or two character tokens.
     Slash,
     SlashEqual,
     Star,
     StarEqual,
-
-    // One or two character tokens.
+    Mod,
+    ModEqual,
     Plus,
     PlusPlus,
     PlusEqual,
@@ -183,6 +189,8 @@ impl Display for TokenType {
                 TokenType::SlashEqual => "'/='",
                 TokenType::Star => "'*'",
                 TokenType::StarEqual => "'*='",
+                TokenType::Mod => "'%'",
+                TokenType::ModEqual => "'%='",
                 TokenType::Bang => "'!'",
                 TokenType::BangEqual => "'!='",
                 TokenType::Amp => "'&'",
@@ -265,6 +273,7 @@ impl Token {
         match self.token {
             TokenType::SlashEqual => TokenType::Slash,
             TokenType::StarEqual => TokenType::Star,
+            TokenType::ModEqual => TokenType::Mod,
             TokenType::MinusEqual | TokenType::MinusMinus => TokenType::Minus,
             TokenType::PlusEqual | TokenType::PlusPlus => TokenType::Plus,
             _ => unreachable!("not compound token"),

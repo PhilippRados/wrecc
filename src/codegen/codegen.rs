@@ -874,12 +874,43 @@ impl<'a> Compiler<'a> {
             right.get_type().suffix(),
             right.name()
         )?;
-        // move rax(div result) into right reg (remainder in rdx)
+        // move rax(div result) into right reg
         writeln!(
             self.output,
             "\tmov{} {}, {}",
             right.get_type().suffix(),
             right.get_type().return_reg(),
+            right.name()
+        )?;
+
+        left.free();
+        Ok(right)
+    }
+
+    fn cg_mod(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+        writeln!(
+            self.output,
+            "\tmov{} {}, {}",
+            left.get_type().suffix(),
+            left.name(),
+            left.get_type().return_reg(),
+        )?;
+        // rax % rcx => rdx
+        writeln!(
+            self.output,
+            "\t{}\n\tidiv{} {}",
+            match right.get_type().size() {
+                0..=7 => "cdq",
+                _ => "cqo",
+            },
+            right.get_type().suffix(),
+            right.name()
+        )?;
+        writeln!(
+            self.output,
+            "\tmov{} {}, {}",
+            right.get_type().suffix(),
+            Register::Arg(2, right.get_type()).name(), // rdx register stores remainder
             right.name()
         )?;
 
@@ -934,6 +965,7 @@ impl<'a> Compiler<'a> {
             TokenType::Minus => self.cg_sub(left_reg, right_reg),
             TokenType::Star => self.cg_mult(left_reg, right_reg),
             TokenType::Slash => self.cg_div(left_reg, right_reg),
+            TokenType::Mod => self.cg_mod(left_reg, right_reg),
             TokenType::EqualEqual => self.cg_comparison("sete", left_reg, right_reg),
             TokenType::BangEqual => self.cg_comparison("setne", left_reg, right_reg),
             TokenType::Greater => self.cg_comparison("setg", left_reg, right_reg),

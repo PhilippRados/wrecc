@@ -249,7 +249,7 @@ impl Parser {
         }
     }
     fn initializer_list(&mut self, type_decl: &NEWTypes, token: Token) -> Result<Vec<Expr>, Error> {
-        if let NEWTypes::Array { of, amount } = type_decl {
+        if let NEWTypes::Array { of, .. } = type_decl {
             let mut elements = Vec::new();
 
             while !self.check(TokenKind::RightBrace) {
@@ -261,24 +261,26 @@ impl Parser {
                     }
                     None => elements.push(self.expression()?),
                 };
-                self.consume(
-                    TokenKind::Comma,
-                    "Expect ',' seperating expressions in initializer_list",
-                )?;
+                if !self.check(TokenKind::RightBrace) {
+                    self.consume(
+                        TokenKind::Comma,
+                        "Expect ',' seperating expressions in initializer-list",
+                    )?;
+                }
             }
-            match amount.cmp(&elements.len()) {
+            match array_element_count(type_decl.clone()).cmp(&elements.len()) {
                 Ordering::Less => {
-                    // return Err(Error::new(
-                    //     &token,
-                    //     &format!(
-                    //         "Array overflow. Expected size: {}, Actual size: {}",
-                    //         amount,
-                    //         elements.len()
-                    //     ),
-                    // ))
+                    return Err(Error::new(
+                        &token,
+                        &format!(
+                            "Array overflow. Expected size: {}, Actual size: {}",
+                            array_element_count(type_decl.clone()),
+                            elements.len()
+                        ),
+                    ))
                 }
                 Ordering::Greater => {
-                    for _ in elements.len()..*amount {
+                    for _ in elements.len()..array_element_count(type_decl.clone()) {
                         // fill up rest with 0's
                         elements.push(Expr::new(ExprKind::Number(0), ValueKind::Rvalue));
                     }
@@ -294,7 +296,10 @@ impl Parser {
         } else {
             Err(Error::new(
                 &token,
-                "Can't initialize non-array type with initializer-list",
+                &format!(
+                    "Can't initialize non-array type '{}' with initializer-list",
+                    type_decl
+                ),
             ))
         }
     }
@@ -682,6 +687,14 @@ fn array_of(type_decl: NEWTypes, size: i32) -> NEWTypes {
     NEWTypes::Array {
         amount: size as usize,
         of: Box::new(type_decl),
+    }
+}
+
+fn array_element_count(arr: NEWTypes) -> usize {
+    if let NEWTypes::Array { amount, of } = arr {
+        amount * array_element_count(*of)
+    } else {
+        1
     }
 }
 

@@ -568,6 +568,7 @@ impl Parser {
             TokenKind::Star,
             TokenKind::Amp,
             TokenKind::Bang,
+            TokenKind::Tilde,
             TokenKind::Minus,
             TokenKind::PlusPlus,
             TokenKind::MinusMinus,

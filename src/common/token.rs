@@ -13,6 +13,7 @@ pub enum TokenKind {
     Comma,
     Dot,
     Semicolon,
+    Tilde,
 
     // One or two character tokens.
     Slash,
@@ -123,6 +124,7 @@ impl From<&TokenType> for TokenKind {
             TokenType::Int => TokenKind::Int,
             TokenType::Long => TokenKind::Long,
             TokenType::Void => TokenKind::Void,
+            TokenType::Tilde => TokenKind::Tilde,
         }
     }
 }
@@ -139,6 +141,7 @@ pub enum TokenType {
     Comma,
     Dot,
     Semicolon,
+    Tilde,
 
     // One or two character tokens.
     Slash,
@@ -251,6 +254,7 @@ impl Display for TokenType {
                 TokenType::Return => "'return'",
                 TokenType::While => "'while'",
                 TokenType::Void => "'void'",
+                TokenType::Tilde => "'~'",
             }
         )
     }

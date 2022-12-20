@@ -83,6 +83,7 @@ impl<'a> Scanner<'a> {
                 ',' => self.add_token(&mut tokens, TokenType::Comma),
                 '.' => self.add_token(&mut tokens, TokenType::Dot),
                 ';' => self.add_token(&mut tokens, TokenType::Semicolon),
+                '~' => self.add_token(&mut tokens, TokenType::Tilde),
                 '-' => {
                     let mut token = TokenType::Minus;
                     if self.matches('-') {

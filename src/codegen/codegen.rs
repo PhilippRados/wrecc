@@ -1,5 +1,5 @@
 use crate::codegen::register::*;
-use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
+use crate::common::{environment::*, expr::*, stmt::*, token::*, types::*};
 use crate::typechecker::{align_by, create_label};
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -757,8 +757,14 @@ impl<'a> Compiler<'a> {
             TokenType::Minus => self.cg_negate(reg),
             TokenType::Amp => self.cg_address_at(reg),
             TokenType::Star => self.cg_deref(reg),
-            _ => Error::new(token, "invalid unary operator").print_exit(),
+            TokenType::Tilde => self.cg_bit_not(reg),
+            _ => unreachable!(),
         }
+    }
+    fn cg_bit_not(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
+        writeln!(self.output, "\tnotl    {}", reg.name())?; // typechecker guarantees integer-type
+
+        Ok(reg)
     }
     fn cg_bang(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
         writeln!(

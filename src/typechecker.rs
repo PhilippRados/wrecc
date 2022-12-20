@@ -785,17 +785,20 @@ impl TypeChecker {
                 Self::lval_to_rval(right);
                 NEWTypes::Primitive(Types::Int)
             }
-            TokenType::Minus => {
+            TokenType::Minus | TokenType::Tilde => {
                 Self::lval_to_rval(right);
                 self.maybe_int_promote(right, &mut right_type);
 
                 if matches!(right_type, NEWTypes::Pointer(_)) {
                     return Err(Error::new(
                         token,
-                        &format!("Invalid unary-expression '-' with type '{}'", right_type),
+                        &format!(
+                            "Invalid unary-expression '{}' with type '{}'",
+                            token.token, right_type
+                        ),
                     ));
                 }
-                right_type
+                NEWTypes::Primitive(Types::Int)
             }
             _ => unreachable!(), // ++a or --a are evaluated as compound assignment
         })

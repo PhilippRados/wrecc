@@ -918,6 +918,42 @@ impl<'a> Compiler<'a> {
         Ok(right)
     }
 
+    fn cg_bit_xor(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+        writeln!(
+            self.output,
+            "\txor{} {}, {}\n",
+            right.get_type().suffix(),
+            left.name(),
+            right.name()
+        )?;
+
+        left.free();
+        Ok(right)
+    }
+    fn cg_bit_or(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+        writeln!(
+            self.output,
+            "\tor{} {}, {}\n",
+            right.get_type().suffix(),
+            left.name(),
+            right.name()
+        )?;
+
+        left.free();
+        Ok(right)
+    }
+    fn cg_bit_and(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+        writeln!(
+            self.output,
+            "\tand{} {}, {}\n",
+            right.get_type().suffix(),
+            left.name(),
+            right.name()
+        )?;
+
+        left.free();
+        Ok(right)
+    }
     fn cg_comparison(
         &mut self,
         operator: &str,
@@ -966,6 +1002,9 @@ impl<'a> Compiler<'a> {
             TokenType::Star => self.cg_mult(left_reg, right_reg),
             TokenType::Slash => self.cg_div(left_reg, right_reg),
             TokenType::Mod => self.cg_mod(left_reg, right_reg),
+            TokenType::Xor => self.cg_bit_xor(left_reg, right_reg),
+            TokenType::Pipe => self.cg_bit_or(left_reg, right_reg),
+            TokenType::Amp => self.cg_bit_and(left_reg, right_reg),
             TokenType::EqualEqual => self.cg_comparison("sete", left_reg, right_reg),
             TokenType::BangEqual => self.cg_comparison("setne", left_reg, right_reg),
             TokenType::Greater => self.cg_comparison("setg", left_reg, right_reg),

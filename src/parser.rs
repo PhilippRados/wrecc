@@ -371,6 +371,9 @@ impl Parser {
             TokenKind::StarEqual,
             TokenKind::SlashEqual,
             TokenKind::ModEqual,
+            TokenKind::PipeEqual,
+            TokenKind::AmpEqual,
+            TokenKind::XorEqual,
         ]) {
             let value = self.expression()?;
 
@@ -402,12 +405,60 @@ impl Parser {
         Ok(expr)
     }
     fn and(&mut self) -> Result<Expr, Error> {
-        let mut expr = self.equality()?;
+        let mut expr = self.bit_or()?;
 
         while let Some(token) = self.matches(vec![TokenKind::AmpAmp]) {
-            let right = self.equality()?;
+            let right = self.bit_or()?;
             expr = Expr::new(
                 ExprKind::Logical {
+                    left: Box::new(expr),
+                    token,
+                    right: Box::new(right),
+                },
+                ValueKind::Rvalue,
+            )
+        }
+        Ok(expr)
+    }
+    fn bit_or(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.bit_xor()?;
+
+        while let Some(token) = self.matches(vec![TokenKind::Pipe]) {
+            let right = self.bit_xor()?;
+            expr = Expr::new(
+                ExprKind::Binary {
+                    left: Box::new(expr),
+                    token,
+                    right: Box::new(right),
+                },
+                ValueKind::Rvalue,
+            )
+        }
+        Ok(expr)
+    }
+    fn bit_xor(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.bit_and()?;
+
+        while let Some(token) = self.matches(vec![TokenKind::Xor]) {
+            let right = self.bit_and()?;
+            expr = Expr::new(
+                ExprKind::Binary {
+                    left: Box::new(expr),
+                    token,
+                    right: Box::new(right),
+                },
+                ValueKind::Rvalue,
+            )
+        }
+        Ok(expr)
+    }
+    fn bit_and(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.equality()?;
+
+        while let Some(token) = self.matches(vec![TokenKind::Amp]) {
+            let right = self.equality()?;
+            expr = Expr::new(
+                ExprKind::Binary {
                     left: Box::new(expr),
                     token,
                     right: Box::new(right),

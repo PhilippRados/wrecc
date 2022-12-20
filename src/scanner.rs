@@ -101,6 +101,28 @@ impl<'a> Scanner<'a> {
                     }
                     self.add_token(&mut tokens, token);
                 }
+                '|' => {
+                    let mut token = TokenType::Pipe;
+                    if self.matches('|') {
+                        token = TokenType::PipePipe;
+                    } else if self.matches('=') {
+                        token = TokenType::PipeEqual;
+                    }
+                    self.add_token(&mut tokens, token);
+                }
+                '&' => {
+                    let mut token = TokenType::Amp;
+                    if self.matches('&') {
+                        token = TokenType::AmpAmp;
+                    } else if self.matches('=') {
+                        token = TokenType::AmpEqual;
+                    }
+                    self.add_token(&mut tokens, token);
+                }
+                '^' => {
+                    let token = self.match_next('=', TokenType::XorEqual, TokenType::Xor);
+                    self.add_token(&mut tokens, token);
+                }
                 '*' => {
                     let token = self.match_next('=', TokenType::StarEqual, TokenType::Star);
                     self.add_token(&mut tokens, token);
@@ -124,10 +146,6 @@ impl<'a> Scanner<'a> {
                 }
                 '>' => {
                     let token = self.match_next('=', TokenType::GreaterEqual, TokenType::Greater);
-                    self.add_token(&mut tokens, token);
-                }
-                '&' => {
-                    let token = self.match_next('&', TokenType::AmpAmp, TokenType::Amp);
                     self.add_token(&mut tokens, token);
                 }
 
@@ -197,8 +215,6 @@ impl<'a> Scanner<'a> {
                         } else {
                             self.add_token(&mut tokens, TokenType::Ident(value.to_string()))
                         }
-                    } else if c == '|' && self.matches('|') {
-                        self.add_token(&mut tokens, TokenType::PipePipe)
                     } else {
                         self.err = true;
                         errors.push(Error::new_scan_error(
@@ -516,7 +532,7 @@ mod tests {
     }
     #[test]
     fn detects_mutliple_on_invalid_chars() {
-        let source = "int c = 0$\n\n% ^";
+        let source = "int c = 0$\n\n‘ ∞";
         let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => panic!(),
@@ -532,14 +548,14 @@ mod tests {
             Error {
                 line_index: 3,
                 column: 1,
-                line_string: "% ^".to_string(),
-                msg: "Unexpected character: %".to_string(),
+                line_string: "‘ ∞".to_string(),
+                msg: "Unexpected character: ‘".to_string(),
             },
             Error {
                 line_index: 3,
                 column: 3,
-                line_string: "% ^".to_string(),
-                msg: "Unexpected character: ^".to_string(),
+                line_string: "‘ ∞".to_string(),
+                msg: "Unexpected character: ∞".to_string(),
             },
         ];
         assert_eq!(result, expected);

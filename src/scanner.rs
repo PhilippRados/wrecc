@@ -119,6 +119,28 @@ impl<'a> Scanner<'a> {
                     }
                     self.add_token(&mut tokens, token);
                 }
+                '<' => {
+                    let mut token = TokenType::Less;
+                    if self.matches('<') {
+                        token = self.match_next('=', TokenType::LessLessEqual, TokenType::LessLess);
+                    } else if self.matches('=') {
+                        token = TokenType::LessEqual;
+                    }
+                    self.add_token(&mut tokens, token);
+                }
+                '>' => {
+                    let mut token = TokenType::Greater;
+                    if self.matches('>') {
+                        token = self.match_next(
+                            '=',
+                            TokenType::GreaterGreaterEqual,
+                            TokenType::GreaterGreater,
+                        );
+                    } else if self.matches('=') {
+                        token = TokenType::GreaterEqual;
+                    }
+                    self.add_token(&mut tokens, token);
+                }
                 '^' => {
                     let token = self.match_next('=', TokenType::XorEqual, TokenType::Xor);
                     self.add_token(&mut tokens, token);
@@ -138,14 +160,6 @@ impl<'a> Scanner<'a> {
                 }
                 '=' => {
                     let token = self.match_next('=', TokenType::EqualEqual, TokenType::Equal);
-                    self.add_token(&mut tokens, token);
-                }
-                '<' => {
-                    let token = self.match_next('=', TokenType::LessEqual, TokenType::Less);
-                    self.add_token(&mut tokens, token);
-                }
-                '>' => {
-                    let token = self.match_next('=', TokenType::GreaterEqual, TokenType::Greater);
                     self.add_token(&mut tokens, token);
                 }
 

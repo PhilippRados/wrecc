@@ -374,6 +374,8 @@ impl Parser {
             TokenKind::PipeEqual,
             TokenKind::AmpEqual,
             TokenKind::XorEqual,
+            TokenKind::GreaterGreaterEqual,
+            TokenKind::LessLessEqual,
         ]) {
             let value = self.expression()?;
 
@@ -486,7 +488,7 @@ impl Parser {
         Ok(expr)
     }
     fn comparison(&mut self) -> Result<Expr, Error> {
-        let mut expr = self.term()?;
+        let mut expr = self.shift()?;
 
         while let Some(token) = self.matches(vec![
             TokenKind::Greater,
@@ -494,6 +496,23 @@ impl Parser {
             TokenKind::Less,
             TokenKind::LessEqual,
         ]) {
+            let operator = token;
+            let right = self.shift()?;
+            expr = Expr::new(
+                ExprKind::Binary {
+                    left: Box::new(expr),
+                    token: operator,
+                    right: Box::new(right),
+                },
+                ValueKind::Rvalue,
+            );
+        }
+        Ok(expr)
+    }
+    fn shift(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.term()?;
+
+        while let Some(token) = self.matches(vec![TokenKind::GreaterGreater, TokenKind::LessLess]) {
             let operator = token;
             let right = self.term()?;
             expr = Expr::new(
@@ -507,6 +526,7 @@ impl Parser {
         }
         Ok(expr)
     }
+
     fn term(&mut self) -> Result<Expr, Error> {
         let mut expr = self.factor()?;
 

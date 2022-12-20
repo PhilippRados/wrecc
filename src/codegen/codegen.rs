@@ -954,6 +954,32 @@ impl<'a> Compiler<'a> {
         left.free();
         Ok(right)
     }
+    fn cg_shift(
+        &mut self,
+        direction: &str,
+        left: Register,
+        right: Register,
+    ) -> Result<Register, std::fmt::Error> {
+        // expects shift amount to be in %cl (4th arg register)
+        writeln!(
+            self.output,
+            "\tmov{}    {},{}",
+            right.get_type().suffix(),
+            right.name(),
+            Register::Arg(3, right.get_type()).name()
+        )?;
+        right.free();
+
+        writeln!(
+            self.output,
+            "\tsa{}{} %cl, {}\n",
+            direction,
+            left.get_type().suffix(),
+            left.name()
+        )?;
+
+        Ok(left)
+    }
     fn cg_comparison(
         &mut self,
         operator: &str,
@@ -1005,6 +1031,8 @@ impl<'a> Compiler<'a> {
             TokenType::Xor => self.cg_bit_xor(left_reg, right_reg),
             TokenType::Pipe => self.cg_bit_or(left_reg, right_reg),
             TokenType::Amp => self.cg_bit_and(left_reg, right_reg),
+            TokenType::LessLess => self.cg_shift("l", left_reg, right_reg),
+            TokenType::GreaterGreater => self.cg_shift("r", left_reg, right_reg),
             TokenType::EqualEqual => self.cg_comparison("sete", left_reg, right_reg),
             TokenType::BangEqual => self.cg_comparison("setne", left_reg, right_reg),
             TokenType::Greater => self.cg_comparison("setg", left_reg, right_reg),

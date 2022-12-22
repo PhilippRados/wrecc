@@ -59,9 +59,16 @@ impl Parser {
                     "Brackets not allowed here; Put them after the Identifier",
                 ));
             }
-            return self.type_declaration(t);
+            self.type_declaration(t)
+        } else {
+            match self.tokens.peek() {
+                Some(t) => Err(Error::new(
+                    &t,
+                    &format!("Expected declaration, found {}", t.token),
+                )),
+                None => panic!("Expected declaration, found nothing"),
+            }
         }
-        self.statement()
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
         if self.matches(vec![TokenKind::For]).is_some() {
@@ -76,8 +83,8 @@ impl Parser {
         if self.matches(vec![TokenKind::While]).is_some() {
             return self.while_statement();
         }
-        if let Some(t) = self.matches(vec![TokenKind::LeftBrace]) {
-            return Ok(Stmt::Block(t, self.block()?));
+        if let Some(_) = self.matches(vec![TokenKind::LeftBrace]) {
+            return Ok(Stmt::Block(self.block()?));
         }
         self.expression_statement()
     }
@@ -116,7 +123,7 @@ impl Parser {
         // for loop is syntax sugar for while loop
         let mut body = self.statement()?;
         if inc != None {
-            body = Stmt::Block(left_paren.clone(), vec![body, Stmt::Expr(inc.unwrap())]);
+            body = Stmt::Block(vec![body, Stmt::Expr(inc.unwrap())]);
         }
         if cond != None {
             body = Stmt::While(left_paren.clone(), cond.unwrap(), Box::new(body));
@@ -129,7 +136,7 @@ impl Parser {
             );
         }
         if init != None {
-            body = Stmt::Block(left_paren, vec![init.unwrap(), body]);
+            body = Stmt::Block(vec![init.unwrap(), body]);
         }
 
         Ok(body)
@@ -153,7 +160,13 @@ impl Parser {
             if TokenKind::from(&token.token) == TokenKind::RightBrace {
                 break;
             }
-            statements.push(self.declaration()?);
+            statements.push(match self.tokens.peek() {
+                Some(v) => match v.is_type() {
+                    true => self.declaration()?,
+                    false => self.statement()?,
+                },
+                None => panic!("empty"),
+            });
         }
         self.consume(TokenKind::RightBrace, "Expect '}' after Block")?;
         Ok(statements)
@@ -216,35 +229,37 @@ impl Parser {
             type_decl = self.parse_arr(type_decl)?;
 
             if self.matches(vec![TokenKind::Equal]).is_some() {
-                // variable-initialization
-                match self.matches(vec![TokenKind::LeftBrace]) {
-                    Some(_) => {
-                        let elements = self.initializer_list(&type_decl, name.clone())?;
-                        let assign_sugar = list_sugar_assign(
-                            name.clone(),
-                            &elements,
-                            type_decl.clone(),
-                            true,
-                            Expr::new(ExprKind::Ident(name.clone()), ValueKind::Lvalue),
-                        );
-
-                        self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
-                        Ok(Stmt::InitList(type_decl, name, assign_sugar))
-                    }
-                    None => {
-                        let r_value = self.expression()?;
-
-                        self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
-                        Ok(Stmt::InitVar(type_decl, name, r_value))
-                    }
-                }
+                self.var_initialization(name, type_decl)
             } else {
                 // declaration
                 self.consume(
                     TokenKind::Semicolon,
                     "Expect ';' after variable declaration",
                 )?;
-                Ok(Stmt::DeclareVar(type_decl, name))
+                Ok(Stmt::DeclareVar(type_decl, name, false))
+            }
+        }
+    }
+    fn var_initialization(&mut self, name: Token, type_decl: NEWTypes) -> Result<Stmt, Error> {
+        match self.matches(vec![TokenKind::LeftBrace]) {
+            Some(_) => {
+                let elements = self.initializer_list(&type_decl, name.clone())?;
+                let assign_sugar = list_sugar_assign(
+                    name.clone(),
+                    &elements,
+                    type_decl.clone(),
+                    true,
+                    Expr::new(ExprKind::Ident(name.clone()), ValueKind::Lvalue),
+                );
+
+                self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
+                Ok(Stmt::InitList(type_decl, name, assign_sugar, false))
+            }
+            None => {
+                let r_value = self.expression()?;
+
+                self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
+                Ok(Stmt::InitVar(type_decl, name, r_value, false))
             }
         }
     }

@@ -41,10 +41,6 @@ impl Error {
             eprintln!("^");
         }
     }
-    pub fn print_exit(&self) -> ! {
-        self.print_error();
-        std::process::exit(-1);
-    }
     pub fn missing_entrypoint() -> Self {
         Error {
             line_index: -1,

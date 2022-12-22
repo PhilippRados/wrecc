@@ -1,4 +1,4 @@
-Error: can only define functions in global scope
+Error: Can only define functions in global scope
 |
 5     int some() {
 |         ^

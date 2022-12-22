@@ -13,17 +13,19 @@ static ARG_REGISTER_MAP: &[[&str; 6]] = &[
 pub enum Register {
     Scratch(Rc<RefCell<ScratchRegister>>, NEWTypes, ValueKind),
     Stack(StackRegister),
+    Label(LabelRegister),
+    Literal(usize, NEWTypes),
     Arg(usize, NEWTypes),
-    String(usize),
     Void,
 }
 impl Register {
     pub fn free(&self) {
         match self {
-            Register::Void => (),
-            Register::Stack(_) => (),
-            Register::Arg(_, _) => (),
-            Register::String(_) => (),
+            Register::Void
+            | Register::Stack(_)
+            | Register::Arg(..)
+            | Register::Label(_)
+            | Register::Literal(..) => (),
             Register::Scratch(reg, _, _) => reg.borrow_mut().free(),
         }
     }
@@ -31,7 +33,8 @@ impl Register {
         match self {
             Register::Void => unimplemented!(),
             Register::Stack(reg) => reg.name(),
-            Register::String(index) => format!("LS{index}(%rip)"),
+            Register::Label(reg) => reg.name(),
+            Register::Literal(n, _) => format!("${n}"),
             Register::Scratch(reg, type_decl, valuekind) => match valuekind {
                 ValueKind::Rvalue => reg.borrow().name(type_decl),
                 ValueKind::Lvalue => self.base_name(),
@@ -51,7 +54,7 @@ impl Register {
         match self {
             Register::Void => unimplemented!(),
             Register::Stack(reg) => reg.name(),
-            Register::String(_) => self.name(),
+            Register::Label(_) | Register::Literal(..) => self.name(),
             Register::Scratch(reg, _, valuekind) => match valuekind {
                 ValueKind::Rvalue => {
                     reg.borrow()
@@ -75,7 +78,8 @@ impl Register {
     pub fn set_type(&mut self, type_decl: NEWTypes) {
         match self {
             Register::Void => unimplemented!(),
-            Register::String(_) => (),
+            Register::Label(_) => (),
+            Register::Literal(_, old_decl) => *old_decl = type_decl,
             Register::Stack(reg) => reg.type_decl = type_decl,
             Register::Scratch(_, old_decl, _) => *old_decl = type_decl,
             Register::Arg(_, old_decl) => *old_decl = type_decl,
@@ -84,7 +88,8 @@ impl Register {
     pub fn get_type(&self) -> NEWTypes {
         match self {
             Register::Void => unimplemented!(),
-            Register::String(_) => NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
+            Register::Label(reg) => reg.get_type(),
+            Register::Literal(_, type_decl) => type_decl.clone(),
             Register::Stack(reg) => reg.type_decl.clone(),
             Register::Scratch(_, type_decl, _) | Register::Arg(_, type_decl) => type_decl.clone(),
         }
@@ -95,6 +100,27 @@ impl Register {
     pub fn set_value_kind(&mut self, new_val_kind: ValueKind) {
         if let Register::Scratch(_, _, value_kind) = self {
             *value_kind = new_val_kind
+        }
+    }
+}
+#[derive(PartialEq, Clone)]
+pub enum LabelRegister {
+    String(usize),
+    Var(String, NEWTypes),
+}
+impl LabelRegister {
+    fn get_type(&self) -> NEWTypes {
+        match self {
+            LabelRegister::String(_) => {
+                NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char)))
+            }
+            LabelRegister::Var(_, type_decl) => type_decl.clone(),
+        }
+    }
+    fn name(&self) -> String {
+        match self {
+            LabelRegister::String(index) => format!("LS{index}(%rip)"),
+            LabelRegister::Var(name, _) => format!("_{name}(%rip)"),
         }
     }
 }

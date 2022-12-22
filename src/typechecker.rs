@@ -67,25 +67,16 @@ impl TypeChecker {
         }
         Ok(())
     }
-    fn check_global(&self, statement: &Stmt) -> Result<(), Error> {
-        if !matches!(statement, Stmt::Function(_, _, _, _))
-            && !matches!(statement, Stmt::FunctionDeclaration(_, _, _))
-            && find_function(&self.scope) == None
-        {
-            return Err(Error::new(
-                statement.get_token(),
-                &format!("can't have {} in global scope", statement),
-            ));
-        }
-        Ok(())
-    }
     fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
-        self.check_global(statement)?;
-
         match statement {
-            Stmt::DeclareVar(type_decl, var_name) => self.declare_var(type_decl, var_name),
-            Stmt::InitVar(type_decl, name, ref mut expr) => {
-                self.init_var(type_decl.clone(), name, expr)
+            Stmt::DeclareVar(type_decl, var_name, is_global) => {
+                self.declare_var(type_decl, var_name, is_global)
+            }
+            Stmt::InitVar(type_decl, name, ref mut expr, is_global) => {
+                self.init_var(type_decl.clone(), name, expr, is_global)
+            }
+            Stmt::InitList(type_decl, var_name, exprs, is_global) => {
+                self.init_list(type_decl, var_name, exprs, is_global)
             }
             Stmt::Function(return_type, name, params, body) => {
                 self.function_definition(return_type, name, params.clone(), body)
@@ -98,10 +89,9 @@ impl TypeChecker {
                 Ok(_) => Ok(()),
                 Err(e) => Err(e),
             },
-            Stmt::Block(left_paren, statements) => {
+            Stmt::Block(statements) => {
                 self.scope.push(Scope::Block);
                 self.block(
-                    left_paren,
                     statements,
                     Environment::new(Some(Box::new(self.env.clone()))),
                 )
@@ -111,25 +101,6 @@ impl TypeChecker {
             }
             Stmt::While(left_paren, ref mut cond, body) => {
                 self.while_statement(left_paren, cond, body)
-            }
-            Stmt::InitList(type_decl, var_name, exprs) => {
-                let name = var_name.unwrap_string();
-                if self.env.current.vars.contains_key(&name) {
-                    return Err(Error::new(
-                        var_name,
-                        &format!("Redefinition of variable '{}'", name),
-                    ));
-                }
-
-                // first declare var
-                self.increment_stack_size(var_name, &type_decl)?;
-                self.env.init_var(name, type_decl.clone());
-
-                // then check all assigns
-                for e in exprs {
-                    self.expr_type(e)?;
-                }
-                Ok(())
             }
         }
     }
@@ -149,7 +120,12 @@ impl TypeChecker {
         self.returns_all_paths = false;
         Ok(())
     }
-    fn declare_var(&mut self, type_decl: &NEWTypes, var_name: &Token) -> Result<(), Error> {
+    fn declare_var(
+        &mut self,
+        type_decl: &NEWTypes,
+        var_name: &Token,
+        is_global: &mut bool,
+    ) -> Result<(), Error> {
         let name = var_name.unwrap_string();
 
         if self.env.current.vars.contains_key(&name) {
@@ -164,7 +140,11 @@ impl TypeChecker {
                 &format!("Can't assign to 'void' {}", var_name.unwrap_string()),
             ));
         }
-        self.increment_stack_size(var_name, type_decl)?;
+        if *self.scope.last().unwrap() == Scope::Global {
+            *is_global = true;
+        } else {
+            self.increment_stack_size(type_decl)?;
+        }
         self.env.declare_var(name, type_decl.clone());
         Ok(())
     }
@@ -183,11 +163,37 @@ impl TypeChecker {
             Ok(())
         }
     }
+    fn init_list(
+        &mut self,
+        type_decl: &mut NEWTypes,
+        var_name: &Token,
+        exprs: &mut Vec<Expr>,
+        is_global: &mut bool,
+    ) -> Result<(), Error> {
+        let name = var_name.unwrap_string();
+        if self.env.current.vars.contains_key(&name) {
+            return Err(Error::new(
+                var_name,
+                &format!("Redefinition of variable '{}'", name),
+            ));
+        }
+
+        // first declare var
+        self.increment_stack_size(type_decl)?;
+        self.env.init_var(name, type_decl.clone());
+
+        // then check all assigns
+        for e in exprs {
+            self.expr_type(e)?;
+        }
+        Ok(())
+    }
     fn init_var(
         &mut self,
         type_decl: NEWTypes,
         var_name: &Token,
         expr: &mut Expr,
+        is_global: &mut bool,
     ) -> Result<(), Error> {
         let name = var_name.unwrap_string();
         let mut value_type = self.expr_type(expr)?;
@@ -203,8 +209,19 @@ impl TypeChecker {
         self.check_type_compatibility(var_name, &type_decl, &value_type)?;
         self.maybe_cast(&type_decl, &value_type, expr);
 
-        self.increment_stack_size(var_name, &type_decl)?;
+        if *self.scope.last().unwrap() == Scope::Global {
+            if !is_constant(expr) {
+                return Err(Error::new(
+                    var_name,
+                    "Global variables can only be initialized to compile-time constants",
+                ));
+            }
+            *is_global = true;
+        } else {
+            self.increment_stack_size(&type_decl)?;
+        }
         self.env.init_var(name, type_decl);
+
         Ok(())
     }
     fn maybe_cast(&self, type_decl: &NEWTypes, other_type: &NEWTypes, expr: &mut Expr) {
@@ -214,11 +231,7 @@ impl TypeChecker {
             Ordering::Equal => (),
         }
     }
-    fn increment_stack_size(
-        &mut self,
-        var_name: &Token,
-        type_decl: &NEWTypes,
-    ) -> Result<(), Error> {
+    fn increment_stack_size(&mut self, type_decl: &NEWTypes) -> Result<(), Error> {
         match find_function(&self.scope) {
             Some(Scope::Function(name, _)) => {
                 *self.func_stack_size.get_mut(name).unwrap() += type_decl.size();
@@ -226,10 +239,10 @@ impl TypeChecker {
                     align(self.func_stack_size[name], type_decl);
                 Ok(())
             }
-            _ => Err(Error::new(
-                var_name,
-                "cant declare stack variables in global scope",
-            )),
+            _ => {
+                // if we're not inside a function we can only be in global scope
+                Ok(())
+            }
         }
     }
     fn if_statement(
@@ -243,7 +256,7 @@ impl TypeChecker {
         if cond.is_void() {
             return Err(Error::new(
                 keyword,
-                "expected Expression inside of condition, found 'void'",
+                "Expected expression inside of condition, found 'void'",
             ));
         }
         self.visit(then_branch)?;
@@ -291,7 +304,7 @@ impl TypeChecker {
         if *self.scope.last().unwrap() != Scope::Global {
             return Err(Error::new(
                 name_token,
-                "can only define functions in global scope",
+                "Can only define functions in global scope",
             ));
         }
         let name = name_token.unwrap_string();
@@ -327,12 +340,12 @@ impl TypeChecker {
         // initialize stack size for current function-scope
         self.func_stack_size.insert(name.clone(), 0);
         for (type_decl, name) in params.iter().by_ref() {
-            self.increment_stack_size(name, type_decl)?; // add params to stack-size
+            self.increment_stack_size(type_decl)?; // add params to stack-size
             env.init_var(name.unwrap_string(), type_decl.clone()) // initialize params in local scope
         }
 
         // check function body
-        self.block(name_token, body, env)?;
+        self.block(body, env)?;
 
         self.main_returns_int(name_token, return_type)?;
         self.implicit_return_main(name_token, body);
@@ -389,11 +402,15 @@ impl TypeChecker {
                 ),
             ))
         } else if declaration.arity() != params.len() {
-            Err(Error::new(name_token,&format!("Mismatched number of parameters in function-declarations: expected {}, found {}",declaration.arity(),params.len())))
+            Err(Error::new(name_token,
+                &format!("Mismatched number of parameters in function-declarations: expected {}, found {}",
+                    declaration.arity(),params.len())))
         } else {
             for (i, (types, token)) in params.iter().enumerate() {
                 if *types != declaration.params[i].0 {
-                    return Err(Error::new(token,&format!("Mismatched parameter-types in function-declarations: expected '{}', found '{}'",declaration.params[i].0,types)));
+                    return Err(Error::new(token,
+                        &format!("Mismatched parameter-types in function-declarations: expected '{}', found '{}'",
+                            declaration.params[i].0,types)));
                 }
             }
             Ok(())
@@ -633,15 +650,7 @@ impl TypeChecker {
         }
         Ok(())
     }
-    fn block(
-        &mut self,
-        token: &Token,
-        body: &mut Vec<Stmt>,
-        env: Environment<NEWTypes>,
-    ) -> Result<(), Error> {
-        if find_function(&self.scope) == None {
-            return Err(Error::new(token, "can't declare block in global scope"));
-        }
+    fn block(&mut self, body: &mut Vec<Stmt>, env: Environment<NEWTypes>) -> Result<(), Error> {
         self.env = env;
         let result = self.check_statements(body);
 
@@ -883,6 +892,15 @@ fn find_function(scopes: &[Scope]) -> Option<&Scope> {
     }
     None
 }
+
+// returns true if expression is known at compile-time
+fn is_constant(expr: &Expr) -> bool {
+    match expr.kind {
+        ExprKind::String(_) | ExprKind::Number(_) | ExprKind::CharLit(_) => true,
+        _ => false,
+    }
+}
+
 // helper function for calculating log2
 const fn num_bits<T>() -> usize {
     std::mem::size_of::<T>() * 8

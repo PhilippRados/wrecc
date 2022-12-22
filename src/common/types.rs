@@ -10,8 +10,11 @@ pub trait TypeInfo {
     // returns the correct suffix for a register of type
     fn reg_suffix(&self) -> &str;
 
-    // returns the correct suffix for an instruction of type
+    // returns the instruction-suffixes
     fn suffix(&self) -> &str;
+
+    // returns the instruction-suffixes spelled out
+    fn complete_suffix(&self) -> &str;
 
     // returns the return register name of type
     fn return_reg(&self) -> &str;
@@ -45,6 +48,12 @@ impl TypeInfo for NEWTypes {
         match self {
             NEWTypes::Primitive(t) => t.suffix(),
             NEWTypes::Pointer(_) | NEWTypes::Array { .. } => "q",
+        }
+    }
+    fn complete_suffix(&self) -> &str {
+        match self {
+            NEWTypes::Primitive(t) => t.complete_suffix(),
+            NEWTypes::Pointer(_) | NEWTypes::Array { .. } => "quad",
         }
     }
     fn return_reg(&self) -> &str {
@@ -143,11 +152,14 @@ impl TypeInfo for Types {
         }
     }
     fn suffix(&self) -> &str {
+        &self.complete_suffix().get(0..1).unwrap()
+    }
+    fn complete_suffix(&self) -> &str {
         match self {
             Types::Void => unreachable!(),
-            Types::Char => "b",
-            Types::Int => "l",
-            Types::Long => "q",
+            Types::Char => "byte",
+            Types::Int => "long",
+            Types::Long => "quad",
         }
     }
     fn return_reg(&self) -> &str {

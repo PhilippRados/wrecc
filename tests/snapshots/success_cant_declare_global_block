@@ -1,4 +1,8 @@
-Error: can't have 'block-statement' in global scope
+Error: Expected declaration, found '{'
 |
 2 {
 | ^
+Error: Expected declaration, found 'return'
+|
+5     return 0;
+|     ^

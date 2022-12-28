@@ -238,11 +238,7 @@ impl<'a> Compiler<'a> {
                     self.output,
                     "\n\t.data\n_{name}:\n\t.{} {}",
                     type_decl.complete_suffix(),
-                    if let Register::Literal(n, _) = value_reg {
-                        n.to_string()
-                    } else {
-                        value_reg.name()
-                    }
+                    value_reg.base_name()
                 )?;
 
                 self.env.declare_var(

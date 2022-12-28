@@ -204,9 +204,16 @@ impl TypeChecker {
                 &format!("Redefinition of variable '{}'", name),
             ));
         }
-        crate::arr_decay!(value_type, expr, var_name);
+        // char[] s = "literal" is valid
+        match (type_decl.clone(), &expr.kind) {
+            (NEWTypes::Array { of, .. }, ExprKind::String(..))
+                if matches!(*of, NEWTypes::Primitive(Types::Char)) =>
+            {
+                ()
+            }
+            _ => self.check_type_compatibility(var_name, &type_decl, &value_type)?,
+        }
 
-        self.check_type_compatibility(var_name, &type_decl, &value_type)?;
         self.maybe_cast(&type_decl, &value_type, expr);
 
         if *self.scope.last().unwrap() == Scope::Global {
@@ -218,6 +225,7 @@ impl TypeChecker {
             }
             *is_global = true;
         } else {
+            crate::arr_decay!(value_type, expr, var_name);
             self.increment_stack_size(&type_decl)?;
         }
         self.env.init_var(name, type_decl);
@@ -646,7 +654,7 @@ impl TypeChecker {
         args: Vec<NEWTypes>,
     ) -> Result<(), Error> {
         for (i, type_decl) in args.iter().enumerate() {
-            self.check_type_compatibility(left_paren, type_decl, &params[i].0)?;
+            self.check_type_compatibility(left_paren, &params[i].0, type_decl)?;
         }
         Ok(())
     }
@@ -785,32 +793,37 @@ impl TypeChecker {
     }
     fn evaluate_unary(&mut self, token: &Token, right: &mut Expr) -> Result<NEWTypes, Error> {
         let mut right_type = self.expr_type(right)?;
-        crate::arr_decay!(right_type, right, token);
 
-        Ok(match token.token {
-            TokenType::Amp => self.check_address(token, right_type, right)?,
-            TokenType::Star => self.check_deref(token, right_type, right)?,
-            TokenType::Bang => {
-                Self::lval_to_rval(right);
-                NEWTypes::Primitive(Types::Int)
-            }
-            TokenType::Minus | TokenType::Tilde => {
-                Self::lval_to_rval(right);
-                self.maybe_int_promote(right, &mut right_type);
+        if matches!(token.token, TokenType::Amp) {
+            // array doesn't decay during '&' expression
+            Ok(self.check_address(token, right_type, right)?)
+        } else {
+            crate::arr_decay!(right_type, right, token);
 
-                if matches!(right_type, NEWTypes::Pointer(_)) {
-                    return Err(Error::new(
-                        token,
-                        &format!(
-                            "Invalid unary-expression '{}' with type '{}'",
-                            token.token, right_type
-                        ),
-                    ));
+            Ok(match token.token {
+                TokenType::Star => self.check_deref(token, right_type, right)?,
+                TokenType::Bang => {
+                    Self::lval_to_rval(right);
+                    NEWTypes::Primitive(Types::Int)
                 }
-                NEWTypes::Primitive(Types::Int)
-            }
-            _ => unreachable!(), // ++a or --a are evaluated as compound assignment
-        })
+                TokenType::Minus | TokenType::Tilde => {
+                    Self::lval_to_rval(right);
+                    self.maybe_int_promote(right, &mut right_type);
+
+                    if matches!(right_type, NEWTypes::Pointer(_)) {
+                        return Err(Error::new(
+                            token,
+                            &format!(
+                                "Invalid unary-expression '{}' with type '{}'",
+                                token.token, right_type
+                            ),
+                        ));
+                    }
+                    NEWTypes::Primitive(Types::Int)
+                }
+                _ => unreachable!(), // ++a or --a are evaluated as compound assignment
+            })
+        }
     }
     fn check_address(
         &self,
@@ -896,7 +909,12 @@ fn find_function(scopes: &[Scope]) -> Option<&Scope> {
 // returns true if expression is known at compile-time
 fn is_constant(expr: &Expr) -> bool {
     match expr.kind {
-        ExprKind::String(_) | ExprKind::Number(_) | ExprKind::CharLit(_) => true,
+        ExprKind::String(_)
+        | ExprKind::Number(_)
+        | ExprKind::CharLit(_)
+        | ExprKind::CastUp { .. }
+        | ExprKind::CastDown { .. } => true,
+        // ExprKind::Unary { ref right, .. } => is_constant(&right),
         _ => false,
     }
 }

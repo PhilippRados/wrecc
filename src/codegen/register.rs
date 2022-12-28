@@ -54,7 +54,8 @@ impl Register {
         match self {
             Register::Void => unimplemented!(),
             Register::Stack(reg) => reg.name(),
-            Register::Label(_) | Register::Literal(..) => self.name(),
+            Register::Label(reg) => reg.base_name(),
+            Register::Literal(index, ..) => format!("{index}"),
             Register::Scratch(reg, _, valuekind) => match valuekind {
                 ValueKind::Rvalue => {
                     reg.borrow()
@@ -118,9 +119,13 @@ impl LabelRegister {
         }
     }
     fn name(&self) -> String {
+        format!("{}(%rip)", self.base_name())
+    }
+
+    fn base_name(&self) -> String {
         match self {
-            LabelRegister::String(index) => format!("LS{index}(%rip)"),
-            LabelRegister::Var(name, _) => format!("_{name}(%rip)"),
+            LabelRegister::String(index) => format!("LS{index}"),
+            LabelRegister::Var(name, _) => format!("_{name}"),
         }
     }
 }

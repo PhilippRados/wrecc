@@ -115,10 +115,35 @@ impl<'a> Compiler<'a> {
         exprs: &Vec<Expr>,
         is_global: bool,
     ) -> Result<(), std::fmt::Error> {
-        self.declare_var(type_decl, name, is_global)?;
+        match is_global {
+            true => {
+                writeln!(self.output, "\n\t.data\n_{}:", name)?;
 
-        for e in exprs {
-            self.execute_expr(e)?.free();
+                self.env.declare_var(
+                    name.clone(),
+                    Register::Label(LabelRegister::Var(name, type_decl.clone())),
+                );
+            }
+            false => {
+                self.declare_var(type_decl, name, is_global)?;
+            }
+        }
+        for e in exprs.iter() {
+            match (is_global, &e.kind) {
+                // init-list is assignment syntax sugar
+                (true, ExprKind::Assign { r_expr, .. }) => {
+                    let r_value = self.execute_expr(r_expr)?;
+                    writeln!(
+                        self.output,
+                        "\t.{} {}",
+                        r_value.get_type().complete_suffix(),
+                        r_value.base_name()
+                    )?;
+                    r_value.free()
+                }
+                (false, _) => self.execute_expr(e)?.free(),
+                _ => unreachable!(),
+            };
         }
         Ok(())
     }
@@ -535,7 +560,6 @@ impl<'a> Compiler<'a> {
     ) -> Result<Register, std::fmt::Error> {
         let mut value_reg = self.execute_expr(expr)?;
         value_reg.set_type(new_type);
-        value_reg.set_value_kind(ValueKind::Rvalue);
 
         Ok(value_reg)
     }

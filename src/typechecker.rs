@@ -178,14 +178,26 @@ impl TypeChecker {
             ));
         }
 
-        // first declare var
-        self.increment_stack_size(type_decl)?;
         self.env.init_var(name, type_decl.clone());
+        if *self.scope.last().unwrap() == Scope::Global {
+            for e in exprs.iter() {
+                if !is_constant(e) {
+                    return Err(Error::new(
+                        var_name,
+                        "Global variables can only be initialized to compile-time constants",
+                    ));
+                }
+            }
+            *is_global = true;
+        } else {
+            self.increment_stack_size(type_decl)?;
+        }
 
         // then check all assigns
         for e in exprs {
             self.expr_type(e)?;
         }
+
         Ok(())
     }
     fn init_var(
@@ -914,6 +926,7 @@ fn is_constant(expr: &Expr) -> bool {
         | ExprKind::CharLit(_)
         | ExprKind::CastUp { .. }
         | ExprKind::CastDown { .. } => true,
+        ExprKind::Assign { ref r_expr, .. } => is_constant(r_expr),
         // ExprKind::Unary { ref right, .. } => is_constant(&right),
         _ => false,
     }

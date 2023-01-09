@@ -598,7 +598,7 @@ mod tests {
     }
     #[test]
     fn errors_on_non_ascii_non_letters() {
-        let source = "\nint ä ~ = 123";
+        let source = "\nint ä @ = 123";
         let mut scanner = Scanner::new(source);
         let result = match scanner.scan_token() {
             Ok(v) => panic!(),
@@ -607,8 +607,8 @@ mod tests {
         let expected = vec![Error {
             line_index: 2,
             column: 8,
-            line_string: "int ä ~ = 123".to_string(),
-            msg: "Unexpected character: ~".to_string(),
+            line_string: "int ä @ = 123".to_string(),
+            msg: "Unexpected character: @".to_string(),
         }];
         assert_eq!(result, expected);
     }

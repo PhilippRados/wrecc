@@ -122,7 +122,7 @@ impl NEWTypes {
 
             (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => *self == *other,
 
-            (NEWTypes::Pointer(to), NEWTypes::Array { of, .. }) => to.type_compatible(of),
+            (NEWTypes::Pointer(to), NEWTypes::Array { of, .. }) => *to == *of,
 
             _ => false,
         }

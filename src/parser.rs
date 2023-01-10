@@ -241,8 +241,17 @@ impl Parser {
         }
     }
     fn var_initialization(&mut self, name: Token, type_decl: NEWTypes) -> Result<Stmt, Error> {
-        match self.matches(vec![TokenKind::LeftBrace]) {
-            Some(_) => {
+        // TODO: don't just unwrap eof have proper helper function
+        match (
+            self.tokens
+                .peek()
+                .expect("eof reached while parsing variable initialization")
+                .token
+                .clone(),
+            type_decl.clone(),
+        ) {
+            (TokenType::LeftBrace, _) => {
+                self.tokens.next().unwrap();
                 let elements = self.initializer_list(&type_decl, name.clone())?;
                 let assign_sugar = list_sugar_assign(
                     name.clone(),
@@ -255,7 +264,45 @@ impl Parser {
                 self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
                 Ok(Stmt::InitList(type_decl, name, assign_sugar, false))
             }
-            None => {
+            (TokenType::String(mut s), NEWTypes::Array { amount, of })
+                if matches!(*of, NEWTypes::Primitive(Types::Char)) =>
+            {
+                // char s[] = "abc" identical to char s[] = {'a','b','c','\0'} (6.7.8)
+                self.tokens.next().unwrap();
+                if amount < s.len() {
+                    return Err(Error::new(
+                        &name,
+                        &format!(
+                            "Initializer-string is too long. Expected: {}, Actual: {}",
+                            amount,
+                            s.len()
+                        ),
+                    ));
+                }
+                let mut diff = amount - s.len();
+                while diff > 0 {
+                    diff -= 1;
+                    s.push('\0'); // append implicit NULL terminator to string
+                }
+
+                let elements = s
+                    .as_bytes()
+                    .into_iter()
+                    .map(|c| Expr::new(ExprKind::CharLit(*c as i8), ValueKind::Rvalue))
+                    .collect();
+
+                let string_sugar = list_sugar_assign(
+                    name.clone(),
+                    &elements,
+                    type_decl.clone(),
+                    true,
+                    Expr::new(ExprKind::Ident(name.clone()), ValueKind::Lvalue),
+                );
+
+                self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
+                Ok(Stmt::InitList(type_decl, name, string_sugar, false))
+            }
+            _ => {
                 let r_value = self.expression()?;
 
                 self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;

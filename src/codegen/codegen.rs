@@ -79,14 +79,14 @@ impl<'a> Compiler<'a> {
     fn visit(&mut self, statement: &Stmt) -> Result<(), std::fmt::Error> {
         match statement {
             Stmt::Expr(expr) => {
-                self.execute_expr(expr)?.free(); // result isn't used
+                self.execute_expr(expr, false)?.free(); // result isn't used
                 Ok(())
             }
             Stmt::DeclareVar(type_decl, name, is_global) => {
                 self.declare_var(type_decl, name.unwrap_string(), *is_global)
             }
             Stmt::InitVar(type_decl, name, expr, is_global) => {
-                let value_reg = self.execute_expr(expr)?;
+                let value_reg = self.execute_expr(expr, *is_global)?;
                 self.init_var(type_decl, name, value_reg, *is_global)
             }
             Stmt::InitList(type_decl, name, exprs, is_global) => {
@@ -132,7 +132,7 @@ impl<'a> Compiler<'a> {
             match (is_global, &e.kind) {
                 // init-list is assignment syntax sugar
                 (true, ExprKind::Assign { r_expr, .. }) => {
-                    let r_value = self.execute_expr(r_expr)?;
+                    let r_value = self.execute_expr(r_expr, is_global)?;
                     writeln!(
                         self.output,
                         "\t.{} {}",
@@ -141,7 +141,7 @@ impl<'a> Compiler<'a> {
                     )?;
                     r_value.free()
                 }
-                (false, _) => self.execute_expr(e)?.free(),
+                (false, _) => self.execute_expr(e, false)?.free(),
                 _ => unreachable!(),
             };
         }
@@ -155,7 +155,7 @@ impl<'a> Compiler<'a> {
         self.visit(body)?;
 
         writeln!(self.output, "L{}:", end_label)?;
-        let cond_reg = self.execute_expr(cond)?;
+        let cond_reg = self.execute_expr(cond, false)?;
         writeln!(
             self.output,
             "\tcmpl    $0, {}\n\tjne      L{}",
@@ -173,7 +173,7 @@ impl<'a> Compiler<'a> {
         then_branch: &Stmt,
         else_branch: &Option<Stmt>,
     ) -> Result<(), std::fmt::Error> {
-        let mut cond_reg = self.execute_expr(cond)?;
+        let mut cond_reg = self.execute_expr(cond, false)?;
         cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
         let done_label = create_label(&mut self.label_index);
@@ -206,7 +206,7 @@ impl<'a> Compiler<'a> {
         );
         match value {
             Some(expr) => {
-                let return_value = self.execute_expr(expr)?;
+                let return_value = self.execute_expr(expr, false)?;
                 writeln!(
                     self.output,
                     "\tmov{}    {}, {}\n\tjmp    {}",
@@ -376,22 +376,26 @@ impl<'a> Compiler<'a> {
     fn cg_literal(&mut self, num: usize, t: Types) -> Result<Register, std::fmt::Error> {
         Ok(Register::Literal(num as usize, NEWTypes::Primitive(t)))
     }
-    pub fn execute_expr(&mut self, ast: &Expr) -> Result<Register, std::fmt::Error> {
+    pub fn execute_expr(
+        &mut self,
+        ast: &Expr,
+        is_global: bool,
+    ) -> Result<Register, std::fmt::Error> {
         match &ast.kind {
             ExprKind::Binary { left, token, right } => {
-                let left_reg = self.execute_expr(left)?;
-                let right_reg = self.execute_expr(right)?;
+                let left_reg = self.execute_expr(left, false)?;
+                let right_reg = self.execute_expr(right, false)?;
 
                 self.cg_binary(left_reg, &token.token, right_reg)
             }
             ExprKind::Number(v) => self.cg_literal(*v as usize, Types::Int),
             ExprKind::CharLit(c) => self.cg_literal(*c as usize, Types::Char),
-            ExprKind::Grouping { expr } => self.execute_expr(expr),
-            ExprKind::Unary { token, right } => self.cg_unary(token, right),
+            ExprKind::Grouping { expr } => self.execute_expr(expr, false),
+            ExprKind::Unary { token, right } => self.cg_unary(token, right, is_global),
             ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
             ExprKind::Assign { l_expr, r_expr, .. } => {
-                let left_reg = self.execute_expr(l_expr)?;
-                let right_reg = self.execute_expr(r_expr)?;
+                let left_reg = self.execute_expr(l_expr, false)?;
+                let right_reg = self.execute_expr(r_expr, false)?;
 
                 self.cg_assign(left_reg, right_reg)
             }
@@ -422,8 +426,8 @@ impl<'a> Compiler<'a> {
         token: &Token,
         r_expr: &Expr,
     ) -> Result<Register, std::fmt::Error> {
-        let l_reg = self.execute_expr(l_expr)?;
-        let r_reg = self.execute_expr(r_expr)?;
+        let l_reg = self.execute_expr(l_expr, false)?;
+        let r_reg = self.execute_expr(r_expr, false)?;
 
         let mut temp_scratch = Register::Scratch(
             self.scratch.scratch_alloc(),
@@ -466,7 +470,7 @@ impl<'a> Compiler<'a> {
         expr: &Expr,
         by_amount: &usize,
     ) -> Result<Register, std::fmt::Error> {
-        let reg = self.execute_expr(expr)?;
+        let reg = self.execute_expr(expr, false)?;
         let mut return_reg = Register::Scratch(
             self.scratch.scratch_alloc(),
             reg.get_type(),
@@ -526,7 +530,7 @@ impl<'a> Compiler<'a> {
         expr: &Expr,
         by_amount: &usize,
     ) -> Result<Register, std::fmt::Error> {
-        let mut value_reg = self.execute_expr(expr)?;
+        let mut value_reg = self.execute_expr(expr, false)?;
         value_reg = convert_reg!(self, value_reg, Register::Literal(..));
 
         writeln!(
@@ -540,7 +544,7 @@ impl<'a> Compiler<'a> {
         Ok(value_reg)
     }
     fn cg_scale_up(&mut self, expr: &Expr, by_amount: &usize) -> Result<Register, std::fmt::Error> {
-        let mut value_reg = self.execute_expr(expr)?;
+        let mut value_reg = self.execute_expr(expr, false)?;
         value_reg = convert_reg!(self, value_reg, Register::Literal(..) | Register::Stack(..));
 
         writeln!(
@@ -558,13 +562,13 @@ impl<'a> Compiler<'a> {
         expr: &Expr,
         new_type: NEWTypes,
     ) -> Result<Register, std::fmt::Error> {
-        let mut value_reg = self.execute_expr(expr)?;
+        let mut value_reg = self.execute_expr(expr, false)?;
         value_reg.set_type(new_type);
 
         Ok(value_reg)
     }
     fn cg_cast_up(&mut self, expr: &Expr, new_type: NEWTypes) -> Result<Register, std::fmt::Error> {
-        let mut value_reg = self.execute_expr(expr)?;
+        let mut value_reg = self.execute_expr(expr, false)?;
 
         if matches!(value_reg, Register::Scratch(..)) || matches!(value_reg, Register::Stack(..)) {
             let dest_reg = Register::Scratch(
@@ -625,7 +629,7 @@ impl<'a> Compiler<'a> {
 
         // moving the arguments into their designated registers
         for (i, expr) in args.iter().enumerate().rev() {
-            let reg = self.execute_expr(expr)?;
+            let reg = self.execute_expr(expr, false)?;
 
             let arg = Register::Arg(i, expr.type_decl.clone().unwrap());
             writeln!(
@@ -726,7 +730,7 @@ impl<'a> Compiler<'a> {
         }
     }
     fn cg_or(&mut self, left: &Expr, right: &Expr) -> Result<Register, std::fmt::Error> {
-        let mut left = self.execute_expr(left)?;
+        let mut left = self.execute_expr(left, false)?;
         left = convert_reg!(self, left, Register::Literal(..));
 
         let true_label = create_label(&mut self.label_index);
@@ -741,7 +745,7 @@ impl<'a> Compiler<'a> {
         )?;
         left.free();
 
-        let mut right = self.execute_expr(right)?;
+        let mut right = self.execute_expr(right, false)?;
         right = convert_reg!(self, right, Register::Literal(..));
 
         let false_label = create_label(&mut self.label_index);
@@ -782,7 +786,7 @@ impl<'a> Compiler<'a> {
         Ok(result)
     }
     fn cg_and(&mut self, left: &Expr, right: &Expr) -> Result<Register, std::fmt::Error> {
-        let mut left = self.execute_expr(left)?;
+        let mut left = self.execute_expr(left, false)?;
         left = convert_reg!(self, left, Register::Literal(..));
 
         let false_label = create_label(&mut self.label_index);
@@ -798,7 +802,7 @@ impl<'a> Compiler<'a> {
         left.free();
 
         // left is true if right false jump to false label
-        let mut right = self.execute_expr(right)?;
+        let mut right = self.execute_expr(right, false)?;
         right = convert_reg!(self, right, Register::Literal(..));
         writeln!(
             self.output,
@@ -829,15 +833,20 @@ impl<'a> Compiler<'a> {
         writeln!(self.output, "L{}:", true_label)?;
         Ok(result)
     }
-    fn cg_unary(&mut self, token: &Token, right: &Expr) -> Result<Register, std::fmt::Error> {
-        let mut reg = self.execute_expr(right)?;
+    fn cg_unary(
+        &mut self,
+        token: &Token,
+        right: &Expr,
+        is_global: bool,
+    ) -> Result<Register, std::fmt::Error> {
+        let mut reg = self.execute_expr(right, is_global)?;
         if matches!(reg, Register::Literal(..)) {
             reg = self.scratch_temp(reg)?;
         }
         match token.token {
             TokenType::Bang => self.cg_bang(reg),
             TokenType::Minus => self.cg_negate(reg),
-            TokenType::Amp => self.cg_address_at(reg),
+            TokenType::Amp => self.cg_address_at(reg, is_global),
             TokenType::Star => self.cg_deref(reg),
             TokenType::Tilde => self.cg_bit_not(reg),
             _ => unreachable!(),
@@ -885,7 +894,14 @@ impl<'a> Compiler<'a> {
         )?;
         Ok(reg)
     }
-    fn cg_address_at(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
+    fn cg_address_at(
+        &mut self,
+        reg: Register,
+        is_global: bool,
+    ) -> Result<Register, std::fmt::Error> {
+        if is_global && matches!(reg, Register::Label(..)) {
+            return Ok(reg);
+        }
         let dest = Register::Scratch(
             self.scratch.scratch_alloc(),
             NEWTypes::Pointer(Box::new(reg.get_type())),

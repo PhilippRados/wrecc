@@ -140,7 +140,7 @@ impl TypeChecker {
                 &format!("Can't assign to 'void' {}", var_name.unwrap_string()),
             ));
         }
-        if *self.scope.last().unwrap() == Scope::Global {
+        if self.is_global() {
             *is_global = true;
         } else {
             self.increment_stack_size(type_decl)?;
@@ -177,25 +177,30 @@ impl TypeChecker {
                 &format!("Redefinition of variable '{}'", name),
             ));
         }
-
         self.env.init_var(name, type_decl.clone());
-        if *self.scope.last().unwrap() == Scope::Global {
-            for e in exprs.iter() {
-                if !is_constant(e) {
-                    return Err(Error::new(
-                        var_name,
-                        "Global variables can only be initialized to compile-time constants",
-                    ));
+
+        // then type-check all assigns
+        let mut types = vec![];
+        for e in exprs.iter_mut() {
+            types.push(self.expr_type(e)?);
+        }
+
+        if self.is_global() {
+            for (i, e) in exprs.iter().enumerate() {
+                if let ExprKind::Assign { r_expr, .. } = e.kind.clone() {
+                    if !is_constant(&*r_expr, &types[i]) {
+                        return Err(Error::new(
+                            var_name,
+                            "Global variables can only be initialized to compile-time constants",
+                        ));
+                    }
+                } else {
+                    unreachable!()
                 }
             }
             *is_global = true;
         } else {
             self.increment_stack_size(type_decl)?;
-        }
-
-        // then check all assigns
-        for e in exprs {
-            self.expr_type(e)?;
         }
 
         Ok(())
@@ -216,7 +221,9 @@ impl TypeChecker {
                 &format!("Redefinition of variable '{}'", name),
             ));
         }
-        // char[] s = "literal" is valid
+        crate::arr_decay!(value_type, expr, var_name);
+
+        // char s[] = "literal" is valid
         match (type_decl.clone(), &expr.kind) {
             (NEWTypes::Array { of, .. }, ExprKind::String(..))
                 if matches!(*of, NEWTypes::Primitive(Types::Char)) =>
@@ -228,8 +235,8 @@ impl TypeChecker {
 
         self.maybe_cast(&type_decl, &value_type, expr);
 
-        if *self.scope.last().unwrap() == Scope::Global {
-            if !is_constant(expr) {
+        if self.is_global() {
+            if !is_constant(expr, &value_type) {
                 return Err(Error::new(
                     var_name,
                     "Global variables can only be initialized to compile-time constants",
@@ -237,7 +244,7 @@ impl TypeChecker {
             }
             *is_global = true;
         } else {
-            crate::arr_decay!(value_type, expr, var_name);
+            // crate::arr_decay!(value_type, expr, var_name);
             self.increment_stack_size(&type_decl)?;
         }
         self.env.init_var(name, type_decl);
@@ -321,7 +328,7 @@ impl TypeChecker {
         params: Vec<(NEWTypes, Token)>,
         body: &mut Vec<Stmt>,
     ) -> Result<(), Error> {
-        if *self.scope.last().unwrap() != Scope::Global {
+        if !self.is_global() {
             return Err(Error::new(
                 name_token,
                 "Can only define functions in global scope",
@@ -811,7 +818,6 @@ impl TypeChecker {
             Ok(self.check_address(token, right_type, right)?)
         } else {
             crate::arr_decay!(right_type, right, token);
-
             Ok(match token.token {
                 TokenType::Star => self.check_deref(token, right_type, right)?,
                 TokenType::Bang => {
@@ -895,6 +901,9 @@ impl TypeChecker {
             Ok(())
         }
     }
+    fn is_global(&self) -> bool {
+        *self.scope.last().unwrap() == Scope::Global
+    }
 }
 
 pub fn align_by(mut offset: usize, type_size: usize) -> usize {
@@ -919,16 +928,14 @@ fn find_function(scopes: &[Scope]) -> Option<&Scope> {
 }
 
 // returns true if expression is known at compile-time
-fn is_constant(expr: &Expr) -> bool {
+fn is_constant(expr: &Expr, type_decl: &NEWTypes) -> bool {
     match expr.kind {
         ExprKind::String(_)
         | ExprKind::Number(_)
         | ExprKind::CharLit(_)
         | ExprKind::CastUp { .. }
         | ExprKind::CastDown { .. } => true,
-        ExprKind::Assign { ref r_expr, .. } => is_constant(r_expr),
-        // ExprKind::Unary { ref right, .. } => is_constant(&right),
-        _ => false,
+        _ => matches!(type_decl, NEWTypes::Pointer { .. }), // compile time constant can also be address
     }
 }
 

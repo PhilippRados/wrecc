@@ -79,7 +79,7 @@ impl Display for NEWTypes {
 
 #[macro_export]
 macro_rules! arr_decay {
-    ($arr:expr,$ast:expr,$token:expr) => {
+    ($arr:expr,$ast:expr,$token:expr,$is_global:expr) => {
         if let NEWTypes::Array { of, .. } = $arr {
             $arr = NEWTypes::Pointer(of);
 
@@ -91,6 +91,7 @@ macro_rules! arr_decay {
                     $token.line_string.clone(),
                 ),
                 right: Box::new($ast.clone()),
+                is_global: $is_global,
             };
         }
     };
@@ -122,8 +123,6 @@ impl NEWTypes {
             (NEWTypes::Primitive(_), NEWTypes::Primitive(_)) => true,
 
             (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => *self == *other,
-
-            (NEWTypes::Pointer(to), NEWTypes::Array { of, .. }) => *to == *of,
 
             _ => false,
         }

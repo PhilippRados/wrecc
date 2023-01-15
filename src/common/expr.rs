@@ -11,6 +11,7 @@ pub enum ExprKind {
     Unary {
         token: Token,
         right: Box<Expr>,
+        is_global: bool,
     },
     Grouping {
         expr: Box<Expr>,

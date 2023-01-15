@@ -186,9 +186,9 @@ impl TypeChecker {
         }
 
         if self.is_global() {
-            for (i, e) in exprs.iter().enumerate() {
-                if let ExprKind::Assign { r_expr, .. } = e.kind.clone() {
-                    if !is_constant(&*r_expr, &types[i]) {
+            for (i, e) in exprs.iter().by_ref().enumerate() {
+                if let ExprKind::Assign { r_expr, .. } = &e.kind {
+                    if !is_constant(r_expr, &types[i]) {
                         return Err(Error::new(
                             var_name,
                             "Global variables can only be initialized to compile-time constants",
@@ -214,6 +214,7 @@ impl TypeChecker {
     ) -> Result<(), Error> {
         let name = var_name.unwrap_string();
         let mut value_type = self.expr_type(expr)?;
+        *is_global = self.is_global();
 
         if self.env.current.vars.contains_key(&name) {
             return Err(Error::new(
@@ -221,30 +222,30 @@ impl TypeChecker {
                 &format!("Redefinition of variable '{}'", name),
             ));
         }
-        crate::arr_decay!(value_type, expr, var_name);
 
         // char s[] = "literal" is valid
         match (type_decl.clone(), &expr.kind) {
-            (NEWTypes::Array { of, .. }, ExprKind::String(..))
-                if matches!(*of, NEWTypes::Primitive(Types::Char)) =>
-            {
-                ()
+            (NEWTypes::Array { of, .. }, ExprKind::String(..)) => {
+                //no array-decay when initializing char-array with string
+                if !matches!(*of, NEWTypes::Primitive(Types::Char)) {
+                    self.check_type_compatibility(var_name, &type_decl, &value_type)?;
+                }
             }
-            _ => self.check_type_compatibility(var_name, &type_decl, &value_type)?,
+            _ => {
+                crate::arr_decay!(value_type, expr, var_name, *is_global);
+                self.check_type_compatibility(var_name, &type_decl, &value_type)?;
+            }
         }
-
         self.maybe_cast(&type_decl, &value_type, expr);
 
-        if self.is_global() {
+        if *is_global {
             if !is_constant(expr, &value_type) {
                 return Err(Error::new(
                     var_name,
                     "Global variables can only be initialized to compile-time constants",
                 ));
             }
-            *is_global = true;
         } else {
-            // crate::arr_decay!(value_type, expr, var_name);
             self.increment_stack_size(&type_decl)?;
         }
         self.env.init_var(name, type_decl);
@@ -460,7 +461,7 @@ impl TypeChecker {
         if let Some(expr) = expr {
             let mut body_return = self.expr_type(expr)?;
 
-            crate::arr_decay!(body_return, expr, keyword);
+            crate::arr_decay!(body_return, expr, keyword, false);
             self.check_return_compatibility(keyword, &function_type, &body_return)?;
             self.maybe_cast(&function_type, &body_return, expr);
         } else {
@@ -488,7 +489,15 @@ impl TypeChecker {
                     }
                 }
             }
-            ExprKind::Unary { token, right } => self.evaluate_unary(token, right)?,
+            ExprKind::Unary {
+                token,
+                right,
+                is_global,
+            } => {
+                *is_global = self.is_global();
+
+                self.evaluate_unary(token, right, *is_global)?
+            }
             ExprKind::Grouping { expr } => self.evaluate_grouping(expr)?,
             ExprKind::Number(_) => NEWTypes::Primitive(Types::Int),
             ExprKind::CharLit(_) => NEWTypes::Primitive(Types::Char),
@@ -606,7 +615,7 @@ impl TypeChecker {
             return Err(Error::new(token, "Expect Lvalue left of assignment"));
         }
 
-        crate::arr_decay!(r_type, r_expr, token);
+        crate::arr_decay!(r_type, r_expr, token, self.is_global());
 
         self.check_type_compatibility(token, &l_type, &r_type)?;
         self.maybe_cast(&l_type, &r_type, r_expr);
@@ -629,7 +638,7 @@ impl TypeChecker {
         for expr in args.iter_mut() {
             let mut t = self.expr_type(expr)?;
 
-            crate::arr_decay!(t, expr, left_paren);
+            crate::arr_decay!(t, expr, left_paren, false);
             self.maybe_int_promote(expr, &mut t);
             arg_types.push(t);
         }
@@ -763,8 +772,8 @@ impl TypeChecker {
         Self::lval_to_rval(left);
         Self::lval_to_rval(right);
 
-        crate::arr_decay!(left_type, left, token);
-        crate::arr_decay!(right_type, right, token);
+        crate::arr_decay!(left_type, left, token, false);
+        crate::arr_decay!(right_type, right, token, false);
 
         // check valid operations
         if !Self::is_valid_bin(token, &left_type, &right_type) {
@@ -810,14 +819,19 @@ impl TypeChecker {
             *type_decl = NEWTypes::Primitive(Types::Int);
         }
     }
-    fn evaluate_unary(&mut self, token: &Token, right: &mut Expr) -> Result<NEWTypes, Error> {
+    fn evaluate_unary(
+        &mut self,
+        token: &Token,
+        right: &mut Expr,
+        is_global: bool,
+    ) -> Result<NEWTypes, Error> {
         let mut right_type = self.expr_type(right)?;
 
         if matches!(token.token, TokenType::Amp) {
             // array doesn't decay during '&' expression
             Ok(self.check_address(token, right_type, right)?)
         } else {
-            crate::arr_decay!(right_type, right, token);
+            crate::arr_decay!(right_type, right, token, is_global);
             Ok(match token.token {
                 TokenType::Star => self.check_deref(token, right_type, right)?,
                 TokenType::Bang => {

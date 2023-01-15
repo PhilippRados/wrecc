@@ -650,6 +650,7 @@ impl Parser {
                     ExprKind::Unary {
                         right: Box::new(right),
                         token: token.clone(),
+                        is_global: false,
                     },
                     match token.token {
                         TokenType::Star => ValueKind::Lvalue,
@@ -925,6 +926,7 @@ fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
                 },
                 ValueKind::Lvalue,
             )),
+            is_global: false,
         },
         ValueKind::Lvalue,
     )

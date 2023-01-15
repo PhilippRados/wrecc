@@ -102,8 +102,7 @@ impl NEWTypes {
     }
     pub fn deref_at(&self) -> Option<NEWTypes> {
         match self {
-            // TODO: should only have to deref pointer because of array-decay
-            NEWTypes::Pointer(inner) | NEWTypes::Array { of: inner, .. } => Some(*inner.clone()),
+            NEWTypes::Pointer(inner) => Some(*inner.clone()),
             _ => None,
         }
     }

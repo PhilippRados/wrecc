@@ -391,7 +391,7 @@ impl<'a> Compiler<'a> {
                 token,
                 right,
                 is_global,
-            } => self.cg_unary(token, right, *is_global),
+            } => self.cg_unary(token, right, *is_global, ast.type_decl.clone().unwrap()),
             ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
             ExprKind::Assign { l_expr, r_expr, .. } => {
                 let left_reg = self.execute_expr(l_expr)?;
@@ -838,6 +838,7 @@ impl<'a> Compiler<'a> {
         token: &Token,
         right: &Expr,
         is_global: bool,
+        new_type: NEWTypes,
     ) -> Result<Register, std::fmt::Error> {
         let mut reg = self.execute_expr(right)?;
         if matches!(reg, Register::Literal(..)) {
@@ -847,7 +848,7 @@ impl<'a> Compiler<'a> {
             TokenType::Bang => self.cg_bang(reg),
             TokenType::Minus => self.cg_negate(reg),
             TokenType::Amp => self.cg_address_at(reg, is_global),
-            TokenType::Star => self.cg_deref(reg),
+            TokenType::Star => self.cg_deref(reg, new_type),
             TokenType::Tilde => self.cg_bit_not(reg),
             _ => unreachable!(),
         }
@@ -912,11 +913,15 @@ impl<'a> Compiler<'a> {
         reg.free();
         Ok(dest)
     }
-    fn cg_deref(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {
+    fn cg_deref(
+        &mut self,
+        mut reg: Register,
+        new_type: NEWTypes,
+    ) -> Result<Register, std::fmt::Error> {
         reg = convert_reg!(self, reg, Register::Label(..) | Register::Stack(..));
         reg = self.convert_to_rval(reg)?;
 
-        reg.set_type(reg.get_type().deref_at().unwrap());
+        reg.set_type(new_type);
         reg.set_value_kind(ValueKind::Lvalue);
         Ok(reg)
     }

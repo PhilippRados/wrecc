@@ -252,10 +252,10 @@ impl TypeChecker {
 
         Ok(())
     }
-    fn maybe_cast(&self, type_decl: &NEWTypes, other_type: &NEWTypes, expr: &mut Expr) {
-        match other_type.size().cmp(&type_decl.size()) {
-            Ordering::Less => cast!(expr, type_decl.clone(), CastUp),
-            Ordering::Greater => cast!(expr, type_decl.clone(), CastDown),
+    fn maybe_cast(&self, new_type: &NEWTypes, old_type: &NEWTypes, expr: &mut Expr) {
+        match old_type.size().cmp(&new_type.size()) {
+            Ordering::Less => cast!(expr, new_type.clone(), CastUp),
+            Ordering::Greater => cast!(expr, new_type.clone(), CastDown),
             Ordering::Equal => (),
         }
     }

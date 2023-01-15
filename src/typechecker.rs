@@ -113,9 +113,10 @@ impl TypeChecker {
         if self.expr_type(cond)?.is_void() {
             return Err(Error::new(
                 left_paren,
-                "conditional expected scalar type found ‘void'",
+                "conditional expected scalar type found 'void'",
             ));
         }
+
         self.visit(body)?;
         self.returns_all_paths = false;
         Ok(())
@@ -280,13 +281,13 @@ impl TypeChecker {
         then_branch: &mut Stmt,
         else_branch: &mut Option<Stmt>,
     ) -> Result<(), Error> {
-        let cond = self.expr_type(cond)?;
-        if cond.is_void() {
+        if self.expr_type(cond)?.is_void() {
             return Err(Error::new(
                 keyword,
                 "Expected expression inside of condition, found 'void'",
             ));
         }
+
         self.visit(then_branch)?;
         let then_return = self.returns_all_paths;
         self.returns_all_paths = false;

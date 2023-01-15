@@ -155,10 +155,14 @@ impl<'a> Compiler<'a> {
         self.visit(body)?;
 
         writeln!(self.output, "L{}:", end_label)?;
-        let cond_reg = self.execute_expr(cond)?;
+
+        let mut cond_reg = self.execute_expr(cond)?;
+        cond_reg = self.convert_to_rval(cond_reg)?;
+
         writeln!(
             self.output,
-            "\tcmpl    $0, {}\n\tjne      L{}",
+            "\tcmp{}    $0, {}\n\tjne      L{}",
+            cond_reg.get_type().suffix(),
             cond_reg.name(),
             start_label
         )?;
@@ -179,7 +183,12 @@ impl<'a> Compiler<'a> {
         let done_label = create_label(&mut self.label_index);
         let mut else_label = done_label;
 
-        writeln!(self.output, "\tcmpl    $0, {}", cond_reg.name())?;
+        writeln!(
+            self.output,
+            "\tcmp{}    $0, {}",
+            cond_reg.get_type().suffix(),
+            cond_reg.name()
+        )?;
         cond_reg.free();
 
         if !else_branch.is_none() {

@@ -751,12 +751,12 @@ impl Parser {
                     Ok(v)
                 }
             }
-            None => Err(Error {
+            None => Err(Error::Regular(ErrorData {
                 line_index: -1,
                 line_string: "".to_string(),
                 column: -1,
                 msg: msg.to_string(),
-            }),
+            })),
         }
     }
     fn check(&mut self, expected: TokenKind) -> bool {
@@ -769,12 +769,12 @@ impl Parser {
     fn peek(&mut self) -> Result<&Token, Error> {
         match self.tokens.peek() {
             Some(t) => Ok(t),
-            None => Err(Error {
+            None => Err(Error::Regular(ErrorData {
                 line_index: -1,
                 line_string: "".to_string(),
                 column: -1,
                 msg: "Expected expression found end of file".to_string(),
-            }),
+            })),
         }
     }
     fn matches(&mut self, expected: Vec<TokenKind>) -> Option<Token> {

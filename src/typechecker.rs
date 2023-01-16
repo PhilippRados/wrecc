@@ -20,13 +20,11 @@ impl Scope {
     }
 }
 pub struct TypeChecker {
-    errors: Vec<Error>,
     scope: Scope,
     env: Environment<NEWTypes>,
     global_env: Environment<NEWTypes>,
     returns_all_paths: bool,
     func_stack_size: HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
-    found_main: bool,
     const_labels: HashMap<String, usize>,
     const_label_count: usize,
 }
@@ -44,12 +42,10 @@ macro_rules! cast {
 impl TypeChecker {
     pub fn new() -> Self {
         TypeChecker {
-            errors: vec![],
             env: Environment::new(None),
             global_env: Environment::new(None),
             scope: Scope::Global,
             returns_all_paths: false,
-            found_main: false,
             func_stack_size: HashMap::new(),
             const_labels: HashMap::new(),
             const_label_count: 0,
@@ -58,24 +54,22 @@ impl TypeChecker {
     pub fn check(
         &mut self,
         statements: &mut Vec<Stmt>,
-    ) -> Result<(&HashMap<String, usize>, &HashMap<String, usize>), Vec<Error>> {
-        if let Err(e) = self.check_statements(statements) {
-            self.errors.push(e);
-            // synchronize
-        }
-        if !self.errors.is_empty() {
-            Err(self.errors.clone())
-        } else if !self.found_main {
-            Err(vec![Error::missing_entrypoint()])
-        } else {
-            Ok((&self.func_stack_size, &self.const_labels))
+    ) -> Option<(&HashMap<String, usize>, &HashMap<String, usize>)> {
+        match self.check_statements(statements) {
+            Ok(_) => Some((&self.func_stack_size, &self.const_labels)),
+            Err(_) => None,
         }
     }
     fn check_statements(&mut self, statements: &mut Vec<Stmt>) -> Result<(), Error> {
+        let mut result = Ok(());
         for s in statements {
-            self.visit(s)?
+            if let Err(e) = self.visit(s) {
+                e.print_error();
+                result = Err(Error::Indicator);
+            }
         }
-        Ok(())
+
+        result
     }
     fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
         match statement {
@@ -340,9 +334,6 @@ impl TypeChecker {
             ));
         }
         let name = name_token.unwrap_string();
-        if name == "main" {
-            self.found_main = true;
-        }
         if self
             .global_env
             .get_func(&name, FunctionKind::DefDeclaration)
@@ -376,9 +367,12 @@ impl TypeChecker {
         }
 
         // check function body
-        self.block(body, env)?;
-
+        let err = self.block(body, env);
         self.scope = Scope::Global;
+
+        if let Err(e) = err {
+            return Err(e);
+        }
 
         self.main_returns_int(name_token, return_type)?;
         self.implicit_return_main(name_token, body);
@@ -686,9 +680,9 @@ impl TypeChecker {
         let result = self.check_statements(body);
 
         self.env = *self.env.enclosing.as_ref().unwrap().clone();
-
         result
     }
+
     fn is_valid_bin(token: &Token, left_type: &NEWTypes, right_type: &NEWTypes) -> bool {
         match (&left_type, &right_type) {
             (NEWTypes::Primitive(Types::Void), _) | (_, NEWTypes::Primitive(Types::Void)) => false,

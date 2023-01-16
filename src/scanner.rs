@@ -297,12 +297,12 @@ impl<'a> Scanner<'a> {
             })
             .collect::<String>();
         if last_char != '"' {
-            return Err(Error {
+            return Err(Error::Regular(ErrorData {
                 line_index: self.line,
                 line_string: self.raw_source[(self.line - 1) as usize].clone(),
                 column: self.column,
                 msg: "Unterminated string".to_string(),
-            });
+            }));
         }
 
         Ok(result)
@@ -429,12 +429,12 @@ mod tests {
             Ok(v) => panic!(),
             Err(e) => e,
         };
-        let expected = vec![Error {
+        let expected = vec![Error::Regular(ErrorData {
             line_index: 1,
             line_string: "int some = \"this is a string".to_string(),
             column: 12,
             msg: "Unterminated string".to_string(),
-        }];
+        })];
         assert_eq!(result, expected);
     }
     #[test]
@@ -537,12 +537,12 @@ mod tests {
             Ok(_v) => panic!(),
             Err(e) => e,
         };
-        let expected = vec![Error {
+        let expected = vec![Error::Regular(ErrorData {
             line_index: 1,
             column: 10,
             line_string: "int c = 0$".to_string(),
             msg: "Unexpected character: $".to_string(),
-        }];
+        })];
         assert_eq!(result, expected);
     }
     #[test]
@@ -554,24 +554,24 @@ mod tests {
             Err(e) => e,
         };
         let expected = vec![
-            Error {
+            Error::Regular(ErrorData {
                 line_index: 1,
                 column: 10,
                 line_string: "int c = 0$".to_string(),
                 msg: "Unexpected character: $".to_string(),
-            },
-            Error {
+            }),
+            Error::Regular(ErrorData {
                 line_index: 3,
                 column: 1,
                 line_string: "‘ ∞".to_string(),
                 msg: "Unexpected character: ‘".to_string(),
-            },
-            Error {
+            }),
+            Error::Regular(ErrorData {
                 line_index: 3,
                 column: 3,
                 line_string: "‘ ∞".to_string(),
                 msg: "Unexpected character: ∞".to_string(),
-            },
+            }),
         ];
         assert_eq!(result, expected);
     }
@@ -604,12 +604,12 @@ mod tests {
             Ok(v) => panic!(),
             Err(e) => e,
         };
-        let expected = vec![Error {
+        let expected = vec![Error::Regular(ErrorData {
             line_index: 2,
             column: 8,
             line_string: "int ä @ = 123".to_string(),
             msg: "Unexpected character: @".to_string(),
-        }];
+        })];
         assert_eq!(result, expected);
     }
     #[test]
@@ -646,12 +646,12 @@ mod tests {
             Ok(v) => panic!(),
             Err(e) => e,
         };
-        let expected = vec![Error {
+        let expected = vec![Error::Regular(ErrorData {
             line_index: 1,
             column: 13,
             line_string: "char some = '12'".to_string(),
             msg: "char literal must contain single character".to_string(),
-        }];
+        })];
         assert_eq!(result, expected);
     }
     #[test]
@@ -662,12 +662,12 @@ mod tests {
             Ok(v) => panic!(),
             Err(e) => e,
         };
-        let expected = vec![Error {
+        let expected = vec![Error::Regular(ErrorData {
             line_index: 1,
             column: 13,
             line_string: "char some = ''".to_string(),
             msg: "char literal must contain single character".to_string(),
-        }];
+        })];
         assert_eq!(result, expected);
     }
 }

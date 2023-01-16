@@ -1,5 +1,0 @@
-int some(int a) {
-  return 1;
-}
-void test(){
-}

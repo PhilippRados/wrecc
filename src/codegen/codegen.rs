@@ -445,7 +445,7 @@ impl<'a> Compiler<'a> {
         );
         // have to do integer-promotion in codegen
         if temp_scratch.get_type().size() < Types::Int.size()
-            && (matches!(l_reg, Register::Scratch(..)) || matches!(l_reg, Register::Stack(..)))
+            && (matches!(l_reg, Register::Scratch(..) | Register::Stack(..)))
         {
             temp_scratch.set_type(NEWTypes::Primitive(Types::Int));
             writeln!(
@@ -579,7 +579,7 @@ impl<'a> Compiler<'a> {
     fn cg_cast_up(&mut self, expr: &Expr, new_type: NEWTypes) -> Result<Register, std::fmt::Error> {
         let mut value_reg = self.execute_expr(expr)?;
 
-        if matches!(value_reg, Register::Scratch(..)) || matches!(value_reg, Register::Stack(..)) {
+        if matches!(value_reg, Register::Scratch(..) | Register::Stack(..)) {
             let dest_reg = Register::Scratch(
                 self.scratch.scratch_alloc(),
                 new_type.clone(),

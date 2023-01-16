@@ -110,7 +110,7 @@ impl NEWTypes {
         *self == NEWTypes::Primitive(Types::Void)
     }
     pub fn is_ptr(&self) -> bool {
-        matches!(*self, NEWTypes::Pointer(_)) || matches!(*self, NEWTypes::Array { .. })
+        matches!(*self, NEWTypes::Pointer(_))
     }
     pub fn type_compatible(&self, other: &NEWTypes) -> bool {
         match (self, other) {

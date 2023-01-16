@@ -61,13 +61,11 @@ impl Parser {
             }
             self.type_declaration(t)
         } else {
-            match self.tokens.peek() {
-                Some(t) => Err(Error::new(
-                    &t,
-                    &format!("Expected declaration, found {}", t.token),
-                )),
-                None => panic!("Expected declaration, found nothing"),
-            }
+            let token = self.peek()?;
+            Err(Error::new(
+                token,
+                &format!("Expected declaration, found {}", token.token),
+            ))
         }
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
@@ -160,12 +158,9 @@ impl Parser {
             if TokenKind::from(&token.token) == TokenKind::RightBrace {
                 break;
             }
-            statements.push(match self.tokens.peek() {
-                Some(v) => match v.is_type() {
-                    true => self.declaration()?,
-                    false => self.statement()?,
-                },
-                None => panic!("empty"),
+            statements.push(match self.peek()?.is_type() {
+                true => self.declaration()?,
+                false => self.statement()?,
             });
         }
         self.consume(TokenKind::RightBrace, "Expect '}' after Block")?;
@@ -241,15 +236,7 @@ impl Parser {
         }
     }
     fn var_initialization(&mut self, name: Token, type_decl: NEWTypes) -> Result<Stmt, Error> {
-        // TODO: don't just unwrap eof have proper helper function
-        match (
-            self.tokens
-                .peek()
-                .expect("eof reached while parsing variable initialization")
-                .token
-                .clone(),
-            type_decl.clone(),
-        ) {
+        match (self.peek()?.token.clone(), type_decl.clone()) {
             (TokenType::LeftBrace, _) => {
                 self.tokens.next().unwrap();
                 let elements = self.initializer_list(&type_decl, name.clone())?;
@@ -376,7 +363,7 @@ impl Parser {
                 let mut param_type = match self.matches_type() {
                     Some(type_decl) => type_decl,
                     None => {
-                        let actual = self.tokens.peek().expect("Expected Type");
+                        let actual = self.peek()?;
                         return Err(Error::new(
                             actual,
                             &format!("Expected type found {}", actual.token),
@@ -720,7 +707,6 @@ impl Parser {
         ))
     }
     fn primary(&mut self) -> Result<Expr, Error> {
-        //TODO: avoid repition
         if let Some(n) = self.matches(vec![TokenKind::Number]) {
             return Ok(Expr::new(
                 ExprKind::Number(n.unwrap_num()),
@@ -750,18 +736,11 @@ impl Parser {
                 expr.value_kind,
             ));
         }
-        match self.tokens.peek() {
-            Some(t) => Err(Error::new(
-                t,
-                &format!("Expected expression found: {}", t.token),
-            )),
-            None => Err(Error {
-                line_index: -1,
-                line_string: "".to_string(),
-                column: -1,
-                msg: "Expected expression found end of file".to_string(),
-            }),
-        }
+        let t = self.peek()?;
+        Err(Error::new(
+            t,
+            &format!("Expected expression found: {}", t.token),
+        ))
     }
     fn consume(&mut self, token: TokenKind, msg: &str) -> Result<Token, Error> {
         match self.tokens.next() {
@@ -787,7 +766,17 @@ impl Parser {
         false
     }
 
-    // TODO: dont need vec when only matching single enum
+    fn peek(&mut self) -> Result<&Token, Error> {
+        match self.tokens.peek() {
+            Some(t) => Ok(t),
+            None => Err(Error {
+                line_index: -1,
+                line_string: "".to_string(),
+                column: -1,
+                msg: "Expected expression found end of file".to_string(),
+            }),
+        }
+    }
     fn matches(&mut self, expected: Vec<TokenKind>) -> Option<Token> {
         match self.tokens.peek() {
             Some(v) => {

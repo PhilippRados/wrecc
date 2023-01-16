@@ -6,12 +6,22 @@ use std::collections::HashMap;
 #[derive(PartialEq)]
 enum Scope {
     Global,
-    Block,
     Function(String, NEWTypes), // function name and return type
+}
+impl Scope {
+    fn get_function_type(&self, token: &Token) -> Result<&NEWTypes, Error> {
+        match self {
+            Scope::Function(_, t) => Ok(t),
+            Scope::Global => Err(Error::new(
+                token,
+                "can only define return statements inside a function",
+            )),
+        }
+    }
 }
 pub struct TypeChecker {
     errors: Vec<Error>,
-    scope: Vec<Scope>,
+    scope: Scope,
     env: Environment<NEWTypes>,
     global_env: Environment<NEWTypes>,
     returns_all_paths: bool,
@@ -37,7 +47,7 @@ impl TypeChecker {
             errors: vec![],
             env: Environment::new(None),
             global_env: Environment::new(None),
-            scope: vec![Scope::Global],
+            scope: Scope::Global,
             returns_all_paths: false,
             found_main: false,
             func_stack_size: HashMap::new(),
@@ -89,13 +99,10 @@ impl TypeChecker {
                 Ok(_) => Ok(()),
                 Err(e) => Err(e),
             },
-            Stmt::Block(statements) => {
-                self.scope.push(Scope::Block);
-                self.block(
-                    statements,
-                    Environment::new(Some(Box::new(self.env.clone()))),
-                )
-            }
+            Stmt::Block(statements) => self.block(
+                statements,
+                Environment::new(Some(Box::new(self.env.clone()))),
+            ),
             Stmt::If(keyword, ref mut cond, then_branch, else_branch) => {
                 self.if_statement(keyword, cond, then_branch, else_branch)
             }
@@ -144,7 +151,7 @@ impl TypeChecker {
         if self.is_global() {
             *is_global = true;
         } else {
-            self.increment_stack_size(type_decl)?;
+            self.increment_stack_size(type_decl);
         }
         self.env.declare_var(name, type_decl.clone());
         Ok(())
@@ -201,7 +208,7 @@ impl TypeChecker {
             }
             *is_global = true;
         } else {
-            self.increment_stack_size(type_decl)?;
+            self.increment_stack_size(type_decl);
         }
 
         Ok(())
@@ -247,7 +254,7 @@ impl TypeChecker {
                 ));
             }
         } else {
-            self.increment_stack_size(&type_decl)?;
+            self.increment_stack_size(&type_decl);
         }
         self.env.init_var(name, type_decl);
 
@@ -260,18 +267,14 @@ impl TypeChecker {
             Ordering::Equal => (),
         }
     }
-    fn increment_stack_size(&mut self, type_decl: &NEWTypes) -> Result<(), Error> {
-        match find_function(&self.scope) {
-            Some(Scope::Function(name, _)) => {
+    fn increment_stack_size(&mut self, type_decl: &NEWTypes) {
+        match &self.scope {
+            Scope::Function(name, _) => {
                 *self.func_stack_size.get_mut(name).unwrap() += type_decl.size();
                 *self.func_stack_size.get_mut(name).unwrap() =
                     align(self.func_stack_size[name], type_decl);
-                Ok(())
             }
-            _ => {
-                // if we're not inside a function we can only be in global scope
-                Ok(())
-            }
+            _ => unreachable!(),
         }
     }
     fn if_statement(
@@ -362,19 +365,20 @@ impl TypeChecker {
         }
 
         // have to push scope before declaring local variables
-        self.scope
-            .push(Scope::Function(name.clone(), return_type.clone()));
+        self.scope = Scope::Function(name.clone(), return_type.clone());
         let mut env = Environment::new(Some(Box::new(self.env.clone()))); // create new scope for function body
 
         // initialize stack size for current function-scope
         self.func_stack_size.insert(name.clone(), 0);
         for (type_decl, name) in params.iter().by_ref() {
-            self.increment_stack_size(type_decl)?; // add params to stack-size
+            self.increment_stack_size(type_decl); // add params to stack-size
             env.init_var(name.unwrap_string(), type_decl.clone()) // initialize params in local scope
         }
 
         // check function body
         self.block(body, env)?;
+
+        self.scope = Scope::Global;
 
         self.main_returns_int(name_token, return_type)?;
         self.implicit_return_main(name_token, body);
@@ -445,19 +449,9 @@ impl TypeChecker {
             Ok(())
         }
     }
-    fn get_function_type(&self, token: &Token) -> Result<&NEWTypes, Error> {
-        if let Some(Scope::Function(_, function_type)) = find_function(&self.scope) {
-            Ok(function_type)
-        } else {
-            Err(Error::new(
-                token,
-                "can only define return statements inside a function",
-            ))
-        }
-    }
     fn return_statement(&mut self, keyword: &Token, expr: &mut Option<Expr>) -> Result<(), Error> {
         self.returns_all_paths = true;
-        let function_type = self.get_function_type(keyword)?.clone();
+        let function_type = self.scope.get_function_type(keyword)?.clone();
 
         if let Some(expr) = expr {
             let mut body_return = self.expr_type(expr)?;
@@ -692,7 +686,6 @@ impl TypeChecker {
         let result = self.check_statements(body);
 
         self.env = *self.env.enclosing.as_ref().unwrap().clone();
-        self.scope.pop();
 
         result
     }
@@ -917,7 +910,7 @@ impl TypeChecker {
         }
     }
     fn is_global(&self) -> bool {
-        *self.scope.last().unwrap() == Scope::Global
+        self.scope == Scope::Global
     }
 }
 
@@ -932,14 +925,6 @@ pub fn create_label(index: &mut usize) -> usize {
     let prev = *index;
     *index += 1;
     prev
-}
-fn find_function(scopes: &[Scope]) -> Option<&Scope> {
-    for ref scope in scopes.iter().rev() {
-        if matches!(scope, Scope::Function(_, _)) {
-            return Some(scope);
-        }
-    }
-    None
 }
 
 // returns true if expression is known at compile-time

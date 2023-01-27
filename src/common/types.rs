@@ -1,4 +1,4 @@
-use crate::common::token::TokenKind;
+use crate::common::token::{Token, TokenKind};
 use std::fmt::Display;
 
 static RETURN_REG: &[&str; 3] = &["%al", "%eax", "%rax"];
@@ -25,12 +25,14 @@ pub enum NEWTypes {
     Primitive(Types),
     Array { amount: usize, of: Box<NEWTypes> },
     Pointer(Box<NEWTypes>),
+    Struct(Option<Token>, Vec<(NEWTypes, Token)>),
 }
 
 impl TypeInfo for NEWTypes {
     fn size(&self) -> usize {
         match self {
             NEWTypes::Primitive(t) => t.size(),
+            NEWTypes::Struct(_, members) => members.iter().fold(0, |acc, (t, _)| acc + t.size()),
             NEWTypes::Pointer(_) => 8,
             NEWTypes::Array {
                 amount,
@@ -42,24 +44,28 @@ impl TypeInfo for NEWTypes {
         match self {
             NEWTypes::Primitive(t) => t.reg_suffix(),
             NEWTypes::Pointer(_) | NEWTypes::Array { .. } => "",
+            NEWTypes::Struct(..) => unimplemented!(),
         }
     }
     fn suffix(&self) -> &str {
         match self {
             NEWTypes::Primitive(t) => t.suffix(),
             NEWTypes::Pointer(_) | NEWTypes::Array { .. } => "q",
+            NEWTypes::Struct(..) => unimplemented!(),
         }
     }
     fn complete_suffix(&self) -> &str {
         match self {
             NEWTypes::Primitive(t) => t.complete_suffix(),
             NEWTypes::Pointer(_) | NEWTypes::Array { .. } => "quad",
+            NEWTypes::Struct(..) => unimplemented!(),
         }
     }
     fn return_reg(&self) -> &str {
         match self {
             NEWTypes::Primitive(t) => t.return_reg(),
             NEWTypes::Pointer(_) | NEWTypes::Array { .. } => RETURN_REG[2],
+            NEWTypes::Struct(..) => unimplemented!(),
         }
     }
 }
@@ -72,6 +78,13 @@ impl Display for NEWTypes {
                 NEWTypes::Primitive(t) => t.fmt().to_string(),
                 NEWTypes::Array { of, amount } => format!("{}[{}]", of, amount),
                 NEWTypes::Pointer(to) => format!("{}*", to),
+                NEWTypes::Struct(name, _) => format!(
+                    "struct {}",
+                    match name {
+                        Some(n) => n.unwrap_string(),
+                        None => "anonymous".to_string(),
+                    }
+                ),
             }
         )
     }
@@ -122,6 +135,21 @@ impl NEWTypes {
             (NEWTypes::Primitive(_), NEWTypes::Primitive(_)) => true,
 
             (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => *self == *other,
+
+            // two structs are compatible if they have the same name and members
+            (
+                NEWTypes::Struct(Some(name_l), members_l),
+                NEWTypes::Struct(Some(name_r), members_r),
+            ) => {
+                let matching_members = members_l
+                    .iter()
+                    .zip(members_r)
+                    .filter(|(l, r)| l.0 == r.0 && l.1.unwrap_string() == r.1.unwrap_string())
+                    .count();
+                name_l.unwrap_string() == name_r.unwrap_string()
+                    && matching_members == members_l.len()
+                    && matching_members == members_r.len()
+            }
 
             _ => false,
         }

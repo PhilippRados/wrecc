@@ -9,7 +9,7 @@ static ARG_REGISTER_MAP: &[[&str; 6]] = &[
     ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"],
 ];
 
-#[derive(PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Register {
     Scratch(Rc<RefCell<ScratchRegister>>, NEWTypes, ValueKind),
     Stack(StackRegister),
@@ -104,7 +104,7 @@ impl Register {
         }
     }
 }
-#[derive(PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum LabelRegister {
     String(usize),
     Var(String, NEWTypes),
@@ -130,9 +130,9 @@ impl LabelRegister {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StackRegister {
-    bp_offset: usize,
+    pub bp_offset: usize,
     type_decl: NEWTypes,
 }
 impl StackRegister {

@@ -100,11 +100,14 @@ impl<'a> Compiler<'a> {
             Stmt::Function(_, name, params, body) => {
                 self.function_definition(name.unwrap_string(), params, body)
             }
-            Stmt::Return(_, expr) => self.return_statement(expr), // jump to function postamble
+            Stmt::Return(_, expr) => self.return_statement(expr),
             Stmt::If(_, cond, then_branch, else_branch) => {
                 self.if_statement(cond, then_branch, else_branch)
             }
             Stmt::While(_, cond, body) => self.while_statement(cond, body),
+            Stmt::StructDef(name, members) => Ok(self
+                .env
+                .declare_struct(name.unwrap_string(), members.clone())),
         }
     }
 
@@ -236,6 +239,9 @@ impl<'a> Compiler<'a> {
         name: String,
         is_global: bool,
     ) -> Result<(), std::fmt::Error> {
+        let mut type_decl = type_decl.clone();
+        self.fill_struct(&mut type_decl);
+
         let reg = match is_global {
             true => {
                 writeln!(
@@ -247,7 +253,7 @@ impl<'a> Compiler<'a> {
             }
             false => {
                 self.current_bp_offset += type_decl.size();
-                self.current_bp_offset = align(self.current_bp_offset, type_decl);
+                self.current_bp_offset = align(self.current_bp_offset, &type_decl);
 
                 Register::Stack(StackRegister::new(
                     self.current_bp_offset,
@@ -291,7 +297,7 @@ impl<'a> Compiler<'a> {
                     "\tmov{}    {}, {}",
                     type_decl.suffix(),
                     value_reg.name(),
-                    self.env.get_var(var_name).unwrap().name() // since var-declaration set everything up we just need declared register
+                    self.env.get_symbol(var_name).unwrap().unwrap_var().name() // since var-declaration set everything up we just need declared register
                 )?;
                 value_reg.free();
             }
@@ -413,7 +419,11 @@ impl<'a> Compiler<'a> {
                 r_expr,
                 token,
             } => self.cg_comp_assign(l_expr, token, r_expr),
-            ExprKind::Ident(name) => Ok(self.env.get_var(name).unwrap()),
+            ExprKind::Ident(name) => Ok(if let Ok(Symbols::Var(v)) = self.env.get_symbol(name) {
+                v
+            } else {
+                unreachable!()
+            }),
             ExprKind::Call { callee, args, .. } => {
                 self.cg_call(callee, args, ast.type_decl.clone().unwrap())
             }
@@ -427,6 +437,38 @@ impl<'a> Compiler<'a> {
                 left,
                 by_amount,
             } => self.cg_postunary(token, left, by_amount),
+            ExprKind::MemberAccess { left, ident, .. } => self.cg_member_access(left, ident),
+        }
+    }
+    fn cg_member_access(
+        &mut self,
+        left: &Expr,
+        ident: &Token,
+    ) -> Result<Register, std::fmt::Error> {
+        let left = self.execute_expr(left)?;
+        let ident = ident.unwrap_string();
+
+        if let NEWTypes::Struct(_, members) = left.get_type() {
+            if let Register::Stack(s) = left {
+                let offset = members
+                    .clone()
+                    .into_iter()
+                    .take_while(|(_, name)| name.unwrap_string() != ident)
+                    .fold(0, |_, (t, _)| t.size());
+                let (member_type, _) = members
+                    .into_iter()
+                    .find(|(_, name)| name.unwrap_string() == ident)
+                    .unwrap();
+
+                Ok(Register::Stack(StackRegister::new(
+                    s.bp_offset - offset,
+                    member_type,
+                )))
+            } else {
+                unreachable!()
+            }
+        } else {
+            unreachable!()
         }
     }
     fn cg_comp_assign(
@@ -606,19 +648,39 @@ impl<'a> Compiler<'a> {
         l_value: Register,
         mut r_value: Register,
     ) -> Result<Register, std::fmt::Error> {
-        // can't move from mem to mem so make temp scratch-register
-        r_value = convert_reg!(self, r_value, Register::Stack(..) | Register::Label(..));
-        r_value = self.convert_to_rval(r_value)?;
+        if let NEWTypes::Struct(_, members) = l_value.get_type() {
+            // when assigning structs have to assign each member
+            if let (Register::Stack(s_l), Register::Stack(s_r)) = (&l_value, &r_value) {
+                let mut offset = 0;
+                for m in members.into_iter() {
+                    let member_lvalue =
+                        Register::Stack(StackRegister::new(s_l.bp_offset - offset, m.0.clone()));
+                    let member_rvalue =
+                        Register::Stack(StackRegister::new(s_r.bp_offset - offset, m.0.clone()));
 
-        writeln!(
-            self.output,
-            "\tmov{}    {}, {}",
-            r_value.get_type().suffix(),
-            r_value.name(),
-            l_value.name(),
-        )?;
-        r_value.free();
-        Ok(l_value)
+                    self.cg_assign(member_lvalue, member_rvalue)?;
+                    offset += m.0.size();
+                }
+                Ok(l_value)
+            } else {
+                dbg!(l_value, r_value);
+                unreachable!()
+            }
+        } else {
+            // can't move from mem to mem so make temp scratch-register
+            r_value = convert_reg!(self, r_value, Register::Stack(..) | Register::Label(..));
+            r_value = self.convert_to_rval(r_value)?;
+
+            writeln!(
+                self.output,
+                "\tmov{}    {}, {}",
+                r_value.get_type().suffix(),
+                r_value.name(),
+                l_value.name(),
+            )?;
+            r_value.free();
+            Ok(l_value)
+        }
     }
     fn cg_call(
         &mut self,
@@ -1166,6 +1228,19 @@ impl<'a> Compiler<'a> {
             TokenType::Less => self.cg_comparison("setl", left_reg, right_reg),
             TokenType::LessEqual => self.cg_comparison("setle", left_reg, right_reg),
             _ => unreachable!(),
+        }
+    }
+    fn fill_struct(&mut self, type_decl: &mut NEWTypes) {
+        match type_decl {
+            NEWTypes::Struct(Some(n), members) if !members.is_empty() => {
+                self.env.declare_struct(n.unwrap_string(), members.clone())
+            }
+            NEWTypes::Struct(Some(n), members) if members.is_empty() => {
+                // if no members struct has to already exists
+                let CustomTypes::Struct(m) = self.env.get_type(&n).unwrap();
+                *members = m;
+            }
+            _ => (),
         }
     }
     fn convert_to_rval(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {

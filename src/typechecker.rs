@@ -77,7 +77,7 @@ impl TypeChecker {
                 self.declare_var(type_decl, var_name, is_global)
             }
             Stmt::InitVar(type_decl, name, ref mut expr, is_global) => {
-                self.init_var(type_decl.clone(), name, expr, is_global)
+                self.init_var(type_decl, name, expr, is_global)
             }
             Stmt::InitList(type_decl, var_name, exprs, is_global) => {
                 self.init_list(type_decl, var_name, exprs, is_global)
@@ -103,6 +103,7 @@ impl TypeChecker {
             Stmt::While(left_paren, ref mut cond, body) => {
                 self.while_statement(left_paren, cond, body)
             }
+            Stmt::StructDef(name, members) => self.declare_struct(name, members.clone()),
         }
     }
     fn while_statement(
@@ -122,18 +123,53 @@ impl TypeChecker {
         self.returns_all_paths = false;
         Ok(())
     }
+    fn declare_struct(
+        &mut self,
+        struct_name: &Token,
+        members: Vec<(NEWTypes, Token)>,
+    ) -> Result<(), Error> {
+        let name = struct_name.unwrap_string();
+
+        if self.env.current.customs.contains_key(&name) {
+            return Err(Error::new(
+                &struct_name,
+                &format!("Redefinition of struct '{}'", name),
+            ));
+        }
+        for m in members.iter() {
+            if m.0.is_void() {
+                return Err(Error::new(&m.1, "Struct member can't have type 'void'"));
+            }
+        }
+        self.env.declare_struct(name, members);
+        Ok(())
+    }
+    fn fill_struct(&mut self, type_decl: &mut NEWTypes) -> Result<(), Error> {
+        match type_decl {
+            NEWTypes::Struct(Some(n), members) if !members.is_empty() => {
+                self.declare_struct(&n, members.clone())
+            }
+            NEWTypes::Struct(Some(n), members) if members.is_empty() => {
+                // if no members struct has to already exists
+                let CustomTypes::Struct(m) = self.env.get_type(n)?;
+                *members = m;
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
     fn declare_var(
         &mut self,
-        type_decl: &NEWTypes,
+        type_decl: &mut NEWTypes,
         var_name: &Token,
         is_global: &mut bool,
     ) -> Result<(), Error> {
         let name = var_name.unwrap_string();
 
-        if self.env.current.vars.contains_key(&name) {
+        if self.env.current.symbols.contains_key(&name) {
             return Err(Error::new(
                 var_name,
-                &format!("Redefinition of variable '{}'", var_name.unwrap_string()),
+                &format!("Redefinition of symbol '{}'", var_name.unwrap_string()),
             ));
         }
         if type_decl.is_void() {
@@ -142,6 +178,8 @@ impl TypeChecker {
                 &format!("Can't assign to 'void' {}", var_name.unwrap_string()),
             ));
         }
+        self.fill_struct(type_decl)?;
+
         if self.is_global() {
             *is_global = true;
         } else {
@@ -173,10 +211,10 @@ impl TypeChecker {
         is_global: &mut bool,
     ) -> Result<(), Error> {
         let name = var_name.unwrap_string();
-        if self.env.current.vars.contains_key(&name) {
+        if self.env.current.symbols.contains_key(&name) {
             return Err(Error::new(
                 var_name,
-                &format!("Redefinition of variable '{}'", name),
+                &format!("Redefinition of symbol '{}'", name),
             ));
         }
         self.env.init_var(name, type_decl.clone());
@@ -209,7 +247,7 @@ impl TypeChecker {
     }
     fn init_var(
         &mut self,
-        type_decl: NEWTypes,
+        type_decl: &mut NEWTypes,
         var_name: &Token,
         expr: &mut Expr,
         is_global: &mut bool,
@@ -218,12 +256,14 @@ impl TypeChecker {
         let mut value_type = self.expr_type(expr)?;
         *is_global = self.is_global();
 
-        if self.env.current.vars.contains_key(&name) {
+        if self.env.current.symbols.contains_key(&name) {
             return Err(Error::new(
                 var_name,
                 &format!("Redefinition of variable '{}'", name),
             ));
         }
+
+        self.fill_struct(type_decl)?;
 
         // char s[] = "literal" is valid
         match (type_decl.clone(), &expr.kind) {
@@ -250,7 +290,7 @@ impl TypeChecker {
         } else {
             self.increment_stack_size(&type_decl);
         }
-        self.env.init_var(name, type_decl);
+        self.env.init_var(name, type_decl.clone());
 
         Ok(())
     }
@@ -305,20 +345,32 @@ impl TypeChecker {
         name_token: &Token,
         params: &Vec<(NEWTypes, Token)>,
     ) -> Result<(), Error> {
-        let name = &name_token.unwrap_string();
-        if let Some(f) = self.global_env.get_func(name, FunctionKind::Declaration) {
-            self.cmp_decl(name_token, f, return_type, params)?;
+        match self.global_env.get_symbol(&name_token) {
+            Ok(Symbols::FuncDecl(f)) => {
+                self.cmp_decl(name_token, &f, return_type, params)?;
+                self.global_env.declare_func(
+                    return_type.clone(),
+                    &name_token.unwrap_string(),
+                    params.clone(),
+                    FunctionKind::Declaration,
+                );
+                Ok(())
+            }
+            Ok(Symbols::FuncDef(f)) => self.cmp_decl(name_token, &f, return_type, params),
+            Ok(Symbols::Var(_)) => Err(Error::new(
+                name_token,
+                "Redefintion of variable with same name",
+            )),
+            Err(_) => {
+                self.global_env.declare_func(
+                    return_type.clone(),
+                    &name_token.unwrap_string(),
+                    params.clone(),
+                    FunctionKind::Declaration,
+                );
+                Ok(())
+            }
         }
-        if let Some(f) = self.global_env.get_func(name, FunctionKind::DefDeclaration) {
-            self.cmp_decl(name_token, f, return_type, params)?;
-        }
-        self.global_env.declare_func(
-            return_type.clone(),
-            name,
-            params.clone(),
-            FunctionKind::Declaration,
-        );
-        Ok(())
     }
     fn function_definition(
         &mut self,
@@ -334,25 +386,21 @@ impl TypeChecker {
             ));
         }
         let name = name_token.unwrap_string();
-        if self
-            .global_env
-            .get_func(&name, FunctionKind::DefDeclaration)
-            .is_some()
-        {
-            return Err(Error::new(
-                name_token,
-                &format!("Redefinition of function '{}'", name),
-            ));
-        } else if let Some(f) = self.global_env.get_func(&name, FunctionKind::Declaration) {
-            // compare function_definition with declaration and see if they match
-            self.cmp_decl(name_token, f, return_type, &params)?;
-        } else {
-            self.global_env.declare_func(
+
+        match self.global_env.get_symbol(name_token) {
+            Ok(Symbols::FuncDef(_)) => {
+                return Err(Error::new(
+                    name_token,
+                    &format!("Redefinition of function '{}'", name),
+                ))
+            }
+            Ok(Symbols::FuncDecl(f)) => self.cmp_decl(name_token, &f, return_type, &params)?,
+            _ => self.global_env.declare_func(
                 return_type.clone(),
                 &name,
                 params.clone(),
-                FunctionKind::DefDeclaration,
-            );
+                FunctionKind::Definition,
+            ),
         }
 
         // have to push scope before declaring local variables
@@ -494,7 +542,16 @@ impl TypeChecker {
             ExprKind::Logical { left, token, right } => {
                 self.evaluate_logical(left, token, right)?
             }
-            ExprKind::Ident(token) => self.env.get_var(token)?,
+            ExprKind::Ident(token) => {
+                if let Ok(Symbols::Var(v)) = self.env.get_symbol(token) {
+                    v
+                } else {
+                    return Err(Error::new(
+                        token,
+                        &format!("No variable '{}'", token.unwrap_string()),
+                    ));
+                }
+            }
             ExprKind::Assign {
                 l_expr,
                 token,
@@ -520,12 +577,45 @@ impl TypeChecker {
                 token,
                 by_amount,
             } => self.evaluate_postunary(token, left, by_amount)?,
+            ExprKind::MemberAccess { token, left, ident } => {
+                self.member_access(token, ident, left)?
+            }
             ExprKind::CastUp { .. } => unimplemented!("explicit casts"),
             ExprKind::CastDown { .. } => unimplemented!("explicit casts"),
             ExprKind::ScaleUp { .. } => unreachable!("is only used in codegen"),
             ExprKind::ScaleDown { .. } => unreachable!("is only used in codegen"),
         });
         Ok(ast.type_decl.clone().unwrap())
+    }
+    fn member_access(
+        &mut self,
+        token: &Token,
+        ident: &Token,
+        left: &mut Expr,
+    ) -> Result<NEWTypes, Error> {
+        let left_type = self.expr_type(left)?;
+
+        if let NEWTypes::Struct(_, members) = left_type.clone() {
+            let ident = ident.unwrap_string();
+
+            if let Some((member_type, _)) = members
+                .into_iter()
+                .find(|(_, name)| name.unwrap_string() == ident)
+            {
+                Ok(member_type)
+            } else {
+                return Err(Error::new(
+                    token,
+                    &format!("No member '{}' in '{}'", ident, left_type),
+                ));
+            }
+        } else {
+            // return Err(Error::new(
+            //     token,
+            //     "Left operator of '.' expression has to be identifier",
+            // ));
+            return Err(Error::new(token, "Can only access members of structs"));
+        }
     }
     fn evaluate_postunary(
         &mut self,
@@ -535,8 +625,11 @@ impl TypeChecker {
     ) -> Result<NEWTypes, Error> {
         let operand = self.expr_type(expr)?;
 
-        if matches!(operand, NEWTypes::Array { .. }) {
-            return Err(Error::new(token, "Can't increment array-type"));
+        if matches!(operand, NEWTypes::Array { .. } | NEWTypes::Struct(..)) {
+            return Err(Error::new(
+                token,
+                &format!("Can't increment value of type '{}'", operand),
+            ));
         } else if expr.value_kind == ValueKind::Rvalue {
             return Err(Error::new(token, "Can't increment Rvalues"));
         }
@@ -632,21 +725,19 @@ impl TypeChecker {
             arg_types.push(t);
         }
 
-        match (
-            self.global_env
-                .current
-                .func_def_decl
-                .get(&func_name.unwrap_string()),
-            self.global_env
-                .current
-                .func_decl
-                .get(&func_name.unwrap_string()),
-        ) {
-            (None, None) => Err(Error::new(
+        match self.global_env.get_symbol(func_name) {
+            Err(_) => Err(Error::new(
                 left_paren,
-                &format!("no function {} exists", func_name.unwrap_string()),
+                &format!("No function {} exists", func_name.unwrap_string()),
             )),
-            (Some(function), None) | (None, Some(function)) | (Some(function), Some(_)) => {
+            Ok(Symbols::Var(_)) => Err(Error::new(
+                left_paren,
+                &format!(
+                    "Symbol '{}' only exists as a variable",
+                    func_name.unwrap_string()
+                ),
+            )),
+            Ok(Symbols::FuncDecl(function)) | Ok(Symbols::FuncDef(function)) => {
                 if function.arity() == args.len() {
                     self.args_and_params_match(left_paren, &function.params, arg_types)?;
                     Ok(function.return_type.clone())
@@ -654,7 +745,7 @@ impl TypeChecker {
                     Err(Error::new(
                         left_paren,
                         &format!(
-                            "at '{}': expected {} argument(s) found {}",
+                            "At '{}': expected {} argument(s) found {}",
                             func_name.unwrap_string(),
                             function.arity(),
                             args.len()
@@ -699,6 +790,7 @@ impl TypeChecker {
             (NEWTypes::Pointer(_), _) => {
                 token.token == TokenType::Plus || token.token == TokenType::Minus
             }
+            (NEWTypes::Struct(..), _) | (_, NEWTypes::Struct(..)) => false,
             _ => true,
         }
     }
@@ -730,7 +822,11 @@ impl TypeChecker {
         Self::lval_to_rval(left);
         Self::lval_to_rval(right);
 
-        if left_type.is_void() || right_type.is_void() {
+        if left_type.is_void()
+            || right_type.is_void()
+            || matches!(left_type, NEWTypes::Struct(..))
+            || matches!(right_type, NEWTypes::Struct(..))
+        {
             return Err(Error::new(
                 token,
                 &format!(
@@ -815,7 +911,15 @@ impl TypeChecker {
     ) -> Result<NEWTypes, Error> {
         let mut right_type = self.expr_type(right)?;
 
-        if matches!(token.token, TokenType::Amp) {
+        if matches!(right_type, NEWTypes::Struct(..)) {
+            Err(Error::new(
+                token,
+                &format!(
+                    "Invalid unary-expression '{}' with type '{}'",
+                    token.token, right_type
+                ),
+            ))
+        } else if matches!(token.token, TokenType::Amp) {
             // array doesn't decay during '&' expression
             Ok(self.check_address(token, right_type, right)?)
         } else {

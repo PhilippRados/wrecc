@@ -27,6 +27,7 @@ impl<'a> Scanner<'a> {
                 ("int", TokenType::Int),
                 ("long", TokenType::Long),
                 ("char", TokenType::Char),
+                ("struct", TokenType::Struct),
                 ("if", TokenType::If),
                 ("else", TokenType::Else),
                 ("for", TokenType::For),

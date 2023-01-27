@@ -55,6 +55,11 @@ pub enum ExprKind {
         left: Box<Expr>,
         by_amount: usize,
     },
+    MemberAccess {
+        token: Token,
+        ident: Token,
+        left: Box<Expr>,
+    },
     String(Token),
     Number(i32),
     CharLit(i8),
@@ -101,6 +106,7 @@ impl Display for ExprKind {
                 ExprKind::ScaleDown { .. } => "'scaling-down'".to_string(),
                 ExprKind::String(token) => token.unwrap_string(),
                 ExprKind::PostUnary { .. } => "'postfix-expression'".to_string(),
+                ExprKind::MemberAccess { .. } => "'member-access-expression'".to_string(),
                 ExprKind::CompoundAssign { token, .. } =>
                     format!("'compound-assignment: {}'", token.token),
             }

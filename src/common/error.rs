@@ -62,14 +62,6 @@ impl ErrorData {
             eprintln!("^");
         }
     }
-    pub fn missing_entrypoint() -> Self {
-        ErrorData {
-            line_index: -1,
-            msg: "Can't find main() entrypoint to program.".to_string(),
-            line_string: "".to_string(),
-            column: -1,
-        }
-    }
 
     pub fn sys_exit(msg: &str, exit_code: i32) -> ! {
         eprintln!("rucc: {msg}");

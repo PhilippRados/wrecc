@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 pub enum FunctionKind {
     Declaration,
-    DefDeclaration,
+    Definition,
 }
 #[derive(Clone, PartialEq)]
 pub struct Function {
@@ -23,23 +23,29 @@ impl Function {
 }
 
 #[derive(Clone, PartialEq)]
-pub struct Table<T> {
-    pub vars: HashMap<String, T>,
-    // for declaration;
-    // can have multiple
-    pub func_decl: HashMap<String, Function>,
-    // for declaration{}
-    // can only have single
-    pub func_def_decl: HashMap<String, Function>,
+pub enum Symbols<T> {
+    Var(T),
+    FuncDef(Function),
+    FuncDecl(Function),
 }
-impl<T> Table<T> {
-    pub fn new() -> Self {
-        Table {
-            vars: HashMap::<String, T>::new(),
-            func_decl: HashMap::<String, Function>::new(),
-            func_def_decl: HashMap::<String, Function>::new(),
+impl<T> Symbols<T> {
+    pub fn unwrap_var(self) -> T {
+        match self {
+            Symbols::Var(v) => v,
+            _ => unreachable!("cant unwrap var on func"),
         }
     }
+}
+
+#[derive(Clone, PartialEq)]
+pub enum CustomTypes {
+    Struct(Vec<(NEWTypes, Token)>),
+}
+
+#[derive(Clone, PartialEq)]
+pub struct Table<T> {
+    pub symbols: HashMap<String, Symbols<T>>,
+    pub customs: HashMap<String, CustomTypes>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -50,27 +56,16 @@ pub struct Environment<T> {
 impl<T: Clone> Environment<T> {
     pub fn new(enclosing: Option<Box<Environment<T>>>) -> Self {
         Environment {
-            current: Table::new(),
+            current: Table {
+                symbols: HashMap::<String, Symbols<T>>::new(),
+                customs: HashMap::<String, CustomTypes>::new(),
+            },
             enclosing,
         }
     }
     // methods used for typechecker AND codegen
     pub fn declare_var(&mut self, name: String, value: T) {
-        self.current.vars.insert(name, value);
-    }
-
-    pub fn get_var(&self, var_name: &Token) -> Result<T, Error> {
-        let name = var_name.unwrap_string();
-        match self.current.vars.get(&name) {
-            Some(v) => Ok(v.clone()),
-            None => match &self.enclosing {
-                Some(env) => (**env).get_var(var_name),
-                None => Err(Error::new(var_name, "undeclared variable")),
-            },
-        }
-    }
-    pub fn init_var(&mut self, name: String, value: T) {
-        self.current.vars.insert(name, value);
+        self.current.symbols.insert(name, Symbols::Var(value));
     }
 
     pub fn declare_func(
@@ -80,18 +75,42 @@ impl<T: Clone> Environment<T> {
         params: Vec<(NEWTypes, Token)>,
         kind: FunctionKind,
     ) {
-        let f = Function::new(return_type, params);
-
-        match kind {
-            FunctionKind::Declaration => self.current.func_decl.insert(name.to_string(), f),
-            FunctionKind::DefDeclaration => self.current.func_def_decl.insert(name.to_string(), f),
-        };
+        self.current.symbols.insert(
+            name.to_string(),
+            match kind {
+                FunctionKind::Declaration => Symbols::FuncDecl(Function::new(return_type, params)),
+                FunctionKind::Definition => Symbols::FuncDef(Function::new(return_type, params)),
+            },
+        );
     }
-    pub fn get_func(&self, name: &str, kind: FunctionKind) -> Option<&Function> {
-        // has to be called from global_env because functions can only be declared in global scope
-        match kind {
-            FunctionKind::Declaration => self.current.func_decl.get(name),
-            FunctionKind::DefDeclaration => self.current.func_def_decl.get(name),
+
+    pub fn get_symbol(&self, var_name: &Token) -> Result<Symbols<T>, Error> {
+        let name = var_name.unwrap_string();
+        match self.current.symbols.get(&name) {
+            Some(v) => Ok(v.clone()),
+            None => match &self.enclosing {
+                Some(env) => (**env).get_symbol(var_name),
+                None => Err(Error::new(var_name, "undeclared symbol")),
+            },
         }
+    }
+    pub fn get_type(&self, var_name: &Token) -> Result<CustomTypes, Error> {
+        let name = var_name.unwrap_string();
+        match self.current.customs.get(&name) {
+            Some(v) => Ok(v.clone()),
+            None => match &self.enclosing {
+                Some(env) => (**env).get_type(var_name),
+                None => Err(Error::new(var_name, "undeclared type")),
+            },
+        }
+    }
+    pub fn init_var(&mut self, name: String, value: T) {
+        self.current.symbols.insert(name, Symbols::Var(value));
+    }
+
+    pub fn declare_struct(&mut self, name: String, members: Vec<(NEWTypes, Token)>) {
+        self.current
+            .customs
+            .insert(name, CustomTypes::Struct(members));
     }
 }

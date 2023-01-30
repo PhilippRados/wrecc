@@ -454,7 +454,7 @@ impl<'a> Compiler<'a> {
                     .clone()
                     .into_iter()
                     .take_while(|(_, name)| name.unwrap_string() != ident)
-                    .fold(0, |_, (t, _)| t.size());
+                    .fold(0, |acc, (t, _)| acc + t.size());
                 let (member_type, _) = members
                     .into_iter()
                     .find(|(_, name)| name.unwrap_string() == ident)

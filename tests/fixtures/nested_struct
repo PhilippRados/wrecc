@@ -1,0 +1,27 @@
+void printf(char* s,int d);
+void strcpy(char* s1,char* s2);
+
+struct Emp {
+    int id;
+    char name[6];
+    struct Date {
+      long dd;
+      char mm;
+      int yyyy;
+    } date;
+};
+
+int main(){
+  struct Emp emp;
+
+  emp.id = 101;
+  strcpy(emp.name,"hello");
+
+  emp.date.dd = 10;
+  emp.date.mm = 5;
+  emp.date.yyyy = 2001;
+
+  printf("%d\n",emp.date.dd);
+  printf("%d\n",emp.date.mm);
+  printf("%d\n",emp.date.yyyy);
+}

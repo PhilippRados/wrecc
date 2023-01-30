@@ -374,7 +374,7 @@ impl TypeChecker {
     }
     fn function_definition(
         &mut self,
-        return_type: &NEWTypes,
+        return_type: &mut NEWTypes,
         name_token: &Token,
         params: Vec<(NEWTypes, Token)>,
         body: &mut Vec<Stmt>,
@@ -386,6 +386,7 @@ impl TypeChecker {
             ));
         }
         let name = name_token.unwrap_string();
+        self.fill_struct(return_type)?;
 
         match self.global_env.get_symbol(name_token) {
             Ok(Symbols::FuncDef(_)) => {

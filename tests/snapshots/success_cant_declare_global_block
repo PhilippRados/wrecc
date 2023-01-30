@@ -1,8 +1,8 @@
-Error: Expected declaration, found '{'
+Error: Expected type-declaration, found '{'
 |
 2 {
 | ^
-Error: Expected declaration, found 'return'
+Error: Expected type-declaration, found 'return'
 |
 5     return 0;
 |     ^

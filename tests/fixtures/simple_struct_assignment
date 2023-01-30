@@ -3,7 +3,7 @@ void printf(char* s,int d);
 int main() {
   struct test {
     long some;
-    int age
+    int age;
   } e;
   struct test name;
 

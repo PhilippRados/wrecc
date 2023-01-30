@@ -610,10 +610,6 @@ impl TypeChecker {
                 ));
             }
         } else {
-            // return Err(Error::new(
-            //     token,
-            //     "Left operator of '.' expression has to be identifier",
-            // ));
             return Err(Error::new(token, "Can only access members of structs"));
         }
     }

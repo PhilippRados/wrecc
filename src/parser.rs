@@ -52,29 +52,28 @@ impl Parser {
         }
     }
     fn declaration(&mut self) -> Result<Stmt, Error> {
-        if let Some(t) = self.matches_type() {
-            if let Some(left) = self.matches(vec![TokenKind::LeftBracket]) {
-                return Err(Error::new(
-                    &left,
-                    "Brackets not allowed here; Put them after the Identifier",
-                ));
-            }
-            match (t.clone(), self.peek()?) {
-                (NEWTypes::Struct(name, members), token) if token.token == TokenType::Semicolon => {
-                    if name.is_none() || members.is_empty() {
-                        return Err(Error::new(token, "struct definition can't be empty"));
-                    }
-                    self.tokens.next();
-                    Ok(Stmt::StructDef(name.unwrap(), members))
+        match self.matches_type() {
+            Ok(t) => {
+                if let Some(left) = self.matches(vec![TokenKind::LeftBracket]) {
+                    return Err(Error::new(
+                        &left,
+                        "Brackets not allowed here; Put them after the Identifier",
+                    ));
                 }
-                _ => self.type_declaration(t),
+                match (t.clone(), self.peek()?) {
+                    (NEWTypes::Struct(name, members), token)
+                        if token.token == TokenType::Semicolon =>
+                    {
+                        if name.is_none() || members.is_empty() {
+                            return Err(Error::new(token, "Struct definition can't be empty"));
+                        }
+                        self.tokens.next();
+                        Ok(Stmt::StructDef(name.unwrap(), members))
+                    }
+                    _ => self.type_declaration(t),
+                }
             }
-        } else {
-            let token = self.peek()?;
-            Err(Error::new(
-                token,
-                &format!("Expected declaration, found {}", token.token),
-            ))
+            Err(e) => Err(e),
         }
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
@@ -107,7 +106,7 @@ impl Parser {
         let left_paren = self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
 
         let mut init = None;
-        if let Some(token) = self.matches_type() {
+        if let Ok(token) = self.matches_type() {
             init = Some(self.type_declaration(token)?);
         } else if !self.check(TokenKind::Semicolon) {
             init = Some(self.expression_statement()?)
@@ -221,13 +220,24 @@ impl Parser {
             Ok(type_decl)
         }
     }
+    fn parse_members(&mut self) -> Result<Vec<(NEWTypes, Token)>, Error> {
+        let mut params = Vec::new();
+        if self.matches(vec![TokenKind::LeftBrace]).is_none() {
+            return Ok(params);
+        }
+        while self.matches(vec![TokenKind::RightBrace]).is_none() {
+            let mut param_type = self.matches_type()?;
+            let name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
+            param_type = self.parse_arr(param_type)?;
+
+            params.push((param_type, name));
+            self.consume(TokenKind::Semicolon, "Expect ';' after member declaration")?;
+        }
+        Ok(params)
+    }
     fn parse_struct(&mut self, token: &Token) -> Result<NEWTypes, Error> {
         let name = self.matches(vec![TokenKind::Ident]);
-        let members = if self.matches(vec![TokenKind::LeftBrace]).is_some() {
-            self.parse_params(TokenKind::Semicolon, TokenKind::RightBrace)?
-        } else {
-            Vec::new()
-        };
+        let members = self.parse_members()?;
 
         if name.is_none() && members.is_empty() {
             return Err(Error::new(
@@ -378,26 +388,13 @@ impl Parser {
             ))
         }
     }
-    fn parse_params(
-        &mut self,
-        seperator: TokenKind,
-        endtoken: TokenKind,
-    ) -> Result<Vec<(NEWTypes, Token)>, Error> {
-        if self.matches(vec![endtoken.clone()]).is_some() {
-            return Ok(vec![]);
-        }
+    fn parse_params(&mut self) -> Result<Vec<(NEWTypes, Token)>, Error> {
         let mut params = Vec::new();
+        if self.matches(vec![TokenKind::RightParen]).is_some() {
+            return Ok(params);
+        }
         loop {
-            let mut param_type = match self.matches_type() {
-                Some(type_decl) => type_decl,
-                None => {
-                    let actual = self.peek()?;
-                    return Err(Error::new(
-                        actual,
-                        &format!("Expected type found {}", actual.token),
-                    ));
-                }
-            };
+            let mut param_type = self.matches_type()?;
             let name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
 
             param_type = self.parse_arr(param_type)?;
@@ -406,20 +403,13 @@ impl Parser {
             }
 
             params.push((param_type, name));
-            if self.matches(vec![seperator.clone()]) == None {
+            if self.matches(vec![TokenKind::Comma]).is_none() {
                 break;
             }
         }
         self.consume(
-            endtoken.clone(),
-            &format!(
-                "Expect '{}' after function parameters",
-                match endtoken {
-                    TokenKind::RightParen => ")",
-                    TokenKind::RightBrace => "}",
-                    _ => unreachable!(),
-                }
-            ),
+            TokenKind::RightParen,
+            "Expect ')' after function parameters",
         )?;
         Ok(params)
     }
@@ -427,7 +417,7 @@ impl Parser {
         if matches!(return_type, NEWTypes::Array { .. }) {
             return Err(Error::new(&name, "function can't return array-type"));
         }
-        let params = self.parse_params(TokenKind::Comma, TokenKind::RightParen)?;
+        let params = self.parse_params()?;
 
         if self.matches(vec![TokenKind::Semicolon]).is_some() {
             Ok(Stmt::FunctionDeclaration(return_type, name, params))
@@ -848,11 +838,14 @@ impl Parser {
         }
         self.tokens.next()
     }
-    fn matches_type(&mut self) -> Option<NEWTypes> {
-        match self.peek().ok() {
-            Some(v) => {
+    fn matches_type(&mut self) -> Result<NEWTypes, Error> {
+        match self.peek() {
+            Ok(v) => {
                 if !v.is_type() {
-                    return None;
+                    return Err(Error::new(
+                        v,
+                        &format!("Expected type-declaration, found {}", v.token),
+                    ));
                 }
                 let mut type_decl;
                 if v.token == TokenType::Struct {
@@ -860,7 +853,7 @@ impl Parser {
                         .tokens
                         .next()
                         .expect("can unwrap because successfull peek");
-                    type_decl = self.parse_struct(&token).ok()?;
+                    type_decl = self.parse_struct(&token)?;
                 } else {
                     // otherwise parse primitive
                     type_decl = self
@@ -873,9 +866,9 @@ impl Parser {
                 while self.matches(vec![TokenKind::Star]).is_some() {
                     type_decl.pointer_to();
                 }
-                Some(type_decl)
+                Ok(type_decl)
             }
-            None => return None,
+            Err(e) => Err(e),
         }
     }
 }

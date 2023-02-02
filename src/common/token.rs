@@ -48,6 +48,7 @@ pub enum TokenKind {
     PipePipe,
     Xor,
     XorEqual,
+    Arrow,
 
     // Literals.
     Ident,
@@ -127,6 +128,7 @@ impl From<&TokenType> for TokenKind {
             TokenType::Struct => TokenKind::Struct,
             TokenType::Void => TokenKind::Void,
             TokenType::Tilde => TokenKind::Tilde,
+            TokenType::Arrow => TokenKind::Arrow,
         }
     }
 }
@@ -178,6 +180,7 @@ pub enum TokenType {
     PipePipe,
     Xor,
     XorEqual,
+    Arrow,
 
     // Literals.
     Ident(String),
@@ -259,6 +262,7 @@ impl Display for TokenType {
                 TokenType::While => "'while'",
                 TokenType::Void => "'void'",
                 TokenType::Tilde => "'~'",
+                TokenType::Arrow => "'->'",
             }
         )
     }

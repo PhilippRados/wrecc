@@ -448,7 +448,6 @@ impl<'a> Compiler<'a> {
         mut left: Register,
         ident: &Token,
     ) -> Result<Register, std::fmt::Error> {
-        // let mut left = self.execute_expr(left)?;
         let ident = ident.unwrap_string();
 
         if let NEWTypes::Struct(_, members) = left.get_type() {

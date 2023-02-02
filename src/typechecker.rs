@@ -613,7 +613,10 @@ impl TypeChecker {
                 ))
             }
         } else {
-            Err(Error::new(token, "Can only access members of structs"))
+            Err(Error::new(
+                token,
+                &format!("Can only access members of structs, not '{}'", left_type),
+            ))
         }
     }
     fn evaluate_postunary(

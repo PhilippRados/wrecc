@@ -8,7 +8,7 @@ struct Emp* malloc(int d);
 
 struct Emp* init() {
   struct Emp* e = malloc(4);
-  (*e).id = 3;
+  e->id = 3;
   (*e).some = 1;
   return e;
 }
@@ -16,7 +16,7 @@ struct Emp* init() {
 int main() {
   struct Emp emp;
 
-  int id = (*init()).id;
+  int id = init()->id;
   emp = *init();
   printf("%d\n",id);
   printf("%d\n",emp.some);

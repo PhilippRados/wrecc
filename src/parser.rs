@@ -688,6 +688,7 @@ impl Parser {
             TokenKind::PlusPlus,
             TokenKind::MinusMinus,
             TokenKind::Dot,
+            TokenKind::Arrow,
         ]) {
             match token.token {
                 TokenType::LeftBracket => {
@@ -714,6 +715,17 @@ impl Parser {
                             },
                             ValueKind::Lvalue,
                         );
+                    } else {
+                        return Err(Error::new(
+                            &token,
+                            "A struct member access must be followed by an identifer",
+                        ));
+                    }
+                }
+                TokenType::Arrow => {
+                    // some_struct->member
+                    if let Some(ident) = self.matches(vec![TokenKind::Ident]) {
+                        expr = arrow_sugar(expr, ident, token);
                     } else {
                         return Err(Error::new(
                             &token,
@@ -886,6 +898,37 @@ fn array_element_count(arr: NEWTypes) -> usize {
     } else {
         1
     }
+}
+
+fn arrow_sugar(left: Expr, member: Token, arrow_token: Token) -> Expr {
+    // some_struct->member
+    // equivalent to:
+    // (*some_struct).member
+    Expr::new(
+        ExprKind::MemberAccess {
+            token: arrow_token,
+            ident: member.clone(),
+            left: Box::new(Expr::new(
+                ExprKind::Grouping {
+                    expr: Box::new(Expr::new(
+                        ExprKind::Unary {
+                            token: Token::new(
+                                TokenType::Star,
+                                member.line_index,
+                                member.column,
+                                member.line_string,
+                            ),
+                            is_global: false,
+                            right: Box::new(left),
+                        },
+                        ValueKind::Lvalue,
+                    )),
+                },
+                ValueKind::Lvalue,
+            )),
+        },
+        ValueKind::Lvalue,
+    )
 }
 
 fn list_sugar_assign(

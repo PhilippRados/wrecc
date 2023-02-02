@@ -91,6 +91,8 @@ impl<'a> Scanner<'a> {
                         token = TokenType::MinusMinus;
                     } else if self.matches('=') {
                         token = TokenType::MinusEqual;
+                    } else if self.matches('>') {
+                        token = TokenType::Arrow;
                     }
                     self.add_token(&mut tokens, token);
                 }

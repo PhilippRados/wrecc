@@ -280,6 +280,14 @@ impl Token {
             line_string,
         }
     }
+    pub fn default(kind: TokenType) -> Self {
+        Token {
+            token: kind,
+            line_index: -1,
+            line_string: "".to_string(),
+            column: -1,
+        }
+    }
     pub fn unwrap_string(&self) -> String {
         match &self.token {
             TokenType::Ident(s) => s.clone(),

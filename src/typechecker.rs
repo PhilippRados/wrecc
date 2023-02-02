@@ -155,6 +155,7 @@ impl TypeChecker {
                 *members = m;
                 Ok(())
             }
+            NEWTypes::Array { of, .. } | NEWTypes::Pointer(of) => self.fill_struct(of),
             _ => Ok(()),
         }
     }
@@ -341,10 +342,11 @@ impl TypeChecker {
     }
     fn function_declaration(
         &mut self,
-        return_type: &NEWTypes,
+        return_type: &mut NEWTypes,
         name_token: &Token,
         params: &Vec<(NEWTypes, Token)>,
     ) -> Result<(), Error> {
+        self.fill_struct(return_type)?;
         match self.global_env.get_symbol(&name_token) {
             Ok(Symbols::FuncDecl(f)) => {
                 self.cmp_decl(name_token, &f, return_type, params)?;
@@ -605,13 +607,13 @@ impl TypeChecker {
             {
                 Ok(member_type)
             } else {
-                return Err(Error::new(
+                Err(Error::new(
                     token,
                     &format!("No member '{}' in '{}'", ident, left_type),
-                ));
+                ))
             }
         } else {
-            return Err(Error::new(token, "Can only access members of structs"));
+            Err(Error::new(token, "Can only access members of structs"))
         }
     }
     fn evaluate_postunary(
@@ -912,7 +914,7 @@ impl TypeChecker {
             Err(Error::new(
                 token,
                 &format!(
-                    "Invalid unary-expression '{}' with type '{}'",
+                    "Invalid unary-expression {} with type '{}'",
                     token.token, right_type
                 ),
             ))

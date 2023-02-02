@@ -43,22 +43,19 @@ impl TypeInfo for NEWTypes {
     fn reg_suffix(&self) -> &str {
         match self {
             NEWTypes::Primitive(t) => t.reg_suffix(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } => "",
-            NEWTypes::Struct(..) => unimplemented!(),
+            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => "",
         }
     }
     fn suffix(&self) -> &str {
         match self {
             NEWTypes::Primitive(t) => t.suffix(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } => "q",
-            NEWTypes::Struct(..) => unimplemented!(),
+            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => "q",
         }
     }
     fn complete_suffix(&self) -> &str {
         match self {
             NEWTypes::Primitive(t) => t.complete_suffix(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } => "quad",
-            NEWTypes::Struct(..) => unimplemented!(),
+            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => "quad",
         }
     }
     fn return_reg(&self) -> &str {
@@ -134,6 +131,11 @@ impl NEWTypes {
 
             (NEWTypes::Primitive(_), NEWTypes::Primitive(_)) => true,
 
+            (NEWTypes::Pointer(l), NEWTypes::Pointer(r))
+                if matches!(**l, NEWTypes::Struct(..)) && matches!(**r, NEWTypes::Struct(..)) =>
+            {
+                l.type_compatible(r)
+            }
             (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => *self == *other,
 
             // two structs are compatible if they have the same name and members

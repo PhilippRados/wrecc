@@ -437,38 +437,54 @@ impl<'a> Compiler<'a> {
                 left,
                 by_amount,
             } => self.cg_postunary(token, left, by_amount),
-            ExprKind::MemberAccess { left, ident, .. } => self.cg_member_access(left, ident),
+            ExprKind::MemberAccess { left, ident, .. } => {
+                let left = self.execute_expr(left)?;
+                self.cg_member_access(left, ident)
+            }
         }
     }
     fn cg_member_access(
         &mut self,
-        left: &Expr,
+        mut left: Register,
         ident: &Token,
     ) -> Result<Register, std::fmt::Error> {
-        let left = self.execute_expr(left)?;
+        // let mut left = self.execute_expr(left)?;
         let ident = ident.unwrap_string();
 
         if let NEWTypes::Struct(_, members) = left.get_type() {
-            if let Register::Stack(s) = left {
-                let offset = members
-                    .clone()
-                    .into_iter()
-                    .take_while(|(_, name)| name.unwrap_string() != ident)
-                    .fold(0, |acc, (t, _)| acc + t.size());
-                let (member_type, _) = members
-                    .into_iter()
-                    .find(|(_, name)| name.unwrap_string() == ident)
-                    .unwrap();
+            let offset = members
+                .clone()
+                .into_iter()
+                .take_while(|(_, name)| name.unwrap_string() != ident)
+                .fold(0, |acc, (t, _)| acc + t.size());
+            let (member_type, _) = members
+                .into_iter()
+                .find(|(_, name)| name.unwrap_string() == ident)
+                .unwrap();
 
-                Ok(Register::Stack(StackRegister::new(
+            if offset == 0 {
+                left.set_type(member_type);
+                return Ok(left);
+            }
+            match &left {
+                Register::Stack(s) => Ok(Register::Stack(StackRegister::new(
                     s.bp_offset - offset,
                     member_type,
-                )))
-            } else {
-                unreachable!()
+                ))),
+                Register::Scratch(..) => {
+                    left.set_value_kind(ValueKind::Rvalue);
+                    left = self.cg_add(
+                        Register::Literal(offset, NEWTypes::Primitive(Types::Int)),
+                        left,
+                    )?;
+                    left.set_type(member_type);
+                    left.set_value_kind(ValueKind::Lvalue);
+                    Ok(left)
+                }
+                _ => unreachable!("{:?}", left),
             }
         } else {
-            unreachable!()
+            unreachable!("{:?}", left)
         }
     }
     fn cg_comp_assign(
@@ -650,21 +666,14 @@ impl<'a> Compiler<'a> {
     ) -> Result<Register, std::fmt::Error> {
         if let NEWTypes::Struct(_, members) = l_value.get_type() {
             // when assigning structs have to assign each member
-            if let (Register::Stack(s_l), Register::Stack(s_r)) = (&l_value, &r_value) {
-                let mut offset = 0;
-                for m in members.into_iter() {
-                    let member_lvalue =
-                        Register::Stack(StackRegister::new(s_l.bp_offset - offset, m.0.clone()));
-                    let member_rvalue =
-                        Register::Stack(StackRegister::new(s_r.bp_offset - offset, m.0.clone()));
+            for m in members {
+                let member_token = Token::default(TokenType::Ident(m.1.unwrap_string()));
+                let member_lvalue = self.cg_member_access(l_value.clone(), &member_token)?;
+                let member_rvalue = self.cg_member_access(r_value.clone(), &member_token)?;
 
-                    self.cg_assign(member_lvalue, member_rvalue)?;
-                    offset += m.0.size();
-                }
-                Ok(l_value)
-            } else {
-                unreachable!()
+                self.cg_assign(member_lvalue, member_rvalue)?.free();
             }
+            Ok(l_value)
         } else {
             // can't move from mem to mem so make temp scratch-register
             r_value = convert_reg!(self, r_value, Register::Stack(..) | Register::Label(..));

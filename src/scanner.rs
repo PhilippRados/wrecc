@@ -57,14 +57,15 @@ impl<'a> Scanner<'a> {
             TokenType::BangEqual
             | TokenType::EqualEqual
             | TokenType::GreaterEqual
-            | TokenType::LessEqual => 2,
+            | TokenType::LessEqual
+            | TokenType::Arrow => 2,
             TokenType::String(s) => (s.len() + 2) as i32,
             TokenType::Ident(s) => s.len() as i32,
             TokenType::Int | TokenType::For => 3,
             TokenType::Char | TokenType::Else | TokenType::Long => 4,
             TokenType::While => 5,
             TokenType::If => 2,
-            TokenType::Return => 6,
+            TokenType::Return | TokenType::Struct => 6,
             TokenType::Number(n) => n.to_string().len() as i32,
             _ => 1,
         }

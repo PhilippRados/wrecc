@@ -126,7 +126,7 @@ impl TypeChecker {
     fn declare_struct(
         &mut self,
         struct_name: &Token,
-        members: Vec<(NEWTypes, Token)>,
+        mut members: Vec<(NEWTypes, Token)>,
     ) -> Result<(), Error> {
         let name = struct_name.unwrap_string();
 
@@ -136,9 +136,12 @@ impl TypeChecker {
                 &format!("Redefinition of struct '{}'", name),
             ));
         }
-        for m in members.iter() {
-            if m.0.is_void() {
-                return Err(Error::new(&m.1, "Struct member can't have type 'void'"));
+        for m in members.iter_mut() {
+            match m.0 {
+                NEWTypes::Primitive(Types::Void) => {
+                    return Err(Error::new(&m.1, "Struct member can't have type 'void'"))
+                }
+                ref mut t => self.fill_struct(t)?,
             }
         }
         self.env.declare_struct(name, members);
@@ -146,13 +149,11 @@ impl TypeChecker {
     }
     fn fill_struct(&mut self, type_decl: &mut NEWTypes) -> Result<(), Error> {
         match type_decl {
-            NEWTypes::Struct(Some(n), members) if !members.is_empty() => {
-                self.declare_struct(&n, members.clone())
-            }
-            NEWTypes::Struct(Some(n), members) if members.is_empty() => {
+            NEWTypes::Struct(Some(n), Some(members)) => self.declare_struct(&n, members.clone()),
+            NEWTypes::Struct(Some(n), members) if members.is_none() => {
                 // if no members struct has to already exists
                 let CustomTypes::Struct(m) = self.env.get_type(n)?;
-                *members = m;
+                *members = Some(m);
                 Ok(())
             }
             NEWTypes::Array { of, .. } | NEWTypes::Pointer(of) => self.fill_struct(of),
@@ -602,6 +603,7 @@ impl TypeChecker {
             let ident = ident.unwrap_string();
 
             if let Some((member_type, _)) = members
+                .expect("struct hasnt been filled")
                 .into_iter()
                 .find(|(_, name)| name.unwrap_string() == ident)
             {
@@ -730,7 +732,7 @@ impl TypeChecker {
         match self.global_env.get_symbol(func_name) {
             Err(_) => Err(Error::new(
                 left_paren,
-                &format!("No function {} exists", func_name.unwrap_string()),
+                &format!("No function '{}' exists", func_name.unwrap_string()),
             )),
             Ok(Symbols::Var(_)) => Err(Error::new(
                 left_paren,
@@ -913,15 +915,7 @@ impl TypeChecker {
     ) -> Result<NEWTypes, Error> {
         let mut right_type = self.expr_type(right)?;
 
-        if matches!(right_type, NEWTypes::Struct(..)) {
-            Err(Error::new(
-                token,
-                &format!(
-                    "Invalid unary-expression {} with type '{}'",
-                    token.token, right_type
-                ),
-            ))
-        } else if matches!(token.token, TokenType::Amp) {
+        if matches!(token.token, TokenType::Amp) {
             // array doesn't decay during '&' expression
             Ok(self.check_address(token, right_type, right)?)
         } else {

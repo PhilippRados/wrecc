@@ -61,7 +61,7 @@ impl Parser {
                     ));
                 }
                 match (t.clone(), self.peek()?) {
-                    (NEWTypes::Struct(name, members), token)
+                    (NEWTypes::Struct(name, Some(members)), token)
                         if token.token == TokenType::Semicolon =>
                     {
                         if name.is_none() || members.is_empty() {
@@ -222,9 +222,6 @@ impl Parser {
     }
     fn parse_members(&mut self) -> Result<Vec<(NEWTypes, Token)>, Error> {
         let mut params = Vec::new();
-        if self.matches(vec![TokenKind::LeftBrace]).is_none() {
-            return Ok(params);
-        }
         while self.matches(vec![TokenKind::RightBrace]).is_none() {
             let mut param_type = self.matches_type()?;
             let name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
@@ -237,9 +234,16 @@ impl Parser {
     }
     fn parse_struct(&mut self, token: &Token) -> Result<NEWTypes, Error> {
         let name = self.matches(vec![TokenKind::Ident]);
-        let members = self.parse_members()?;
+        let members = if let Some(_) = self.matches(vec![TokenKind::LeftBrace]) {
+            match self.parse_members()? {
+                m if m.is_empty() => return Err(Error::new(token, "Can't have empty struct")),
+                m => Some(m),
+            }
+        } else {
+            None
+        };
 
-        if name.is_none() && members.is_empty() {
+        if name.is_none() && members.is_none() {
             return Err(Error::new(
                 token,
                 "Can't declare anonymous struct without members",

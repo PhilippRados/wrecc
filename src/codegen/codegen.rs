@@ -450,7 +450,7 @@ impl<'a> Compiler<'a> {
     ) -> Result<Register, std::fmt::Error> {
         let ident = ident.unwrap_string();
 
-        if let NEWTypes::Struct(_, members) = left.get_type() {
+        if let NEWTypes::Struct(_, Some(members)) = left.get_type() {
             let offset = members
                 .clone()
                 .into_iter()
@@ -663,7 +663,7 @@ impl<'a> Compiler<'a> {
         l_value: Register,
         mut r_value: Register,
     ) -> Result<Register, std::fmt::Error> {
-        if let NEWTypes::Struct(_, members) = l_value.get_type() {
+        if let NEWTypes::Struct(_, Some(members)) = l_value.get_type() {
             // when assigning structs have to assign each member
             for m in members {
                 let member_token = Token::default(TokenType::Ident(m.1.unwrap_string()));
@@ -1239,14 +1239,18 @@ impl<'a> Compiler<'a> {
     }
     fn fill_struct(&mut self, type_decl: &mut NEWTypes) {
         match type_decl {
-            NEWTypes::Struct(Some(n), members) if !members.is_empty() => {
+            NEWTypes::Struct(Some(n), Some(members)) => {
+                for m in members.iter_mut() {
+                    self.fill_struct(&mut m.0);
+                }
                 self.env.declare_struct(n.unwrap_string(), members.clone())
             }
-            NEWTypes::Struct(Some(n), members) if members.is_empty() => {
+            NEWTypes::Struct(Some(n), members) if members.is_none() => {
                 // if no members struct has to already exists
                 let CustomTypes::Struct(m) = self.env.get_type(&n).unwrap();
-                *members = m;
+                *members = Some(m);
             }
+            NEWTypes::Array { of, .. } | NEWTypes::Pointer(of) => self.fill_struct(of),
             _ => (),
         }
     }

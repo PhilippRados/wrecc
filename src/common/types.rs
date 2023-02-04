@@ -25,14 +25,18 @@ pub enum NEWTypes {
     Primitive(Types),
     Array { amount: usize, of: Box<NEWTypes> },
     Pointer(Box<NEWTypes>),
-    Struct(Option<Token>, Vec<(NEWTypes, Token)>),
+    Struct(Option<Token>, Option<Vec<(NEWTypes, Token)>>),
 }
 
 impl TypeInfo for NEWTypes {
     fn size(&self) -> usize {
         match self {
             NEWTypes::Primitive(t) => t.size(),
-            NEWTypes::Struct(_, members) => members.iter().fold(0, |acc, (t, _)| acc + t.size()),
+            NEWTypes::Struct(_, members) => members
+                .clone()
+                .unwrap()
+                .iter()
+                .fold(0, |acc, (t, _)| acc + t.size()),
             NEWTypes::Pointer(_) => 8,
             NEWTypes::Array {
                 amount,
@@ -140,8 +144,8 @@ impl NEWTypes {
 
             // two structs are compatible if they have the same name and members
             (
-                NEWTypes::Struct(Some(name_l), members_l),
-                NEWTypes::Struct(Some(name_r), members_r),
+                NEWTypes::Struct(Some(name_l), Some(members_l)),
+                NEWTypes::Struct(Some(name_r), Some(members_r)),
             ) => {
                 let matching_members = members_l
                     .iter()

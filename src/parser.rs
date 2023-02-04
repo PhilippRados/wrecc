@@ -89,7 +89,7 @@ impl Parser {
         if self.matches(vec![TokenKind::While]).is_some() {
             return self.while_statement();
         }
-        if let Some(_) = self.matches(vec![TokenKind::LeftBrace]) {
+        if self.matches(vec![TokenKind::LeftBrace]).is_some() {
             return Ok(Stmt::Block(self.block()?));
         }
         self.expression_statement()
@@ -132,11 +132,11 @@ impl Parser {
             body = Stmt::Block(vec![body, Stmt::Expr(inc.unwrap())]);
         }
         if cond != None {
-            body = Stmt::While(left_paren.clone(), cond.unwrap(), Box::new(body));
+            body = Stmt::While(left_paren, cond.unwrap(), Box::new(body));
         } else {
             // if no condition then condition is true
             body = Stmt::While(
-                left_paren.clone(),
+                left_paren,
                 Expr::new(ExprKind::Number(1), ValueKind::Rvalue),
                 Box::new(body),
             );
@@ -234,7 +234,7 @@ impl Parser {
     }
     fn parse_struct(&mut self, token: &Token) -> Result<NEWTypes, Error> {
         let name = self.matches(vec![TokenKind::Ident]);
-        let members = if let Some(_) = self.matches(vec![TokenKind::LeftBrace]) {
+        let members = if self.matches(vec![TokenKind::LeftBrace]).is_some() {
             match self.parse_members()? {
                 m if m.is_empty() => return Err(Error::new(token, "Can't have empty struct")),
                 m => Some(m),
@@ -314,7 +314,7 @@ impl Parser {
 
                 let elements = s
                     .as_bytes()
-                    .into_iter()
+                    .iter()
                     .map(|c| Expr::new(ExprKind::CharLit(*c as i8), ValueKind::Rvalue))
                     .collect();
 

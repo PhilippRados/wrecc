@@ -132,7 +132,7 @@ impl TypeChecker {
 
         if self.env.current.customs.contains_key(&name) {
             return Err(Error::new(
-                &struct_name,
+                struct_name,
                 &format!("Redefinition of struct '{}'", name),
             ));
         }
@@ -149,7 +149,7 @@ impl TypeChecker {
     }
     fn fill_struct(&mut self, type_decl: &mut NEWTypes) -> Result<(), Error> {
         match type_decl {
-            NEWTypes::Struct(Some(n), Some(members)) => self.declare_struct(&n, members.clone()),
+            NEWTypes::Struct(Some(n), Some(members)) => self.declare_struct(n, members.clone()),
             NEWTypes::Struct(Some(n), members) if members.is_none() => {
                 // if no members struct has to already exists
                 let CustomTypes::Struct(m) = self.env.get_type(n)?;
@@ -272,15 +272,15 @@ impl TypeChecker {
             (NEWTypes::Array { of, .. }, ExprKind::String(..)) => {
                 //no array-decay when initializing char-array with string
                 if !matches!(*of, NEWTypes::Primitive(Types::Char)) {
-                    self.check_type_compatibility(var_name, &type_decl, &value_type)?;
+                    self.check_type_compatibility(var_name, type_decl, &value_type)?;
                 }
             }
             _ => {
                 crate::arr_decay!(value_type, expr, var_name, *is_global);
-                self.check_type_compatibility(var_name, &type_decl, &value_type)?;
+                self.check_type_compatibility(var_name, type_decl, &value_type)?;
             }
         }
-        self.maybe_cast(&type_decl, &value_type, expr);
+        self.maybe_cast(type_decl, &value_type, expr);
 
         if *is_global {
             if !is_constant(expr, &value_type) {
@@ -290,7 +290,7 @@ impl TypeChecker {
                 ));
             }
         } else {
-            self.increment_stack_size(&type_decl);
+            self.increment_stack_size(type_decl);
         }
         self.env.init_var(name, type_decl.clone());
 
@@ -348,7 +348,7 @@ impl TypeChecker {
         params: &Vec<(NEWTypes, Token)>,
     ) -> Result<(), Error> {
         self.fill_struct(return_type)?;
-        match self.global_env.get_symbol(&name_token) {
+        match self.global_env.get_symbol(name_token) {
             Ok(Symbols::FuncDecl(f)) => {
                 self.cmp_decl(name_token, &f, return_type, params)?;
                 self.global_env.declare_func(
@@ -744,7 +744,7 @@ impl TypeChecker {
             Ok(Symbols::FuncDecl(function)) | Ok(Symbols::FuncDef(function)) => {
                 if function.arity() == args.len() {
                     self.args_and_params_match(left_paren, &function.params, arg_types)?;
-                    Ok(function.return_type.clone())
+                    Ok(function.return_type)
                 } else {
                     Err(Error::new(
                         left_paren,

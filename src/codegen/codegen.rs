@@ -1247,7 +1247,7 @@ impl<'a> Compiler<'a> {
             }
             NEWTypes::Struct(Some(n), members) if members.is_none() => {
                 // if no members struct has to already exists
-                let CustomTypes::Struct(m) = self.env.get_type(&n).unwrap();
+                let CustomTypes::Struct(m) = self.env.get_type(n).unwrap();
                 *members = Some(m);
             }
             NEWTypes::Array { of, .. } | NEWTypes::Pointer(of) => self.fill_struct(of),

@@ -9,9 +9,8 @@ pub enum Error {
 
 impl Error {
     pub fn print_error(&self) {
-        match self {
-            Error::Regular(e) => e.print_error(),
-            _ => (),
+        if let Error::Regular(e) = self {
+            e.print_error()
         }
     }
     pub fn new(t: &Token, msg: &str) -> Self {

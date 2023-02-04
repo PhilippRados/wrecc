@@ -187,7 +187,7 @@ impl TypeInfo for Types {
         }
     }
     fn suffix(&self) -> &str {
-        &self.complete_suffix().get(0..1).unwrap()
+        self.complete_suffix().get(0..1).unwrap()
     }
     fn complete_suffix(&self) -> &str {
         match self {

@@ -136,15 +136,30 @@ impl TypeChecker {
                 &format!("Redefinition of struct '{}'", name),
             ));
         }
-        for m in members.iter_mut() {
-            match m.0 {
+        self.env.declare_struct(name.clone(), members.clone());
+        for (mem_type, token) in members.iter_mut() {
+            match mem_type {
                 NEWTypes::Primitive(Types::Void) => {
-                    return Err(Error::new(&m.1, "Struct member can't have type 'void'"))
+                    return Err(Error::new(&token, "Struct member can't have type 'void'"))
                 }
-                ref mut t => self.fill_struct(t)?,
+                NEWTypes::Struct(Some(t_name), None) if name.clone() == t_name.unwrap_string() => {
+                    return Err(Error::new(&token, "Struct can't have itself as a member"));
+                }
+                NEWTypes::Array { of, .. }
+                    if if let NEWTypes::Struct(Some(t_name), _) = &**of {
+                        t_name.unwrap_string() == name.clone()
+                    } else {
+                        false
+                    } =>
+                {
+                    return Err(Error::new(
+                        &token,
+                        "Struct can't have array of itself as a member",
+                    ));
+                }
+                _ => self.fill_struct(mem_type)?,
             }
         }
-        self.env.declare_struct(name, members);
         Ok(())
     }
     fn fill_struct(&mut self, type_decl: &mut NEWTypes) -> Result<(), Error> {

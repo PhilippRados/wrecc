@@ -241,11 +241,10 @@ impl TypeChecker {
         for e in exprs.iter_mut() {
             types.push(self.expr_type(e)?);
         }
-
         if self.is_global() {
-            for (i, e) in exprs.iter().by_ref().enumerate() {
+            for e in exprs.iter().by_ref() {
                 if let ExprKind::Assign { r_expr, .. } = &e.kind {
-                    if !is_constant(r_expr, &types[i]) {
+                    if !is_constant(r_expr) {
                         return Err(Error::new(
                             var_name,
                             "Global variables can only be initialized to compile-time constants",
@@ -282,23 +281,12 @@ impl TypeChecker {
 
         self.fill_struct(type_decl)?;
 
-        // char s[] = "literal" is valid
-        match (type_decl.clone(), &expr.kind) {
-            (NEWTypes::Array { of, .. }, ExprKind::String(..)) => {
-                //no array-decay when initializing char-array with string
-                if !matches!(*of, NEWTypes::Primitive(Types::Char)) {
-                    self.check_type_compatibility(var_name, type_decl, &value_type)?;
-                }
-            }
-            _ => {
-                crate::arr_decay!(value_type, expr, var_name, *is_global);
-                self.check_type_compatibility(var_name, type_decl, &value_type)?;
-            }
-        }
+        crate::arr_decay!(value_type, expr, var_name, *is_global);
+        self.check_type_compatibility(var_name, type_decl, &value_type)?;
         self.maybe_cast(type_decl, &value_type, expr);
 
         if *is_global {
-            if !is_constant(expr, &value_type) {
+            if !is_constant(expr) {
                 return Err(Error::new(
                     var_name,
                     "Global variables can only be initialized to compile-time constants",
@@ -1037,14 +1025,19 @@ pub fn create_label(index: &mut usize) -> usize {
 }
 
 // returns true if expression is known at compile-time
-fn is_constant(expr: &Expr, type_decl: &NEWTypes) -> bool {
-    match expr.kind {
+fn is_constant(expr: &Expr) -> bool {
+    // 6.6 Constant Expressions
+    match &expr.kind {
         ExprKind::String(_)
         | ExprKind::Number(_)
         | ExprKind::CharLit(_)
         | ExprKind::CastUp { .. }
         | ExprKind::CastDown { .. } => true,
-        _ => matches!(type_decl, NEWTypes::Pointer { .. }), // compile time constant can also be address
+        // don't have to specify matching array-type because it decays into '&' anyway
+        ExprKind::Unary { token, right, .. } if matches!(token.token, TokenType::Amp) => {
+            matches!(&right.kind, ExprKind::Ident(_) | ExprKind::String(_))
+        }
+        _ => false,
     }
 }
 

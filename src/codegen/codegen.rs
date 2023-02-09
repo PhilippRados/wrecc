@@ -437,53 +437,45 @@ impl<'a> Compiler<'a> {
                 left,
                 by_amount,
             } => self.cg_postunary(token, left, by_amount),
-            ExprKind::MemberAccess { left, ident, .. } => {
-                let left = self.execute_expr(left)?;
-                self.cg_member_access(left, ident)
+            ExprKind::MemberAccess { expr, member, .. } => {
+                let expr = self.execute_expr(expr)?;
+                self.cg_member_access(expr, member, true)
             }
         }
     }
     fn cg_member_access(
         &mut self,
-        mut left: Register,
-        ident: &Token,
+        reg: Register,
+        member: &Token,
+        free: bool,
     ) -> Result<Register, std::fmt::Error> {
-        let ident = ident.unwrap_string();
+        let member = member.unwrap_string();
 
-        if let NEWTypes::Struct(_, Some(members)) = left.get_type() {
+        if let NEWTypes::Struct(_, Some(members)) = reg.get_type() {
             let offset = members
                 .clone()
                 .into_iter()
-                .take_while(|(_, name)| name.unwrap_string() != ident)
+                .take_while(|(_, name)| name.unwrap_string() != member)
                 .fold(0, |acc, (t, _)| acc + t.size());
             let (member_type, _) = members
                 .into_iter()
-                .find(|(_, name)| name.unwrap_string() == ident)
+                .find(|(_, name)| name.unwrap_string() == member)
                 .unwrap();
 
-            if offset == 0 {
-                left.set_type(member_type);
-                return Ok(left);
-            }
-            match &left {
-                Register::Stack(s) => Ok(Register::Stack(StackRegister::new(
-                    s.bp_offset - offset,
-                    member_type,
-                ))),
-                Register::Scratch(..) => {
-                    left.set_value_kind(ValueKind::Rvalue);
-                    left = self.cg_add(
-                        Register::Literal(offset, NEWTypes::Primitive(Types::Int)),
-                        left,
-                    )?;
-                    left.set_type(member_type);
-                    left.set_value_kind(ValueKind::Lvalue);
-                    Ok(left)
-                }
-                _ => unreachable!("{:?}", left),
-            }
+            let address = self.cg_address_at(reg, false, free)?;
+            let mut result = if offset != 0 {
+                self.cg_add(
+                    Register::Literal(offset, NEWTypes::Primitive(Types::Int)),
+                    address,
+                )?
+            } else {
+                address
+            };
+            result.set_type(member_type);
+            result.set_value_kind(ValueKind::Lvalue);
+            Ok(result)
         } else {
-            unreachable!("{:?}", left)
+            unreachable!("{:?}", reg.get_type())
         }
     }
     fn cg_comp_assign(
@@ -665,13 +657,14 @@ impl<'a> Compiler<'a> {
     ) -> Result<Register, std::fmt::Error> {
         if let NEWTypes::Struct(_, Some(members)) = l_value.get_type() {
             // when assigning structs have to assign each member
-            for m in members {
+            for m in members.iter() {
                 let member_token = Token::default(TokenType::Ident(m.1.unwrap_string()));
-                let member_lvalue = self.cg_member_access(l_value.clone(), &member_token)?;
-                let member_rvalue = self.cg_member_access(r_value.clone(), &member_token)?;
+                let member_lvalue = self.cg_member_access(l_value.clone(), &member_token, false)?;
+                let member_rvalue = self.cg_member_access(r_value.clone(), &member_token, false)?;
 
                 self.cg_assign(member_lvalue, member_rvalue)?.free();
             }
+            r_value.free();
             Ok(l_value)
         } else {
             // can't move from mem to mem so make temp scratch-register
@@ -925,7 +918,7 @@ impl<'a> Compiler<'a> {
         match token.token {
             TokenType::Bang => self.cg_bang(reg),
             TokenType::Minus => self.cg_negate(reg),
-            TokenType::Amp => self.cg_address_at(reg, is_global),
+            TokenType::Amp => self.cg_address_at(reg, is_global, true),
             TokenType::Star => self.cg_deref(reg, new_type),
             TokenType::Tilde => self.cg_bit_not(reg),
             _ => unreachable!(),
@@ -977,6 +970,7 @@ impl<'a> Compiler<'a> {
         &mut self,
         reg: Register,
         is_global: bool,
+        free: bool,
     ) -> Result<Register, std::fmt::Error> {
         if is_global && matches!(reg, Register::Label(..)) {
             return Ok(reg);
@@ -988,7 +982,9 @@ impl<'a> Compiler<'a> {
         );
         writeln!(self.output, "\tleaq    {}, {}", reg.name(), dest.name())?;
 
-        reg.free();
+        if free {
+            reg.free();
+        }
         Ok(dest)
     }
     fn cg_deref(

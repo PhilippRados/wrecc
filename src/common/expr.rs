@@ -57,8 +57,8 @@ pub enum ExprKind {
     },
     MemberAccess {
         token: Token,
-        ident: Token,
-        left: Box<Expr>,
+        member: Token,
+        expr: Box<Expr>,
     },
     String(Token),
     Number(i32),

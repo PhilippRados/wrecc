@@ -39,6 +39,7 @@ macro_rules! cast {
         }
     };
 }
+
 impl TypeChecker {
     pub fn new() -> Self {
         TypeChecker {
@@ -549,16 +550,7 @@ impl TypeChecker {
             ExprKind::Logical { left, token, right } => {
                 self.evaluate_logical(left, token, right)?
             }
-            ExprKind::Ident(token) => {
-                if let Ok(Symbols::Var(v)) = self.env.get_symbol(token) {
-                    v
-                } else {
-                    return Err(Error::new(
-                        token,
-                        &format!("No variable '{}'", token.unwrap_string()),
-                    ));
-                }
-            }
+            ExprKind::Ident(token) => self.ident(token)?,
             ExprKind::Assign {
                 l_expr,
                 token,
@@ -584,9 +576,11 @@ impl TypeChecker {
                 token,
                 by_amount,
             } => self.evaluate_postunary(token, left, by_amount)?,
-            ExprKind::MemberAccess { token, left, ident } => {
-                self.member_access(token, ident, left)?
-            }
+            ExprKind::MemberAccess {
+                token,
+                expr,
+                member,
+            } => self.member_access(token, member, expr)?,
             ExprKind::CastUp { .. } => unimplemented!("explicit casts"),
             ExprKind::CastDown { .. } => unimplemented!("explicit casts"),
             ExprKind::ScaleUp { .. } => unreachable!("is only used in codegen"),
@@ -594,33 +588,43 @@ impl TypeChecker {
         });
         Ok(ast.type_decl.clone().unwrap())
     }
+    fn ident(&mut self, token: &Token) -> Result<NEWTypes, Error> {
+        if let Ok(Symbols::Var(v)) = self.env.get_symbol(token) {
+            Ok(v)
+        } else {
+            return Err(Error::new(
+                token,
+                &format!("No variable '{}'", token.unwrap_string()),
+            ));
+        }
+    }
     fn member_access(
         &mut self,
         token: &Token,
-        ident: &Token,
-        left: &mut Expr,
+        member: &Token,
+        expr: &mut Expr,
     ) -> Result<NEWTypes, Error> {
-        let left_type = self.expr_type(left)?;
+        let expr_type = self.expr_type(expr)?;
 
-        if let NEWTypes::Struct(_, members) = left_type.clone() {
-            let ident = ident.unwrap_string();
+        if let NEWTypes::Struct(_, members) = expr_type.clone() {
+            let member = member.unwrap_string();
 
             if let Some((member_type, _)) = members
                 .expect("struct hasnt been filled")
                 .into_iter()
-                .find(|(_, name)| name.unwrap_string() == ident)
+                .find(|(_, name)| name.unwrap_string() == member)
             {
                 Ok(member_type)
             } else {
                 Err(Error::new(
                     token,
-                    &format!("No member '{}' in '{}'", ident, left_type),
+                    &format!("No member '{}' in '{}'", member, expr_type),
                 ))
             }
         } else {
             Err(Error::new(
                 token,
-                &format!("Can only access members of structs, not '{}'", left_type),
+                &format!("Can only access members of structs, not '{}'", expr_type),
             ))
         }
     }

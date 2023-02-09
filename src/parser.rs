@@ -710,12 +710,12 @@ impl Parser {
                 }
                 TokenType::Dot => {
                     // some_struct.member
-                    if let Some(ident) = self.matches(vec![TokenKind::Ident]) {
+                    if let Some(member) = self.matches(vec![TokenKind::Ident]) {
                         expr = Expr::new(
                             ExprKind::MemberAccess {
                                 token,
-                                ident,
-                                left: Box::new(expr),
+                                member,
+                                expr: Box::new(expr),
                             },
                             ValueKind::Lvalue,
                         );
@@ -911,8 +911,8 @@ fn arrow_sugar(left: Expr, member: Token, arrow_token: Token) -> Expr {
     Expr::new(
         ExprKind::MemberAccess {
             token: arrow_token,
-            ident: member.clone(),
-            left: Box::new(Expr::new(
+            member: member.clone(),
+            expr: Box::new(Expr::new(
                 ExprKind::Grouping {
                     expr: Box::new(Expr::new(
                         ExprKind::Unary {

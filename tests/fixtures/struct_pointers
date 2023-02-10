@@ -19,7 +19,7 @@ int main() {
   struct Emp emp;
 
   int id = init()->id;
-  other = emp = *init();
+  struct Emp another = other = emp = *init();
 
   printf("%d\n",id);
 
@@ -28,4 +28,7 @@ int main() {
 
   printf("%d\n",other.id);
   printf("%d\n",other.some);
+
+  printf("%d\n",another.id);
+  printf("%d\n",another.some);
 }

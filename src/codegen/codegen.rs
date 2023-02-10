@@ -268,7 +268,7 @@ impl<'a> Compiler<'a> {
         &mut self,
         type_decl: &NEWTypes,
         var_name: &Token,
-        mut value_reg: Register,
+        value_reg: Register,
         is_global: bool,
     ) -> Result<(), std::fmt::Error> {
         let name = var_name.unwrap_string();
@@ -289,17 +289,11 @@ impl<'a> Compiler<'a> {
             false => {
                 self.declare_var(type_decl, name, is_global)?;
 
-                value_reg = convert_reg!(self, value_reg, Register::Stack(..));
-                value_reg = self.convert_to_rval(value_reg)?;
-
-                writeln!(
-                    self.output,
-                    "\tmov{}    {}, {}",
-                    type_decl.suffix(),
-                    value_reg.name(),
-                    self.env.get_symbol(var_name).unwrap().unwrap_var().name() // since var-declaration set everything up we just need declared register
-                )?;
-                value_reg.free();
+                self.cg_assign(
+                    self.env.get_symbol(var_name).unwrap().unwrap_var(),
+                    value_reg,
+                )?
+                .free();
             }
         }
 

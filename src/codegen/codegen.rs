@@ -105,9 +105,6 @@ impl<'a> Compiler<'a> {
                 self.if_statement(cond, then_branch, else_branch)
             }
             Stmt::While(_, cond, body) => self.while_statement(cond, body),
-            Stmt::StructDef(name, members) => Ok(self
-                .env
-                .declare_struct(name.unwrap_string(), members.clone())),
         }
     }
 
@@ -239,8 +236,7 @@ impl<'a> Compiler<'a> {
         name: String,
         is_global: bool,
     ) -> Result<(), std::fmt::Error> {
-        let mut type_decl = type_decl.clone();
-        self.fill_struct(&mut type_decl);
+        let type_decl = type_decl.clone();
 
         let reg = match is_global {
             true => {
@@ -445,14 +441,15 @@ impl<'a> Compiler<'a> {
     ) -> Result<Register, std::fmt::Error> {
         let member = member.unwrap_string();
 
-        if let NEWTypes::Struct(_, Some(members)) = reg.get_type() {
-            let offset = members
-                .clone()
-                .into_iter()
+        if let NEWTypes::Struct(s) = reg.get_type() {
+            let offset = s
+                .members()
+                .iter()
                 .take_while(|(_, name)| name.unwrap_string() != member)
                 .fold(0, |acc, (t, _)| acc + t.size());
-            let (member_type, _) = members
-                .into_iter()
+            let members_iter = s.members().clone();
+            let (member_type, _) = members_iter
+                .iter()
                 .find(|(_, name)| name.unwrap_string() == member)
                 .unwrap();
 
@@ -465,7 +462,7 @@ impl<'a> Compiler<'a> {
             } else {
                 address
             };
-            result.set_type(member_type);
+            result.set_type(member_type.clone());
             result.set_value_kind(ValueKind::Lvalue);
             Ok(result)
         } else {
@@ -649,9 +646,9 @@ impl<'a> Compiler<'a> {
         l_value: Register,
         mut r_value: Register,
     ) -> Result<Register, std::fmt::Error> {
-        if let NEWTypes::Struct(_, Some(members)) = l_value.get_type() {
+        if let NEWTypes::Struct(s) = l_value.get_type() {
             // when assigning structs have to assign each member
-            for m in members.iter() {
+            for m in s.members().iter() {
                 let member_token = Token::default(TokenType::Ident(m.1.unwrap_string()));
                 let member_lvalue = self.cg_member_access(l_value.clone(), &member_token, false)?;
                 let member_rvalue = self.cg_member_access(r_value.clone(), &member_token, false)?;
@@ -1225,23 +1222,6 @@ impl<'a> Compiler<'a> {
             TokenType::Less => self.cg_comparison("setl", left_reg, right_reg),
             TokenType::LessEqual => self.cg_comparison("setle", left_reg, right_reg),
             _ => unreachable!(),
-        }
-    }
-    fn fill_struct(&mut self, type_decl: &mut NEWTypes) {
-        match type_decl {
-            NEWTypes::Struct(Some(n), Some(members)) => {
-                for m in members.iter_mut() {
-                    self.fill_struct(&mut m.0);
-                }
-                self.env.declare_struct(n.unwrap_string(), members.clone())
-            }
-            NEWTypes::Struct(Some(n), members) if members.is_none() => {
-                // if no members struct has to already exists
-                let CustomTypes::Struct(m) = self.env.get_type(n).unwrap();
-                *members = Some(m);
-            }
-            NEWTypes::Array { of, .. } | NEWTypes::Pointer(of) => self.fill_struct(of),
-            _ => (),
         }
     }
     fn convert_to_rval(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {

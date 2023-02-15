@@ -1,16 +1,18 @@
-use crate::common::{error::*, expr::*, stmt::*, token::*, types::*};
+use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
 use std::cmp::Ordering;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
+    env: Environment<NEWTypes>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser {
             tokens: tokens.into_iter().peekable(),
+            env: Environment::new(None),
         }
     }
     pub fn parse(&mut self) -> Option<Vec<Stmt>> {
@@ -20,6 +22,7 @@ impl Parser {
         while self.tokens.peek() != None {
             match self.declaration() {
                 Ok(v) => statements.push(v),
+                Err(Error::Indicator) => (),
                 Err(e) => {
                     e.print_error();
                     self.synchronize();
@@ -44,7 +47,10 @@ impl Parser {
                     | TokenType::While
                     | TokenType::For
                     | TokenType::Char
-                    | TokenType::Int => return,
+                    | TokenType::Int
+                    | TokenType::Long
+                    | TokenType::Void
+                    | TokenType::Struct => return,
                     _ => (),
                 }
             }
@@ -60,17 +66,13 @@ impl Parser {
                         "Brackets not allowed here; Put them after the Identifier",
                     ));
                 }
-                match (t.clone(), self.peek()?) {
-                    (NEWTypes::Struct(name, Some(members)), token)
-                        if token.token == TokenType::Semicolon =>
-                    {
-                        if name.is_none() || members.is_empty() {
-                            return Err(Error::new(token, "Struct definition can't be empty"));
-                        }
-                        self.tokens.next();
-                        Ok(Stmt::StructDef(name.unwrap(), members))
-                    }
-                    _ => self.type_declaration(t),
+                if let (NEWTypes::Struct(..), true) = (
+                    t.clone(),
+                    self.matches(vec![TokenKind::Semicolon]).is_some(),
+                ) {
+                    return Err(Error::Indicator);
+                } else {
+                    self.type_declaration(t)
                 }
             }
             Err(e) => Err(e),
@@ -162,6 +164,7 @@ impl Parser {
     fn block(&mut self) -> Result<Vec<Stmt>, Error> {
         let mut statements = Vec::new();
 
+        self.env = Environment::new(Some(Box::new(self.env.clone())));
         while let Some(token) = self.tokens.peek() {
             if TokenKind::from(&token.token) == TokenKind::RightBrace {
                 break;
@@ -172,6 +175,7 @@ impl Parser {
             });
         }
         self.consume(TokenKind::RightBrace, "Expect '}' after Block")?;
+        self.env = *self.env.enclosing.as_ref().unwrap().clone();
         Ok(statements)
     }
     fn expression_statement(&mut self) -> Result<Stmt, Error> {
@@ -220,37 +224,82 @@ impl Parser {
             Ok(type_decl)
         }
     }
-    fn parse_members(&mut self) -> Result<Vec<(NEWTypes, Token)>, Error> {
-        let mut params = Vec::new();
+    fn parse_members(&mut self, struct_name: &Token) -> Result<Vec<(NEWTypes, Token)>, Error> {
+        let mut members = Vec::new();
+        if self.check(TokenKind::RightBrace) {
+            return Err(Error::new(&struct_name, "Can't have empty struct"));
+        }
         while self.matches(vec![TokenKind::RightBrace]).is_none() {
-            let mut param_type = self.matches_type()?;
+            let mut member_type = self.matches_type()?;
             let name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
-            param_type = self.parse_arr(param_type)?;
+            member_type = self.parse_arr(member_type)?;
 
-            params.push((param_type, name));
+            match member_type {
+                NEWTypes::Primitive(Types::Void) => {
+                    return Err(Error::new(&name, "Struct member can't have type 'void'"))
+                }
+                NEWTypes::Struct(StructInfo::Named(t_name, _))
+                    if struct_name.unwrap_string() == t_name =>
+                {
+                    return Err(Error::new(&name, "Struct can't have itself as a member"));
+                }
+                NEWTypes::Array { of, .. }
+                    if if let NEWTypes::Struct(StructInfo::Named(t_name, _)) = &*of {
+                        struct_name.unwrap_string() == *t_name
+                    } else {
+                        false
+                    } =>
+                {
+                    return Err(Error::new(
+                        &name,
+                        "Struct can't have array of itself as a member",
+                    ));
+                }
+                _ => (),
+            }
+
+            members.push((member_type, name));
             self.consume(TokenKind::Semicolon, "Expect ';' after member declaration")?;
         }
-        Ok(params)
+        Ok(members)
     }
     fn parse_struct(&mut self, token: &Token) -> Result<NEWTypes, Error> {
         let name = self.matches(vec![TokenKind::Ident]);
-        let members = if self.matches(vec![TokenKind::LeftBrace]).is_some() {
-            match self.parse_members()? {
-                m if m.is_empty() => return Err(Error::new(token, "Can't have empty struct")),
-                m => Some(m),
+        let has_members = self.matches(vec![TokenKind::LeftBrace]);
+
+        let result = match (&name, has_members) {
+            (Some(name), Some(_)) => {
+                if self.env.current.customs.contains_key(&name.unwrap_string()) {
+                    return Err(Error::new(
+                        &name,
+                        &format!("Redefinition of struct '{}'", name.unwrap_string()),
+                    ));
+                }
+
+                self.env.declare_struct(name.unwrap_string());
+
+                let members = self.parse_members(name)?;
+                let struct_ref = self.env.get_type(name)?;
+                struct_ref.update(members);
+
+                StructInfo::Named(name.unwrap_string(), struct_ref)
             }
-        } else {
-            None
+            (Some(name), None) => {
+                // lookup struct definition
+                let struct_ref = self.env.get_type(name)?;
+                StructInfo::Named(name.unwrap_string(), struct_ref)
+            }
+            (None, Some(_)) => StructInfo::Anonymous(self.parse_members(&Token::default(
+                TokenType::String("<anonymous>".to_string()),
+            ))?),
+            (None, None) => {
+                return Err(Error::new(
+                    token,
+                    "Can't declare anonymous struct without members",
+                ));
+            }
         };
-
-        if name.is_none() && members.is_none() {
-            return Err(Error::new(
-                token,
-                "Can't declare anonymous struct without members",
-            ));
-        }
-
-        Ok(NEWTypes::Struct(name, members))
+        Ok(NEWTypes::Struct(result))
     }
     fn type_declaration(&mut self, mut type_decl: NEWTypes) -> Result<Stmt, Error> {
         let name = self.consume(
@@ -277,7 +326,22 @@ impl Parser {
     }
     fn var_initialization(&mut self, name: Token, type_decl: NEWTypes) -> Result<Stmt, Error> {
         match (self.peek()?.token.clone(), type_decl.clone()) {
-            (TokenType::LeftBrace, _) => {
+            (TokenType::LeftBrace, NEWTypes::Array { .. }) => {
+                self.tokens.next().unwrap();
+                let elements = self.initializer_list(&type_decl, name.clone())?;
+                let assign_sugar = list_sugar_assign(
+                    name.clone(),
+                    &elements,
+                    type_decl.clone(),
+                    true,
+                    Expr::new(ExprKind::Ident(name.clone()), ValueKind::Lvalue),
+                );
+
+                self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
+                Ok(Stmt::InitList(type_decl, name, assign_sugar, false))
+            }
+            (TokenType::LeftBrace, NEWTypes::Struct { .. }) => {
+                // TODO: parse struct initializer
                 self.tokens.next().unwrap();
                 let elements = self.initializer_list(&type_decl, name.clone())?;
                 let assign_sugar = list_sugar_assign(

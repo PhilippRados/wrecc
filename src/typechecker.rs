@@ -104,7 +104,6 @@ impl TypeChecker {
             Stmt::While(left_paren, ref mut cond, body) => {
                 self.while_statement(left_paren, cond, body)
             }
-            Stmt::StructDef(name, members) => self.declare_struct(name, members.clone()),
         }
     }
     fn while_statement(
@@ -123,58 +122,6 @@ impl TypeChecker {
         self.visit(body)?;
         self.returns_all_paths = false;
         Ok(())
-    }
-    fn declare_struct(
-        &mut self,
-        struct_name: &Token,
-        mut members: Vec<(NEWTypes, Token)>,
-    ) -> Result<(), Error> {
-        let name = struct_name.unwrap_string();
-
-        if self.env.current.customs.contains_key(&name) {
-            return Err(Error::new(
-                struct_name,
-                &format!("Redefinition of struct '{}'", name),
-            ));
-        }
-        self.env.declare_struct(name.clone(), members.clone());
-        for (mem_type, token) in members.iter_mut() {
-            match mem_type {
-                NEWTypes::Primitive(Types::Void) => {
-                    return Err(Error::new(&token, "Struct member can't have type 'void'"))
-                }
-                NEWTypes::Struct(Some(t_name), None) if name.clone() == t_name.unwrap_string() => {
-                    return Err(Error::new(&token, "Struct can't have itself as a member"));
-                }
-                NEWTypes::Array { of, .. }
-                    if if let NEWTypes::Struct(Some(t_name), _) = &**of {
-                        t_name.unwrap_string() == name.clone()
-                    } else {
-                        false
-                    } =>
-                {
-                    return Err(Error::new(
-                        &token,
-                        "Struct can't have array of itself as a member",
-                    ));
-                }
-                _ => self.fill_struct(mem_type)?,
-            }
-        }
-        Ok(())
-    }
-    fn fill_struct(&mut self, type_decl: &mut NEWTypes) -> Result<(), Error> {
-        match type_decl {
-            NEWTypes::Struct(Some(n), Some(members)) => self.declare_struct(n, members.clone()),
-            NEWTypes::Struct(Some(n), members) if members.is_none() => {
-                // if no members struct has to already exists
-                let CustomTypes::Struct(m) = self.env.get_type(n)?;
-                *members = Some(m);
-                Ok(())
-            }
-            NEWTypes::Array { of, .. } | NEWTypes::Pointer(of) => self.fill_struct(of),
-            _ => Ok(()),
-        }
     }
     fn declare_var(
         &mut self,
@@ -196,7 +143,6 @@ impl TypeChecker {
                 &format!("Can't assign to 'void' {}", var_name.unwrap_string()),
             ));
         }
-        self.fill_struct(type_decl)?;
 
         if self.is_global() {
             *is_global = true;
@@ -280,8 +226,6 @@ impl TypeChecker {
             ));
         }
 
-        self.fill_struct(type_decl)?;
-
         crate::arr_decay!(value_type, expr, var_name, *is_global);
         self.check_type_compatibility(var_name, type_decl, &value_type)?;
         self.maybe_cast(type_decl, &value_type, expr);
@@ -351,7 +295,6 @@ impl TypeChecker {
         name_token: &Token,
         params: &Vec<(NEWTypes, Token)>,
     ) -> Result<(), Error> {
-        self.fill_struct(return_type)?;
         match self.global_env.get_symbol(name_token) {
             Ok(Symbols::FuncDecl(f)) => {
                 self.cmp_decl(name_token, &f, return_type, params)?;
@@ -393,7 +336,6 @@ impl TypeChecker {
             ));
         }
         let name = name_token.unwrap_string();
-        self.fill_struct(return_type)?;
 
         match self.global_env.get_symbol(name_token) {
             Ok(Symbols::FuncDef(_)) => {
@@ -606,15 +548,16 @@ impl TypeChecker {
     ) -> Result<NEWTypes, Error> {
         let expr_type = self.expr_type(expr)?;
 
-        if let NEWTypes::Struct(_, members) = expr_type.clone() {
+        if let NEWTypes::Struct(s) = expr_type.clone() {
             let member = member.unwrap_string();
 
-            if let Some((member_type, _)) = members
-                .expect("struct hasnt been filled")
-                .into_iter()
+            if let Some((member_type, _)) = s
+                .members()
+                .clone()
+                .iter()
                 .find(|(_, name)| name.unwrap_string() == member)
             {
-                Ok(member_type)
+                Ok(member_type.clone())
             } else {
                 Err(Error::new(
                     token,

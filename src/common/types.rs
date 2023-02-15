@@ -1,5 +1,7 @@
 use crate::common::token::{Token, TokenKind};
 use std::fmt::Display;
+use std::rc::Rc;
+pub use struct_ref::StructRef;
 
 static RETURN_REG: &[&str; 3] = &["%al", "%eax", "%rax"];
 
@@ -25,18 +27,76 @@ pub enum NEWTypes {
     Primitive(Types),
     Array { amount: usize, of: Box<NEWTypes> },
     Pointer(Box<NEWTypes>),
-    Struct(Option<Token>, Option<Vec<(NEWTypes, Token)>>),
+    Struct(StructInfo),
+}
+
+// this code is shamelessly copied from the more sophisticated saltwater compiler
+mod struct_ref {
+    use super::NEWTypes;
+    use super::Token;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    thread_local! {
+        static CUSTOMS: RefCell<Vec<Rc<Vec<(NEWTypes, Token)>>>> = Default::default();
+    }
+
+    #[derive(Clone, PartialEq, Debug)]
+    pub struct StructRef {
+        index: usize,
+    }
+    impl Default for StructRef {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl StructRef {
+        pub fn new() -> StructRef {
+            CUSTOMS.with(|list| {
+                let mut types = list.borrow_mut();
+                let index = types.len();
+                types.push(Rc::new(vec![]));
+                StructRef { index }
+            })
+        }
+
+        pub fn get(&self) -> Rc<Vec<(NEWTypes, Token)>> {
+            CUSTOMS.with(|list| list.borrow()[self.index].clone())
+        }
+        pub(crate) fn update(&self, members: Vec<(NEWTypes, Token)>) {
+            CUSTOMS.with(|list| {
+                let mut types = list.borrow_mut();
+                types[self.index] = members.into();
+            });
+        }
+    }
+}
+#[derive(Clone, PartialEq, Debug)]
+pub enum StructInfo {
+    Named(String, StructRef),
+    Anonymous(Vec<(NEWTypes, Token)>),
+}
+impl StructInfo {
+    pub fn members(&self) -> Rc<Vec<(NEWTypes, Token)>> {
+        match self {
+            StructInfo::Named(_, s) => s.get(),
+            StructInfo::Anonymous(m) => Rc::new(m.clone()),
+        }
+    }
+    fn name(&self) -> &str {
+        match self {
+            StructInfo::Named(name, _) => name,
+            StructInfo::Anonymous(_) => "anonymous",
+        }
+    }
 }
 
 impl TypeInfo for NEWTypes {
     fn size(&self) -> usize {
         match self {
             NEWTypes::Primitive(t) => t.size(),
-            NEWTypes::Struct(_, members) => members
-                .clone()
-                .unwrap()
-                .iter()
-                .fold(0, |acc, (t, _)| acc + t.size()),
+            NEWTypes::Struct(s) => s.members().iter().fold(0, |acc, (t, _)| acc + t.size()),
             NEWTypes::Pointer(_) => 8,
             NEWTypes::Array {
                 amount,
@@ -79,13 +139,7 @@ impl Display for NEWTypes {
                 NEWTypes::Primitive(t) => t.fmt().to_string(),
                 NEWTypes::Array { of, amount } => format!("{}[{}]", of, amount),
                 NEWTypes::Pointer(to) => format!("{}*", to),
-                NEWTypes::Struct(name, _) => format!(
-                    "struct {}",
-                    match name {
-                        Some(n) => n.unwrap_string(),
-                        None => "anonymous".to_string(),
-                    }
-                ),
+                NEWTypes::Struct(s) => s.name().to_string(),
             }
         )
     }
@@ -143,18 +197,20 @@ impl NEWTypes {
             (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => *self == *other,
 
             // two structs are compatible if they have the same name and members
-            (
-                NEWTypes::Struct(Some(name_l), Some(members_l)),
-                NEWTypes::Struct(Some(name_r), Some(members_r)),
-            ) => {
-                let matching_members = members_l
-                    .iter()
-                    .zip(members_r)
-                    .filter(|(l, r)| l.0 == r.0 && l.1.unwrap_string() == r.1.unwrap_string())
-                    .count();
-                name_l.unwrap_string() == name_r.unwrap_string()
-                    && matching_members == members_l.len()
-                    && matching_members == members_r.len()
+            (NEWTypes::Struct(s_l), NEWTypes::Struct(s_r)) => {
+                if let (StructInfo::Named(name_l, _), StructInfo::Named(name_r, _)) = (s_l, s_r) {
+                    let matching_members = s_l
+                        .members()
+                        .iter()
+                        .zip(s_r.members().iter())
+                        .filter(|(l, r)| l.0 == r.0 && l.1.unwrap_string() == r.1.unwrap_string())
+                        .count();
+                    *name_l == *name_r
+                        && matching_members == s_l.members().len()
+                        && matching_members == s_r.members().len()
+                } else {
+                    false
+                }
             }
 
             _ => false,

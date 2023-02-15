@@ -4,11 +4,10 @@ use std::fmt::Display;
 #[derive(PartialEq, Clone, Debug)]
 pub enum Stmt {
     Expr(Expr),
-    // bool is to indicate if global or not
+    // bool indicates if global declaration or not
     DeclareVar(NEWTypes, Token, bool),
     InitVar(NEWTypes, Token, Expr, bool),
     InitList(NEWTypes, Token, Vec<Expr>, bool),
-    StructDef(Token, Vec<(NEWTypes, Token)>),
     Block(Vec<Stmt>),
     If(Token, Expr, Box<Stmt>, Box<Option<Stmt>>),
     While(Token, Expr, Box<Stmt>),
@@ -33,7 +32,6 @@ impl Display for Stmt {
                 Stmt::Return(..) => "'return-statement'",
                 Stmt::InitList(..) => "'initializer-list'",
                 Stmt::Expr(_) => unimplemented!(),
-                Stmt::StructDef(..) => "'struct definition",
             }
         )
     }

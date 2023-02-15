@@ -1,0 +1,8 @@
+Error: Struct can't have itself as a member
+|
+13     struct Other some;
+|                   ^
+Error: Struct can't have array of itself as a member
+|
+18     struct Another some[6];
+|                     ^

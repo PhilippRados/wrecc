@@ -38,14 +38,9 @@ impl<T> Symbols<T> {
 }
 
 #[derive(Clone, PartialEq)]
-pub enum CustomTypes {
-    Struct(Vec<(NEWTypes, Token)>),
-}
-
-#[derive(Clone, PartialEq)]
 pub struct Table<T> {
     pub symbols: HashMap<String, Symbols<T>>,
-    pub customs: HashMap<String, CustomTypes>,
+    pub customs: HashMap<String, StructRef>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -58,7 +53,7 @@ impl<T: Clone> Environment<T> {
         Environment {
             current: Table {
                 symbols: HashMap::<String, Symbols<T>>::new(),
-                customs: HashMap::<String, CustomTypes>::new(),
+                customs: HashMap::<String, StructRef>::new(),
             },
             enclosing,
         }
@@ -90,17 +85,17 @@ impl<T: Clone> Environment<T> {
             Some(v) => Ok(v.clone()),
             None => match &self.enclosing {
                 Some(env) => (**env).get_symbol(var_name),
-                None => Err(Error::new(var_name, "undeclared symbol")),
+                None => Err(Error::new(var_name, "Undeclared symbol")),
             },
         }
     }
-    pub fn get_type(&self, var_name: &Token) -> Result<CustomTypes, Error> {
+    pub fn get_type(&self, var_name: &Token) -> Result<StructRef, Error> {
         let name = var_name.unwrap_string();
         match self.current.customs.get(&name) {
             Some(v) => Ok(v.clone()),
             None => match &self.enclosing {
                 Some(env) => (**env).get_type(var_name),
-                None => Err(Error::new(var_name, "undeclared type")),
+                None => Err(Error::new(var_name, "Undeclared type")),
             },
         }
     }
@@ -108,9 +103,7 @@ impl<T: Clone> Environment<T> {
         self.current.symbols.insert(name, Symbols::Var(value));
     }
 
-    pub fn declare_struct(&mut self, name: String, members: Vec<(NEWTypes, Token)>) {
-        self.current
-            .customs
-            .insert(name, CustomTypes::Struct(members));
+    pub fn declare_struct(&mut self, name: String) {
+        self.current.customs.insert(name.clone(), StructRef::new());
     }
 }

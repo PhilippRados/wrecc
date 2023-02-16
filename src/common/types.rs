@@ -84,10 +84,10 @@ impl StructInfo {
             StructInfo::Anonymous(m) => Rc::new(m.clone()),
         }
     }
-    fn name(&self) -> &str {
+    fn name(&self) -> String {
         match self {
-            StructInfo::Named(name, _) => name,
-            StructInfo::Anonymous(_) => "anonymous",
+            StructInfo::Named(name, _) => "struct ".to_string() + name,
+            StructInfo::Anonymous(_) => "struct anonymous".to_string(),
         }
     }
 }
@@ -139,7 +139,7 @@ impl Display for NEWTypes {
                 NEWTypes::Primitive(t) => t.fmt().to_string(),
                 NEWTypes::Array { of, amount } => format!("{}[{}]", of, amount),
                 NEWTypes::Pointer(to) => format!("{}*", to),
-                NEWTypes::Struct(s) => s.name().to_string(),
+                NEWTypes::Struct(s) => s.name(),
             }
         )
     }

@@ -70,6 +70,7 @@ impl Parser {
                     t.clone(),
                     self.matches(vec![TokenKind::Semicolon]).is_some(),
                 ) {
+                    // dont't generate any statement when defining struct
                     return Err(Error::Indicator);
                 } else {
                     self.type_declaration(t)
@@ -169,10 +170,15 @@ impl Parser {
             if TokenKind::from(&token.token) == TokenKind::RightBrace {
                 break;
             }
-            statements.push(match self.peek()?.is_type() {
-                true => self.declaration()?,
+            let s = match self.peek()?.is_type() {
+                true => match self.declaration() {
+                    Err(Error::Indicator) => continue,
+                    Err(e) => return Err(e),
+                    Ok(s) => s,
+                },
                 false => self.statement()?,
-            });
+            };
+            statements.push(s);
         }
         self.consume(TokenKind::RightBrace, "Expect '}' after Block")?;
         self.env = *self.env.enclosing.as_ref().unwrap().clone();

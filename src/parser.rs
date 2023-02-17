@@ -1,5 +1,4 @@
 use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
-use std::cmp::Ordering;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
@@ -332,22 +331,8 @@ impl Parser {
     }
     fn var_initialization(&mut self, name: Token, type_decl: NEWTypes) -> Result<Stmt, Error> {
         match (self.peek()?.token.clone(), type_decl.clone()) {
-            (TokenType::LeftBrace, NEWTypes::Array { .. }) => {
-                self.tokens.next().unwrap();
-                let elements = self.initializer_list(&type_decl, name.clone())?;
-                let assign_sugar = list_sugar_assign(
-                    name.clone(),
-                    &elements,
-                    type_decl.clone(),
-                    true,
-                    Expr::new(ExprKind::Ident(name.clone()), ValueKind::Lvalue),
-                );
-
-                self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
-                Ok(Stmt::InitList(type_decl, name, assign_sugar, false))
-            }
-            (TokenType::LeftBrace, NEWTypes::Struct { .. }) => {
-                // TODO: parse struct initializer
+            (TokenType::LeftBrace, NEWTypes::Array { .. })
+            | (TokenType::LeftBrace, NEWTypes::Struct { .. }) => {
                 self.tokens.next().unwrap();
                 let elements = self.initializer_list(&type_decl, name.clone())?;
                 let assign_sugar = list_sugar_assign(
@@ -407,60 +392,135 @@ impl Parser {
             }
         }
     }
-    fn initializer_list(&mut self, type_decl: &NEWTypes, token: Token) -> Result<Vec<Expr>, Error> {
-        if let NEWTypes::Array { of, .. } = type_decl {
-            let mut elements = Vec::new();
+    fn parse_designator(&mut self, type_decl: &NEWTypes) -> Result<(usize, bool), Error> {
+        let mut result = 0;
+        let mut found = false;
+        if let Some(t) = self.matches(vec![TokenKind::Dot]) {
+            // parse member-designator {.member = value}
+            if let NEWTypes::Struct(s) = type_decl {
+                if let Some(ident) = self.matches(vec![TokenKind::Ident]) {
+                    let member = ident.unwrap_string();
+                    result = s
+                        .members()
+                        .clone()
+                        .iter()
+                        .position(|(_, t)| member == t.unwrap_string())
+                        .map_or_else(
+                            || {
+                                Err(Error::new(
+                                    &ident,
+                                    &format!("No member '{}' in {}", member, type_decl),
+                                ))
+                            },
+                            |index| Ok(index),
+                        )?;
 
-            while !self.check(TokenKind::RightBrace) {
-                match self.matches(vec![TokenKind::LeftBrace]) {
-                    Some(_) => {
-                        for e in self.initializer_list(of, token.clone())? {
-                            elements.push(e);
-                        }
+                    found = true;
+                    // parse chained designators
+                    result += match self.parse_designator(&s.members().clone()[result].0)? {
+                        (_, false) => 0,
+                        (n, true) => n,
                     }
-                    None => elements.push(self.expression()?),
-                };
-                if !self.check(TokenKind::RightBrace) {
-                    self.consume(
-                        TokenKind::Comma,
-                        "Expect ',' seperating expressions in initializer-list",
-                    )?;
+                } else {
+                    return Err(Error::new(&t, "Expect identifier as member designator"));
                 }
+            } else {
+                return Err(Error::new(
+                    &t,
+                    "Can only use struct designator on type 'struct' not 'array'",
+                ));
             }
-            match array_element_count(type_decl.clone()).cmp(&elements.len()) {
-                Ordering::Less => {
-                    return Err(Error::new(
-                        &token,
-                        &format!(
-                            "Array overflow. Expected size: {}, Actual size: {}",
-                            array_element_count(type_decl.clone()),
-                            elements.len()
-                        ),
-                    ))
+        } else if let Some(t) = self.matches(vec![TokenKind::LeftBracket]) {
+            // parse array-designator {[3] = value}
+            if let NEWTypes::Array { of, .. } = type_decl {
+                if let Some(n) = self.matches(vec![TokenKind::Number]) {
+                    let n = n.unwrap_num() as usize * type_element_count(&**of); // have to offset by type
+                    result = n;
+                } else {
+                    return Err(Error::new(&t, "Expect number as array designator"));
                 }
-                Ordering::Greater => {
-                    for _ in elements.len()..array_element_count(type_decl.clone()) {
-                        // fill up rest with 0's
-                        elements.push(Expr::new(ExprKind::Number(0), ValueKind::Rvalue));
+                self.consume(
+                    TokenKind::RightBracket,
+                    "Expect closing ']' after array designator",
+                )?;
+
+                found = true;
+                // parse chained designators
+                result += match self.parse_designator(of)? {
+                    (_, false) => 0,
+                    (n, true) => n,
+                }
+            } else {
+                return Err(Error::new(
+                    &t,
+                    "Can only use array designator on type 'array' not 'struct'",
+                ));
+            }
+        }
+        Ok((result, found))
+    }
+    fn initializer_list(&mut self, type_decl: &NEWTypes, token: Token) -> Result<Vec<Expr>, Error> {
+        let element_type = match type_decl {
+            NEWTypes::Array { of, .. } => vec![*of.clone(); type_element_count(type_decl)],
+            NEWTypes::Struct(s) => s.members().clone().iter().map(|m| m.0.clone()).collect(),
+            _ => {
+                return Err(Error::new(
+                    &token,
+                    &format!(
+                        "Can't initialize non-aggregate type '{}' with initializer-list",
+                        type_decl
+                    ),
+                ))
+            }
+        };
+        let mut elements =
+            vec![Expr::new(ExprKind::Number(0), ValueKind::Rvalue); type_element_count(type_decl)];
+        let mut element_index = 0;
+
+        while !self.check(TokenKind::RightBrace) {
+            element_index = match self.parse_designator(type_decl)? {
+                (_, false) => element_index,
+                (result, true) => {
+                    self.consume(TokenKind::Equal, "Expect '=' after array designator")?;
+                    result
+                }
+            };
+
+            if element_index + 1 > elements.len() {
+                return Err(Error::new(
+                    &token,
+                    &format!(
+                        "Array overflow. Expected size: {}, Actual size: {}",
+                        elements.len(),
+                        element_index + 1
+                    ),
+                ));
+            }
+            match self.matches(vec![TokenKind::LeftBrace]) {
+                Some(_) => {
+                    for e in self.initializer_list(&element_type[element_index], token.clone())? {
+                        elements[element_index] = e;
+                        element_index += 1;
                     }
                 }
-                _ => (),
+                None => {
+                    elements[element_index] = self.expression()?;
+                    element_index += 1
+                }
             };
-            self.consume(
-                TokenKind::RightBrace,
-                "Expected closing '}' after initializer-list",
-            )?;
-
-            Ok(elements)
-        } else {
-            Err(Error::new(
-                &token,
-                &format!(
-                    "Can't initialize non-array type '{}' with initializer-list",
-                    type_decl
-                ),
-            ))
+            if !self.check(TokenKind::RightBrace) {
+                self.consume(
+                    TokenKind::Comma,
+                    "Expect ',' seperating expressions in initializer-list",
+                )?;
+            }
         }
+        self.consume(
+            TokenKind::RightBrace,
+            "Expected closing '}' after initializer-list",
+        )?;
+
+        Ok(elements)
     }
     fn parse_params(&mut self) -> Result<Vec<(NEWTypes, Token)>, Error> {
         let mut params = Vec::new();
@@ -966,11 +1026,17 @@ fn array_of(type_decl: NEWTypes, size: i32) -> NEWTypes {
     }
 }
 
-fn array_element_count(arr: NEWTypes) -> usize {
-    if let NEWTypes::Array { amount, of } = arr {
-        amount * array_element_count(*of)
-    } else {
-        1
+fn type_element_count(type_decl: &NEWTypes) -> usize {
+    match type_decl {
+        NEWTypes::Array { amount, of } => amount * type_element_count(of),
+        NEWTypes::Struct(s) => {
+            let mut result = 0;
+            for m in s.members().iter() {
+                result += type_element_count(&m.0);
+            }
+            result
+        }
+        _ => 1,
     }
 }
 
@@ -1023,16 +1089,7 @@ fn list_sugar_assign(
         for ((i, _), arr_i) in list
             .iter()
             .enumerate()
-            .step_by(
-                if let NEWTypes::Array {
-                    amount: of_amount, ..
-                } = *of
-                {
-                    of_amount
-                } else {
-                    1
-                },
-            )
+            .step_by(type_element_count(&of))
             .zip(0..amount)
         {
             list_sugar_assign(
@@ -1044,6 +1101,41 @@ fn list_sugar_assign(
                     token.clone(),
                     left.clone(),
                     Expr::new(ExprKind::Number(arr_i as i32), ValueKind::Rvalue),
+                ),
+            )
+            .into_iter()
+            .enumerate()
+            .for_each(|(offset, l_expr)| {
+                result.push(match is_outer {
+                    true => Expr::new(
+                        ExprKind::Assign {
+                            l_expr: Box::new(l_expr),
+                            token: token.clone(),
+                            r_expr: Box::new(list[i + offset].clone()),
+                        },
+                        ValueKind::Rvalue,
+                    ),
+                    false => l_expr,
+                })
+            });
+        }
+        result
+    } else if let NEWTypes::Struct(s) = type_decl {
+        let mut result = Vec::new();
+        let members = s.members().clone();
+        for i in 0..members.len() {
+            list_sugar_assign(
+                token.clone(),
+                &list[i..list.len()].to_vec(),
+                members[i].clone().0,
+                false,
+                Expr::new(
+                    ExprKind::MemberAccess {
+                        token: token.clone(),
+                        member: members[i].clone().1,
+                        expr: Box::new(left.clone()),
+                    },
+                    ValueKind::Lvalue,
                 ),
             )
             .into_iter()
@@ -1116,6 +1208,20 @@ mod tests {
             v
         }}
     }
+    #[test]
+    fn multidimensional_array_size() {
+        let input = NEWTypes::Array {
+            amount: 2,
+            of: Box::new(NEWTypes::Array {
+                amount: 2,
+                of: Box::new(NEWTypes::Primitive(Types::Int)),
+            }),
+        };
+        let actual = type_element_count(&input);
+
+        assert_eq!(actual, 4);
+    }
+
     #[test]
     fn creates_ast_for_expression() {
         let tokens = tok_vec![

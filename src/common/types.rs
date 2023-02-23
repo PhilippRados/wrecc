@@ -87,7 +87,7 @@ impl StructInfo {
     fn name(&self) -> String {
         match self {
             StructInfo::Named(name, _) => "struct ".to_string() + name,
-            StructInfo::Anonymous(_) => "struct anonymous".to_string(),
+            StructInfo::Anonymous(_) => "struct <anonymous>".to_string(),
         }
     }
 }

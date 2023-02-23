@@ -2,6 +2,55 @@ use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types:
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
+#[derive(Clone, Debug)]
+enum ElementType {
+    Multiple(Vec<Box<ElementType>>),
+    Single(NEWTypes),
+}
+impl ElementType {
+    fn contains_char_arr(&self) -> Option<NEWTypes> {
+        match self {
+            Self::Multiple(m) => m.iter().find_map(|x| x.contains_char_arr()),
+            Self::Single(t) => match t {
+                NEWTypes::Array { of, .. } if matches!(**of, NEWTypes::Primitive(Types::Char)) => {
+                    Some(t.clone())
+                }
+                _ => None,
+            },
+        }
+    }
+    fn at(&self, depth: usize) -> NEWTypes {
+        match self {
+            Self::Multiple(m) => {
+                if let ElementType::Single(s) = *m[depth].clone() {
+                    s
+                } else {
+                    unreachable!()
+                }
+            }
+            Self::Single(t) => t.clone(),
+        }
+    }
+    fn flatten(&self) -> Vec<ElementType> {
+        match self {
+            Self::Multiple(v) => {
+                let mut result = vec![];
+                for e in v {
+                    if let ElementType::Multiple(..) = **e {
+                        for s in e.flatten() {
+                            result.push(s);
+                        }
+                    } else {
+                        result.push(*e.clone());
+                    }
+                }
+                result
+            }
+            Self::Single(_) => vec![self.clone()],
+        }
+    }
+}
+
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
     env: Environment<NEWTypes>,
@@ -330,14 +379,11 @@ impl Parser {
         }
     }
     fn var_initialization(&mut self, name: Token, type_decl: NEWTypes) -> Result<Stmt, Error> {
-        match (self.peek()?.token.clone(), type_decl.clone()) {
-            (TokenType::LeftBrace, NEWTypes::Array { .. })
-            | (TokenType::LeftBrace, NEWTypes::Struct { .. }) => {
-                self.tokens.next().unwrap();
-                let elements = self.initializer_list(&type_decl, name.clone())?;
+        match self.initializers(&type_decl) {
+            Some(elements) => {
                 let assign_sugar = list_sugar_assign(
                     name.clone(),
-                    &elements,
+                    &elements?,
                     type_decl.clone(),
                     true,
                     Expr::new(ExprKind::Ident(name.clone()), ValueKind::Lvalue),
@@ -346,45 +392,7 @@ impl Parser {
                 self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
                 Ok(Stmt::InitList(type_decl, name, assign_sugar, false))
             }
-            (TokenType::String(mut s), NEWTypes::Array { amount, of })
-                if matches!(*of, NEWTypes::Primitive(Types::Char)) =>
-            {
-                // char s[] = "abc" identical to char s[] = {'a','b','c','\0'} (6.7.8)
-                self.tokens.next().unwrap();
-                if amount < s.len() {
-                    return Err(Error::new(
-                        &name,
-                        &format!(
-                            "Initializer-string is too long. Expected: {}, Actual: {}",
-                            amount,
-                            s.len()
-                        ),
-                    ));
-                }
-                let mut diff = amount - s.len();
-                while diff > 0 {
-                    diff -= 1;
-                    s.push('\0'); // append implicit NULL terminator to string
-                }
-
-                let elements = s
-                    .as_bytes()
-                    .iter()
-                    .map(|c| Expr::new(ExprKind::CharLit(*c as i8), ValueKind::Rvalue))
-                    .collect();
-
-                let string_sugar = list_sugar_assign(
-                    name.clone(),
-                    &elements,
-                    type_decl.clone(),
-                    true,
-                    Expr::new(ExprKind::Ident(name.clone()), ValueKind::Lvalue),
-                );
-
-                self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
-                Ok(Stmt::InitList(type_decl, name, string_sugar, false))
-            }
-            _ => {
+            None => {
                 let r_value = self.expression()?;
 
                 self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
@@ -392,35 +400,46 @@ impl Parser {
             }
         }
     }
-    fn parse_designator(&mut self, type_decl: &NEWTypes) -> Result<(usize, bool), Error> {
-        let mut result = 0;
+    fn parse_designator(
+        &mut self,
+        type_decl: &NEWTypes,
+        depth: usize,
+    ) -> Result<((usize, usize), bool), Error> {
+        let mut result = (0, depth);
         let mut found = false;
         if let Some(t) = self.matches(vec![TokenKind::Dot]) {
             // parse member-designator {.member = value}
             if let NEWTypes::Struct(s) = type_decl {
                 if let Some(ident) = self.matches(vec![TokenKind::Ident]) {
                     let member = ident.unwrap_string();
-                    result = s
+                    let index = if let Some(i) = s
                         .members()
                         .clone()
                         .iter()
-                        .position(|(_, t)| member == t.unwrap_string())
-                        .map_or_else(
-                            || {
-                                Err(Error::new(
-                                    &ident,
-                                    &format!("No member '{}' in {}", member, type_decl),
-                                ))
-                            },
-                            |index| Ok(index),
-                        )?;
+                        .position(|(_, name)| name.unwrap_string() == member)
+                    {
+                        i
+                    } else {
+                        return Err(Error::new(
+                            &ident,
+                            &format!("No member '{}' in '{}'", member, type_decl),
+                        ));
+                    };
+                    result.0 = s
+                        .members()
+                        .iter()
+                        .take_while(|(_, name)| name.unwrap_string() != member)
+                        .fold(0, |acc, (t, _)| acc + type_element_count(t));
 
                     found = true;
                     // parse chained designators
-                    result += match self.parse_designator(&s.members().clone()[result].0)? {
-                        (_, false) => 0,
-                        (n, true) => n,
-                    }
+                    let (inc, new_depth) =
+                        match self.parse_designator(&s.members().clone()[index].0, depth + 1)? {
+                            (_, false) => (0, depth),
+                            (n, true) => n,
+                        };
+                    result.0 += inc;
+                    result.1 = new_depth;
                 } else {
                     return Err(Error::new(&t, "Expect identifier as member designator"));
                 }
@@ -435,7 +454,7 @@ impl Parser {
             if let NEWTypes::Array { of, .. } = type_decl {
                 if let Some(n) = self.matches(vec![TokenKind::Number]) {
                     let n = n.unwrap_num() as usize * type_element_count(&**of); // have to offset by type
-                    result = n;
+                    result = (n, depth);
                 } else {
                     return Err(Error::new(&t, "Expect number as array designator"));
                 }
@@ -446,10 +465,12 @@ impl Parser {
 
                 found = true;
                 // parse chained designators
-                result += match self.parse_designator(of)? {
-                    (_, false) => 0,
+                let (inc, new_depth) = match self.parse_designator(of, depth + 1)? {
+                    (_, false) => (0, depth),
                     (n, true) => n,
-                }
+                };
+                result.0 += inc;
+                result.1 = new_depth;
             } else {
                 return Err(Error::new(
                     &t,
@@ -459,27 +480,141 @@ impl Parser {
         }
         Ok((result, found))
     }
+
+    fn initializers(&mut self, type_decl: &NEWTypes) -> Option<Result<Vec<Expr>, Error>> {
+        let token = match self.peek() {
+            Ok(t) => t.clone(),
+            Err(e) => return Some(Err(e)),
+        };
+        match (token.token.clone(), type_decl.clone()) {
+            (TokenType::LeftBrace, _) => {
+                self.tokens.next();
+                Some(self.initializer_list(type_decl, token))
+            }
+            (TokenType::String(mut s), NEWTypes::Array { amount, of })
+                if matches!(*of, NEWTypes::Primitive(Types::Char)) =>
+            {
+                // char s[] = "abc" identical to char s[] = {'a','b','c','\0'} (6.7.8)
+                self.tokens.next();
+                if amount < s.len() {
+                    return Some(Err(Error::new(
+                        &token,
+                        &format!(
+                            "Initializer-string is too long. Expected: {}, Actual: {}",
+                            amount,
+                            s.len()
+                        ),
+                    )));
+                }
+                let mut diff = amount - s.len();
+                while diff > 0 {
+                    diff -= 1;
+                    s.push('\0'); // append implicit NULL terminator to string
+                }
+
+                Some(Ok(s
+                    .as_bytes()
+                    .iter()
+                    .map(|c| Expr::new(ExprKind::CharLit(*c as i8), ValueKind::Rvalue))
+                    .collect()))
+            }
+            _ => None,
+        }
+    }
+    // creates array that groups types when they are at the same index:
+    // struct Some {
+    //   char s[3];
+    //   int age;
+    // };
+    // struct Some arr[2];
+    // => [Multiple(Some-arr,Some,Char-arr,Char),Single(Char),Single(Char),Single(Int),
+    // Multiple(Some-arr,Some,Char-arr,Char),Single(Char),Single(Char),Single(Int)]
+    fn init_default(type_decl: &NEWTypes) -> ElementType {
+        match type_decl {
+            NEWTypes::Array { of, amount } => match Self::init_default(&*of) {
+                ElementType::Single(s) => {
+                    let start = ElementType::Multiple(vec![
+                        Box::new(ElementType::Single(type_decl.clone())),
+                        Box::new(ElementType::Single(s.clone())),
+                    ]);
+                    let mut result = vec![start];
+                    for _ in 1..*amount {
+                        result.push(ElementType::Single(s.clone()));
+                    }
+                    ElementType::Multiple(result.into_iter().map(|e| Box::new(e)).collect())
+                }
+                ElementType::Multiple(v) => {
+                    let mut start = vec![Box::new(ElementType::Single(type_decl.clone()))];
+                    for e in v[0].flatten() {
+                        start.push(Box::new(e))
+                    }
+                    let mut result = vec![ElementType::Multiple(start)];
+
+                    for e in v.clone().into_iter().skip(1) {
+                        result.push(*e);
+                    }
+                    let result = result
+                        .iter()
+                        .cloned()
+                        .cycle()
+                        .take(result.len() * amount)
+                        .collect::<Vec<_>>();
+                    ElementType::Multiple(result.into_iter().map(|e| Box::new(e)).collect())
+                }
+            },
+            NEWTypes::Struct(s) => {
+                let mut start = vec![ElementType::Single(type_decl.clone())];
+                let mut result = vec![];
+                for (i, (t, _)) in s.members().clone().iter().enumerate() {
+                    match Self::init_default(t) {
+                        ElementType::Single(s) => {
+                            if i == 0 {
+                                start.push(ElementType::Single(s))
+                            } else {
+                                result.push(ElementType::Single(s))
+                            }
+                        }
+                        ElementType::Multiple(v) => {
+                            if i == 0 {
+                                for e in v[0].flatten() {
+                                    start.push(e);
+                                }
+                                for e in v.clone().into_iter().skip(1) {
+                                    result.push(*e);
+                                }
+                            } else {
+                                for e in v.clone().into_iter() {
+                                    result.push(*e);
+                                }
+                            }
+                        }
+                    };
+                }
+                result.insert(
+                    0,
+                    ElementType::Multiple(start.into_iter().map(|e| Box::new(e)).collect()),
+                );
+                ElementType::Multiple(result.into_iter().map(|e| Box::new(e)).collect())
+            }
+            _ => ElementType::Single(type_decl.clone()),
+        }
+    }
     fn initializer_list(&mut self, type_decl: &NEWTypes, token: Token) -> Result<Vec<Expr>, Error> {
-        let element_type = match type_decl {
-            NEWTypes::Array { of, .. } => vec![*of.clone(); type_element_count(type_decl)],
-            NEWTypes::Struct(s) => s.members().clone().iter().map(|m| m.0.clone()).collect(),
-            _ => {
-                return Err(Error::new(
-                    &token,
-                    &format!(
-                        "Can't initialize non-aggregate type '{}' with initializer-list",
-                        type_decl
-                    ),
-                ))
+        let element_type = match Self::init_default(type_decl) {
+            ElementType::Multiple(m) => m,
+            ElementType::Single(_) => {
+                unreachable!()
             }
         };
         let mut elements =
             vec![Expr::new(ExprKind::Number(0), ValueKind::Rvalue); type_element_count(type_decl)];
         let mut element_index = 0;
+        let mut depth;
 
         while !self.check(TokenKind::RightBrace) {
-            element_index = match self.parse_designator(type_decl)? {
-                (_, false) => element_index,
+            depth = 0;
+            (element_index, depth) = match self.parse_designator(type_decl, depth)? {
+                (_, false) => (element_index, depth),
                 (result, true) => {
                     self.consume(TokenKind::Equal, "Expect '=' after array designator")?;
                     result
@@ -496,18 +631,33 @@ impl Parser {
                     ),
                 ));
             }
-            match self.matches(vec![TokenKind::LeftBrace]) {
-                Some(_) => {
-                    for e in self.initializer_list(&element_type[element_index], token.clone())? {
+            // this is really verbose but i have to check for a valid index beforehand
+            match self.peek()?.token {
+                TokenType::LeftBrace => {
+                    for e in self
+                        .initializers(&element_type[element_index].at(depth + 1))
+                        .unwrap()?
+                    {
                         elements[element_index] = e;
                         element_index += 1;
                     }
                 }
-                None => {
-                    elements[element_index] = self.expression()?;
-                    element_index += 1
+                TokenType::String(..)
+                    if element_type[element_index].contains_char_arr().is_some() =>
+                {
+                    for e in self
+                        .initializers(&element_type[element_index].contains_char_arr().unwrap())
+                        .unwrap()?
+                    {
+                        elements[element_index] = e;
+                        element_index += 1;
+                    }
                 }
-            };
+                _ => {
+                    elements[element_index] = self.expression()?;
+                    element_index += 1;
+                }
+            }
             if !self.check(TokenKind::RightBrace) {
                 self.consume(
                     TokenKind::Comma,

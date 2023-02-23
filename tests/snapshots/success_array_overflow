@@ -1,4 +1,4 @@
 Error: Array overflow. Expected size: 4, Actual size: 5
 |
 4   int a[2][2] = {{1, 2,}, {3}, 4};
-|       ^
+|                 ^

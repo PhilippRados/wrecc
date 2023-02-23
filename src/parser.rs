@@ -1,55 +1,7 @@
 use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
+use initiliazer_list_types::*;
 use std::iter::Peekable;
 use std::vec::IntoIter;
-
-#[derive(Clone, Debug)]
-enum ElementType {
-    Multiple(Vec<Box<ElementType>>),
-    Single(NEWTypes),
-}
-impl ElementType {
-    fn contains_char_arr(&self) -> Option<NEWTypes> {
-        match self {
-            Self::Multiple(m) => m.iter().find_map(|x| x.contains_char_arr()),
-            Self::Single(t) => match t {
-                NEWTypes::Array { of, .. } if matches!(**of, NEWTypes::Primitive(Types::Char)) => {
-                    Some(t.clone())
-                }
-                _ => None,
-            },
-        }
-    }
-    fn at(&self, depth: usize) -> NEWTypes {
-        match self {
-            Self::Multiple(m) => {
-                if let ElementType::Single(s) = *m[depth].clone() {
-                    s
-                } else {
-                    unreachable!()
-                }
-            }
-            Self::Single(t) => t.clone(),
-        }
-    }
-    fn flatten(&self) -> Vec<ElementType> {
-        match self {
-            Self::Multiple(v) => {
-                let mut result = vec![];
-                for e in v {
-                    if let ElementType::Multiple(..) = **e {
-                        for s in e.flatten() {
-                            result.push(s);
-                        }
-                    } else {
-                        result.push(*e.clone());
-                    }
-                }
-                result
-            }
-            Self::Single(_) => vec![self.clone()],
-        }
-    }
-}
 
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
@@ -400,12 +352,8 @@ impl Parser {
             }
         }
     }
-    fn parse_designator(
-        &mut self,
-        type_decl: &NEWTypes,
-        depth: usize,
-    ) -> Result<((usize, usize), bool), Error> {
-        let mut result = (0, depth);
+    fn parse_designator(&mut self, type_decl: &NEWTypes) -> Result<((usize, usize), bool), Error> {
+        let mut result = (0, 0);
         let mut found = false;
         if let Some(t) = self.matches(vec![TokenKind::Dot]) {
             // parse member-designator {.member = value}
@@ -430,16 +378,15 @@ impl Parser {
                         .iter()
                         .take_while(|(_, name)| name.unwrap_string() != member)
                         .fold(0, |acc, (t, _)| acc + type_element_count(t));
-
                     found = true;
                     // parse chained designators
-                    let (inc, new_depth) =
-                        match self.parse_designator(&s.members().clone()[index].0, depth + 1)? {
-                            (_, false) => (0, depth),
+                    let (index_inc, depth_inc) =
+                        match self.parse_designator(&s.members().clone()[index].0)? {
+                            (_, false) => (0, result.1),
                             (n, true) => n,
                         };
-                    result.0 += inc;
-                    result.1 = new_depth;
+                    result.0 += index_inc;
+                    result.1 += depth_inc;
                 } else {
                     return Err(Error::new(&t, "Expect identifier as member designator"));
                 }
@@ -454,7 +401,7 @@ impl Parser {
             if let NEWTypes::Array { of, .. } = type_decl {
                 if let Some(n) = self.matches(vec![TokenKind::Number]) {
                     let n = n.unwrap_num() as usize * type_element_count(&**of); // have to offset by type
-                    result = (n, depth);
+                    result.0 = n;
                 } else {
                     return Err(Error::new(&t, "Expect number as array designator"));
                 }
@@ -465,12 +412,12 @@ impl Parser {
 
                 found = true;
                 // parse chained designators
-                let (inc, new_depth) = match self.parse_designator(of, depth + 1)? {
-                    (_, false) => (0, depth),
+                let (inc, new_type) = match self.parse_designator(of)? {
+                    (_, false) => (0, result.1),
                     (n, true) => n,
                 };
                 result.0 += inc;
-                result.1 = new_depth;
+                result.1 = new_type;
             } else {
                 return Err(Error::new(
                     &t,
@@ -521,106 +468,34 @@ impl Parser {
             _ => None,
         }
     }
-    // creates array that groups types when they are at the same index:
-    // struct Some {
-    //   char s[3];
-    //   int age;
-    // };
-    // struct Some arr[2];
-    // => [Multiple(Some-arr,Some,Char-arr,Char),Single(Char),Single(Char),Single(Int),
-    // Multiple(Some-arr,Some,Char-arr,Char),Single(Char),Single(Char),Single(Int)]
-    fn init_default(type_decl: &NEWTypes) -> ElementType {
-        match type_decl {
-            NEWTypes::Array { of, amount } => match Self::init_default(&*of) {
-                ElementType::Single(s) => {
-                    let start = ElementType::Multiple(vec![
-                        Box::new(ElementType::Single(type_decl.clone())),
-                        Box::new(ElementType::Single(s.clone())),
-                    ]);
-                    let mut result = vec![start];
-                    for _ in 1..*amount {
-                        result.push(ElementType::Single(s.clone()));
-                    }
-                    ElementType::Multiple(result.into_iter().map(|e| Box::new(e)).collect())
-                }
-                ElementType::Multiple(v) => {
-                    let mut start = vec![Box::new(ElementType::Single(type_decl.clone()))];
-                    for e in v[0].flatten() {
-                        start.push(Box::new(e))
-                    }
-                    let mut result = vec![ElementType::Multiple(start)];
-
-                    for e in v.clone().into_iter().skip(1) {
-                        result.push(*e);
-                    }
-                    let result = result
-                        .iter()
-                        .cloned()
-                        .cycle()
-                        .take(result.len() * amount)
-                        .collect::<Vec<_>>();
-                    ElementType::Multiple(result.into_iter().map(|e| Box::new(e)).collect())
-                }
-            },
-            NEWTypes::Struct(s) => {
-                let mut start = vec![ElementType::Single(type_decl.clone())];
-                let mut result = vec![];
-                for (i, (t, _)) in s.members().clone().iter().enumerate() {
-                    match Self::init_default(t) {
-                        ElementType::Single(s) => {
-                            if i == 0 {
-                                start.push(ElementType::Single(s))
-                            } else {
-                                result.push(ElementType::Single(s))
-                            }
-                        }
-                        ElementType::Multiple(v) => {
-                            if i == 0 {
-                                for e in v[0].flatten() {
-                                    start.push(e);
-                                }
-                                for e in v.clone().into_iter().skip(1) {
-                                    result.push(*e);
-                                }
-                            } else {
-                                for e in v.clone().into_iter() {
-                                    result.push(*e);
-                                }
-                            }
-                        }
-                    };
-                }
-                result.insert(
-                    0,
-                    ElementType::Multiple(start.into_iter().map(|e| Box::new(e)).collect()),
-                );
-                ElementType::Multiple(result.into_iter().map(|e| Box::new(e)).collect())
-            }
-            _ => ElementType::Single(type_decl.clone()),
-        }
-    }
     fn initializer_list(&mut self, type_decl: &NEWTypes, token: Token) -> Result<Vec<Expr>, Error> {
-        let element_type = match Self::init_default(type_decl) {
+        let element_types = match init_default(type_decl) {
             ElementType::Multiple(m) => m,
-            ElementType::Single(_) => {
-                unreachable!()
+            ElementType::Single(s) => {
+                return Err(Error::new(
+                    &token,
+                    &format!(
+                        "Can't initialize non-aggregate type '{}' with '{}'",
+                        type_decl, s
+                    ),
+                ))
             }
         };
         let mut elements =
             vec![Expr::new(ExprKind::Number(0), ValueKind::Rvalue); type_element_count(type_decl)];
         let mut element_index = 0;
         let mut depth;
+        let max_depth = element_types[0].len();
 
         while !self.check(TokenKind::RightBrace) {
             depth = 0;
-            (element_index, depth) = match self.parse_designator(type_decl, depth)? {
+            (element_index, depth) = match self.parse_designator(type_decl)? {
                 (_, false) => (element_index, depth),
                 (result, true) => {
                     self.consume(TokenKind::Equal, "Expect '=' after array designator")?;
                     result
                 }
             };
-
             if element_index + 1 > elements.len() {
                 return Err(Error::new(
                     &token,
@@ -635,7 +510,7 @@ impl Parser {
             match self.peek()?.token {
                 TokenType::LeftBrace => {
                     for e in self
-                        .initializers(&element_type[element_index].at(depth + 1))
+                        .initializers(&element_types[element_index].at(depth + 1, max_depth))
                         .unwrap()?
                     {
                         elements[element_index] = e;
@@ -643,10 +518,10 @@ impl Parser {
                     }
                 }
                 TokenType::String(..)
-                    if element_type[element_index].contains_char_arr().is_some() =>
+                    if element_types[element_index].contains_char_arr().is_some() =>
                 {
                     for e in self
-                        .initializers(&element_type[element_index].contains_char_arr().unwrap())
+                        .initializers(&element_types[element_index].contains_char_arr().unwrap())
                         .unwrap()?
                     {
                         elements[element_index] = e;
@@ -1341,6 +1216,148 @@ fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
         },
         ValueKind::Lvalue,
     )
+}
+
+// creates a list of types for any given initializer list
+mod initiliazer_list_types {
+    use super::*;
+
+    #[derive(Clone, Debug)]
+    pub enum ElementType {
+        Multiple(Vec<Box<ElementType>>),
+        Single(NEWTypes),
+    }
+    impl ElementType {
+        pub fn contains_char_arr(&self) -> Option<NEWTypes> {
+            match self {
+                Self::Multiple(m) => m.iter().find_map(|x| x.contains_char_arr()),
+                Self::Single(t) => match t {
+                    NEWTypes::Array { of, .. }
+                        if matches!(**of, NEWTypes::Primitive(Types::Char)) =>
+                    {
+                        Some(t.clone())
+                    }
+                    _ => None,
+                },
+            }
+        }
+        pub fn len(&self) -> usize {
+            match self {
+                Self::Single(_) => 1,
+                Self::Multiple(v) => v.len(),
+            }
+        }
+        pub fn at(&self, depth: usize, max_depth: usize) -> NEWTypes {
+            let depth = depth - (max_depth - self.len());
+            match self {
+                Self::Multiple(m) => {
+                    if let ElementType::Single(s) = *m[depth].clone() {
+                        s
+                    } else {
+                        unreachable!()
+                    }
+                }
+                Self::Single(t) => t.clone(),
+            }
+        }
+        pub fn flatten(&self) -> Vec<ElementType> {
+            match self {
+                Self::Multiple(v) => {
+                    let mut result = vec![];
+                    for e in v {
+                        if let ElementType::Multiple(..) = **e {
+                            for s in e.flatten() {
+                                result.push(s);
+                            }
+                        } else {
+                            result.push(*e.clone());
+                        }
+                    }
+                    result
+                }
+                Self::Single(_) => vec![self.clone()],
+            }
+        }
+    }
+
+    // creates array that groups types when they are at the same index:
+    // struct Some {
+    //   char s[3];
+    //   int age;
+    // };
+    // struct Some arr[2];
+    // => [Multiple(Some-arr,Some,Char-arr,Char),Single(Char),Single(Char),Single(Int),
+    // Multiple(Some-arr,Some,Char-arr,Char),Single(Char),Single(Char),Single(Int)]
+    pub fn init_default(type_decl: &NEWTypes) -> ElementType {
+        match type_decl {
+            NEWTypes::Array { of, amount } => match init_default(&*of) {
+                ElementType::Single(s) => {
+                    let start = ElementType::Multiple(vec![
+                        Box::new(ElementType::Single(type_decl.clone())),
+                        Box::new(ElementType::Single(s.clone())),
+                    ]);
+                    let mut result = vec![start];
+                    for _ in 1..*amount {
+                        result.push(ElementType::Single(s.clone()));
+                    }
+                    ElementType::Multiple(result.into_iter().map(|e| Box::new(e)).collect())
+                }
+                ElementType::Multiple(v) => {
+                    let mut start = vec![Box::new(ElementType::Single(type_decl.clone()))];
+                    for e in v[0].flatten() {
+                        start.push(Box::new(e))
+                    }
+                    let mut result = vec![ElementType::Multiple(start)];
+
+                    for e in v.clone().into_iter().skip(1) {
+                        result.push(*e);
+                    }
+                    let result = result
+                        .iter()
+                        .cloned()
+                        .cycle()
+                        .take(result.len() * amount)
+                        .collect::<Vec<_>>();
+                    ElementType::Multiple(result.into_iter().map(|e| Box::new(e)).collect())
+                }
+            },
+            NEWTypes::Struct(s) => {
+                let mut start = vec![ElementType::Single(type_decl.clone())];
+                let mut result = vec![];
+                for (i, (t, _)) in s.members().clone().iter().enumerate() {
+                    match init_default(t) {
+                        ElementType::Single(s) => {
+                            if i == 0 {
+                                start.push(ElementType::Single(s))
+                            } else {
+                                result.push(ElementType::Single(s))
+                            }
+                        }
+                        ElementType::Multiple(v) => {
+                            if i == 0 {
+                                for e in v[0].flatten() {
+                                    start.push(e);
+                                }
+                                for e in v.clone().into_iter().skip(1) {
+                                    result.push(*e);
+                                }
+                            } else {
+                                for e in v.clone().into_iter() {
+                                    result.push(*e);
+                                }
+                            }
+                        }
+                    };
+                }
+                result.insert(
+                    0,
+                    ElementType::Multiple(start.into_iter().map(|e| Box::new(e)).collect()),
+                );
+                ElementType::Multiple(result.into_iter().map(|e| Box::new(e)).collect())
+            }
+            _ => ElementType::Single(type_decl.clone()),
+        }
+    }
 }
 
 #[cfg(test)]

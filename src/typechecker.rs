@@ -171,7 +171,7 @@ impl TypeChecker {
         &mut self,
         type_decl: &mut NEWTypes,
         var_name: &Token,
-        exprs: &mut Vec<Expr>,
+        exprs: &mut [Expr],
         is_global: &mut bool,
     ) -> Result<(), Error> {
         let name = var_name.unwrap_string();
@@ -534,10 +534,10 @@ impl TypeChecker {
         if let Ok(Symbols::Var(v)) = self.env.get_symbol(token) {
             Ok(v)
         } else {
-            return Err(Error::new(
+            Err(Error::new(
                 token,
                 &format!("No variable '{}'", token.unwrap_string()),
-            ));
+            ))
         }
     }
     fn member_access(
@@ -553,7 +553,6 @@ impl TypeChecker {
 
             if let Some((member_type, _)) = s
                 .members()
-                .clone()
                 .iter()
                 .find(|(_, name)| name.unwrap_string() == member)
             {

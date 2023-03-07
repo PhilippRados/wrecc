@@ -112,7 +112,7 @@ impl<'a> Compiler<'a> {
         &mut self,
         type_decl: &NEWTypes,
         name: String,
-        exprs: &Vec<Expr>,
+        exprs: &[Expr],
         is_global: bool,
     ) -> Result<(), std::fmt::Error> {
         match is_global {
@@ -245,16 +245,13 @@ impl<'a> Compiler<'a> {
                     "\n\t.data\n_{name}:\n\t.zero {}",
                     type_decl.size()
                 )?;
-                Register::Label(LabelRegister::Var(name.clone(), type_decl.clone()))
+                Register::Label(LabelRegister::Var(name.clone(), type_decl))
             }
             false => {
                 self.current_bp_offset += type_decl.size();
                 self.current_bp_offset = align(self.current_bp_offset, &type_decl);
 
-                Register::Stack(StackRegister::new(
-                    self.current_bp_offset,
-                    type_decl.clone(),
-                ))
+                Register::Stack(StackRegister::new(self.current_bp_offset, type_decl))
             }
         };
         self.env.declare_var(name, reg);
@@ -447,7 +444,7 @@ impl<'a> Compiler<'a> {
                 .iter()
                 .take_while(|(_, name)| name.unwrap_string() != member)
                 .fold(0, |acc, (t, _)| acc + t.size());
-            let members_iter = s.members().clone();
+            let members_iter = s.members();
             let (member_type, _) = members_iter
                 .iter()
                 .find(|(_, name)| name.unwrap_string() == member)

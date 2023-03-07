@@ -104,6 +104,6 @@ impl<T: Clone> Environment<T> {
     }
 
     pub fn declare_struct(&mut self, name: String) {
-        self.current.customs.insert(name.clone(), StructRef::new());
+        self.current.customs.insert(name, StructRef::new());
     }
 }

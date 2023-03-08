@@ -527,6 +527,7 @@ impl TypeChecker {
             ExprKind::CastDown { .. } => unimplemented!("explicit casts"),
             ExprKind::ScaleUp { .. } => unreachable!("is only used in codegen"),
             ExprKind::ScaleDown { .. } => unreachable!("is only used in codegen"),
+            ExprKind::Nop { .. } => unreachable!("only used in parser"),
         });
         Ok(ast.type_decl.clone().unwrap())
     }
@@ -548,26 +549,27 @@ impl TypeChecker {
     ) -> Result<NEWTypes, Error> {
         let expr_type = self.expr_type(expr)?;
 
-        if let NEWTypes::Struct(s) = expr_type.clone() {
-            let member = member.unwrap_string();
+        match expr_type.clone() {
+            NEWTypes::Struct(s) | NEWTypes::Union(s) => {
+                let member = member.unwrap_string();
 
-            if let Some((member_type, _)) = s
-                .members()
-                .iter()
-                .find(|(_, name)| name.unwrap_string() == member)
-            {
-                Ok(member_type.clone())
-            } else {
-                Err(Error::new(
-                    token,
-                    &format!("No member '{}' in '{}'", member, expr_type),
-                ))
+                if let Some((member_type, _)) = s
+                    .members()
+                    .iter()
+                    .find(|(_, name)| name.unwrap_string() == member)
+                {
+                    Ok(member_type.clone())
+                } else {
+                    Err(Error::new(
+                        token,
+                        &format!("No member '{}' in '{}'", member, expr_type),
+                    ))
+                }
             }
-        } else {
-            Err(Error::new(
+            _ => Err(Error::new(
                 token,
                 &format!("Can only access members of structs, not '{}'", expr_type),
-            ))
+            )),
         }
     }
     fn evaluate_postunary(

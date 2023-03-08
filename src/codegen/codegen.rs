@@ -428,6 +428,7 @@ impl<'a> Compiler<'a> {
                 let expr = self.execute_expr(expr)?;
                 self.cg_member_access(expr, member, true)
             }
+            ExprKind::Nop => unreachable!("only used in parser"),
         }
     }
     fn cg_member_access(
@@ -459,6 +460,18 @@ impl<'a> Compiler<'a> {
             } else {
                 address
             };
+            result.set_type(member_type.clone());
+            result.set_value_kind(ValueKind::Lvalue);
+            Ok(result)
+        } else if let NEWTypes::Union(s) = reg.get_type() {
+            let members_iter = s.members();
+            let (member_type, _) = members_iter
+                .iter()
+                .find(|(_, name)| name.unwrap_string() == member)
+                .unwrap();
+
+            let mut result = self.cg_address_at(reg, false, free)?;
+
             result.set_type(member_type.clone());
             result.set_value_kind(ValueKind::Lvalue);
             Ok(result)

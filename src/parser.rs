@@ -66,7 +66,7 @@ impl Parser {
                         "Brackets not allowed here; Put them after the Identifier",
                     ));
                 }
-                if let (NEWTypes::Struct(..), true) = (
+                if let (NEWTypes::Struct(..) | NEWTypes::Union(..), true) = (
                     t.clone(),
                     self.matches(vec![TokenKind::Semicolon]).is_some(),
                 ) {
@@ -230,10 +230,17 @@ impl Parser {
             Ok(type_decl)
         }
     }
-    fn parse_members(&mut self, struct_name: &Token) -> Result<Vec<(NEWTypes, Token)>, Error> {
+    fn parse_members(
+        &mut self,
+        token: &Token,
+        aggr_name: &Token,
+    ) -> Result<Vec<(NEWTypes, Token)>, Error> {
         let mut members = Vec::new();
         if self.check(TokenKind::RightBrace) {
-            return Err(Error::new(struct_name, "Can't have empty struct"));
+            return Err(Error::new(
+                token,
+                &format!("Can't have empty {}", token.token),
+            ));
         }
         while self.matches(vec![TokenKind::RightBrace]).is_none() {
             let mut member_type = self.matches_type()?;
@@ -242,23 +249,32 @@ impl Parser {
 
             match member_type {
                 NEWTypes::Primitive(Types::Void) => {
-                    return Err(Error::new(&name, "Struct member can't have type 'void'"))
+                    return Err(Error::new(
+                        &name,
+                        &format!("{} member can't have type 'void'", token.token),
+                    ))
                 }
                 NEWTypes::Struct(StructInfo::Named(t_name, _))
-                    if struct_name.unwrap_string() == t_name =>
+                | NEWTypes::Union(StructInfo::Named(t_name, _))
+                    if aggr_name.unwrap_string() == t_name =>
                 {
-                    return Err(Error::new(&name, "Struct can't have itself as a member"));
+                    return Err(Error::new(
+                        &name,
+                        &format!("{} can't have itself as a member", token.token),
+                    ));
                 }
                 NEWTypes::Array { of, .. }
-                    if if let NEWTypes::Struct(StructInfo::Named(t_name, _)) = &*of {
-                        struct_name.unwrap_string() == *t_name
+                    if if let NEWTypes::Struct(StructInfo::Named(t_name, _))
+                    | NEWTypes::Union(StructInfo::Named(t_name, _)) = &*of
+                    {
+                        aggr_name.unwrap_string() == *t_name
                     } else {
                         false
                     } =>
                 {
                     return Err(Error::new(
                         &name,
-                        "Struct can't have array of itself as a member",
+                        &format!("{} can't have array of itself as a member", token.token),
                     ));
                 }
                 _ => (),
@@ -269,7 +285,7 @@ impl Parser {
         }
         Ok(members)
     }
-    fn parse_struct(&mut self, token: &Token) -> Result<NEWTypes, Error> {
+    fn parse_aggregate(&mut self, token: &Token) -> Result<NEWTypes, Error> {
         let name = self.matches(vec![TokenKind::Ident]);
         let has_members = self.matches(vec![TokenKind::LeftBrace]);
 
@@ -278,34 +294,39 @@ impl Parser {
                 if self.env.current.customs.contains_key(&name.unwrap_string()) {
                     return Err(Error::new(
                         name,
-                        &format!("Redefinition of struct '{}'", name.unwrap_string()),
+                        &format!("Redefinition of {} '{}'", token.token, name.unwrap_string()),
                     ));
                 }
 
-                self.env.declare_struct(name.unwrap_string());
+                self.env.declare_aggregate(name.unwrap_string());
 
-                let members = self.parse_members(name)?;
+                let members = self.parse_members(token, name)?;
                 let struct_ref = self.env.get_type(name)?;
                 struct_ref.update(members);
 
                 StructInfo::Named(name.unwrap_string(), struct_ref)
             }
             (Some(name), None) => {
-                // lookup struct definition
+                // lookup struct/union definition
                 let struct_ref = self.env.get_type(name)?;
                 StructInfo::Named(name.unwrap_string(), struct_ref)
             }
-            (None, Some(_)) => StructInfo::Anonymous(self.parse_members(&Token::default(
-                TokenType::String("<anonymous>".to_string()),
-            ))?),
+            (None, Some(_)) => StructInfo::Anonymous(self.parse_members(
+                token,
+                &Token::default(TokenType::String("<anonymous>".to_string())),
+            )?),
             (None, None) => {
                 return Err(Error::new(
                     token,
-                    "Can't declare anonymous struct without members",
+                    &format!("Can't declare anonymous {} without members", token.token),
                 ));
             }
         };
-        Ok(NEWTypes::Struct(result))
+        Ok(match token.token {
+            TokenType::Union => NEWTypes::Union(result),
+            TokenType::Struct => NEWTypes::Struct(result),
+            _ => unreachable!(),
+        })
     }
     fn type_declaration(&mut self, mut type_decl: NEWTypes) -> Result<Stmt, Error> {
         let name = self.consume(
@@ -335,7 +356,7 @@ impl Parser {
             Some(elements) => {
                 let assign_sugar = list_sugar_assign(
                     name.clone(),
-                    &elements?,
+                    &mut elements?,
                     type_decl.clone(),
                     true,
                     Expr::new(ExprKind::Ident(name.clone()), ValueKind::Lvalue),
@@ -357,7 +378,7 @@ impl Parser {
         let mut found = false;
         if let Some(t) = self.matches(vec![TokenKind::Dot]) {
             // parse member-designator {.member = value}
-            if let NEWTypes::Struct(s) = type_decl {
+            if let NEWTypes::Struct(s) | NEWTypes::Union(s) = type_decl {
                 if let Some(ident) = self.matches(vec![TokenKind::Ident]) {
                     let member = ident.unwrap_string();
                     let index = if let Some(i) = s
@@ -392,7 +413,7 @@ impl Parser {
             } else {
                 return Err(Error::new(
                     &t,
-                    "Can only use struct designator on type 'struct' not 'array'",
+                    "Can only use member designator on type 'struct' and 'union' not 'array'",
                 ));
             }
         } else if let Some(t) = self.matches(vec![TokenKind::LeftBracket]) {
@@ -420,7 +441,10 @@ impl Parser {
             } else {
                 return Err(Error::new(
                     &t,
-                    "Can only use array designator on type 'array' not 'struct'",
+                    &format!(
+                        "Can only use array designator on type 'array' not '{}'",
+                        type_decl
+                    ),
                 ));
             }
         }
@@ -481,10 +505,10 @@ impl Parser {
             }
         };
         let mut elements =
-            vec![Expr::new(ExprKind::Number(0), ValueKind::Rvalue); type_element_count(type_decl)];
+            vec![Expr::new(ExprKind::Nop, ValueKind::Rvalue); type_element_count(type_decl)];
         let mut element_index = 0;
         let mut depth;
-        let max_depth = element_types[0].len();
+        let max_depth = element_types.iter().map(|e| e.len()).max().unwrap_or(1);
 
         while !self.check(TokenKind::RightBrace) {
             depth = 0;
@@ -499,7 +523,7 @@ impl Parser {
                 return Err(Error::new(
                     &token,
                     &format!(
-                        "Array overflow. Expected size: {}, Actual size: {}",
+                        "Initializer overflow. Expected size: {}, Actual size: {}",
                         elements.len(),
                         element_index + 1
                     ),
@@ -863,7 +887,7 @@ impl Parser {
                     expr = self.call(token, expr)?;
                 }
                 TokenType::Dot => {
-                    // some_struct.member
+                    // some_struct.member or some_union.member
                     if let Some(member) = self.matches(vec![TokenKind::Ident]) {
                         expr = Expr::new(
                             ExprKind::MemberAccess {
@@ -876,7 +900,7 @@ impl Parser {
                     } else {
                         return Err(Error::new(
                             &token,
-                            "A struct member access must be followed by an identifer",
+                            "A member access must be followed by an identifer",
                         ));
                     }
                 }
@@ -887,7 +911,7 @@ impl Parser {
                     } else {
                         return Err(Error::new(
                             &token,
-                            "A struct member access must be followed by an identifer",
+                            "A member access must be followed by an identifer",
                         ));
                     }
                 }
@@ -1018,12 +1042,12 @@ impl Parser {
                     ));
                 }
                 let mut type_decl;
-                if v.token == TokenType::Struct {
+                if v.token == TokenType::Struct || v.token == TokenType::Union {
                     let token = self
                         .tokens
                         .next()
                         .expect("can unwrap because successfull peek");
-                    type_decl = self.parse_struct(&token)?;
+                    type_decl = self.parse_aggregate(&token)?;
                 } else {
                     // otherwise parse primitive
                     type_decl = self
@@ -1053,7 +1077,7 @@ fn array_of(type_decl: NEWTypes, size: i32) -> NEWTypes {
 fn type_element_count(type_decl: &NEWTypes) -> usize {
     match type_decl {
         NEWTypes::Array { amount, of } => amount * type_element_count(of),
-        NEWTypes::Struct(s) => {
+        NEWTypes::Struct(s) | NEWTypes::Union(s) => {
             let mut result = 0;
             for m in s.members().iter() {
                 result += type_element_count(&m.0);
@@ -1097,7 +1121,7 @@ fn arrow_sugar(left: Expr, member: Token, arrow_token: Token) -> Expr {
 
 fn list_sugar_assign(
     token: Token,
-    list: &Vec<Expr>,
+    list: &mut Vec<Expr>,
     type_decl: NEWTypes,
     is_outer: bool,
     left: Expr,
@@ -1108,7 +1132,7 @@ fn list_sugar_assign(
     // a[0] = 1;
     // a[1] = 2;
     // a[2] = 3;
-    if let NEWTypes::Array { amount, of } = type_decl {
+    if let NEWTypes::Array { amount, of } = type_decl.clone() {
         let mut result = Vec::new();
         for ((i, _), arr_i) in list
             .iter()
@@ -1116,9 +1140,9 @@ fn list_sugar_assign(
             .step_by(type_element_count(&of))
             .zip(0..amount)
         {
-            list_sugar_assign(
+            for (offset, l_expr) in list_sugar_assign(
                 token.clone(),
-                &list[i..list.len()].to_vec(),
+                &mut list[i..list.len()].to_vec(),
                 *of.clone(),
                 false,
                 index_sugar(
@@ -1129,28 +1153,38 @@ fn list_sugar_assign(
             )
             .into_iter()
             .enumerate()
-            .for_each(|(offset, l_expr)| {
+            {
+                let value = if let ExprKind::Nop = list[i + offset].kind.clone() {
+                    Expr::new(ExprKind::Number(0), ValueKind::Rvalue)
+                } else {
+                    list[i + offset].clone()
+                };
                 result.push(match is_outer {
                     true => Expr::new(
                         ExprKind::Assign {
                             l_expr: Box::new(l_expr),
                             token: token.clone(),
-                            r_expr: Box::new(list[i + offset].clone()),
+                            r_expr: Box::new(value),
                         },
                         ValueKind::Rvalue,
                     ),
                     false => l_expr,
                 })
-            });
+            }
         }
         result
-    } else if let NEWTypes::Struct(s) = type_decl {
+    } else if let NEWTypes::Struct(s) | NEWTypes::Union(s) = type_decl.clone() {
         let mut result = Vec::new();
-        let members = s.members();
+        let mut members = s.members().to_vec();
+
+        if let NEWTypes::Union(_) = type_decl.clone() {
+            remove_unused_members(&mut members, list);
+        }
+
         for i in 0..members.len() {
-            list_sugar_assign(
+            for (offset, l_expr) in list_sugar_assign(
                 token.clone(),
-                &list[i..list.len()].to_vec(),
+                &mut list[i..list.len()].to_vec(),
                 members[i].clone().0,
                 false,
                 Expr::new(
@@ -1164,24 +1198,53 @@ fn list_sugar_assign(
             )
             .into_iter()
             .enumerate()
-            .for_each(|(offset, l_expr)| {
+            {
+                let value = if let ExprKind::Nop = list[i + offset].kind.clone() {
+                    Expr::new(ExprKind::Number(0), ValueKind::Rvalue)
+                } else {
+                    list[i + offset].clone()
+                };
                 result.push(match is_outer {
                     true => Expr::new(
                         ExprKind::Assign {
                             l_expr: Box::new(l_expr),
                             token: token.clone(),
-                            r_expr: Box::new(list[i + offset].clone()),
+                            r_expr: Box::new(value),
                         },
                         ValueKind::Rvalue,
                     ),
                     false => l_expr,
                 })
-            });
+            }
         }
         result
     } else {
         vec![left]
     }
+}
+fn remove_unused_members(members: &mut Vec<(NEWTypes, Token)>, list: &mut Vec<Expr>) {
+    // remove unused members so they don't overwrite existing ones
+    let old_members = members.clone();
+    let mut new_members = vec![];
+    let mut new_list = vec![];
+    let mut i = 0;
+
+    for m in old_members.iter() {
+        let type_len = type_element_count(&m.0);
+        if !list[i..i + type_len]
+            .iter()
+            .all(|e| matches!(e.kind, ExprKind::Nop))
+        {
+            new_members.push(m.clone());
+            for e in list[i..i + type_len].into_iter() {
+                new_list.push(e.clone())
+            }
+        }
+        i += type_len;
+    }
+
+    *list = new_list;
+    *members = new_members;
 }
 fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
     // a[i] <=> *(a + i)
@@ -1315,7 +1378,7 @@ mod initiliazer_list_types {
                     ElementType::Multiple(result.into_iter().collect())
                 }
             },
-            NEWTypes::Struct(s) => {
+            NEWTypes::Struct(s) | NEWTypes::Union(s) => {
                 let mut start = vec![ElementType::Single(type_decl.clone())];
                 let mut result = vec![];
                 for (i, (t, _)) in s.members().iter().enumerate() {

@@ -103,7 +103,7 @@ impl<T: Clone> Environment<T> {
         self.current.symbols.insert(name, Symbols::Var(value));
     }
 
-    pub fn declare_struct(&mut self, name: String) {
+    pub fn declare_aggregate(&mut self, name: String) {
         self.current.customs.insert(name, StructRef::new());
     }
 }

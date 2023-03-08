@@ -10,16 +10,16 @@ pub trait TypeInfo {
     fn size(&self) -> usize;
 
     // returns the correct suffix for a register of type
-    fn reg_suffix(&self) -> &str;
+    fn reg_suffix(&self) -> String;
 
     // returns the instruction-suffixes
-    fn suffix(&self) -> &str;
+    fn suffix(&self) -> String;
 
     // returns the instruction-suffixes spelled out
-    fn complete_suffix(&self) -> &str;
+    fn complete_suffix(&self) -> String;
 
     // returns the return register name of type
-    fn return_reg(&self) -> &str;
+    fn return_reg(&self) -> String;
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -28,6 +28,7 @@ pub enum NEWTypes {
     Array { amount: usize, of: Box<NEWTypes> },
     Pointer(Box<NEWTypes>),
     Struct(StructInfo),
+    Union(StructInfo),
 }
 
 // this code is shamelessly copied from the more sophisticated saltwater compiler
@@ -84,10 +85,10 @@ impl StructInfo {
             StructInfo::Anonymous(m) => Rc::new(m.clone()),
         }
     }
-    fn name(&self) -> String {
+    fn name(&self) -> &str {
         match self {
-            StructInfo::Named(name, _) => "struct ".to_string() + name,
-            StructInfo::Anonymous(_) => "struct <anonymous>".to_string(),
+            StructInfo::Named(name, _) => name,
+            StructInfo::Anonymous(_) => "<anonymous>",
         }
     }
 }
@@ -97,6 +98,7 @@ impl TypeInfo for NEWTypes {
         match self {
             NEWTypes::Primitive(t) => t.size(),
             NEWTypes::Struct(s) => s.members().iter().fold(0, |acc, (t, _)| acc + t.size()),
+            NEWTypes::Union(_) => self.union_biggest().size(),
             NEWTypes::Pointer(_) => 8,
             NEWTypes::Array {
                 amount,
@@ -104,28 +106,36 @@ impl TypeInfo for NEWTypes {
             } => amount * element_type.size(),
         }
     }
-    fn reg_suffix(&self) -> &str {
+    fn reg_suffix(&self) -> String {
         match self {
             NEWTypes::Primitive(t) => t.reg_suffix(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => "",
+            NEWTypes::Union(_) => self.union_biggest().reg_suffix(),
+            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => {
+                String::from("")
+            }
         }
     }
-    fn suffix(&self) -> &str {
+    fn suffix(&self) -> String {
         match self {
             NEWTypes::Primitive(t) => t.suffix(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => "q",
+            NEWTypes::Union(_) => self.union_biggest().suffix(),
+            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => "q".to_string(),
         }
     }
-    fn complete_suffix(&self) -> &str {
+    fn complete_suffix(&self) -> String {
         match self {
             NEWTypes::Primitive(t) => t.complete_suffix(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => "quad",
+            NEWTypes::Union(_) => self.union_biggest().complete_suffix(),
+            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => {
+                "quad".to_string()
+            }
         }
     }
-    fn return_reg(&self) -> &str {
+    fn return_reg(&self) -> String {
         match self {
             NEWTypes::Primitive(t) => t.return_reg(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } => RETURN_REG[2],
+            NEWTypes::Pointer(_) | NEWTypes::Array { .. } => RETURN_REG[2].to_string(),
+            NEWTypes::Union(..) => self.union_biggest().return_reg(),
             NEWTypes::Struct(..) => unimplemented!(),
         }
     }
@@ -139,9 +149,24 @@ impl Display for NEWTypes {
                 NEWTypes::Primitive(t) => t.fmt().to_string(),
                 NEWTypes::Array { of, amount } => format!("{}[{}]", of, amount),
                 NEWTypes::Pointer(to) => format!("{}*", to),
-                NEWTypes::Struct(s) => s.name(),
+                NEWTypes::Union(s) => "union ".to_string() + s.name(),
+                NEWTypes::Struct(s) => "struct ".to_string() + s.name(),
             }
         )
+    }
+}
+impl NEWTypes {
+    fn union_biggest(&self) -> NEWTypes {
+        match self {
+            NEWTypes::Union(s) => s
+                .members()
+                .iter()
+                .max_by_key(|(type_decl, _)| type_decl.size())
+                .expect("union can't be empty, checked in parser")
+                .0
+                .clone(),
+            _ => unreachable!("not union"),
+        }
     }
 }
 
@@ -196,8 +221,9 @@ impl NEWTypes {
             }
             (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => *self == *other,
 
-            // two structs are compatible if they have the same name and members
-            (NEWTypes::Struct(s_l), NEWTypes::Struct(s_r)) => {
+            // two structs/unions are compatible if they have the same name and members
+            (NEWTypes::Struct(s_l), NEWTypes::Struct(s_r))
+            | (NEWTypes::Union(s_l), NEWTypes::Union(s_r)) => {
                 if let (StructInfo::Named(name_l, _), StructInfo::Named(name_r, _)) = (s_l, s_r) {
                     let matching_members = s_l
                         .members()
@@ -234,32 +260,32 @@ impl TypeInfo for Types {
             Types::Long => 8,
         }
     }
-    fn reg_suffix(&self) -> &str {
-        match self {
+    fn reg_suffix(&self) -> String {
+        String::from(match self {
             Types::Void => unreachable!(),
             Types::Char => "b",
             Types::Int => "d",
             Types::Long => "",
-        }
+        })
     }
-    fn suffix(&self) -> &str {
-        self.complete_suffix().get(0..1).unwrap()
+    fn suffix(&self) -> String {
+        self.complete_suffix().get(0..1).unwrap().to_string()
     }
-    fn complete_suffix(&self) -> &str {
-        match self {
+    fn complete_suffix(&self) -> String {
+        String::from(match self {
             Types::Void => unreachable!(),
             Types::Char => "byte",
             Types::Int => "long",
             Types::Long => "quad",
-        }
+        })
     }
-    fn return_reg(&self) -> &str {
-        match self {
+    fn return_reg(&self) -> String {
+        String::from(match self {
             Types::Void => unreachable!("doesnt have return register when returning void"),
             Types::Char => RETURN_REG[0],
             Types::Int => RETURN_REG[1],
             Types::Long => RETURN_REG[2],
-        }
+        })
     }
 }
 impl Types {

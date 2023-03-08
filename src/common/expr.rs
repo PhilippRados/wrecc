@@ -60,6 +60,7 @@ pub enum ExprKind {
         member: Token,
         expr: Box<Expr>,
     },
+    Nop, // works as an indicator for parser
     String(Token),
     Number(i32),
     CharLit(i8),
@@ -107,6 +108,7 @@ impl Display for ExprKind {
                 ExprKind::String(token) => token.unwrap_string(),
                 ExprKind::PostUnary { .. } => "'postfix-expression'".to_string(),
                 ExprKind::MemberAccess { .. } => "'member-access-expression'".to_string(),
+                ExprKind::Nop => "'nop'".to_string(),
                 ExprKind::CompoundAssign { token, .. } =>
                     format!("'compound-assignment: {}'", token.token),
             }

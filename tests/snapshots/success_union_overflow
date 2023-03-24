@@ -1,0 +1,4 @@
+Error: Initializer overflow. Expected size: 3, Actual size: 4
+|
+10   } a = {'u', 'w', 'e', 2};
+|          ^

@@ -294,11 +294,12 @@ impl Parser {
                 if self.env.current.customs.contains_key(&name.unwrap_string()) {
                     return Err(Error::new(
                         name,
-                        &format!("Redefinition of {} '{}'", token.token, name.unwrap_string()),
+                        &format!("Redefinition of '{}'", name.unwrap_string()),
                     ));
                 }
 
-                self.env.declare_aggregate(name.unwrap_string());
+                self.env
+                    .declare_aggregate(name.unwrap_string(), token.clone().token);
 
                 let members = self.parse_members(token, name)?;
                 let struct_ref = self.env.get_type(name)?;
@@ -309,6 +310,16 @@ impl Parser {
             (Some(name), None) => {
                 // lookup struct/union definition
                 let struct_ref = self.env.get_type(name)?;
+                if token.token != *struct_ref.get_kind() {
+                    return Err(Error::new(
+                        name,
+                        &format!(
+                            "Type '{}' already exists but not as {}",
+                            name.unwrap_string(),
+                            token.token
+                        ),
+                    ));
+                }
                 StructInfo::Named(name.unwrap_string(), struct_ref)
             }
             (None, Some(_)) => StructInfo::Anonymous(self.parse_members(

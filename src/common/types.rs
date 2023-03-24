@@ -1,4 +1,4 @@
-use crate::common::token::{Token, TokenKind};
+use crate::common::token::{Token, TokenKind, TokenType};
 use std::fmt::Display;
 use std::rc::Rc;
 pub use struct_ref::StructRef;
@@ -35,6 +35,7 @@ pub enum NEWTypes {
 mod struct_ref {
     use super::NEWTypes;
     use super::Token;
+    use super::TokenType;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -45,21 +46,21 @@ mod struct_ref {
     #[derive(Clone, PartialEq, Debug)]
     pub struct StructRef {
         index: usize,
-    }
-    impl Default for StructRef {
-        fn default() -> Self {
-            Self::new()
-        }
+        kind: TokenType,
     }
 
     impl StructRef {
-        pub fn new() -> StructRef {
+        pub fn new(kind: TokenType) -> StructRef {
             CUSTOMS.with(|list| {
                 let mut types = list.borrow_mut();
                 let index = types.len();
                 types.push(Rc::new(vec![]));
-                StructRef { index }
+
+                StructRef { index, kind }
             })
+        }
+        pub fn get_kind(&self) -> &TokenType {
+            &self.kind
         }
 
         pub fn get(&self) -> Rc<Vec<(NEWTypes, Token)>> {

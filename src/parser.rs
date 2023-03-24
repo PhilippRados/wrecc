@@ -508,24 +508,26 @@ impl Parser {
             vec![Expr::new(ExprKind::Nop, ValueKind::Rvalue); type_element_count(type_decl)];
         let mut element_index = 0;
         let mut depth;
+        let mut found_des;
         let max_depth = element_types.iter().map(|e| e.len()).max().unwrap_or(1);
 
         while !self.check(TokenKind::RightBrace) {
             depth = 0;
-            (element_index, depth) = match self.parse_designator(type_decl)? {
-                (_, false) => (element_index, depth),
+            ((element_index, depth), found_des) = match self.parse_designator(type_decl)? {
+                (_, false) => ((element_index, depth), false),
                 (result, true) => {
                     self.consume(TokenKind::Equal, "Expect '=' after array designator")?;
-                    result
+                    ((result), true)
                 }
             };
-            if element_index + 1 > elements.len() {
+            if let Some((actual, expected)) =
+                init_overflow(type_decl, found_des, element_index + 1, elements.len())
+            {
                 return Err(Error::new(
                     &token,
                     &format!(
                         "Initializer overflow. Expected size: {}, Actual size: {}",
-                        elements.len(),
-                        element_index + 1
+                        expected, actual
                     ),
                 ));
             }
@@ -1087,6 +1089,23 @@ fn type_element_count(type_decl: &NEWTypes) -> usize {
         _ => 1,
     }
 }
+fn init_overflow(
+    type_decl: &NEWTypes,
+    found_designator: bool,
+    element_index: usize,
+    mut len: usize,
+) -> Option<(usize, usize)> {
+    // union intializer can only have single element if no designator used
+    if let (NEWTypes::Union(s), false) = (type_decl, found_designator) {
+        len = type_element_count(&s.members()[0].0);
+    }
+
+    if element_index > len {
+        Some((element_index, len))
+    } else {
+        None
+    }
+}
 
 fn arrow_sugar(left: Expr, member: Token, arrow_token: Token) -> Expr {
     // some_struct->member
@@ -1181,16 +1200,20 @@ fn list_sugar_assign(
             remove_unused_members(&mut members, list);
         }
 
-        for i in 0..members.len() {
+        for member_i in 0..members.len() {
+            let i = members
+                .iter()
+                .take(member_i)
+                .fold(0, |acc, (t, _)| acc + type_element_count(t));
             for (offset, l_expr) in list_sugar_assign(
                 token.clone(),
                 &mut list[i..list.len()].to_vec(),
-                members[i].clone().0,
+                members[member_i].clone().0,
                 false,
                 Expr::new(
                     ExprKind::MemberAccess {
                         token: token.clone(),
-                        member: members[i].clone().1,
+                        member: members[member_i].clone().1,
                         expr: Box::new(left.clone()),
                     },
                     ValueKind::Lvalue,

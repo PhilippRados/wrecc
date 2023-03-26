@@ -190,7 +190,7 @@ pub enum TokenType {
     Ident(String),
     String(String),
     CharLit(i8),
-    Number(i32),
+    Number(i64),
 
     // Keywords.
     Void,
@@ -307,7 +307,7 @@ impl Token {
             _ => panic!("cant unwrap string on {} token", self.token),
         }
     }
-    pub fn unwrap_num(&self) -> i32 {
+    pub fn unwrap_num(&self) -> i64 {
         match &self.token {
             TokenType::Number(n) => *n,
             _ => panic!("cant unwrap number on {} token", self.token),

@@ -216,7 +216,7 @@ impl<'a> Scanner<'a> {
                         {
                             num.push(digit);
                         }
-                        self.add_token(&mut tokens, TokenType::Number(num.parse::<i32>().unwrap()));
+                        self.add_token(&mut tokens, TokenType::Number(num.parse::<i64>().unwrap()));
                     } else if c.is_alphabetic() || c == '_' {
                         // Identifier
                         let mut value = String::new();

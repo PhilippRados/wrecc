@@ -406,7 +406,14 @@ impl<'a> Compiler<'a> {
     }
 
     fn cg_literal(&mut self, num: usize, t: Types) -> Result<Register, std::fmt::Error> {
-        Ok(Register::Literal(num as usize, NEWTypes::Primitive(t)))
+        Ok(Register::Literal(
+            num,
+            NEWTypes::Primitive(match t {
+                Types::Char => Types::Char,
+                _ if i32::try_from(num).is_ok() => Types::Int,
+                _ => Types::Long,
+            }),
+        ))
     }
     pub fn execute_expr(&mut self, ast: &Expr) -> Result<Register, std::fmt::Error> {
         match &ast.kind {

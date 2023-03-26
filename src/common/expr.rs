@@ -61,7 +61,7 @@ pub enum ExprKind {
         expr: Box<Expr>,
     },
     String(Token),
-    Number(i32),
+    Number(i64),
     CharLit(i8),
     Ident(Token),
     Nop, // works as an indicator for parser

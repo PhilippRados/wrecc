@@ -496,7 +496,13 @@ impl TypeChecker {
                 self.evaluate_unary(token, right, *is_global)?
             }
             ExprKind::Grouping { expr } => self.evaluate_grouping(expr)?,
-            ExprKind::Number(_) => NEWTypes::Primitive(Types::Int),
+            ExprKind::Number(n) => {
+                if i32::try_from(*n).is_ok() {
+                    NEWTypes::Primitive(Types::Int)
+                } else {
+                    NEWTypes::Primitive(Types::Long)
+                }
+            }
             ExprKind::CharLit(_) => NEWTypes::Primitive(Types::Char),
             ExprKind::String(token) => self.string(token.unwrap_string())?,
             ExprKind::Logical { left, token, right } => {

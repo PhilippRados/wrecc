@@ -247,7 +247,7 @@ impl Parser {
                 if let Some(n) = self.matches(vec![TokenKind::Number, TokenKind::CharLit]) {
                     index = match n.token {
                         TokenType::CharLit(c) => c as i32,
-                        TokenType::Number(n) => n,
+                        TokenType::Number(n) => n as i32,
                         _ => {
                             return Err(Error::new(
                                 &n,
@@ -1135,7 +1135,7 @@ impl Parser {
     }
 }
 
-fn array_of(type_decl: NEWTypes, size: i32) -> NEWTypes {
+fn array_of(type_decl: NEWTypes, size: i64) -> NEWTypes {
     NEWTypes::Array {
         amount: size as usize,
         of: Box::new(type_decl),
@@ -1233,7 +1233,7 @@ fn list_sugar_assign(
                 index_sugar(
                     token.clone(),
                     left.clone(),
-                    Expr::new(ExprKind::Number(arr_i as i32), ValueKind::Rvalue),
+                    Expr::new(ExprKind::Number(arr_i as i64), ValueKind::Rvalue),
                 ),
             )
             .into_iter()

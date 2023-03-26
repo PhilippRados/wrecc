@@ -18,6 +18,11 @@ pub enum Register {
     Arg(usize, NEWTypes),
     Void,
 }
+impl EnumValue<Register> for Register {
+    fn enum_value(n: i32) -> Register {
+        Register::Literal(n as usize, NEWTypes::Primitive(Types::Int))
+    }
+}
 impl Register {
     pub fn free(&self) {
         match self {
@@ -41,7 +46,9 @@ impl Register {
             },
             Register::Arg(i, type_decl) => match type_decl {
                 NEWTypes::Primitive(Types::Char) => ARG_REGISTER_MAP[0][*i].to_string(),
-                NEWTypes::Primitive(Types::Int) => ARG_REGISTER_MAP[1][*i].to_string(),
+                NEWTypes::Primitive(Types::Int) | NEWTypes::Enum(..) => {
+                    ARG_REGISTER_MAP[1][*i].to_string()
+                }
                 NEWTypes::Primitive(Types::Long)
                 | NEWTypes::Pointer(_)
                 | NEWTypes::Array { .. } => ARG_REGISTER_MAP[2][*i].to_string(),

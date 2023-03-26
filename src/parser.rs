@@ -50,7 +50,9 @@ impl Parser {
                     | TokenType::Int
                     | TokenType::Long
                     | TokenType::Void
-                    | TokenType::Struct => return,
+                    | TokenType::Struct
+                    | TokenType::Union
+                    | TokenType::Enum => return,
                     _ => (),
                 }
             }
@@ -66,14 +68,14 @@ impl Parser {
                         "Brackets not allowed here; Put them after the Identifier",
                     ));
                 }
-                if let (NEWTypes::Struct(..) | NEWTypes::Union(..), true) = (
+                match (
                     t.clone(),
                     self.matches(vec![TokenKind::Semicolon]).is_some(),
                 ) {
                     // dont't generate any statement when defining struct
-                    Err(Error::Indicator)
-                } else {
-                    self.type_declaration(t)
+                    (NEWTypes::Struct(..) | NEWTypes::Union(..), true) => Err(Error::Indicator),
+                    (NEWTypes::Enum(..), true) => Ok(Stmt::TypeDef(t)),
+                    _ => self.type_declaration(t),
                 }
             }
             Err(e) => Err(e),
@@ -230,6 +232,42 @@ impl Parser {
             Ok(type_decl)
         }
     }
+    fn parse_enum(&mut self, token: &Token) -> Result<Vec<(Token, i32)>, Error> {
+        let mut members = Vec::new();
+        let mut index = 0;
+        if self.check(TokenKind::RightBrace) {
+            return Err(Error::new(
+                token,
+                &format!("Can't have empty {}", token.token),
+            ));
+        }
+        while self.matches(vec![TokenKind::RightBrace]).is_none() {
+            let ident = self.consume(TokenKind::Ident, "Expect identifier in enum definition")?;
+            if self.matches(vec![TokenKind::Equal]).is_some() {
+                if let Some(n) = self.matches(vec![TokenKind::Number, TokenKind::CharLit]) {
+                    index = match n.token {
+                        TokenType::CharLit(c) => c as i32,
+                        TokenType::Number(n) => n,
+                        _ => {
+                            return Err(Error::new(
+                                &n,
+                                "Can only initialize enums with integer constants",
+                            ))
+                        }
+                    }
+                }
+            }
+            members.push((ident, index));
+            index += 1;
+            if !self.check(TokenKind::RightBrace) {
+                self.consume(
+                    TokenKind::Comma,
+                    "Expect ',' seperating expressions in enum-specifier",
+                )?;
+            }
+        }
+        Ok(members)
+    }
     fn parse_members(
         &mut self,
         token: &Token,
@@ -289,7 +327,7 @@ impl Parser {
         let name = self.matches(vec![TokenKind::Ident]);
         let has_members = self.matches(vec![TokenKind::LeftBrace]);
 
-        let result = match (&name, has_members) {
+        match (&name, has_members) {
             (Some(name), Some(_)) => {
                 if self.env.current.customs.contains_key(&name.unwrap_string()) {
                     return Err(Error::new(
@@ -298,19 +336,42 @@ impl Parser {
                     ));
                 }
 
-                self.env
-                    .declare_aggregate(name.unwrap_string(), token.clone().token);
+                Ok(match token.token {
+                    TokenType::Struct | TokenType::Union => {
+                        self.env
+                            .declare_aggregate(name.unwrap_string(), token.clone().token);
 
-                let members = self.parse_members(token, name)?;
-                let struct_ref = self.env.get_type(name)?;
-                struct_ref.update(members);
+                        let members = self.parse_members(token, name)?;
+                        if let Customs::Aggregate(struct_ref) = self.env.get_type(name)? {
+                            struct_ref.update(members);
 
-                StructInfo::Named(name.unwrap_string(), struct_ref)
+                            match token.token {
+                                TokenType::Union => NEWTypes::Union(StructInfo::Named(
+                                    name.unwrap_string(),
+                                    struct_ref.clone(),
+                                )),
+                                TokenType::Struct => NEWTypes::Struct(StructInfo::Named(
+                                    name.unwrap_string(),
+                                    struct_ref.clone(),
+                                )),
+                                _ => unreachable!(),
+                            }
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    TokenType::Enum => {
+                        let members = self.parse_enum(token)?;
+                        self.env.init_enum(name.unwrap_string(), members.clone());
+                        NEWTypes::Enum(Some(name.unwrap_string()), members, true)
+                    }
+                    _ => unreachable!(),
+                })
             }
             (Some(name), None) => {
                 // lookup struct/union definition
-                let struct_ref = self.env.get_type(name)?;
-                if token.token != *struct_ref.get_kind() {
+                let custom_type = self.env.get_type(name)?;
+                if token.token != *custom_type.get_kind() {
                     return Err(Error::new(
                         name,
                         &format!(
@@ -320,25 +381,45 @@ impl Parser {
                         ),
                     ));
                 }
-                StructInfo::Named(name.unwrap_string(), struct_ref)
+
+                Ok(match token.token {
+                    TokenType::Union => NEWTypes::Union(StructInfo::Named(
+                        name.unwrap_string(),
+                        custom_type.clone().unwrap_aggr(),
+                    )),
+                    TokenType::Struct => NEWTypes::Struct(StructInfo::Named(
+                        name.unwrap_string(),
+                        custom_type.clone().unwrap_aggr(),
+                    )),
+                    TokenType::Enum => NEWTypes::Enum(
+                        Some(name.unwrap_string()),
+                        custom_type.clone().unwrap_enum(),
+                        false,
+                    ),
+                    _ => unreachable!(),
+                })
             }
-            (None, Some(_)) => StructInfo::Anonymous(self.parse_members(
-                token,
-                &Token::default(TokenType::String("<anonymous>".to_string())),
-            )?),
+            (None, Some(_)) => Ok(match token.token {
+                TokenType::Union => NEWTypes::Union(StructInfo::Anonymous(self.parse_members(
+                    token,
+                    &Token::default(TokenType::String("<anonymous>".to_string())),
+                )?)),
+                TokenType::Struct => NEWTypes::Struct(StructInfo::Anonymous(self.parse_members(
+                    token,
+                    &Token::default(TokenType::String("<anonymous>".to_string())),
+                )?)),
+                TokenType::Enum => NEWTypes::Enum(None, self.parse_enum(token)?, true),
+                _ => unreachable!(),
+            }),
             (None, None) => {
                 return Err(Error::new(
                     token,
                     &format!("Can't declare anonymous {} without members", token.token),
                 ));
             }
-        };
-        Ok(match token.token {
-            TokenType::Union => NEWTypes::Union(result),
-            TokenType::Struct => NEWTypes::Struct(result),
-            _ => unreachable!(),
-        })
+        }
     }
+
     fn type_declaration(&mut self, mut type_decl: NEWTypes) -> Result<Stmt, Error> {
         let name = self.consume(
             TokenKind::Ident,
@@ -1054,24 +1135,34 @@ impl Parser {
                         &format!("Expected type-declaration, found {}", v.token),
                     ));
                 }
-                let mut type_decl;
-                if v.token == TokenType::Struct || v.token == TokenType::Union {
-                    let token = self
-                        .tokens
-                        .next()
-                        .expect("can unwrap because successfull peek");
-                    type_decl = self.parse_aggregate(&token)?;
-                } else {
+                let v = v.clone();
+                let mut type_decl = match v.token {
+                    TokenType::Struct | TokenType::Union | TokenType::Enum => {
+                        let token = self
+                            .tokens
+                            .next()
+                            .expect("can unwrap because successfull peek");
+                        self.parse_aggregate(&token)?
+                    }
                     // otherwise parse primitive
-                    type_decl = self
+                    _ => self
                         .tokens
                         .next()
                         .expect("can only be types because of previous check")
-                        .into_type();
-                }
+                        .into_type(),
+                };
 
                 while self.matches(vec![TokenKind::Star]).is_some() {
                     type_decl.pointer_to();
+                }
+                match type_decl {
+                    NEWTypes::Struct(ref s) | NEWTypes::Union(ref s) if !s.is_complete() => {
+                        return Err(Error::new(
+                            &v,
+                            &format!("'{}' contains incomplete type", type_decl),
+                        ));
+                    }
+                    _ => (),
                 }
                 Ok(type_decl)
             }

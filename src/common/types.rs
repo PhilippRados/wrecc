@@ -29,6 +29,20 @@ pub enum NEWTypes {
     Pointer(Box<NEWTypes>),
     Struct(StructInfo),
     Union(StructInfo),
+
+    // the boolean is an indicator for the typechecker and codegenerator
+    //whether or not the current enum members should be inserted into the symbol table
+    Enum(Option<String>, Vec<(Token, i32)>, bool),
+}
+
+pub trait EnumValue<T> {
+    fn enum_value(n: i32) -> T;
+}
+
+impl EnumValue<NEWTypes> for NEWTypes {
+    fn enum_value(_n: i32) -> NEWTypes {
+        NEWTypes::Primitive(Types::Int)
+    }
 }
 
 // this code is shamelessly copied from the more sophisticated saltwater compiler
@@ -47,6 +61,7 @@ mod struct_ref {
     pub struct StructRef {
         index: usize,
         kind: TokenType,
+        is_complete: bool,
     }
 
     impl StructRef {
@@ -56,7 +71,11 @@ mod struct_ref {
                 let index = types.len();
                 types.push(Rc::new(vec![]));
 
-                StructRef { index, kind }
+                StructRef {
+                    index,
+                    kind,
+                    is_complete: false,
+                }
             })
         }
         pub fn get_kind(&self) -> &TokenType {
@@ -66,11 +85,15 @@ mod struct_ref {
         pub fn get(&self) -> Rc<Vec<(NEWTypes, Token)>> {
             CUSTOMS.with(|list| list.borrow()[self.index].clone())
         }
-        pub(crate) fn update(&self, members: Vec<(NEWTypes, Token)>) {
+        pub(crate) fn update(&mut self, members: Vec<(NEWTypes, Token)>) {
+            self.is_complete = true;
             CUSTOMS.with(|list| {
                 let mut types = list.borrow_mut();
                 types[self.index] = members.into();
             });
+        }
+        pub fn is_complete(&self) -> bool {
+            self.is_complete
         }
     }
 }
@@ -92,6 +115,12 @@ impl StructInfo {
             StructInfo::Anonymous(_) => "<anonymous>",
         }
     }
+    pub fn is_complete(&self) -> bool {
+        match self {
+            Self::Named(_, s) => s.is_complete(),
+            Self::Anonymous(_) => true,
+        }
+    }
 }
 
 impl TypeInfo for NEWTypes {
@@ -100,7 +129,8 @@ impl TypeInfo for NEWTypes {
             NEWTypes::Primitive(t) => t.size(),
             NEWTypes::Struct(s) => s.members().iter().fold(0, |acc, (t, _)| acc + t.size()),
             NEWTypes::Union(_) => self.union_biggest().size(),
-            NEWTypes::Pointer(_) => 8,
+            NEWTypes::Pointer(_) => NEWTypes::Primitive(Types::Long).size(),
+            NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).size(),
             NEWTypes::Array {
                 amount,
                 of: element_type,
@@ -111,8 +141,9 @@ impl TypeInfo for NEWTypes {
         match self {
             NEWTypes::Primitive(t) => t.reg_suffix(),
             NEWTypes::Union(_) => self.union_biggest().reg_suffix(),
+            NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).reg_suffix(),
             NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => {
-                String::from("")
+                NEWTypes::Primitive(Types::Long).reg_suffix()
             }
         }
     }
@@ -120,24 +151,31 @@ impl TypeInfo for NEWTypes {
         match self {
             NEWTypes::Primitive(t) => t.suffix(),
             NEWTypes::Union(_) => self.union_biggest().suffix(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => "q".to_string(),
+            NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).suffix(),
+            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => {
+                NEWTypes::Primitive(Types::Long).suffix()
+            }
         }
     }
     fn complete_suffix(&self) -> String {
         match self {
             NEWTypes::Primitive(t) => t.complete_suffix(),
             NEWTypes::Union(_) => self.union_biggest().complete_suffix(),
+            NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).complete_suffix(),
             NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => {
-                "quad".to_string()
+                NEWTypes::Primitive(Types::Long).complete_suffix()
             }
         }
     }
     fn return_reg(&self) -> String {
         match self {
             NEWTypes::Primitive(t) => t.return_reg(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } => RETURN_REG[2].to_string(),
+            NEWTypes::Pointer(_) | NEWTypes::Array { .. } => {
+                NEWTypes::Primitive(Types::Long).return_reg()
+            }
+            NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).return_reg(),
             NEWTypes::Union(..) => self.union_biggest().return_reg(),
-            NEWTypes::Struct(..) => unimplemented!(),
+            NEWTypes::Struct(..) => unimplemented!("currently can't return structs"),
         }
     }
 }
@@ -152,6 +190,8 @@ impl Display for NEWTypes {
                 NEWTypes::Pointer(to) => format!("{}*", to),
                 NEWTypes::Union(s) => "union ".to_string() + s.name(),
                 NEWTypes::Struct(s) => "struct ".to_string() + s.name(),
+                NEWTypes::Enum(Some(name), ..) => "enum ".to_string() + name,
+                NEWTypes::Enum(None, ..) => "enum <anonymous>".to_string(),
             }
         )
     }
@@ -239,6 +279,11 @@ impl NEWTypes {
                     false
                 }
             }
+            (NEWTypes::Enum(..), NEWTypes::Primitive(Types::Void))
+            | (NEWTypes::Primitive(Types::Void), NEWTypes::Enum(..)) => false,
+
+            (NEWTypes::Enum(..), NEWTypes::Primitive(_))
+            | (NEWTypes::Primitive(_), NEWTypes::Enum(..)) => true,
 
             _ => false,
         }

@@ -96,15 +96,20 @@ impl<'a> Compiler<'a> {
                 statements,
                 Environment::new(Some(Box::new(self.env.clone()))),
             ),
-            Stmt::FunctionDeclaration(_, _, _) => Ok(()),
-            Stmt::Function(_, name, params, body) => {
-                self.function_definition(name.unwrap_string(), params, body)
+            Stmt::FunctionDeclaration(return_type, _, _) => {
+                // don't have to do anything besides insert enum constants to symbol-table
+                Ok(self.env.insert_enum_symbols(&return_type).unwrap())
+            }
+
+            Stmt::Function(return_type, name, params, body) => {
+                self.function_definition(return_type, name.unwrap_string(), params, body)
             }
             Stmt::Return(_, expr) => self.return_statement(expr),
             Stmt::If(_, cond, then_branch, else_branch) => {
                 self.if_statement(cond, then_branch, else_branch)
             }
             Stmt::While(_, cond, body) => self.while_statement(cond, body),
+            Stmt::TypeDef(t) => Ok(self.env.insert_enum_symbols(t).unwrap()),
         }
     }
 
@@ -119,6 +124,7 @@ impl<'a> Compiler<'a> {
             true => {
                 writeln!(self.output, "\n\t.data\n_{}:", name)?;
 
+                self.env.insert_enum_symbols(type_decl).unwrap();
                 self.env.declare_var(
                     name.clone(),
                     Register::Label(LabelRegister::Var(name, type_decl.clone())),
@@ -237,6 +243,7 @@ impl<'a> Compiler<'a> {
         is_global: bool,
     ) -> Result<(), std::fmt::Error> {
         let type_decl = type_decl.clone();
+        self.env.insert_enum_symbols(&type_decl).unwrap();
 
         let reg = match is_global {
             true => {
@@ -265,6 +272,7 @@ impl<'a> Compiler<'a> {
         is_global: bool,
     ) -> Result<(), std::fmt::Error> {
         let name = var_name.unwrap_string();
+
         match is_global {
             true => {
                 writeln!(
@@ -273,6 +281,7 @@ impl<'a> Compiler<'a> {
                     type_decl.complete_suffix(),
                     value_reg.base_name()
                 )?;
+                self.env.insert_enum_symbols(type_decl).unwrap();
 
                 self.env.declare_var(
                     name.clone(),
@@ -294,16 +303,18 @@ impl<'a> Compiler<'a> {
     }
     fn function_definition(
         &mut self,
+        return_type: &NEWTypes,
         name: String,
         params: &[(NEWTypes, Token)],
         body: &Vec<Stmt>,
     ) -> Result<(), std::fmt::Error> {
         self.function_name = Some(name.clone()); // save function name for return label jump
+        self.env.insert_enum_symbols(return_type).unwrap();
 
         // generate function code
-        self.cg_func_preamble(&name, params)?;
+        let prev_env = self.cg_func_preamble(&name, params)?;
         self.cg_stmts(body)?;
-        self.cg_func_postamble(&name)?;
+        self.cg_func_postamble(&name, prev_env)?;
 
         self.current_bp_offset = 0;
         self.function_name = None;
@@ -334,13 +345,16 @@ impl<'a> Compiler<'a> {
         &mut self,
         name: &str,
         params: &[(NEWTypes, Token)],
-    ) -> Result<(), std::fmt::Error> {
+    ) -> Result<Environment<Register>, std::fmt::Error> {
         writeln!(self.output, "\n\t.text\n\t.globl _{}", name)?;
         writeln!(self.output, "_{}:", name)?; // generate function label
         writeln!(self.output, "\tpushq   %rbp\n\tmovq    %rsp, %rbp")?; // setup base pointer and stackpointer
 
         // allocate stack-space for local vars
         self.allocate_stack(name)?;
+
+        let prev = self.env.clone();
+        self.env = Environment::new(Some(Box::new(prev.clone())));
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
@@ -351,11 +365,16 @@ impl<'a> Compiler<'a> {
                 false,
             )?;
         }
-        Ok(())
+        Ok(prev)
     }
-    fn cg_func_postamble(&mut self, name: &str) -> Result<(), std::fmt::Error> {
+    fn cg_func_postamble(
+        &mut self,
+        name: &str,
+        env: Environment<Register>,
+    ) -> Result<(), std::fmt::Error> {
         writeln!(self.output, "{}_epilogue:", name)?;
         self.dealloc_stack(name)?;
+        self.env = env;
 
         writeln!(self.output, "\tpopq    %rbp\n\tret")?;
         Ok(())

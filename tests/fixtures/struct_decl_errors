@@ -18,5 +18,12 @@ struct Another {
     struct Another some[6];
 };
 
+struct some {
+  union other {
+    struct some a;
+  } e;
+  int age;
+};
+
 int main() {
 }

@@ -63,6 +63,7 @@ pub enum TokenKind {
     Long,
     Struct,
     Union,
+    Enum,
     Else,
     For,
     If,
@@ -128,6 +129,7 @@ impl From<&TokenType> for TokenKind {
             TokenType::Long => TokenKind::Long,
             TokenType::Struct => TokenKind::Struct,
             TokenType::Union => TokenKind::Union,
+            TokenType::Enum => TokenKind::Enum,
             TokenType::Void => TokenKind::Void,
             TokenType::Tilde => TokenKind::Tilde,
             TokenType::Arrow => TokenKind::Arrow,
@@ -197,6 +199,7 @@ pub enum TokenType {
     Char,
     Struct,
     Union,
+    Enum,
     Else,
     For,
     If,
@@ -246,6 +249,7 @@ impl Display for TokenType {
                 TokenType::Long => "'long'",
                 TokenType::Struct => "'struct'",
                 TokenType::Union => "'union'",
+                TokenType::Enum => "'enum'",
                 TokenType::Equal => "'='",
                 TokenType::EqualEqual => "'=='",
                 TokenType::Greater => "'>'",
@@ -316,7 +320,8 @@ impl Token {
         }
     }
     pub fn is_type(&self) -> bool {
-        self.token == TokenType::Union
+        self.token == TokenType::Enum
+            || self.token == TokenType::Union
             || self.token == TokenType::Struct
             || Types::into_vec().contains(&TokenKind::from(&self.token))
     }

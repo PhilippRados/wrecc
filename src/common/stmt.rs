@@ -14,6 +14,7 @@ pub enum Stmt {
     Function(NEWTypes, Token, Vec<(NEWTypes, Token)>, Vec<Stmt>),
     FunctionDeclaration(NEWTypes, Token, Vec<(NEWTypes, Token)>),
     Return(Token, Option<Expr>),
+    TypeDef(NEWTypes), // insert typedef names and enum constants into same namespace used by idents
 }
 
 impl Display for Stmt {
@@ -31,6 +32,7 @@ impl Display for Stmt {
                 Stmt::FunctionDeclaration(..) => "'function-declaration'",
                 Stmt::Return(..) => "'return-statement'",
                 Stmt::InitList(..) => "'initializer-list'",
+                Stmt::TypeDef(_) => "'type-definition'",
                 Stmt::Expr(_) => unimplemented!(),
             }
         )

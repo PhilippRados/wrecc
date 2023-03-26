@@ -60,11 +60,11 @@ pub enum ExprKind {
         member: Token,
         expr: Box<Expr>,
     },
-    Nop, // works as an indicator for parser
     String(Token),
     Number(i32),
     CharLit(i8),
     Ident(Token),
+    Nop, // works as an indicator for parser
 }
 #[derive(Debug, PartialEq, Clone)]
 pub enum ValueKind {

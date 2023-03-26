@@ -37,23 +37,50 @@ impl<T> Symbols<T> {
     }
 }
 
-#[derive(Clone, PartialEq)]
-pub struct Table<T> {
-    pub symbols: HashMap<String, Symbols<T>>,
-    pub customs: HashMap<String, StructRef>,
+#[derive(Debug, Clone, PartialEq)]
+pub enum Customs {
+    // bool indicates wether type is complete or incomplete
+    Aggregate(StructRef),
+    Enum(Vec<(Token, i32)>),
+}
+impl Customs {
+    pub fn get_kind(&self) -> &TokenType {
+        match self {
+            Customs::Aggregate(s) => s.get_kind(),
+            Customs::Enum(_) => &TokenType::Enum,
+        }
+    }
+    pub fn unwrap_aggr(self) -> StructRef {
+        match self {
+            Customs::Aggregate(s) => s,
+            _ => unreachable!(),
+        }
+    }
+    pub fn unwrap_enum(self) -> Vec<(Token, i32)> {
+        match self {
+            Customs::Enum(s) => s,
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
-pub struct Environment<T> {
+pub struct Table<T: EnumValue<T>> {
+    pub symbols: HashMap<String, Symbols<T>>,
+    pub customs: HashMap<String, Customs>,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct Environment<T: EnumValue<T>> {
     pub current: Table<T>,
     pub enclosing: Option<Box<Environment<T>>>,
 }
-impl<T: Clone> Environment<T> {
+impl<T: Clone + EnumValue<T>> Environment<T> {
     pub fn new(enclosing: Option<Box<Environment<T>>>) -> Self {
         Environment {
             current: Table {
                 symbols: HashMap::<String, Symbols<T>>::new(),
-                customs: HashMap::<String, StructRef>::new(),
+                customs: HashMap::<String, Customs>::new(),
             },
             enclosing,
         }
@@ -89,21 +116,58 @@ impl<T: Clone> Environment<T> {
             },
         }
     }
-    pub fn get_type(&self, var_name: &Token) -> Result<StructRef, Error> {
+    pub fn get_type(&mut self, var_name: &Token) -> Result<&mut Customs, Error> {
         let name = var_name.unwrap_string();
-        match self.current.customs.get(&name) {
-            Some(v) => Ok(v.clone()),
-            None => match &self.enclosing {
+        match self.current.customs.get_mut(&name) {
+            Some(v) => Ok(v),
+            None => match &mut self.enclosing {
                 Some(env) => (**env).get_type(var_name),
                 None => Err(Error::new(var_name, "Undeclared type")),
             },
         }
     }
+
+    // TODO: remove this its same as declare_var
     pub fn init_var(&mut self, name: String, value: T) {
         self.current.symbols.insert(name, Symbols::Var(value));
     }
 
     pub fn declare_aggregate(&mut self, name: String, token: TokenType) {
-        self.current.customs.insert(name, StructRef::new(token));
+        self.current
+            .customs
+            .insert(name, Customs::Aggregate(StructRef::new(token)));
+    }
+
+    pub fn init_enum(&mut self, name: String, members: Vec<(Token, i32)>) {
+        self.current.customs.insert(name, Customs::Enum(members));
+    }
+
+    pub fn insert_enum_symbols(&mut self, type_decl: &NEWTypes) -> Result<(), Error> {
+        match type_decl {
+            NEWTypes::Enum(_, members, true) => {
+                for (token, value) in members {
+                    let name = token.unwrap_string();
+                    if self.current.symbols.contains_key(&name) {
+                        return Err(Error::new(
+                            token,
+                            &format!("Redefinition of symbol '{}'", name),
+                        ));
+                    }
+
+                    self.declare_var(name, T::enum_value(*value));
+                }
+            }
+            // union definition could be nested deeper into a type
+            NEWTypes::Union(s) | NEWTypes::Struct(s) => {
+                for m in s.members().iter() {
+                    self.insert_enum_symbols(&m.0)?
+                }
+            }
+            NEWTypes::Pointer(to) | NEWTypes::Array { of: to, .. } => {
+                self.insert_enum_symbols(to)?
+            }
+            _ => (),
+        }
+        Ok(())
     }
 }

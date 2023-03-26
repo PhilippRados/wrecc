@@ -104,6 +104,7 @@ impl TypeChecker {
             Stmt::While(left_paren, ref mut cond, body) => {
                 self.while_statement(left_paren, cond, body)
             }
+            Stmt::TypeDef(t) => self.env.insert_enum_symbols(t),
         }
     }
     fn while_statement(
@@ -143,6 +144,7 @@ impl TypeChecker {
                 &format!("Can't assign to 'void' {}", var_name.unwrap_string()),
             ));
         }
+        self.env.insert_enum_symbols(type_decl)?;
 
         if self.is_global() {
             *is_global = true;
@@ -181,6 +183,7 @@ impl TypeChecker {
                 &format!("Redefinition of symbol '{}'", name),
             ));
         }
+        self.env.insert_enum_symbols(type_decl)?;
         self.env.init_var(name, type_decl.clone());
 
         // then type-check all assigns
@@ -215,6 +218,8 @@ impl TypeChecker {
         expr: &mut Expr,
         is_global: &mut bool,
     ) -> Result<(), Error> {
+        self.env.insert_enum_symbols(type_decl)?;
+
         let name = var_name.unwrap_string();
         let mut value_type = self.expr_type(expr)?;
         *is_global = self.is_global();
@@ -295,6 +300,8 @@ impl TypeChecker {
         name_token: &Token,
         params: &Vec<(NEWTypes, Token)>,
     ) -> Result<(), Error> {
+        self.env.insert_enum_symbols(&return_type)?;
+
         match self.global_env.get_symbol(name_token) {
             Ok(Symbols::FuncDecl(f)) => {
                 self.cmp_decl(name_token, &f, return_type, params)?;
@@ -335,6 +342,8 @@ impl TypeChecker {
                 "Can only define functions in global scope",
             ));
         }
+        self.env.insert_enum_symbols(&return_type)?;
+
         let name = name_token.unwrap_string();
 
         match self.global_env.get_symbol(name_token) {
@@ -360,10 +369,11 @@ impl TypeChecker {
         // initialize stack size for current function-scope
         self.func_stack_size.insert(name.clone(), 0);
         for (type_decl, name) in params.iter().by_ref() {
+            env.insert_enum_symbols(&type_decl)?;
+
             self.increment_stack_size(type_decl); // add params to stack-size
             env.init_var(name.unwrap_string(), type_decl.clone()) // initialize params in local scope
         }
-
         // check function body
         let err = self.block(body, env);
         self.scope = Scope::Global;

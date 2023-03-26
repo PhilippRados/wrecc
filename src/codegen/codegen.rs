@@ -98,7 +98,10 @@ impl<'a> Compiler<'a> {
             ),
             Stmt::FunctionDeclaration(return_type, _, _) => {
                 // don't have to do anything besides insert enum constants to symbol-table
-                Ok(self.env.insert_enum_symbols(&return_type).unwrap())
+                Ok(self
+                    .env
+                    .insert_enum_symbols(return_type, &mut vec![])
+                    .unwrap())
             }
 
             Stmt::Function(return_type, name, params, body) => {
@@ -109,7 +112,7 @@ impl<'a> Compiler<'a> {
                 self.if_statement(cond, then_branch, else_branch)
             }
             Stmt::While(_, cond, body) => self.while_statement(cond, body),
-            Stmt::TypeDef(t) => Ok(self.env.insert_enum_symbols(t).unwrap()),
+            Stmt::TypeDef(t) => Ok(self.env.insert_enum_symbols(t, &mut vec![]).unwrap()),
         }
     }
 
@@ -124,7 +127,9 @@ impl<'a> Compiler<'a> {
             true => {
                 writeln!(self.output, "\n\t.data\n_{}:", name)?;
 
-                self.env.insert_enum_symbols(type_decl).unwrap();
+                self.env
+                    .insert_enum_symbols(type_decl, &mut vec![])
+                    .unwrap();
                 self.env.declare_var(
                     name.clone(),
                     Register::Label(LabelRegister::Var(name, type_decl.clone())),
@@ -243,7 +248,9 @@ impl<'a> Compiler<'a> {
         is_global: bool,
     ) -> Result<(), std::fmt::Error> {
         let type_decl = type_decl.clone();
-        self.env.insert_enum_symbols(&type_decl).unwrap();
+        self.env
+            .insert_enum_symbols(&type_decl, &mut vec![])
+            .unwrap();
 
         let reg = match is_global {
             true => {
@@ -281,7 +288,9 @@ impl<'a> Compiler<'a> {
                     type_decl.complete_suffix(),
                     value_reg.base_name()
                 )?;
-                self.env.insert_enum_symbols(type_decl).unwrap();
+                self.env
+                    .insert_enum_symbols(type_decl, &mut vec![])
+                    .unwrap();
 
                 self.env.declare_var(
                     name.clone(),
@@ -309,7 +318,9 @@ impl<'a> Compiler<'a> {
         body: &Vec<Stmt>,
     ) -> Result<(), std::fmt::Error> {
         self.function_name = Some(name.clone()); // save function name for return label jump
-        self.env.insert_enum_symbols(return_type).unwrap();
+        self.env
+            .insert_enum_symbols(return_type, &mut vec![])
+            .unwrap();
 
         // generate function code
         let prev_env = self.cg_func_preamble(&name, params)?;

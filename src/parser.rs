@@ -268,11 +268,7 @@ impl Parser {
         }
         Ok(members)
     }
-    fn parse_members(
-        &mut self,
-        token: &Token,
-        aggr_name: &Token,
-    ) -> Result<Vec<(NEWTypes, Token)>, Error> {
+    fn parse_members(&mut self, token: &Token) -> Result<Vec<(NEWTypes, Token)>, Error> {
         let mut members = Vec::new();
         if self.check(TokenKind::RightBrace) {
             return Err(Error::new(
@@ -285,37 +281,11 @@ impl Parser {
             let name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
             member_type = self.parse_arr(member_type)?;
 
-            match member_type {
-                NEWTypes::Primitive(Types::Void) => {
-                    return Err(Error::new(
-                        &name,
-                        &format!("{} member can't have type 'void'", token.token),
-                    ))
-                }
-                NEWTypes::Struct(StructInfo::Named(t_name, _))
-                | NEWTypes::Union(StructInfo::Named(t_name, _))
-                    if aggr_name.unwrap_string() == t_name =>
-                {
-                    return Err(Error::new(
-                        &name,
-                        &format!("{} can't have itself as a member", token.token),
-                    ));
-                }
-                NEWTypes::Array { of, .. }
-                    if if let NEWTypes::Struct(StructInfo::Named(t_name, _))
-                    | NEWTypes::Union(StructInfo::Named(t_name, _)) = &*of
-                    {
-                        aggr_name.unwrap_string() == *t_name
-                    } else {
-                        false
-                    } =>
-                {
-                    return Err(Error::new(
-                        &name,
-                        &format!("{} can't have array of itself as a member", token.token),
-                    ));
-                }
-                _ => (),
+            if member_type.is_void() {
+                return Err(Error::new(
+                    &name,
+                    &format!("{} member can't have type 'void'", token.token),
+                ));
             }
 
             members.push((member_type, name));
@@ -341,7 +311,7 @@ impl Parser {
                         self.env
                             .declare_aggregate(name.unwrap_string(), token.clone().token);
 
-                        let members = self.parse_members(token, name)?;
+                        let members = self.parse_members(token)?;
                         if let Customs::Aggregate(struct_ref) = self.env.get_type(name)? {
                             struct_ref.update(members);
 
@@ -400,23 +370,19 @@ impl Parser {
                 })
             }
             (None, Some(_)) => Ok(match token.token {
-                TokenType::Union => NEWTypes::Union(StructInfo::Anonymous(self.parse_members(
-                    token,
-                    &Token::default(TokenType::String("<anonymous>".to_string())),
-                )?)),
-                TokenType::Struct => NEWTypes::Struct(StructInfo::Anonymous(self.parse_members(
-                    token,
-                    &Token::default(TokenType::String("<anonymous>".to_string())),
-                )?)),
+                TokenType::Union => {
+                    NEWTypes::Union(StructInfo::Anonymous(self.parse_members(token)?))
+                }
+                TokenType::Struct => {
+                    NEWTypes::Struct(StructInfo::Anonymous(self.parse_members(token)?))
+                }
                 TokenType::Enum => NEWTypes::Enum(None, self.parse_enum(token)?, true),
                 _ => unreachable!(),
             }),
-            (None, None) => {
-                return Err(Error::new(
-                    token,
-                    &format!("Can't declare anonymous {} without members", token.token),
-                ));
-            }
+            (None, None) => Err(Error::new(
+                token,
+                &format!("Can't declare anonymous {} without members", token.token),
+            )),
         }
     }
 
@@ -1298,7 +1264,7 @@ fn list_sugar_assign(
         let mut result = Vec::new();
         let mut members = s.members().to_vec();
 
-        if let NEWTypes::Union(_) = type_decl.clone() {
+        if let NEWTypes::Union(_) = type_decl {
             remove_unused_members(&mut members, list);
         }
 
@@ -1361,7 +1327,7 @@ fn remove_unused_members(members: &mut Vec<(NEWTypes, Token)>, list: &mut Vec<Ex
             .all(|e| matches!(e.kind, ExprKind::Nop))
         {
             new_members.push(m.clone());
-            for e in list[i..i + type_len].into_iter() {
+            for e in list[i..i + type_len].iter() {
                 new_list.push(e.clone())
             }
         }

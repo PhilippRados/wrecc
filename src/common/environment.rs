@@ -142,7 +142,11 @@ impl<T: Clone + EnumValue<T>> Environment<T> {
         self.current.customs.insert(name, Customs::Enum(members));
     }
 
-    pub fn insert_enum_symbols(&mut self, type_decl: &NEWTypes) -> Result<(), Error> {
+    pub fn insert_enum_symbols(
+        &mut self,
+        type_decl: &NEWTypes,
+        visited: &mut Vec<NEWTypes>,
+    ) -> Result<(), Error> {
         match type_decl {
             NEWTypes::Enum(_, members, true) => {
                 for (token, value) in members {
@@ -159,12 +163,18 @@ impl<T: Clone + EnumValue<T>> Environment<T> {
             }
             // union definition could be nested deeper into a type
             NEWTypes::Union(s) | NEWTypes::Struct(s) => {
+                visited.push(type_decl.clone());
+
                 for m in s.members().iter() {
-                    self.insert_enum_symbols(&m.0)?
+                    if !visited.contains(&m.0) {
+                        self.insert_enum_symbols(&m.0, visited)?
+                    }
                 }
             }
             NEWTypes::Pointer(to) | NEWTypes::Array { of: to, .. } => {
-                self.insert_enum_symbols(to)?
+                if !visited.contains(&to) {
+                    self.insert_enum_symbols(to, visited)?
+                }
             }
             _ => (),
         }

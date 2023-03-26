@@ -116,10 +116,10 @@ impl<T: Clone + EnumValue<T>> Environment<T> {
             },
         }
     }
-    pub fn get_type(&mut self, var_name: &Token) -> Result<&mut Customs, Error> {
+    pub fn get_type(&mut self, var_name: &Token) -> Result<Customs, Error> {
         let name = var_name.unwrap_string();
         match self.current.customs.get_mut(&name) {
-            Some(v) => Ok(v),
+            Some(v) => Ok(v.clone()),
             None => match &mut self.enclosing {
                 Some(env) => (**env).get_type(var_name),
                 None => Err(Error::new(var_name, "Undeclared type")),
@@ -163,19 +163,17 @@ impl<T: Clone + EnumValue<T>> Environment<T> {
             }
             // union definition could be nested deeper into a type
             NEWTypes::Union(s) | NEWTypes::Struct(s) => {
+                // mark current type as visited so that following pointer doesn't result in infinite recursion
                 visited.push(type_decl.clone());
 
                 for m in s.members().iter() {
-                    if !visited.contains(&m.0) {
-                        self.insert_enum_symbols(&m.0, visited)?
-                    }
+                    self.insert_enum_symbols(&m.0, visited)?;
                 }
             }
-            NEWTypes::Pointer(to) | NEWTypes::Array { of: to, .. } => {
-                if !visited.contains(&to) {
-                    self.insert_enum_symbols(to, visited)?
-                }
+            NEWTypes::Pointer(to) if !visited.contains(&to) => {
+                self.insert_enum_symbols(to, visited)?
             }
+            NEWTypes::Array { of: to, .. } => self.insert_enum_symbols(to, visited)?,
             _ => (),
         }
         Ok(())

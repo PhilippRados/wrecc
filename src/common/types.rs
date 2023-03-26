@@ -55,27 +55,26 @@ mod struct_ref {
 
     thread_local! {
         static CUSTOMS: RefCell<Vec<Rc<Vec<(NEWTypes, Token)>>>> = Default::default();
+        static IS_COMPLETE: RefCell<Vec<bool>> = Default::default();
     }
 
     #[derive(Clone, PartialEq, Debug)]
     pub struct StructRef {
         index: usize,
         kind: TokenType,
-        is_complete: bool,
     }
 
     impl StructRef {
         pub fn new(kind: TokenType) -> StructRef {
+            IS_COMPLETE.with(|list| {
+                list.borrow_mut().push(false);
+            });
             CUSTOMS.with(|list| {
                 let mut types = list.borrow_mut();
                 let index = types.len();
                 types.push(Rc::new(vec![]));
 
-                StructRef {
-                    index,
-                    kind,
-                    is_complete: false,
-                }
+                StructRef { index, kind }
             })
         }
         pub fn get_kind(&self) -> &TokenType {
@@ -85,15 +84,18 @@ mod struct_ref {
         pub fn get(&self) -> Rc<Vec<(NEWTypes, Token)>> {
             CUSTOMS.with(|list| list.borrow()[self.index].clone())
         }
-        pub(crate) fn update(&mut self, members: Vec<(NEWTypes, Token)>) {
-            self.is_complete = true;
+        pub(crate) fn update(&self, members: Vec<(NEWTypes, Token)>) {
+            IS_COMPLETE.with(|list| {
+                let mut types = list.borrow_mut();
+                types[self.index] = true.into();
+            });
             CUSTOMS.with(|list| {
                 let mut types = list.borrow_mut();
                 types[self.index] = members.into();
             });
         }
         pub fn is_complete(&self) -> bool {
-            self.is_complete
+            IS_COMPLETE.with(|list| list.borrow()[self.index].clone())
         }
     }
 }
@@ -105,7 +107,7 @@ pub enum StructInfo {
 impl StructInfo {
     pub fn members(&self) -> Rc<Vec<(NEWTypes, Token)>> {
         match self {
-            StructInfo::Named(_, s) => s.get(),
+            StructInfo::Named(_, s) => s.get().into(),
             StructInfo::Anonymous(m) => Rc::new(m.clone()),
         }
     }

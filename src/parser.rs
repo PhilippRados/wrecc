@@ -318,11 +318,11 @@ impl Parser {
                             match token.token {
                                 TokenType::Union => NEWTypes::Union(StructInfo::Named(
                                     name.unwrap_string(),
-                                    struct_ref.clone(),
+                                    struct_ref,
                                 )),
                                 TokenType::Struct => NEWTypes::Struct(StructInfo::Named(
                                     name.unwrap_string(),
-                                    struct_ref.clone(),
+                                    struct_ref,
                                 )),
                                 _ => unreachable!(),
                             }
@@ -355,17 +355,15 @@ impl Parser {
                 Ok(match token.token {
                     TokenType::Union => NEWTypes::Union(StructInfo::Named(
                         name.unwrap_string(),
-                        custom_type.clone().unwrap_aggr(),
+                        custom_type.unwrap_aggr(),
                     )),
                     TokenType::Struct => NEWTypes::Struct(StructInfo::Named(
                         name.unwrap_string(),
-                        custom_type.clone().unwrap_aggr(),
+                        custom_type.unwrap_aggr(),
                     )),
-                    TokenType::Enum => NEWTypes::Enum(
-                        Some(name.unwrap_string()),
-                        custom_type.clone().unwrap_enum(),
-                        false,
-                    ),
+                    TokenType::Enum => {
+                        NEWTypes::Enum(Some(name.unwrap_string()), custom_type.unwrap_enum(), false)
+                    }
                     _ => unreachable!(),
                 })
             }

@@ -30,6 +30,7 @@ impl<'a> Scanner<'a> {
                 ("struct", TokenType::Struct),
                 ("union", TokenType::Union),
                 ("enum", TokenType::Enum),
+                ("typedef", TokenType::TypeDef),
                 ("if", TokenType::If),
                 ("else", TokenType::Else),
                 ("for", TokenType::For),
@@ -68,6 +69,7 @@ impl<'a> Scanner<'a> {
             TokenType::While | TokenType::Union => 5,
             TokenType::If => 2,
             TokenType::Return | TokenType::Struct => 6,
+            TokenType::TypeDef => 7,
             TokenType::Number(n) => n.to_string().len() as i32,
             _ => 1,
         }

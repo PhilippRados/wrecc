@@ -25,6 +25,7 @@ impl Function {
 #[derive(Clone, PartialEq)]
 pub enum Symbols<T> {
     Var(T),
+    TypeDef,
     FuncDef(Function),
     FuncDecl(Function),
 }
@@ -42,12 +43,14 @@ pub enum Customs {
     // bool indicates wether type is complete or incomplete
     Aggregate(StructRef),
     Enum(Vec<(Token, i32)>),
+    TypeDef(NEWTypes),
 }
 impl Customs {
     pub fn get_kind(&self) -> &TokenType {
         match self {
             Customs::Aggregate(s) => s.get_kind(),
             Customs::Enum(_) => &TokenType::Enum,
+            Customs::TypeDef(_) => &TokenType::TypeDef,
         }
     }
     pub fn unwrap_aggr(self) -> StructRef {
@@ -89,6 +92,9 @@ impl<T: Clone + EnumValue<T>> Environment<T> {
     pub fn declare_var(&mut self, name: String, value: T) {
         self.current.symbols.insert(name, Symbols::Var(value));
     }
+    pub fn declare_type(&mut self, name: String) {
+        self.current.symbols.insert(name, Symbols::TypeDef);
+    }
 
     pub fn declare_func(
         &mut self,
@@ -116,11 +122,11 @@ impl<T: Clone + EnumValue<T>> Environment<T> {
             },
         }
     }
-    pub fn get_type(&mut self, var_name: &Token) -> Result<Customs, Error> {
+    pub fn get_type(&self, var_name: &Token) -> Result<Customs, Error> {
         let name = var_name.unwrap_string();
-        match self.current.customs.get_mut(&name) {
+        match self.current.customs.get(&name) {
             Some(v) => Ok(v.clone()),
-            None => match &mut self.enclosing {
+            None => match &self.enclosing {
                 Some(env) => (**env).get_type(var_name),
                 None => Err(Error::new(var_name, "Undeclared type")),
             },
@@ -136,6 +142,11 @@ impl<T: Clone + EnumValue<T>> Environment<T> {
         self.current
             .customs
             .insert(name, Customs::Aggregate(StructRef::new(token)));
+    }
+    pub fn declare_typedef(&mut self, name: String, type_decl: NEWTypes) {
+        self.current
+            .customs
+            .insert(name, Customs::TypeDef(type_decl));
     }
 
     pub fn init_enum(&mut self, name: String, members: Vec<(Token, i32)>) {

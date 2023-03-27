@@ -112,7 +112,8 @@ impl<'a> Compiler<'a> {
                 self.if_statement(cond, then_branch, else_branch)
             }
             Stmt::While(_, cond, body) => self.while_statement(cond, body),
-            Stmt::TypeDef(t) => Ok(self.env.insert_enum_symbols(t, &mut vec![]).unwrap()),
+            Stmt::EnumDef(t) => Ok(self.env.insert_enum_symbols(t, &mut vec![]).unwrap()),
+            Stmt::TypeDef(..) => Ok(()), // only necessary for checking redefinitions in typechecker
         }
     }
 

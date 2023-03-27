@@ -72,12 +72,13 @@ impl Parser {
                     t.clone(),
                     self.matches(vec![TokenKind::Semicolon]).is_some(),
                 ) {
-                    // dont't generate any statement when defining struct
+                    // dont't generate any statement when defining struct/union
                     (NEWTypes::Struct(..) | NEWTypes::Union(..), true) => Err(Error::Indicator),
-                    (NEWTypes::Enum(..), true) => Ok(Stmt::TypeDef(t)),
+                    (NEWTypes::Enum(..), true) => Ok(Stmt::EnumDef(t)),
                     _ => self.type_declaration(t),
                 }
             }
+            Err(_) if self.matches(vec![TokenKind::TypeDef]).is_some() => self.typedef(),
             Err(e) => Err(e),
         }
     }
@@ -172,13 +173,11 @@ impl Parser {
             if TokenKind::from(&token.token) == TokenKind::RightBrace {
                 break;
             }
-            let s = match self.peek()?.is_type() {
-                true => match self.declaration() {
-                    Err(Error::Indicator) => continue,
-                    Err(e) => return Err(e),
-                    Ok(s) => s,
-                },
-                false => self.statement()?,
+            let s = match self.declaration() {
+                Err(Error::Indicator) => continue,
+                Err(Error::NotType(..)) => self.statement()?,
+                Err(e) => return Err(e),
+                Ok(s) => s,
             };
             statements.push(s);
         }
@@ -384,6 +383,17 @@ impl Parser {
         }
     }
 
+    fn typedef(&mut self) -> Result<Stmt, Error> {
+        let type_decl = self.matches_type()?;
+        let name = self.consume(TokenKind::Ident, "Expect identifier following type")?;
+
+        self.env.declare_typedef(name.unwrap_string(), type_decl);
+        self.consume(TokenKind::Semicolon, "Expect ',' after typedef-declaration")?;
+
+        // doesnt need to generate any statements for later stages
+        // because types get resolved in the parser
+        Ok(Stmt::TypeDef(name))
+    }
     fn type_declaration(&mut self, mut type_decl: NEWTypes) -> Result<Stmt, Error> {
         let name = self.consume(
             TokenKind::Ident,
@@ -1093,11 +1103,8 @@ impl Parser {
     fn matches_type(&mut self) -> Result<NEWTypes, Error> {
         match self.peek() {
             Ok(v) => {
-                if !v.is_type() {
-                    return Err(Error::new(
-                        v,
-                        &format!("Expected type-declaration, found {}", v.token),
-                    ));
+                if !v.is_type() && !matches!(v.token, TokenType::Ident(..)) {
+                    return Err(Error::NotType(v.clone()));
                 }
                 let v = v.clone();
                 let mut type_decl = match v.token {
@@ -1108,6 +1115,30 @@ impl Parser {
                             .expect("can unwrap because successfull peek");
                         self.parse_aggregate(&token)?
                     }
+                    // typedef
+                    TokenType::Ident(ref name) => match self.env.get_type(&v) {
+                        Ok(Customs::TypeDef(t)) => {
+                            self.tokens.next();
+                            t
+                        }
+                        Ok(Customs::Aggregate(s)) => {
+                            return Err(Error::new(
+                                &v,
+                                &format!(
+                                    "Must use {}-tag to refer to aggregate type {}",
+                                    s.get_kind(),
+                                    name
+                                ),
+                            ))
+                        }
+                        Ok(Customs::Enum(_)) => {
+                            return Err(Error::new(
+                                &v,
+                                &format!("Must use 'enum'-tag to refer to type 'enum {}'", name),
+                            ))
+                        }
+                        Err(_) => return Err(Error::NotType(v)),
+                    },
                     // otherwise parse primitive
                     _ => self
                         .tokens

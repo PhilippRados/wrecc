@@ -104,8 +104,19 @@ impl TypeChecker {
             Stmt::While(left_paren, ref mut cond, body) => {
                 self.while_statement(left_paren, cond, body)
             }
-            Stmt::TypeDef(t) => self.env.insert_enum_symbols(t, &mut vec![]),
+            Stmt::EnumDef(t) => self.env.insert_enum_symbols(t, &mut vec![]),
+            Stmt::TypeDef(name) => self.typedef(name),
         }
+    }
+    fn typedef(&mut self, name: &Token) -> Result<(), Error> {
+        if self.env.current.symbols.contains_key(&name.unwrap_string()) {
+            return Err(Error::new(
+                &name,
+                &format!("Redefinition of '{}'", name.unwrap_string()),
+            ));
+        }
+        self.env.declare_type(name.unwrap_string());
+        Ok(())
     }
     fn while_statement(
         &mut self,
@@ -314,9 +325,9 @@ impl TypeChecker {
                 Ok(())
             }
             Ok(Symbols::FuncDef(f)) => self.cmp_decl(name_token, &f, return_type, params),
-            Ok(Symbols::Var(_)) => Err(Error::new(
+            Ok(Symbols::Var(_)) | Ok(Symbols::TypeDef) => Err(Error::new(
                 name_token,
-                "Redefintion of variable with same name",
+                "Redefintion of symbol with same name",
             )),
             Err(_) => {
                 self.global_env.declare_func(
@@ -548,13 +559,15 @@ impl TypeChecker {
         Ok(ast.type_decl.clone().unwrap())
     }
     fn ident(&mut self, token: &Token) -> Result<NEWTypes, Error> {
-        if let Ok(Symbols::Var(v)) = self.env.get_symbol(token) {
-            Ok(v)
-        } else {
-            Err(Error::new(
+        match self.env.get_symbol(token)? {
+            Symbols::Var(v) => Ok(v),
+            Symbols::TypeDef | Symbols::FuncDef(..) | Symbols::FuncDecl(..) => Err(Error::new(
                 token,
-                &format!("No variable '{}'", token.unwrap_string()),
-            ))
+                &format!(
+                    "Symbol '{}' doesn't exist as variable",
+                    token.unwrap_string()
+                ),
+            )),
         }
     }
     fn member_access(
@@ -701,12 +714,9 @@ impl TypeChecker {
                 left_paren,
                 &format!("No function '{}' exists", func_name.unwrap_string()),
             )),
-            Ok(Symbols::Var(_)) => Err(Error::new(
+            Ok(Symbols::Var(_)) | Ok(Symbols::TypeDef) => Err(Error::new(
                 left_paren,
-                &format!(
-                    "Symbol '{}' only exists as a variable",
-                    func_name.unwrap_string()
-                ),
+                &format!("Symbol '{}' already exists", func_name.unwrap_string()),
             )),
             Ok(Symbols::FuncDecl(function)) | Ok(Symbols::FuncDef(function)) => {
                 if function.arity() == args.len() {

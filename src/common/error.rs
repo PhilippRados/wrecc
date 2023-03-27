@@ -1,16 +1,22 @@
 use crate::common::token::Token;
 use crate::scanner::Scanner;
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Error {
     Indicator, // just to signal an error occured
+    NotType(Token),
     Regular(ErrorData),
 }
 
 impl Error {
     pub fn print_error(&self) {
-        if let Error::Regular(e) = self {
-            e.print_error()
+        match self {
+            Error::Regular(e) => e.print_error(),
+            Error::NotType(t) => {
+                Error::new(&t, &format!("Expected type-declaration, found {}", t.token))
+                    .print_error()
+            }
+            Error::Indicator => (),
         }
     }
     pub fn new(t: &Token, msg: &str) -> Self {

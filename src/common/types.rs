@@ -262,11 +262,10 @@ impl NEWTypes {
             {
                 l.type_compatible(r)
             }
-            // void* is compatible to any other pointer to a primitive
-            (NEWTypes::Pointer(t), NEWTypes::Pointer(other))
-            | (NEWTypes::Pointer(other), NEWTypes::Pointer(t))
-                if matches!(**t, NEWTypes::Primitive(Types::Void))
-                    && matches!(**other, NEWTypes::Primitive(_)) =>
+            // void* is compatible to any other pointer
+            (NEWTypes::Pointer(t), NEWTypes::Pointer(_))
+            | (NEWTypes::Pointer(_), NEWTypes::Pointer(t))
+                if matches!(**t, NEWTypes::Primitive(Types::Void)) =>
             {
                 true
             }

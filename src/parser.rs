@@ -1,5 +1,5 @@
 use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
-use initiliazer_list_types::*;
+use initializer_list_types::*;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
@@ -559,7 +559,14 @@ impl Parser {
     }
     fn initializer_list(&mut self, type_decl: &NEWTypes, token: Token) -> Result<Vec<Expr>, Error> {
         let element_types = match init_default(type_decl) {
-            ElementType::Multiple(m) => m,
+            ElementType::Multiple(mut m) => match m.clone()[0].clone() {
+                ElementType::Multiple(mut v) => {
+                    v.remove(0);
+                    m[0] = ElementType::Multiple(v);
+                    m
+                }
+                _ => m,
+            },
             ElementType::Single(s) => {
                 return Err(Error::new(
                     &token,
@@ -575,7 +582,6 @@ impl Parser {
         let mut element_index = 0;
         let mut depth;
         let mut found_des;
-        let max_depth = element_types.iter().map(|e| e.len()).max().unwrap_or(1);
 
         while !self.check(TokenKind::RightBrace) {
             depth = 0;
@@ -601,7 +607,7 @@ impl Parser {
             match self.peek()?.token {
                 TokenType::LeftBrace => {
                     for e in self
-                        .initializers(&element_types[element_index].at(depth + 1, max_depth))
+                        .initializers(&element_types[element_index].at(depth))
                         .unwrap()?
                     {
                         elements[element_index] = e;
@@ -1401,10 +1407,10 @@ fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
 }
 
 // creates a list of types for any given initializer list
-mod initiliazer_list_types {
+mod initializer_list_types {
     use super::*;
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq)]
     pub enum ElementType {
         Multiple(Vec<ElementType>),
         Single(NEWTypes),
@@ -1423,14 +1429,7 @@ mod initiliazer_list_types {
                 },
             }
         }
-        pub fn len(&self) -> usize {
-            match self {
-                Self::Single(_) => 1,
-                Self::Multiple(v) => v.len(),
-            }
-        }
-        pub fn at(&self, depth: usize, max_depth: usize) -> NEWTypes {
-            let depth = depth - (max_depth - self.len());
+        pub fn at(&self, depth: usize) -> NEWTypes {
             match self {
                 Self::Multiple(m) => {
                     if let ElementType::Single(s) = m[depth].clone() {
@@ -1482,20 +1481,28 @@ mod initiliazer_list_types {
                     for _ in 1..*amount {
                         result.push(ElementType::Single(s.clone()));
                     }
-                    ElementType::Multiple(result.into_iter().collect())
+                    ElementType::Multiple(result)
                 }
                 ElementType::Multiple(v) => {
                     let mut start = vec![ElementType::Single(type_decl.clone())];
+                    let mut rest_start = vec![];
                     for e in v[0].flatten() {
-                        start.push(e)
+                        start.push(e.clone());
+                        rest_start.push(e);
                     }
                     let mut result = vec![ElementType::Multiple(start)];
+                    let mut rest = vec![ElementType::Multiple(rest_start)];
 
                     for e in v.into_iter().skip(1) {
-                        result.push(e);
+                        result.push(e.clone());
+                        rest.push(e);
                     }
-                    let result = result.iter().cloned().cycle().take(result.len() * amount);
-                    ElementType::Multiple(result.into_iter().collect())
+                    for _ in 1..*amount {
+                        for e in rest.clone() {
+                            result.push(e);
+                        }
+                    }
+                    ElementType::Multiple(result)
                 }
             },
             NEWTypes::Struct(s) | NEWTypes::Union(s) => {
@@ -1526,10 +1533,92 @@ mod initiliazer_list_types {
                         }
                     };
                 }
-                result.insert(0, ElementType::Multiple(start.into_iter().collect()));
-                ElementType::Multiple(result.into_iter().collect())
+                result.insert(0, ElementType::Multiple(start));
+                ElementType::Multiple(result)
             }
             _ => ElementType::Single(type_decl.clone()),
+        }
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        // typedef struct {
+        //   int x;
+        //   int y;
+        // } Point;
+
+        // typedef struct {
+        //   Point start;
+        //   Point end;
+        // } Line;
+
+        // typedef struct {
+        //   char name[5];
+        //   int age;
+        //   Line address;
+        // } Person;
+        #[allow(non_snake_case)]
+        #[test]
+        fn complex_struct() {
+            let Point = NEWTypes::Struct(StructInfo::Anonymous(vec![
+                (
+                    NEWTypes::Primitive(Types::Int),
+                    Token::default(TokenType::Comma),
+                ),
+                (
+                    NEWTypes::Primitive(Types::Int),
+                    Token::default(TokenType::Comma),
+                ),
+            ]));
+            let Line = NEWTypes::Struct(StructInfo::Anonymous(vec![
+                (Point.clone(), Token::default(TokenType::Comma)),
+                (Point.clone(), Token::default(TokenType::Comma)),
+            ]));
+            let Person = NEWTypes::Struct(StructInfo::Anonymous(vec![
+                (
+                    NEWTypes::Array {
+                        of: Box::new(NEWTypes::Primitive(Types::Char)),
+                        amount: 5,
+                    },
+                    Token::default(TokenType::Comma),
+                ),
+                (
+                    NEWTypes::Primitive(Types::Int),
+                    Token::default(TokenType::Comma),
+                ),
+                (Line.clone(), Token::default(TokenType::Comma)),
+            ]));
+
+            let expected = ElementType::Multiple(vec![
+                ElementType::Multiple(vec![
+                    ElementType::Single(Person.clone()),
+                    ElementType::Single(NEWTypes::Array {
+                        of: Box::new(NEWTypes::Primitive(Types::Char)),
+                        amount: 5,
+                    }),
+                    ElementType::Single(NEWTypes::Primitive(Types::Char)),
+                ]),
+                ElementType::Single(NEWTypes::Primitive(Types::Char)),
+                ElementType::Single(NEWTypes::Primitive(Types::Char)),
+                ElementType::Single(NEWTypes::Primitive(Types::Char)),
+                ElementType::Single(NEWTypes::Primitive(Types::Char)),
+                ElementType::Single(NEWTypes::Primitive(Types::Int)),
+                ElementType::Multiple(vec![
+                    ElementType::Single(Line.clone()),
+                    ElementType::Single(Point.clone()),
+                    ElementType::Single(NEWTypes::Primitive(Types::Int)),
+                ]),
+                ElementType::Single(NEWTypes::Primitive(Types::Int)),
+                ElementType::Multiple(vec![
+                    ElementType::Single(Point.clone()),
+                    ElementType::Single(NEWTypes::Primitive(Types::Int)),
+                ]),
+                ElementType::Single(NEWTypes::Primitive(Types::Int)),
+            ]);
+            let actual = init_default(&Person);
+
+            assert_eq!(actual, expected);
         }
     }
 }

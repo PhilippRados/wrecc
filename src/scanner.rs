@@ -65,7 +65,11 @@ impl<'a> Scanner<'a> {
             TokenType::String(s) => (s.len() + 2) as i32,
             TokenType::Ident(s) => s.len() as i32,
             TokenType::Int | TokenType::For => 3,
-            TokenType::Char | TokenType::Else | TokenType::Long | TokenType::Enum => 4,
+            TokenType::Void
+            | TokenType::Char
+            | TokenType::Else
+            | TokenType::Long
+            | TokenType::Enum => 4,
             TokenType::While | TokenType::Union => 5,
             TokenType::If => 2,
             TokenType::Return | TokenType::Struct => 6,

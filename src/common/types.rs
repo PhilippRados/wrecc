@@ -262,6 +262,15 @@ impl NEWTypes {
             {
                 l.type_compatible(r)
             }
+            // void* is compatible to any other pointer to a primitive
+            (NEWTypes::Pointer(t), NEWTypes::Pointer(other))
+            | (NEWTypes::Pointer(other), NEWTypes::Pointer(t))
+                if matches!(**t, NEWTypes::Primitive(Types::Void))
+                    && matches!(**other, NEWTypes::Primitive(_)) =>
+            {
+                true
+            }
+
             (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => *self == *other,
 
             // two structs/unions are compatible if they have the same name and members

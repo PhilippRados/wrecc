@@ -29,9 +29,12 @@ pub struct TypeChecker {
     const_label_count: usize,
 }
 macro_rules! cast {
-    ($ex:expr,$new_type:expr,$kind:ident) => {
+    ($ex:expr,$new_type:expr,$direction:path) => {
         *$ex = Expr {
-            kind: ExprKind::$kind {
+            kind: ExprKind::Cast {
+                token: Token::default(TokenType::LeftParen),
+                direction: Some($direction),
+                new_type: $new_type,
                 expr: Box::new($ex.clone()),
             },
             type_decl: Some($new_type),
@@ -260,10 +263,45 @@ impl TypeChecker {
 
         Ok(())
     }
+    // TODO: display warning when casting down
+    fn explicit_cast(
+        &mut self,
+        token: &Token,
+        expr: &mut Expr,
+        new_type: &NEWTypes,
+        direction: &mut Option<CastDirection>,
+    ) -> Result<NEWTypes, Error> {
+        let mut old_type = self.expr_type(expr)?;
+
+        crate::arr_decay!(old_type, expr, token, self.is_global());
+
+        if !old_type.is_scalar() || !new_type.is_scalar() {
+            return Err(Error::new(
+                &token,
+                &format!(
+                    "Invalid cast from '{}' to '{}'. '{}' is not a scalar type",
+                    old_type,
+                    new_type,
+                    if !old_type.is_scalar() {
+                        &old_type
+                    } else {
+                        new_type
+                    }
+                ),
+            ));
+        }
+
+        *direction = Some(match old_type.size().cmp(&new_type.size()) {
+            Ordering::Less => CastDirection::Up,
+            Ordering::Greater => CastDirection::Down,
+            Ordering::Equal => CastDirection::Equal,
+        });
+        Ok(new_type.clone())
+    }
     fn maybe_cast(&self, new_type: &NEWTypes, old_type: &NEWTypes, expr: &mut Expr) {
         match old_type.size().cmp(&new_type.size()) {
-            Ordering::Less => cast!(expr, new_type.clone(), CastUp),
-            Ordering::Greater => cast!(expr, new_type.clone(), CastDown),
+            Ordering::Less => cast!(expr, new_type.clone(), CastDirection::Up),
+            Ordering::Greater => cast!(expr, new_type.clone(), CastDirection::Down),
             Ordering::Equal => (),
         }
     }
@@ -550,8 +588,12 @@ impl TypeChecker {
                 expr,
                 member,
             } => self.member_access(token, member, expr)?,
-            ExprKind::CastUp { .. } => unimplemented!("explicit casts"),
-            ExprKind::CastDown { .. } => unimplemented!("explicit casts"),
+            ExprKind::Cast {
+                token,
+                new_type,
+                expr,
+                direction,
+            } => self.explicit_cast(token, expr, new_type, direction)?,
             ExprKind::ScaleUp { .. } => unreachable!("is only used in codegen"),
             ExprKind::ScaleDown { .. } => unreachable!("is only used in codegen"),
             ExprKind::Nop { .. } => unreachable!("only used in parser"),
@@ -860,11 +902,11 @@ impl TypeChecker {
         // type promote to bigger type
         match left_type.size().cmp(&right_type.size()) {
             Ordering::Greater => {
-                cast!(right, left_type.clone(), CastUp);
+                cast!(right, left_type.clone(), CastDirection::Up);
                 Ok((left_type, None))
             }
             Ordering::Less => {
-                cast!(left, right_type.clone(), CastUp);
+                cast!(left, right_type.clone(), CastDirection::Up);
                 Ok((right_type, None))
             }
             Ordering::Equal => match (&left_type, &right_type) {
@@ -880,7 +922,7 @@ impl TypeChecker {
             return;
         }
         if type_decl.size() < NEWTypes::Primitive(Types::Int).size() {
-            cast!(expr, NEWTypes::Primitive(Types::Int), CastUp);
+            cast!(expr, NEWTypes::Primitive(Types::Int), CastDirection::Up);
             *type_decl = NEWTypes::Primitive(Types::Int);
         }
     }
@@ -1005,8 +1047,7 @@ fn is_constant(expr: &Expr) -> bool {
         ExprKind::String(_)
         | ExprKind::Number(_)
         | ExprKind::CharLit(_)
-        | ExprKind::CastUp { .. }
-        | ExprKind::CastDown { .. } => true,
+        | ExprKind::Cast { .. } => true,
         // don't have to specify matching array-type because it decays into '&' anyway
         ExprKind::Unary { token, right, .. } if matches!(token.token, TokenType::Amp) => {
             matches!(&right.kind, ExprKind::Ident(_) | ExprKind::String(_))

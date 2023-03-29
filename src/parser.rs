@@ -908,32 +908,68 @@ impl Parser {
             TokenKind::Minus,
             TokenKind::PlusPlus,
             TokenKind::MinusMinus,
+            TokenKind::LeftParen,
         ]) {
-            let right = self.unary()?;
             return Ok(match token.token {
                 // ++a or --a is equivalent to a += 1 or a -= 1
-                TokenType::PlusPlus | TokenType::MinusMinus => Expr::new(
-                    ExprKind::CompoundAssign {
-                        l_expr: Box::new(right),
-                        token,
-                        r_expr: Box::new(Expr::new(ExprKind::Number(1), ValueKind::Rvalue)),
-                    },
-                    ValueKind::Rvalue,
-                ),
-                _ => Expr::new(
-                    ExprKind::Unary {
-                        right: Box::new(right),
-                        token: token.clone(),
-                        is_global: false,
-                    },
-                    match token.token {
-                        TokenType::Star => ValueKind::Lvalue,
-                        _ => ValueKind::Rvalue,
-                    },
-                ),
+                TokenType::PlusPlus | TokenType::MinusMinus => {
+                    let right = self.unary()?;
+                    Expr::new(
+                        ExprKind::CompoundAssign {
+                            l_expr: Box::new(right),
+                            token,
+                            r_expr: Box::new(Expr::new(ExprKind::Number(1), ValueKind::Rvalue)),
+                        },
+                        ValueKind::Rvalue,
+                    )
+                }
+                // typecast
+                // have to check whether expression or type inside of parentheses
+                TokenType::LeftParen => match self.matches_type() {
+                    Ok(type_decl) => self.typecast(token, type_decl)?,
+                    Err(Error::NotType(_)) => {
+                        // hacky way of inserting token back into iterator
+                        let mut start = vec![token];
+                        while let Some(t) = self.tokens.next() {
+                            start.push(t);
+                        }
+                        self.tokens = start.into_iter().peekable();
+
+                        return self.postfix();
+                    }
+                    Err(e) => return Err(e),
+                },
+                _ => {
+                    let right = self.unary()?;
+                    Expr::new(
+                        ExprKind::Unary {
+                            right: Box::new(right),
+                            token: token.clone(),
+                            is_global: false,
+                        },
+                        match token.token {
+                            TokenType::Star => ValueKind::Lvalue,
+                            _ => ValueKind::Rvalue,
+                        },
+                    )
+                }
             });
         }
         self.postfix()
+    }
+    fn typecast(&mut self, token: Token, type_decl: NEWTypes) -> Result<Expr, Error> {
+        self.consume(TokenKind::RightParen, "Expect closing ')' after type-cast")?;
+        let expr = self.expression()?;
+
+        Ok(Expr::new(
+            ExprKind::Cast {
+                token,
+                new_type: type_decl,
+                direction: None,
+                expr: Box::new(expr),
+            },
+            ValueKind::Rvalue,
+        ))
     }
     fn postfix(&mut self) -> Result<Expr, Error> {
         let mut expr = self.primary()?;

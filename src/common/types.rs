@@ -298,6 +298,12 @@ impl NEWTypes {
             _ => false,
         }
     }
+    pub fn is_scalar(&self) -> bool {
+        match self {
+            NEWTypes::Primitive(_) | NEWTypes::Pointer(_) | NEWTypes::Enum(..) => true,
+            _ => false,
+        }
+    }
 }
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Types {

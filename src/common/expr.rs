@@ -36,10 +36,10 @@ pub enum ExprKind {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
-    CastUp {
-        expr: Box<Expr>,
-    },
-    CastDown {
+    Cast {
+        token: Token,
+        new_type: NEWTypes,
+        direction: Option<CastDirection>,
         expr: Box<Expr>,
     },
     ScaleUp {
@@ -65,6 +65,13 @@ pub enum ExprKind {
     CharLit(i8),
     Ident(Token),
     Nop, // works as an indicator for parser
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum CastDirection {
+    Up,
+    Down,
+    Equal,
 }
 #[derive(Debug, PartialEq, Clone)]
 pub enum ValueKind {
@@ -98,8 +105,7 @@ impl Display for ExprKind {
                 ExprKind::Assign { .. } => "'assign-expression'".to_string(),
                 ExprKind::Logical { token, .. } => format!("'logical-expression': {}", token.token),
                 ExprKind::Call { .. } => "'call-expression'".to_string(),
-                ExprKind::CastUp { .. } | ExprKind::CastDown { .. } =>
-                    "'cast-expression'".to_string(),
+                ExprKind::Cast { .. } => "'cast-expression'".to_string(),
                 ExprKind::Number(_) => "'number-literal'".to_string(),
                 ExprKind::CharLit(_) => "'character-literal'".to_string(),
                 ExprKind::Ident(_) => "'identifier'".to_string(),

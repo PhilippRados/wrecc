@@ -128,7 +128,7 @@ impl<T: Clone + EnumValue<T>> Environment<T> {
             Some(v) => Ok(v.clone()),
             None => match &self.enclosing {
                 Some(env) => (**env).get_type(var_name),
-                None => Err(Error::new(var_name, "Undeclared type")),
+                None => Err(Error::UndeclaredType(var_name.clone())),
             },
         }
     }

@@ -175,6 +175,16 @@ impl Parser {
             }
             let s = match self.declaration() {
                 Err(Error::Indicator) => continue,
+                Err(e @ Error::UndeclaredType(..)) => {
+                    let token = self.tokens.next().ok_or(Error::Eof)?;
+                    if let TokenType::Ident(..) = self.peek()?.token {
+                        dbg!("here");
+                        return Err(e);
+                    } else {
+                        self.insert_token(token);
+                        self.statement()?
+                    }
+                }
                 Err(Error::NotType(..)) => self.statement()?,
                 Err(e) => return Err(e),
                 Ok(s) => s,
@@ -388,7 +398,7 @@ impl Parser {
         let name = self.consume(TokenKind::Ident, "Expect identifier following type")?;
 
         self.env.declare_typedef(name.unwrap_string(), type_decl);
-        self.consume(TokenKind::Semicolon, "Expect ',' after typedef-declaration")?;
+        self.consume(TokenKind::Semicolon, "Expect ';' after typedef-declaration")?;
 
         // doesnt need to generate any statements for later stages
         // because types get resolved in the parser
@@ -927,13 +937,8 @@ impl Parser {
                 // have to check whether expression or type inside of parentheses
                 TokenType::LeftParen => match self.matches_type() {
                     Ok(type_decl) => self.typecast(token, type_decl)?,
-                    Err(Error::NotType(_)) => {
-                        // hacky way of inserting token back into iterator
-                        let mut start = vec![token];
-                        while let Some(t) = self.tokens.next() {
-                            start.push(t);
-                        }
-                        self.tokens = start.into_iter().peekable();
+                    Err(Error::NotType(_) | Error::UndeclaredType(..)) => {
+                        self.insert_token(token);
 
                         return self.postfix();
                     }
@@ -1105,12 +1110,7 @@ impl Parser {
                     Ok(v)
                 }
             }
-            None => Err(Error::Regular(ErrorData {
-                line_index: -1,
-                line_string: "".to_string(),
-                column: -1,
-                msg: msg.to_string(),
-            })),
+            None => Err(Error::Eof),
         }
     }
     fn check(&mut self, expected: TokenKind) -> bool {
@@ -1123,12 +1123,7 @@ impl Parser {
     fn peek(&mut self) -> Result<&Token, Error> {
         match self.tokens.peek() {
             Some(t) => Ok(t),
-            None => Err(Error::Regular(ErrorData {
-                line_index: -1,
-                line_string: "".to_string(),
-                column: -1,
-                msg: "Expected expression found end of file".to_string(),
-            })),
+            None => Err(Error::Eof),
         }
     }
     fn matches(&mut self, expected: Vec<TokenKind>) -> Option<Token> {
@@ -1158,12 +1153,12 @@ impl Parser {
                         self.parse_aggregate(&token)?
                     }
                     // typedef
-                    TokenType::Ident(ref name) => match self.env.get_type(&v) {
-                        Ok(Customs::TypeDef(t)) => {
+                    TokenType::Ident(ref name) => match self.env.get_type(&v)? {
+                        Customs::TypeDef(t) => {
                             self.tokens.next();
                             t
                         }
-                        Ok(Customs::Aggregate(s)) => {
+                        Customs::Aggregate(s) => {
                             return Err(Error::new(
                                 &v,
                                 &format!(
@@ -1173,13 +1168,12 @@ impl Parser {
                                 ),
                             ))
                         }
-                        Ok(Customs::Enum(_)) => {
+                        Customs::Enum(_) => {
                             return Err(Error::new(
                                 &v,
                                 &format!("Must use 'enum'-tag to refer to type 'enum {}'", name),
                             ))
                         }
-                        Err(_) => return Err(Error::NotType(v)),
                     },
                     // otherwise parse primitive
                     _ => self
@@ -1205,6 +1199,15 @@ impl Parser {
             }
             Err(e) => Err(e),
         }
+    }
+    // hacky and slow way of inserting token back into iterator
+    // TODO: remove this by using multipeek() when adding libraries
+    fn insert_token(&mut self, token: Token) {
+        let mut start = vec![token];
+        while let Some(t) = self.tokens.next() {
+            start.push(t);
+        }
+        self.tokens = start.into_iter().peekable();
     }
 }
 

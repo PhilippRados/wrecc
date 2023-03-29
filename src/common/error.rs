@@ -5,16 +5,28 @@ use crate::scanner::Scanner;
 pub enum Error {
     Indicator, // just to signal an error occured
     NotType(Token),
+    UndeclaredType(Token),
     Regular(ErrorData),
+    Eof,
 }
 
 impl Error {
     pub fn print_error(&self) {
         match self {
             Error::Regular(e) => e.print_error(),
+            Error::Eof => Error::Regular(ErrorData {
+                line_index: -1,
+                line_string: "".to_string(),
+                column: -1,
+                msg: "Expected expression found end of file".to_string(),
+            })
+            .print_error(),
             Error::NotType(t) => {
                 Error::new(&t, &format!("Expected type-declaration, found {}", t.token))
                     .print_error()
+            }
+            Error::UndeclaredType(t) => {
+                Error::new(&t, &format!("Undeclared type '{}'", t.unwrap_string())).print_error()
             }
             Error::Indicator => (),
         }

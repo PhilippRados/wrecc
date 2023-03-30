@@ -3,19 +3,43 @@ use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types:
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 enum Scope {
     Global,
+    Loop(Box<Scope>),
     Function(String, NEWTypes), // function name and return type
 }
 impl Scope {
     fn get_function_type(&self, token: &Token) -> Result<&NEWTypes, Error> {
         match self {
             Scope::Function(_, t) => Ok(t),
+            Scope::Loop(enclosing) => enclosing.get_function_type(token),
             Scope::Global => Err(Error::new(
                 token,
-                "can only define return statements inside a function",
+                "Can only define return statements inside a function",
             )),
+        }
+    }
+    fn enclosing(&mut self) {
+        *self = match self {
+            Scope::Global => unreachable!("global scope doesn't have an enclosing scope"),
+            Scope::Loop(s) => *s.clone(),
+            Scope::Function(..) => Scope::Global,
+        }
+    }
+
+    fn increment_stack_size(
+        &mut self,
+        func_stack_size: &mut HashMap<String, usize>,
+        type_decl: &NEWTypes,
+    ) {
+        match self {
+            Scope::Function(name, _) => {
+                *func_stack_size.get_mut(name).unwrap() += type_decl.size();
+                *func_stack_size.get_mut(name).unwrap() = align(func_stack_size[name], type_decl);
+            }
+            Scope::Loop(s) => s.increment_stack_size(func_stack_size, type_decl),
+            Scope::Global => unreachable!(),
         }
     }
 }
@@ -107,10 +131,77 @@ impl TypeChecker {
             Stmt::While(left_paren, ref mut cond, body) => {
                 self.while_statement(left_paren, cond, body)
             }
+            Stmt::For(left_paren, init, ref mut cond, inc, body) => {
+                self.for_statement(left_paren, init, cond, inc, body)
+            }
             Stmt::EnumDef(t) => self.env.insert_enum_symbols(t, &mut vec![]),
             Stmt::TypeDef(name) => self.typedef(name),
+            Stmt::Break(keyword) => self.break_statement(keyword),
+            Stmt::Continue(keyword) => self.continue_statement(keyword),
         }
     }
+    fn for_statement(
+        &mut self,
+        left_paren: &Token,
+        init: &mut Option<Box<Stmt>>,
+        cond: &mut Option<Expr>,
+        inc: &mut Option<Expr>,
+        body: &mut Stmt,
+    ) -> Result<(), Error> {
+        // emulate:
+        // {
+        //     init
+        //     cond {
+        //         body
+        //     }
+        //     inc
+        // }
+        self.env = Environment::new(Some(Box::new(self.env.clone())));
+
+        if let Some(init) = init {
+            self.visit(&mut *init)?;
+        }
+        if let Some(cond) = cond {
+            if self.expr_type(cond)?.is_void() {
+                return Err(Error::new(
+                    left_paren,
+                    "Conditional expected scalar type found 'void'",
+                ));
+            }
+        }
+
+        self.scope = Scope::Loop(Box::new(self.scope.clone()));
+        self.visit(body)?;
+
+        if let Some(inc) = inc {
+            self.expr_type(inc)?;
+        }
+
+        self.scope.enclosing();
+
+        self.env = *self.env.enclosing.as_ref().unwrap().clone();
+
+        self.returns_all_paths = false;
+        Ok(())
+    }
+    fn break_statement(&mut self, token: &Token) -> Result<(), Error> {
+        if matches!(self.scope, Scope::Loop(..)) {
+            Ok(())
+        } else {
+            Err(Error::new(token, "'break' statement must be inside loop"))
+        }
+    }
+    fn continue_statement(&mut self, token: &Token) -> Result<(), Error> {
+        if matches!(self.scope, Scope::Loop(..)) {
+            Ok(())
+        } else {
+            Err(Error::new(
+                token,
+                "'continue' statement must be inside loop",
+            ))
+        }
+    }
+
     fn typedef(&mut self, name: &Token) -> Result<(), Error> {
         if self.env.current.symbols.contains_key(&name.unwrap_string()) {
             return Err(Error::new(
@@ -134,7 +225,10 @@ impl TypeChecker {
             ));
         }
 
+        self.scope = Scope::Loop(Box::new(self.scope.clone()));
         self.visit(body)?;
+        self.scope.enclosing();
+
         self.returns_all_paths = false;
         Ok(())
     }
@@ -163,7 +257,8 @@ impl TypeChecker {
         if self.is_global() {
             *is_global = true;
         } else {
-            self.increment_stack_size(type_decl);
+            self.scope
+                .increment_stack_size(&mut self.func_stack_size, type_decl);
         }
         self.env.declare_var(name, type_decl.clone());
         Ok(())
@@ -220,7 +315,8 @@ impl TypeChecker {
             }
             *is_global = true;
         } else {
-            self.increment_stack_size(type_decl);
+            self.scope
+                .increment_stack_size(&mut self.func_stack_size, type_decl);
         }
 
         Ok(())
@@ -257,7 +353,8 @@ impl TypeChecker {
                 ));
             }
         } else {
-            self.increment_stack_size(type_decl);
+            self.scope
+                .increment_stack_size(&mut self.func_stack_size, type_decl);
         }
         self.env.init_var(name, type_decl.clone());
 
@@ -303,16 +400,6 @@ impl TypeChecker {
             Ordering::Less => cast!(expr, new_type.clone(), CastDirection::Up),
             Ordering::Greater => cast!(expr, new_type.clone(), CastDirection::Down),
             Ordering::Equal => (),
-        }
-    }
-    fn increment_stack_size(&mut self, type_decl: &NEWTypes) {
-        match &self.scope {
-            Scope::Function(name, _) => {
-                *self.func_stack_size.get_mut(name).unwrap() += type_decl.size();
-                *self.func_stack_size.get_mut(name).unwrap() =
-                    align(self.func_stack_size[name], type_decl);
-            }
-            _ => unreachable!(),
         }
     }
     fn if_statement(
@@ -420,8 +507,12 @@ impl TypeChecker {
         for (type_decl, name) in params.iter().by_ref() {
             env.insert_enum_symbols(type_decl, &mut vec![])?;
 
-            self.increment_stack_size(type_decl); // add params to stack-size
-            env.init_var(name.unwrap_string(), type_decl.clone()) // initialize params in local scope
+            // add params to stack-size
+            self.scope
+                .increment_stack_size(&mut self.func_stack_size, type_decl);
+
+            // initialize params in local scope
+            env.init_var(name.unwrap_string(), type_decl.clone())
         }
         // check function body
         let err = self.block(body, env);

@@ -83,22 +83,35 @@ impl Parser {
         }
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
-        if self.matches(vec![TokenKind::For]).is_some() {
-            return self.for_statement();
-        }
-        if let Some(t) = self.matches(vec![TokenKind::Return]) {
-            return self.return_statement(t);
-        }
-        if let Some(t) = self.matches(vec![TokenKind::If]) {
-            return self.if_statement(t);
-        }
-        if self.matches(vec![TokenKind::While]).is_some() {
-            return self.while_statement();
-        }
-        if self.matches(vec![TokenKind::LeftBrace]).is_some() {
-            return Ok(Stmt::Block(self.block()?));
+        if let Some(token) = self.matches(vec![
+            TokenKind::For,
+            TokenKind::Return,
+            TokenKind::If,
+            TokenKind::While,
+            TokenKind::Break,
+            TokenKind::Continue,
+            TokenKind::LeftBrace,
+        ]) {
+            return match token.token {
+                TokenType::For => self.for_statement(),
+                TokenType::Return => self.return_statement(token),
+                TokenType::If => self.if_statement(token),
+                TokenType::While => self.while_statement(),
+                TokenType::Break => self.break_statement(token),
+                TokenType::Continue => self.continue_statement(token),
+                TokenType::LeftBrace => Ok(Stmt::Block(self.block()?)),
+                _ => unreachable!(),
+            };
         }
         self.expression_statement()
+    }
+    fn break_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
+        self.consume(TokenKind::Semicolon, "Expect ';' after break statement")?;
+        Ok(Stmt::Break(keyword))
+    }
+    fn continue_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
+        self.consume(TokenKind::Semicolon, "Expect ';' after continue statement")?;
+        Ok(Stmt::Continue(keyword))
     }
     fn return_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
         let mut value = None;
@@ -111,47 +124,30 @@ impl Parser {
     fn for_statement(&mut self) -> Result<Stmt, Error> {
         let left_paren = self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
 
-        let mut init = None;
-        if let Ok(token) = self.matches_type() {
-            init = Some(self.type_declaration(token)?);
-        } else if !self.check(TokenKind::Semicolon) {
-            init = Some(self.expression_statement()?)
-        } else {
-            self.consume(TokenKind::Semicolon, "Expect ';' in for loop")?;
-        }
+        let init = match self.matches_type() {
+            Ok(type_decl) => Some(Box::new(self.type_declaration(type_decl)?)),
+            _ if !self.check(TokenKind::Semicolon) => Some(Box::new(self.expression_statement()?)),
+            _ => {
+                self.consume(TokenKind::Semicolon, "Expect ';' in for loop")?;
+                None
+            }
+        };
 
-        let mut cond = None;
-        if self.matches(vec![TokenKind::Semicolon]) == None {
-            cond = Some(self.expression()?);
-            self.consume(TokenKind::Semicolon, "Expect ';' after for-condition")?;
-        }
+        let cond = match self.check(TokenKind::Semicolon) {
+            false => Some(self.expression()?),
+            true => None,
+        };
+        self.consume(TokenKind::Semicolon, "Expect ';' after for condition")?;
 
-        let mut inc = None;
-        if self.matches(vec![TokenKind::RightParen]) == None {
-            inc = Some(self.expression()?);
-            self.consume(TokenKind::RightParen, "Expect ')' after for increment")?;
-        }
+        let inc = match self.check(TokenKind::RightParen) {
+            false => Some(self.expression()?),
+            true => None,
+        };
+        self.consume(TokenKind::RightParen, "Expect ')' after for increment")?;
 
-        // for loop is syntax sugar for while loop
-        let mut body = self.statement()?;
-        if inc != None {
-            body = Stmt::Block(vec![body, Stmt::Expr(inc.unwrap())]);
-        }
-        if cond != None {
-            body = Stmt::While(left_paren, cond.unwrap(), Box::new(body));
-        } else {
-            // if no condition then condition is true
-            body = Stmt::While(
-                left_paren,
-                Expr::new(ExprKind::Number(1), ValueKind::Rvalue),
-                Box::new(body),
-            );
-        }
-        if init != None {
-            body = Stmt::Block(vec![init.unwrap(), body]);
-        }
+        let body = Box::new(self.statement()?);
 
-        Ok(body)
+        Ok(Stmt::For(left_paren, init, cond, inc, body))
     }
     fn while_statement(&mut self) -> Result<Stmt, Error> {
         let left_paren = self.consume(TokenKind::LeftParen, "Expect '(' after while-statement")?;
@@ -178,7 +174,6 @@ impl Parser {
                 Err(e @ Error::UndeclaredType(..)) => {
                     let token = self.tokens.next().ok_or(Error::Eof)?;
                     if let TokenType::Ident(..) = self.peek()?.token {
-                        dbg!("here");
                         return Err(e);
                     } else {
                         self.insert_token(token);

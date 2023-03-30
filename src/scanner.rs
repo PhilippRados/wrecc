@@ -35,6 +35,8 @@ impl<'a> Scanner<'a> {
                 ("else", TokenType::Else),
                 ("for", TokenType::For),
                 ("while", TokenType::While),
+                ("break", TokenType::Break),
+                ("continue", TokenType::Continue),
                 ("return", TokenType::Return),
             ]),
         }
@@ -70,10 +72,11 @@ impl<'a> Scanner<'a> {
             | TokenType::Else
             | TokenType::Long
             | TokenType::Enum => 4,
-            TokenType::While | TokenType::Union => 5,
+            TokenType::While | TokenType::Union | TokenType::Break => 5,
             TokenType::If => 2,
             TokenType::Return | TokenType::Struct => 6,
             TokenType::TypeDef => 7,
+            TokenType::Continue => 8,
             TokenType::Number(n) => n.to_string().len() as i32,
             _ => 1,
         }

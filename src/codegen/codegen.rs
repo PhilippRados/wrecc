@@ -23,10 +23,17 @@ pub struct Compiler<'a> {
     env: Environment<Register>,
     function_name: Option<String>,
     label_index: usize,
-    func_stack_size: &'a HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
+
+    // typechecker passes info about how many stack allocation there are in a function
+    func_stack_size: &'a HashMap<String, usize>,
     const_labels: &'a HashMap<String, usize>,
     saved_args: Vec<Register>,
-    pub current_bp_offset: usize, // offset from base-pointer where variable stays
+
+    // offset from base-pointer where variable stays
+    current_bp_offset: usize,
+
+    // loop labels saved so that break and continue jump to them
+    jump_labels: Vec<(usize, usize)>,
 }
 impl<'a> Compiler<'a> {
     pub fn new(
@@ -43,6 +50,7 @@ impl<'a> Compiler<'a> {
             saved_args: Vec::new(),
             const_labels,
             func_stack_size,
+            jump_labels: vec![],
         }
     }
 
@@ -112,11 +120,19 @@ impl<'a> Compiler<'a> {
                 self.if_statement(cond, then_branch, else_branch)
             }
             Stmt::While(_, cond, body) => self.while_statement(cond, body),
+            Stmt::For(_, init, cond, inc, body) => self.for_statement(init, cond, inc, body),
             Stmt::EnumDef(t) => Ok(self.env.insert_enum_symbols(t, &mut vec![]).unwrap()),
             Stmt::TypeDef(..) => Ok(()), // only necessary for checking redefinitions in typechecker
+            Stmt::Break(..) => self.jump_statement(self.jump_labels.last().expect("typechecker").0),
+            Stmt::Continue(..) => {
+                self.jump_statement(self.jump_labels.last().expect("typechecker").1)
+            }
         }
     }
 
+    fn jump_statement(&mut self, label: usize) -> Result<(), std::fmt::Error> {
+        writeln!(self.output, "\tjmp    L{}", label)
+    }
     fn init_list(
         &mut self,
         type_decl: &NEWTypes,
@@ -159,14 +175,74 @@ impl<'a> Compiler<'a> {
         }
         Ok(())
     }
-    fn while_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), std::fmt::Error> {
-        let start_label = create_label(&mut self.label_index);
+
+    fn for_statement(
+        &mut self,
+        init: &Option<Box<Stmt>>,
+        cond: &Option<Expr>,
+        inc: &Option<Expr>,
+        body: &Stmt,
+    ) -> Result<(), std::fmt::Error> {
+        self.env = Environment::new(Some(Box::new(self.env.clone())));
+
+        let body_label = create_label(&mut self.label_index);
+        let cond_label = create_label(&mut self.label_index);
+
+        let inc_label = create_label(&mut self.label_index);
         let end_label = create_label(&mut self.label_index);
 
-        writeln!(self.output, "\tjmp    L{}\nL{}:", end_label, start_label)?;
+        self.jump_labels.push((end_label, inc_label));
+        if let Some(init) = init {
+            self.visit(init)?;
+        }
+        writeln!(self.output, "\tjmp    L{}\nL{}:", cond_label, body_label)?;
         self.visit(body)?;
 
-        writeln!(self.output, "L{}:", end_label)?;
+        writeln!(self.output, "L{}:\n\tnop", inc_label)?;
+
+        if let Some(inc) = inc {
+            self.execute_expr(inc)?.free();
+        }
+
+        writeln!(self.output, "L{}:", cond_label)?;
+
+        match cond {
+            Some(cond) => {
+                let mut cond_reg = self.execute_expr(cond)?;
+                cond_reg = self.convert_to_rval(cond_reg)?;
+
+                writeln!(
+                    self.output,
+                    "\tcmp{}    $0, {}\n\tjne      L{}",
+                    cond_reg.get_type().suffix(),
+                    cond_reg.name(),
+                    body_label
+                )?;
+                cond_reg.free();
+            }
+            None => writeln!(self.output, "\tjmp    L{}", body_label)?,
+        }
+
+        writeln!(self.output, "L{}:\n\tnop", end_label)?;
+
+        self.jump_labels.pop();
+
+        self.env = *self.env.enclosing.as_ref().unwrap().clone();
+
+        Ok(())
+    }
+    fn while_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), std::fmt::Error> {
+        let body_label = create_label(&mut self.label_index);
+        let cond_label = create_label(&mut self.label_index);
+
+        let end_label = create_label(&mut self.label_index);
+
+        self.jump_labels.push((end_label, cond_label));
+
+        writeln!(self.output, "\tjmp    L{}\nL{}:", cond_label, body_label)?;
+        self.visit(body)?;
+
+        writeln!(self.output, "L{}:", cond_label)?;
 
         let mut cond_reg = self.execute_expr(cond)?;
         cond_reg = self.convert_to_rval(cond_reg)?;
@@ -176,9 +252,15 @@ impl<'a> Compiler<'a> {
             "\tcmp{}    $0, {}\n\tjne      L{}",
             cond_reg.get_type().suffix(),
             cond_reg.name(),
-            start_label
+            body_label
         )?;
         cond_reg.free();
+
+        // don't know before wether loop contains break statement
+        // could be checked by typechecker
+        writeln!(self.output, "L{}:\n\tnop", end_label)?;
+
+        self.jump_labels.pop();
 
         Ok(())
     }

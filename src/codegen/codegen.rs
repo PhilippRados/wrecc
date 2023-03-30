@@ -553,8 +553,71 @@ impl<'a> Compiler<'a> {
                 let expr = self.execute_expr(expr)?;
                 self.cg_member_access(expr, member, true)
             }
+            ExprKind::Ternary {
+                cond,
+                true_expr,
+                false_expr,
+                ..
+            } => self.cg_ternary(cond, true_expr, false_expr),
             ExprKind::Nop => unreachable!("only used in parser"),
         }
+    }
+
+    fn cg_ternary(
+        &mut self,
+        cond: &Expr,
+        true_expr: &Expr,
+        false_expr: &Expr,
+    ) -> Result<Register, std::fmt::Error> {
+        let mut cond_reg = self.execute_expr(cond)?;
+        cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
+
+        let done_label = create_label(&mut self.label_index);
+        let else_label = create_label(&mut self.label_index);
+
+        writeln!(
+            self.output,
+            "\tcmp{}    $0, {}\n\tje      L{}",
+            cond_reg.get_type().suffix(),
+            cond_reg.name(),
+            else_label
+        )?;
+        cond_reg.free();
+
+        let result = Register::Scratch(
+            self.scratch.scratch_alloc(),
+            true_expr.clone().type_decl.unwrap(),
+            ValueKind::Rvalue,
+        );
+        let true_reg = self.execute_expr(true_expr)?;
+
+        // copy both expressions into result register
+        writeln!(
+            self.output,
+            "\tmov{}    {}, {}",
+            true_reg.get_type().suffix(),
+            true_reg.name(),
+            result.name()
+        )?;
+        true_reg.free();
+
+        writeln!(self.output, "\tjmp     L{}", done_label)?;
+        writeln!(self.output, "L{}:", else_label)?;
+
+        let false_reg = self.execute_expr(false_expr)?;
+
+        writeln!(
+            self.output,
+            "\tmov{}   {}, {}",
+            false_reg.get_type().suffix(),
+            false_reg.name(),
+            result.name()
+        )?;
+        false_reg.free();
+
+        writeln!(self.output, "L{}:", done_label)?;
+
+        Ok(result)
     }
     fn cg_member_access(
         &mut self,

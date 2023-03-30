@@ -694,7 +694,7 @@ impl Parser {
         self.var_assignment()
     }
     fn var_assignment(&mut self) -> Result<Expr, Error> {
-        let expr = self.or()?;
+        let expr = self.ternary_conditional()?;
 
         if let Some(t) = self.matches(vec![TokenKind::Equal]) {
             let value = self.expression()?;
@@ -728,6 +728,29 @@ impl Parser {
                 },
                 ValueKind::Rvalue,
             ));
+        }
+        Ok(expr)
+    }
+    fn ternary_conditional(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.or()?;
+
+        while let Some(token) = self.matches(vec![TokenKind::Question]) {
+            let true_expr = self.expression()?;
+            self.consume(
+                TokenKind::Colon,
+                "Expect ':' to seperate ternary expression",
+            )?;
+            let false_expr = self.expression()?;
+
+            expr = Expr::new(
+                ExprKind::Ternary {
+                    token,
+                    cond: Box::new(expr),
+                    true_expr: Box::new(true_expr),
+                    false_expr: Box::new(false_expr),
+                },
+                ValueKind::Rvalue,
+            )
         }
         Ok(expr)
     }

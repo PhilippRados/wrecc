@@ -60,6 +60,12 @@ pub enum ExprKind {
         member: Token,
         expr: Box<Expr>,
     },
+    Ternary {
+        token: Token,
+        cond: Box<Expr>,
+        true_expr: Box<Expr>,
+        false_expr: Box<Expr>,
+    },
     String(Token),
     Number(i64),
     CharLit(i8),
@@ -117,6 +123,7 @@ impl Display for ExprKind {
                 ExprKind::Nop => "'nop'".to_string(),
                 ExprKind::CompoundAssign { token, .. } =>
                     format!("'compound-assignment: {}'", token.token),
+                ExprKind::Ternary { .. } => "'ternary-expression'".to_string(),
             }
         )
     }

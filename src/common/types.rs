@@ -300,6 +300,7 @@ impl NEWTypes {
     }
     pub fn is_scalar(&self) -> bool {
         match self {
+            NEWTypes::Primitive(Types::Void) => false,
             NEWTypes::Primitive(_) | NEWTypes::Pointer(_) | NEWTypes::Enum(..) => true,
             _ => false,
         }

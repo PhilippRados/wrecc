@@ -162,10 +162,11 @@ impl TypeChecker {
             self.visit(&mut *init)?;
         }
         if let Some(cond) = cond {
-            if self.expr_type(cond)?.is_void() {
+            let cond_type = self.expr_type(cond)?;
+            if !cond_type.is_scalar() {
                 return Err(Error::new(
                     left_paren,
-                    "Conditional expected scalar type found 'void'",
+                    &format!("Conditional expected scalar type found '{}'", cond_type),
                 ));
             }
         }
@@ -218,10 +219,11 @@ impl TypeChecker {
         cond: &mut Expr,
         body: &mut Stmt,
     ) -> Result<(), Error> {
-        if self.expr_type(cond)?.is_void() {
+        let cond_type = self.expr_type(cond)?;
+        if !cond_type.is_scalar() {
             return Err(Error::new(
                 left_paren,
-                "conditional expected scalar type found 'void'",
+                &format!("Conditional expected scalar type found '{}'", cond_type),
             ));
         }
 
@@ -409,10 +411,14 @@ impl TypeChecker {
         then_branch: &mut Stmt,
         else_branch: &mut Option<Stmt>,
     ) -> Result<(), Error> {
-        if self.expr_type(cond)?.is_void() {
+        let cond_type = self.expr_type(cond)?;
+        if !cond_type.is_scalar() {
             return Err(Error::new(
                 keyword,
-                "Expected expression inside of condition, found 'void'",
+                &format!(
+                    "Expected scalar type inside of condition, found '{}'",
+                    cond_type
+                ),
             ));
         }
 
@@ -685,11 +691,59 @@ impl TypeChecker {
                 expr,
                 direction,
             } => self.explicit_cast(token, expr, new_type, direction)?,
+            ExprKind::Ternary {
+                token,
+                cond,
+                true_expr,
+                false_expr,
+            } => self.ternary(token, cond, true_expr, false_expr)?,
             ExprKind::ScaleUp { .. } => unreachable!("is only used in codegen"),
             ExprKind::ScaleDown { .. } => unreachable!("is only used in codegen"),
             ExprKind::Nop { .. } => unreachable!("only used in parser"),
         });
         Ok(ast.type_decl.clone().unwrap())
+    }
+    fn ternary(
+        &mut self,
+        token: &Token,
+        cond: &mut Expr,
+        true_expr: &mut Expr,
+        false_expr: &mut Expr,
+    ) -> Result<NEWTypes, Error> {
+        let cond_type = self.expr_type(cond)?;
+        if !cond_type.is_scalar() {
+            return Err(Error::new(
+                token,
+                &format!("Conditional expected scalar type found '{}'", cond_type),
+            ));
+        }
+        let mut true_type = self.expr_type(true_expr)?;
+        let mut false_type = self.expr_type(false_expr)?;
+
+        if !true_type.type_compatible(&false_type) {
+            return Err(Error::new(
+                token,
+                &format!(
+                    "Mismatched operand types in ternary-expression. '{}' and '{}'",
+                    true_type, false_type
+                ),
+            ));
+        }
+
+        self.maybe_int_promote(true_expr, &mut true_type);
+        self.maybe_int_promote(false_expr, &mut false_type);
+
+        match true_type.size().cmp(&false_type.size()) {
+            Ordering::Greater => {
+                cast!(false_expr, true_type.clone(), CastDirection::Up);
+                Ok(true_type)
+            }
+            Ordering::Less => {
+                cast!(true_expr, false_type.clone(), CastDirection::Up);
+                Ok(false_type)
+            }
+            Ordering::Equal => Ok(true_type),
+        }
     }
     fn ident(&mut self, token: &Token) -> Result<NEWTypes, Error> {
         match self.env.get_symbol(token)? {
@@ -904,7 +958,10 @@ impl TypeChecker {
             (NEWTypes::Pointer(_), _) => {
                 token.token == TokenType::Plus || token.token == TokenType::Minus
             }
-            (NEWTypes::Struct(..), _) | (_, NEWTypes::Struct(..)) => false,
+            (NEWTypes::Struct(..), _)
+            | (_, NEWTypes::Struct(..))
+            | (NEWTypes::Union(..), _)
+            | (_, NEWTypes::Union(..)) => false,
             _ => true,
         }
     }
@@ -936,15 +993,11 @@ impl TypeChecker {
         Self::lval_to_rval(left);
         Self::lval_to_rval(right);
 
-        if left_type.is_void()
-            || right_type.is_void()
-            || matches!(left_type, NEWTypes::Struct(..))
-            || matches!(right_type, NEWTypes::Struct(..))
-        {
+        if !left_type.is_scalar() || !right_type.is_scalar() {
             return Err(Error::new(
                 token,
                 &format!(
-                    "invalid logical expression: '{}' {} '{}'",
+                    "invalid logical expression: '{}' {} '{}'. Both types need to be scalar",
                     left_type, token.token, right_type
                 ),
             ));

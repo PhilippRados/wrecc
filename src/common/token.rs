@@ -49,6 +49,8 @@ pub enum TokenKind {
     Xor,
     XorEqual,
     Arrow,
+    Question,
+    Colon,
 
     // Literals.
     Ident,
@@ -139,6 +141,8 @@ impl From<&TokenType> for TokenKind {
             TokenType::Void => TokenKind::Void,
             TokenType::Tilde => TokenKind::Tilde,
             TokenType::Arrow => TokenKind::Arrow,
+            TokenType::Question => TokenKind::Question,
+            TokenType::Colon => TokenKind::Colon,
         }
     }
 }
@@ -191,6 +195,8 @@ pub enum TokenType {
     Xor,
     XorEqual,
     Arrow,
+    Question,
+    Colon,
 
     // Literals.
     Ident(String),
@@ -283,6 +289,8 @@ impl Display for TokenType {
                 TokenType::Void => "'void'",
                 TokenType::Tilde => "'~'",
                 TokenType::Arrow => "'->'",
+                TokenType::Question => "'?'",
+                TokenType::Colon => "':'",
             }
         )
     }

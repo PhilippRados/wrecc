@@ -1,0 +1,4 @@
+Error: Undeclared symbol
+|
+9   printf("%d\n",/*c*/ c);
+|                       ^

@@ -44,7 +44,7 @@ impl<'a> Scanner<'a> {
 
     fn match_next(&mut self, expected: char, if_match: TokenType, if_not: TokenType) -> TokenType {
         match self.source.next_if_eq(&expected) {
-            Some(_v) => if_match,
+            Some(_) => if_match,
             None => if_not,
         }
     }
@@ -190,6 +190,22 @@ impl<'a> Scanner<'a> {
                             .next_if(|&c| c != '\n' && c != '\0')
                             .is_some()
                         {}
+                    } else if self.matches('*') {
+                        // parse multiline comment
+                        self.column += 2;
+                        while let Some(c) = self.source.next() {
+                            match c {
+                                '\n' => {
+                                    self.line += 1;
+                                    self.column = 1
+                                }
+                                '*' if self.matches('/') => {
+                                    self.column += 2;
+                                    break;
+                                }
+                                _ => self.column += 1,
+                            }
+                        }
                     } else {
                         let token = self.match_next('=', TokenType::SlashEqual, TokenType::Slash);
                         self.add_token(&mut tokens, token);
@@ -277,30 +293,46 @@ impl<'a> Scanner<'a> {
         true
     }
     fn char_lit(&mut self) -> Result<char, Error> {
-        let mut last_char = '\0';
-        let result = self
-            .source
-            .by_ref()
-            .take_while(|c| {
-                last_char = *c;
-                *c != '\''
-            })
-            .collect::<String>();
-        if last_char != '\'' {
-            return Err(Error::new_scan_error(self, "unterminated char literal"));
-        } else if result.len() != 1 {
+        let mut char = self.source.next().ok_or(Error::new_scan_error(
+            self,
+            "Expected character literal found end of file",
+        ))?;
+        if char == '\\' {
+            let char_to_escape = self.source.next().ok_or(Error::new_scan_error(
+                self,
+                "Expected character literal found end of file",
+            ))?;
+            char = self.escape_char(char_to_escape)?;
+        }
+        if !self.matches('\'') {
             return Err(Error::new_scan_error(
                 self,
-                "char literal must contain single character",
-            ));
-        } else if !result.is_ascii() {
-            return Err(Error::new_scan_error(
-                self,
-                "char literal must be valid ascii value",
+                "Character literal must contain single character enclosed by single quotes ('')",
             ));
         }
+        if !char.is_ascii() {
+            return Err(Error::new_scan_error(
+                self,
+                "Character literal must be valid ascii value",
+            ));
+        };
 
-        Ok(result.chars().next().unwrap())
+        Ok(char)
+    }
+    fn escape_char(&mut self, char_to_escape: char) -> Result<char, Error> {
+        match char_to_escape {
+            '0' => Ok('\0'),
+            'n' => Ok('\n'),
+            'r' => Ok('\r'),
+            't' => Ok('\t'),
+            '\\' => Ok('\\'),
+            '\'' => Ok('\''),
+            '\"' => Ok('\"'),
+            _ => Err(Error::new_scan_error(
+                self,
+                &format!("Can't escape character '{}'", char_to_escape),
+            )),
+        }
     }
 
     fn string(&mut self) -> Result<String, Error> {
@@ -314,12 +346,7 @@ impl<'a> Scanner<'a> {
             })
             .collect::<String>();
         if last_char != '"' {
-            return Err(Error::Regular(ErrorData {
-                line_index: self.line,
-                line_string: self.raw_source[(self.line - 1) as usize].clone(),
-                column: self.column,
-                msg: "Unterminated string".to_string(),
-            }));
+            return Err(Error::new_scan_error(self, "Unterminated String"));
         }
 
         Ok(result)

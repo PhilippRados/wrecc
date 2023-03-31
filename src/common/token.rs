@@ -72,6 +72,7 @@ pub enum TokenKind {
     If,
     Return,
     While,
+    Do,
     Break,
     Continue,
 }
@@ -143,6 +144,7 @@ impl From<&TokenType> for TokenKind {
             TokenType::Arrow => TokenKind::Arrow,
             TokenType::Question => TokenKind::Question,
             TokenType::Colon => TokenKind::Colon,
+            TokenType::Do => TokenKind::Do,
         }
     }
 }
@@ -218,6 +220,7 @@ pub enum TokenType {
     If,
     Return,
     While,
+    Do,
     Break,
     Continue,
 }
@@ -291,6 +294,7 @@ impl Display for TokenType {
                 TokenType::Arrow => "'->'",
                 TokenType::Question => "'?'",
                 TokenType::Colon => "':'",
+                TokenType::Do => "'do'",
             }
         )
     }

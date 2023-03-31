@@ -11,6 +11,7 @@ pub enum Stmt {
     Block(Vec<Stmt>),
     If(Token, Expr, Box<Stmt>, Box<Option<Stmt>>),
     While(Token, Expr, Box<Stmt>),
+    Do(Token, Box<Stmt>, Expr),
     For(
         Token,
         Option<Box<Stmt>>,

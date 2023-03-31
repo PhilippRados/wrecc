@@ -120,6 +120,7 @@ impl<'a> Compiler<'a> {
                 self.if_statement(cond, then_branch, else_branch)
             }
             Stmt::While(_, cond, body) => self.while_statement(cond, body),
+            Stmt::Do(_, body, cond) => self.do_statement(body, cond),
             Stmt::For(_, init, cond, inc, body) => self.for_statement(init, cond, inc, body),
             Stmt::EnumDef(t) => Ok(self.env.insert_enum_symbols(t, &mut vec![]).unwrap()),
             Stmt::TypeDef(..) => Ok(()), // only necessary for checking redefinitions in typechecker
@@ -128,6 +129,35 @@ impl<'a> Compiler<'a> {
                 self.jump_statement(self.jump_labels.last().expect("typechecker").1)
             }
         }
+    }
+    fn do_statement(&mut self, body: &Stmt, cond: &Expr) -> Result<(), std::fmt::Error> {
+        let body_label = create_label(&mut self.label_index);
+        let cond_label = create_label(&mut self.label_index);
+        let end_label = create_label(&mut self.label_index);
+
+        self.jump_labels.push((end_label, cond_label));
+
+        writeln!(self.output, "L{}:", body_label)?;
+        self.visit(body)?;
+
+        writeln!(self.output, "L{}:", cond_label)?;
+        let mut cond_reg = self.execute_expr(cond)?;
+        cond_reg = self.convert_to_rval(cond_reg)?;
+
+        writeln!(
+            self.output,
+            "\tcmp{}    $0, {}\n\tjne      L{}",
+            cond_reg.get_type().suffix(),
+            cond_reg.name(),
+            body_label
+        )?;
+        cond_reg.free();
+
+        writeln!(self.output, "L{}:\n\tnop", end_label)?;
+
+        self.jump_labels.pop();
+
+        Ok(())
     }
 
     fn jump_statement(&mut self, label: usize) -> Result<(), std::fmt::Error> {
@@ -234,7 +264,6 @@ impl<'a> Compiler<'a> {
     fn while_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), std::fmt::Error> {
         let body_label = create_label(&mut self.label_index);
         let cond_label = create_label(&mut self.label_index);
-
         let end_label = create_label(&mut self.label_index);
 
         self.jump_labels.push((end_label, cond_label));

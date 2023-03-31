@@ -131,6 +131,7 @@ impl TypeChecker {
             Stmt::While(left_paren, ref mut cond, body) => {
                 self.while_statement(left_paren, cond, body)
             }
+            Stmt::Do(keyword, body, cond) => self.do_statement(keyword, body, cond),
             Stmt::For(left_paren, init, ref mut cond, inc, body) => {
                 self.for_statement(left_paren, init, cond, inc, body)
             }
@@ -139,6 +140,28 @@ impl TypeChecker {
             Stmt::Break(keyword) => self.break_statement(keyword),
             Stmt::Continue(keyword) => self.continue_statement(keyword),
         }
+    }
+    fn do_statement(
+        &mut self,
+        token: &Token,
+        body: &mut Stmt,
+        cond: &mut Expr,
+    ) -> Result<(), Error> {
+        self.scope = Scope::Loop(Box::new(self.scope.clone()));
+        self.visit(body)?;
+        self.scope.enclosing();
+
+        let cond_type = self.expr_type(cond)?;
+        if !cond_type.is_scalar() {
+            return Err(Error::new(
+                token,
+                &format!("Conditional expected scalar type found '{}'", cond_type),
+            ));
+        }
+
+        self.returns_all_paths = false;
+
+        Ok(())
     }
     fn for_statement(
         &mut self,

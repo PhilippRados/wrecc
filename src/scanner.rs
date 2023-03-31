@@ -35,6 +35,7 @@ impl<'a> Scanner<'a> {
                 ("else", TokenType::Else),
                 ("for", TokenType::For),
                 ("while", TokenType::While),
+                ("do", TokenType::Do),
                 ("break", TokenType::Break),
                 ("continue", TokenType::Continue),
                 ("return", TokenType::Return),
@@ -63,7 +64,8 @@ impl<'a> Scanner<'a> {
             | TokenType::EqualEqual
             | TokenType::GreaterEqual
             | TokenType::LessEqual
-            | TokenType::Arrow => 2,
+            | TokenType::Arrow
+            | TokenType::Do => 2,
             TokenType::String(s) => (s.len() + 2) as i32,
             TokenType::Ident(s) => s.len() as i32,
             TokenType::Int | TokenType::For => 3,

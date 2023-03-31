@@ -91,12 +91,14 @@ impl Parser {
             TokenKind::Break,
             TokenKind::Continue,
             TokenKind::LeftBrace,
+            TokenKind::Do,
         ]) {
             return match token.token {
                 TokenType::For => self.for_statement(),
                 TokenType::Return => self.return_statement(token),
                 TokenType::If => self.if_statement(token),
                 TokenType::While => self.while_statement(),
+                TokenType::Do => self.do_statement(token),
                 TokenType::Break => self.break_statement(token),
                 TokenType::Continue => self.continue_statement(token),
                 TokenType::LeftBrace => Ok(Stmt::Block(self.block()?)),
@@ -104,6 +106,22 @@ impl Parser {
             };
         }
         self.expression_statement()
+    }
+    fn do_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
+        let body = self.statement()?;
+
+        self.consume(TokenKind::While, "Expect 'while' after do/while loop-body")?;
+        self.consume(TokenKind::LeftParen, "Expect '(' after while keyword")?;
+
+        let cond = self.expression()?;
+
+        self.consume(
+            TokenKind::RightParen,
+            "Expected closing ')' after do/while-condition",
+        )?;
+        self.consume(TokenKind::Semicolon, "Expect ';' after do/while statement")?;
+
+        Ok(Stmt::Do(keyword, Box::new(body), cond))
     }
     fn break_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
         self.consume(TokenKind::Semicolon, "Expect ';' after break statement")?;

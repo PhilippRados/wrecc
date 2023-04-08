@@ -1159,7 +1159,6 @@ impl Compiler {
         is_global: bool,
         free: bool,
     ) -> Result<Register, std::fmt::Error> {
-        // TODO: check if is_global is necessary
         if is_global && matches!(reg, Register::Label(..)) {
             return Ok(reg);
         }

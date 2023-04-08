@@ -345,6 +345,9 @@ impl Parser {
             members.push((member_type, name));
             self.consume(TokenKind::Semicolon, "Expect ';' after member declaration")?;
         }
+
+        check_duplicate(&members)?;
+
         Ok(members)
     }
     fn parse_aggregate(&mut self, token: &Token) -> Result<NEWTypes, Error> {
@@ -363,6 +366,7 @@ impl Parser {
                         )?;
 
                         let members = self.parse_members(token)?;
+
                         if let Tags::Aggregate(struct_ref) = self.env.get_type(name)? {
                             struct_ref.update(members);
 
@@ -1356,13 +1360,19 @@ impl Parser {
     }
 }
 
-// fn cmp_decl(
-//     name_token: &Token,
-//     declaration: &Function,
-//     return_type: &NEWTypes,
-//     params: &Vec<(NEWTypes, Token)>,
-// ) -> Result<(), Error> {
-// }
+fn check_duplicate(vec: &Vec<(NEWTypes, Token)>) -> Result<(), Error> {
+    use std::collections::HashSet;
+    let mut set = HashSet::new();
+    for token in vec.iter().map(|(_, name)| name) {
+        if !set.insert(token.unwrap_string()) {
+            return Err(Error::new(
+                token,
+                &format!("Duplicate member '{}'", token.unwrap_string()),
+            ));
+        }
+    }
+    Ok(())
+}
 
 fn array_of(type_decl: NEWTypes, size: i64) -> NEWTypes {
     NEWTypes::Array {

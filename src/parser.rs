@@ -1,3 +1,4 @@
+use crate::codegen::register::*;
 use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
 use initializer_list_types::*;
 use std::iter::Peekable;
@@ -5,17 +6,17 @@ use std::vec::IntoIter;
 
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
-    env: Environment<NEWTypes>,
+    env: Scope,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser {
             tokens: tokens.into_iter().peekable(),
-            env: Environment::new(None),
+            env: Scope::new(),
         }
     }
-    pub fn parse(&mut self) -> Option<Vec<Stmt>> {
+    pub fn parse(mut self) -> Option<(Vec<Stmt>, Scope)> {
         let mut statements: Vec<Stmt> = Vec::new();
         let mut had_error = false;
 
@@ -33,7 +34,8 @@ impl Parser {
         if had_error {
             None
         } else {
-            Some(statements)
+            self.env.reset_current();
+            Some((statements, self.env))
         }
     }
     fn synchronize(&mut self) {
@@ -72,9 +74,10 @@ impl Parser {
                     t.clone(),
                     self.matches(vec![TokenKind::Semicolon]).is_some(),
                 ) {
-                    // dont't generate any statement when defining struct/union
-                    (NEWTypes::Struct(..) | NEWTypes::Union(..), true) => Err(Error::Indicator),
-                    (NEWTypes::Enum(..), true) => Ok(Stmt::EnumDef(t)),
+                    // dont't generate any statement when defining type
+                    (NEWTypes::Struct(..) | NEWTypes::Union(..) | NEWTypes::Enum(..), true) => {
+                        Err(Error::Indicator)
+                    }
                     _ => self.type_declaration(t),
                 }
             }
@@ -101,7 +104,10 @@ impl Parser {
                 TokenType::Do => self.do_statement(token),
                 TokenType::Break => self.break_statement(token),
                 TokenType::Continue => self.continue_statement(token),
-                TokenType::LeftBrace => Ok(Stmt::Block(self.block()?)),
+                TokenType::LeftBrace => {
+                    self.env.create();
+                    Ok(Stmt::Block(self.block()?))
+                }
                 _ => unreachable!(),
             };
         }
@@ -142,6 +148,16 @@ impl Parser {
     fn for_statement(&mut self) -> Result<Stmt, Error> {
         let left_paren = self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
 
+        // emulate:
+        // {
+        //     init
+        //     cond {
+        //         body
+        //     }
+        //     inc
+        // }
+        self.env.create();
+
         let init = match self.matches_type() {
             Ok(type_decl) => Some(Box::new(self.type_declaration(type_decl)?)),
             _ if !self.check(TokenKind::Semicolon) => Some(Box::new(self.expression_statement()?)),
@@ -165,6 +181,8 @@ impl Parser {
 
         let body = Box::new(self.statement()?);
 
+        self.env.exit();
+
         Ok(Stmt::For(left_paren, init, cond, inc, body))
     }
     fn while_statement(&mut self) -> Result<Stmt, Error> {
@@ -182,7 +200,6 @@ impl Parser {
     fn block(&mut self) -> Result<Vec<Stmt>, Error> {
         let mut statements = Vec::new();
 
-        self.env = Environment::new(Some(Box::new(self.env.clone())));
         while let Some(token) = self.tokens.peek() {
             if TokenKind::from(&token.token) == TokenKind::RightBrace {
                 break;
@@ -205,7 +222,8 @@ impl Parser {
             statements.push(s);
         }
         self.consume(TokenKind::RightBrace, "Expect '}' after Block")?;
-        self.env = *self.env.enclosing.as_ref().unwrap().clone();
+        self.env.exit();
+
         Ok(statements)
     }
     fn expression_statement(&mut self) -> Result<Stmt, Error> {
@@ -279,7 +297,20 @@ impl Parser {
                     }
                 }
             }
-            members.push((ident, index));
+            members.push((ident.clone(), index));
+
+            // insert enum constant into symbol table
+            self.env.declare_symbol(
+                &ident,
+                Symbols::Variable(SymbolInfo {
+                    type_decl: NEWTypes::Primitive(Types::Int),
+                    reg: Some(Register::Literal(
+                        index as usize,
+                        NEWTypes::Primitive(Types::Int),
+                    )),
+                }),
+            )?;
+
             index += 1;
             if !self.check(TokenKind::RightBrace) {
                 self.consume(
@@ -321,20 +352,17 @@ impl Parser {
 
         match (&name, has_members) {
             (Some(name), Some(_)) => {
-                if self.env.current.customs.contains_key(&name.unwrap_string()) {
-                    return Err(Error::new(
-                        name,
-                        &format!("Redefinition of '{}'", name.unwrap_string()),
-                    ));
-                }
+                self.env.check_redefinition(name)?;
 
                 Ok(match token.token {
                     TokenType::Struct | TokenType::Union => {
-                        self.env
-                            .declare_aggregate(name.unwrap_string(), token.clone().token);
+                        self.env.declare_tag(
+                            name,
+                            Tags::Aggregate(StructRef::new(token.clone().token)),
+                        )?;
 
                         let members = self.parse_members(token)?;
-                        if let Customs::Aggregate(struct_ref) = self.env.get_type(name)? {
+                        if let Tags::Aggregate(struct_ref) = self.env.get_type(name)? {
                             struct_ref.update(members);
 
                             match token.token {
@@ -354,8 +382,11 @@ impl Parser {
                     }
                     TokenType::Enum => {
                         let members = self.parse_enum(token)?;
-                        self.env.init_enum(name.unwrap_string(), members.clone());
-                        NEWTypes::Enum(Some(name.unwrap_string()), members, true)
+
+                        // declare the enum tag in the tag namespace
+                        self.env.declare_tag(name, Tags::Enum(members.clone()))?;
+
+                        NEWTypes::Enum(Some(name.unwrap_string()), members)
                     }
                     _ => unreachable!(),
                 })
@@ -384,7 +415,7 @@ impl Parser {
                         custom_type.unwrap_aggr(),
                     )),
                     TokenType::Enum => {
-                        NEWTypes::Enum(Some(name.unwrap_string()), custom_type.unwrap_enum(), false)
+                        NEWTypes::Enum(Some(name.unwrap_string()), custom_type.unwrap_enum())
                     }
                     _ => unreachable!(),
                 })
@@ -396,7 +427,7 @@ impl Parser {
                 TokenType::Struct => {
                     NEWTypes::Struct(StructInfo::Anonymous(self.parse_members(token)?))
                 }
-                TokenType::Enum => NEWTypes::Enum(None, self.parse_enum(token)?, true),
+                TokenType::Enum => NEWTypes::Enum(None, self.parse_enum(token)?),
                 _ => unreachable!(),
             }),
             (None, None) => Err(Error::new(
@@ -410,12 +441,13 @@ impl Parser {
         let type_decl = self.matches_type()?;
         let name = self.consume(TokenKind::Ident, "Expect identifier following type")?;
 
-        self.env.declare_typedef(name.unwrap_string(), type_decl);
+        self.env
+            .declare_symbol(&name, Symbols::TypeDef(type_decl))?;
         self.consume(TokenKind::Semicolon, "Expect ';' after typedef-declaration")?;
 
         // doesnt need to generate any statements for later stages
         // because types get resolved in the parser
-        Ok(Stmt::TypeDef(name))
+        Err(Error::Indicator)
     }
     fn type_declaration(&mut self, mut type_decl: NEWTypes) -> Result<Stmt, Error> {
         let name = self.consume(
@@ -428,6 +460,9 @@ impl Parser {
         } else {
             type_decl = self.parse_arr(type_decl)?;
 
+            self.env
+                .declare_symbol(&name, Symbols::Variable(SymbolInfo::new(type_decl.clone())))?;
+
             if self.matches(vec![TokenKind::Equal]).is_some() {
                 self.var_initialization(name, type_decl)
             } else {
@@ -436,6 +471,7 @@ impl Parser {
                     TokenKind::Semicolon,
                     "Expect ';' after variable declaration",
                 )?;
+
                 Ok(Stmt::DeclareVar(type_decl, name, false))
             }
         }
@@ -694,18 +730,90 @@ impl Parser {
     }
     fn function(&mut self, return_type: NEWTypes, name: Token) -> Result<Stmt, Error> {
         if matches!(return_type, NEWTypes::Array { .. }) {
-            return Err(Error::new(&name, "function can't return array-type"));
+            return Err(Error::new(&name, "Functions can't return array-type"));
         }
+
+        self.env.create();
         let params = self.parse_params()?;
 
         if self.matches(vec![TokenKind::Semicolon]).is_some() {
-            Ok(Stmt::FunctionDeclaration(return_type, name, params))
+            self.function_declaration(return_type, name, params)
         } else {
-            self.consume(TokenKind::LeftBrace, "Expect '{' before function body.")?;
-            let body = self.block()?;
-
-            Ok(Stmt::Function(return_type, name, params, body))
+            self.function_definition(return_type, name, params)
         }
+    }
+    fn function_definition(
+        &mut self,
+        return_type: NEWTypes,
+        name: Token,
+        params: Vec<(NEWTypes, Token)>,
+    ) -> Result<Stmt, Error> {
+        self.consume(TokenKind::LeftBrace, "Expect '{' before function body.")?;
+
+        let func = Function::new(
+            return_type.clone(),
+            params.clone(),
+            FunctionKind::Definition,
+        );
+        // compare with matching symbol in symbol table
+        match self.env.get_symbol(&name) {
+            Ok(Symbols::Func(other)) => {
+                if other.clone().get_kind() == FunctionKind::Definition {
+                    return Err(Error::new(
+                        &name,
+                        &format!("Redefinition of function '{}'", name.unwrap_string()),
+                    ));
+                }
+                func.cmp(&name, &other)?;
+            }
+            Ok(Symbols::Variable(_)) | Ok(Symbols::TypeDef(..)) => {
+                return Err(Error::new(&name, "Redefinition of symbol with same name"));
+            }
+            Err(_) => {
+                self.env
+                    .declare_global_symbol(name.unwrap_string(), Symbols::Func(func));
+            }
+        }
+
+        // insert parameters into symbol table
+        for (type_decl, name) in params.iter() {
+            self.env
+                .declare_symbol(&name, Symbols::Variable(SymbolInfo::new(type_decl.clone())))?;
+        }
+
+        let body = self.block()?;
+
+        Ok(Stmt::Function(return_type, name, params, body))
+    }
+    fn function_declaration(
+        &mut self,
+        return_type: NEWTypes,
+        name: Token,
+        params: Vec<(NEWTypes, Token)>,
+    ) -> Result<Stmt, Error> {
+        let func = Function::new(
+            return_type.clone(),
+            params.clone(),
+            FunctionKind::Declaration,
+        );
+        match self.env.get_symbol(&name) {
+            Ok(Symbols::Func(other)) => {
+                func.cmp(&name, &other)?;
+            }
+            Ok(Symbols::Variable(_)) | Ok(Symbols::TypeDef(..)) => {
+                return Err(Error::new(&name, "Redefinition of symbol with same name"))
+            }
+            Err(_) => {
+                self.env
+                    .declare_global_symbol(name.unwrap_string(), Symbols::Func(func));
+            }
+        }
+
+        // declaration params have their own scope that's why we need to
+        // exit out of it
+        self.env.exit();
+
+        Ok(Stmt::FunctionDeclaration())
     }
 
     fn expression(&mut self) -> Result<Expr, Error> {
@@ -1115,6 +1223,9 @@ impl Parser {
             ));
         }
         if let Some(s) = self.matches(vec![TokenKind::Ident]) {
+            // if identifier isn't known in symbol table then error
+            self.env.get_symbol(&s)?;
+
             return Ok(Expr::new(ExprKind::Ident(s), ValueKind::Lvalue));
         }
         if let Some(s) = self.matches(vec![TokenKind::String]) {
@@ -1189,28 +1300,14 @@ impl Parser {
                         self.parse_aggregate(&token)?
                     }
                     // typedef
-                    TokenType::Ident(ref name) => match self.env.get_type(&v)? {
-                        Customs::TypeDef(t) => {
+                    TokenType::Ident(..) => {
+                        if let Symbols::TypeDef(t) = self.env.get_symbol(&v)? {
                             self.tokens.next();
                             t
+                        } else {
+                            return Err(Error::NotType(v.clone()));
                         }
-                        Customs::Aggregate(s) => {
-                            return Err(Error::new(
-                                &v,
-                                &format!(
-                                    "Must use {}-tag to refer to aggregate type {}",
-                                    s.get_kind(),
-                                    name
-                                ),
-                            ))
-                        }
-                        Customs::Enum(_) => {
-                            return Err(Error::new(
-                                &v,
-                                &format!("Must use 'enum'-tag to refer to type 'enum {}'", name),
-                            ))
-                        }
-                    },
+                    }
                     // otherwise parse primitive
                     _ => self
                         .tokens
@@ -1246,6 +1343,14 @@ impl Parser {
         self.tokens = start.into_iter().peekable();
     }
 }
+
+// fn cmp_decl(
+//     name_token: &Token,
+//     declaration: &Function,
+//     return_type: &NEWTypes,
+//     params: &Vec<(NEWTypes, Token)>,
+// ) -> Result<(), Error> {
+// }
 
 fn array_of(type_decl: NEWTypes, size: i64) -> NEWTypes {
     NEWTypes::Array {

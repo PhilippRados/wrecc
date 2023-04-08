@@ -17,16 +17,22 @@ macro_rules! convert_reg {
     };
 }
 
-pub struct Compiler<'a> {
+pub struct Compiler {
     scratch: ScratchRegisters,
     output: String,
-    env: Environment<Register>,
+    env: Scope,
     function_name: Option<String>,
+
+    func_stack_size: HashMap<String, usize>,
+
+    // index of current label
     label_index: usize,
 
-    // typechecker passes info about how many stack allocation there are in a function
-    func_stack_size: &'a HashMap<String, usize>,
-    const_labels: &'a HashMap<String, usize>,
+    // map containing Strings and their corresponding label-index
+    const_labels: HashMap<String, usize>,
+
+    // which args have to be pushed on stack before entering next function
+    // so that they don't get overwritten
     saved_args: Vec<Register>,
 
     // offset from base-pointer where variable stays
@@ -35,22 +41,23 @@ pub struct Compiler<'a> {
     // loop labels saved so that break and continue jump to them
     jump_labels: Vec<(usize, usize)>,
 }
-impl<'a> Compiler<'a> {
+impl Compiler {
     pub fn new(
-        func_stack_size: &'a HashMap<String, usize>,
-        const_labels: &'a HashMap<String, usize>,
+        func_stack_size: HashMap<String, usize>,
+        const_labels: HashMap<String, usize>,
+        env: Scope,
     ) -> Self {
         Compiler {
+            env,
+            const_labels,
+            func_stack_size,
             output: String::new(),
             scratch: ScratchRegisters::new(),
             current_bp_offset: 0,
             label_index: 0,
-            env: Environment::new(None),
             function_name: None,
             saved_args: Vec::new(),
-            const_labels,
-            func_stack_size,
-            jump_labels: vec![],
+            jump_labels: Vec::new(),
         }
     }
 
@@ -71,7 +78,7 @@ impl<'a> Compiler<'a> {
             .expect("write failed");
     }
     fn cg_const_labels(&mut self) -> Result<(), std::fmt::Error> {
-        for (data, label_index) in self.const_labels {
+        for (data, label_index) in self.const_labels.iter().by_ref() {
             writeln!(self.output, "LS{}:\n\t.string \"{}\"", label_index, data)?;
         }
         Ok(())
@@ -91,29 +98,23 @@ impl<'a> Compiler<'a> {
                 Ok(())
             }
             Stmt::DeclareVar(type_decl, name, is_global) => {
-                self.declare_var(type_decl, name.unwrap_string(), *is_global)
+                self.declare_var(type_decl, name, *is_global)
             }
             Stmt::InitVar(type_decl, name, expr, is_global) => {
                 let value_reg = self.execute_expr(expr)?;
                 self.init_var(type_decl, name, value_reg, *is_global)
             }
             Stmt::InitList(type_decl, name, exprs, is_global) => {
-                self.init_list(type_decl, name.unwrap_string(), exprs, *is_global)
+                self.init_list(type_decl, name, exprs, *is_global)
             }
-            Stmt::Block(statements) => self.block(
-                statements,
-                Environment::new(Some(Box::new(self.env.clone()))),
-            ),
-            Stmt::FunctionDeclaration(return_type, _, _) => {
-                // don't have to do anything besides insert enum constants to symbol-table
-                Ok(self
-                    .env
-                    .insert_enum_symbols(return_type, &mut vec![])
-                    .unwrap())
+            Stmt::Block(statements) => self.block(statements),
+            Stmt::FunctionDeclaration() => {
+                self.env.enter();
+                self.env.exit();
+                Ok(())
             }
-
-            Stmt::Function(return_type, name, params, body) => {
-                self.function_definition(return_type, name.unwrap_string(), params, body)
+            Stmt::Function(_, name, params, body) => {
+                self.function_definition(name.unwrap_string(), params, body)
             }
             Stmt::Return(_, expr) => self.return_statement(expr),
             Stmt::If(_, cond, then_branch, else_branch) => {
@@ -122,8 +123,6 @@ impl<'a> Compiler<'a> {
             Stmt::While(_, cond, body) => self.while_statement(cond, body),
             Stmt::Do(_, body, cond) => self.do_statement(body, cond),
             Stmt::For(_, init, cond, inc, body) => self.for_statement(init, cond, inc, body),
-            Stmt::EnumDef(t) => Ok(self.env.insert_enum_symbols(t, &mut vec![]).unwrap()),
-            Stmt::TypeDef(..) => Ok(()), // only necessary for checking redefinitions in typechecker
             Stmt::Break(..) => self.jump_statement(self.jump_labels.last().expect("typechecker").0),
             Stmt::Continue(..) => {
                 self.jump_statement(self.jump_labels.last().expect("typechecker").1)
@@ -166,20 +165,17 @@ impl<'a> Compiler<'a> {
     fn init_list(
         &mut self,
         type_decl: &NEWTypes,
-        name: String,
+        name: &Token,
         exprs: &[Expr],
         is_global: bool,
     ) -> Result<(), std::fmt::Error> {
         match is_global {
             true => {
-                writeln!(self.output, "\n\t.data\n_{}:", name)?;
+                writeln!(self.output, "\n\t.data\n_{}:", name.unwrap_string())?;
 
-                self.env
-                    .insert_enum_symbols(type_decl, &mut vec![])
-                    .unwrap();
-                self.env.declare_var(
-                    name.clone(),
-                    Register::Label(LabelRegister::Var(name, type_decl.clone())),
+                self.env.set_reg(
+                    name,
+                    Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl.clone())),
                 );
             }
             false => {
@@ -213,7 +209,7 @@ impl<'a> Compiler<'a> {
         inc: &Option<Expr>,
         body: &Stmt,
     ) -> Result<(), std::fmt::Error> {
-        self.env = Environment::new(Some(Box::new(self.env.clone())));
+        self.env.enter();
 
         let body_label = create_label(&mut self.label_index);
         let cond_label = create_label(&mut self.label_index);
@@ -257,7 +253,7 @@ impl<'a> Compiler<'a> {
 
         self.jump_labels.pop();
 
-        self.env = *self.env.enclosing.as_ref().unwrap().clone();
+        self.env.exit();
 
         Ok(())
     }
@@ -356,22 +352,20 @@ impl<'a> Compiler<'a> {
     fn declare_var(
         &mut self,
         type_decl: &NEWTypes,
-        name: String,
+        name: &Token,
         is_global: bool,
     ) -> Result<(), std::fmt::Error> {
         let type_decl = type_decl.clone();
-        self.env
-            .insert_enum_symbols(&type_decl, &mut vec![])
-            .unwrap();
 
         let reg = match is_global {
             true => {
                 writeln!(
                     self.output,
-                    "\n\t.data\n_{name}:\n\t.zero {}",
+                    "\n\t.data\n_{}:\n\t.zero {}",
+                    name.unwrap_string(),
                     type_decl.size()
                 )?;
-                Register::Label(LabelRegister::Var(name.clone(), type_decl))
+                Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl))
             }
             false => {
                 self.current_bp_offset += type_decl.size();
@@ -380,7 +374,7 @@ impl<'a> Compiler<'a> {
                 Register::Stack(StackRegister::new(self.current_bp_offset, type_decl))
             }
         };
-        self.env.declare_var(name, reg);
+        self.env.set_reg(name, reg);
         Ok(())
     }
     fn init_var(
@@ -396,24 +390,26 @@ impl<'a> Compiler<'a> {
             true => {
                 writeln!(
                     self.output,
-                    "\n\t.data\n_{name}:\n\t.{} {}",
+                    "\n\t.data\n_{}:\n\t.{} {}",
+                    name,
                     type_decl.complete_suffix(),
                     value_reg.base_name()
                 )?;
-                self.env
-                    .insert_enum_symbols(type_decl, &mut vec![])
-                    .unwrap();
 
-                self.env.declare_var(
-                    name.clone(),
+                self.env.set_reg(
+                    var_name,
                     Register::Label(LabelRegister::Var(name, type_decl.clone())),
                 );
             }
             false => {
-                self.declare_var(type_decl, name, is_global)?;
+                self.declare_var(type_decl, var_name, is_global)?;
 
                 self.cg_assign(
-                    self.env.get_symbol(var_name).unwrap().unwrap_var(),
+                    self.env
+                        .get_symbol(var_name)
+                        .unwrap()
+                        .unwrap_var()
+                        .get_reg(),
                     value_reg,
                 )?
                 .free();
@@ -424,20 +420,17 @@ impl<'a> Compiler<'a> {
     }
     fn function_definition(
         &mut self,
-        return_type: &NEWTypes,
         name: String,
         params: &[(NEWTypes, Token)],
         body: &Vec<Stmt>,
     ) -> Result<(), std::fmt::Error> {
-        self.function_name = Some(name.clone()); // save function name for return label jump
-        self.env
-            .insert_enum_symbols(return_type, &mut vec![])
-            .unwrap();
+        // save function name for return label jump
+        self.function_name = Some(name.clone());
 
         // generate function code
-        let prev_env = self.cg_func_preamble(&name, params)?;
+        self.cg_func_preamble(&name, params)?;
         self.cg_stmts(body)?;
-        self.cg_func_postamble(&name, prev_env)?;
+        self.cg_func_postamble(&name)?;
 
         self.current_bp_offset = 0;
         self.function_name = None;
@@ -468,7 +461,7 @@ impl<'a> Compiler<'a> {
         &mut self,
         name: &str,
         params: &[(NEWTypes, Token)],
-    ) -> Result<Environment<Register>, std::fmt::Error> {
+    ) -> Result<(), std::fmt::Error> {
         writeln!(self.output, "\n\t.text\n\t.globl _{}", name)?;
         writeln!(self.output, "_{}:", name)?; // generate function label
         writeln!(self.output, "\tpushq   %rbp\n\tmovq    %rsp, %rbp")?; // setup base pointer and stackpointer
@@ -476,8 +469,7 @@ impl<'a> Compiler<'a> {
         // allocate stack-space for local vars
         self.allocate_stack(name)?;
 
-        let prev = self.env.clone();
-        self.env = Environment::new(Some(Box::new(prev.clone())));
+        self.env.enter();
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
@@ -488,32 +480,22 @@ impl<'a> Compiler<'a> {
                 false,
             )?;
         }
-        Ok(prev)
+        Ok(())
     }
-    fn cg_func_postamble(
-        &mut self,
-        name: &str,
-        env: Environment<Register>,
-    ) -> Result<(), std::fmt::Error> {
+    fn cg_func_postamble(&mut self, name: &str) -> Result<(), std::fmt::Error> {
         writeln!(self.output, "{}_epilogue:", name)?;
         self.dealloc_stack(name)?;
-        self.env = env;
+        self.env.exit();
 
         writeln!(self.output, "\tpopq    %rbp\n\tret")?;
         Ok(())
     }
 
-    pub fn block(
-        &mut self,
-        statements: &Vec<Stmt>,
-        env: Environment<Register>,
-    ) -> Result<(), std::fmt::Error> {
-        self.env = env;
+    pub fn block(&mut self, statements: &Vec<Stmt>) -> Result<(), std::fmt::Error> {
+        self.env.enter();
         let result = self.cg_stmts(statements);
+        self.env.exit();
 
-        // this means assignment to vars inside block which were declared outside
-        // of the block are still apparent after block
-        self.env = *self.env.enclosing.as_ref().unwrap().clone();
         result
     }
 
@@ -555,11 +537,13 @@ impl<'a> Compiler<'a> {
                 r_expr,
                 token,
             } => self.cg_comp_assign(l_expr, token, r_expr),
-            ExprKind::Ident(name) => Ok(if let Ok(Symbols::Var(v)) = self.env.get_symbol(name) {
-                v
-            } else {
-                unreachable!()
-            }),
+            ExprKind::Ident(name) => Ok(
+                if let Ok(Symbols::Variable(v)) = self.env.get_symbol(name) {
+                    v.get_reg()
+                } else {
+                    unreachable!()
+                },
+            ),
             ExprKind::Call { callee, args, .. } => {
                 self.cg_call(callee, args, ast.type_decl.clone().unwrap())
             }

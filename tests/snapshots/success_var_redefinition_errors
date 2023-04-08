@@ -1,4 +1,4 @@
-Error: Redefinition of variable 'a'
+Error: Redefinition of symbol 'a'
 |
 9   int a = 2;
 |       ^

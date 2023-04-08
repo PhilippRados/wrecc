@@ -4,17 +4,17 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 #[derive(PartialEq, Clone)]
-enum Scope {
+enum ScopeLevel {
     Global,
-    Loop(Box<Scope>),
+    Loop(Box<ScopeLevel>),
     Function(String, NEWTypes), // function name and return type
 }
-impl Scope {
+impl ScopeLevel {
     fn get_function_type(&self, token: &Token) -> Result<&NEWTypes, Error> {
         match self {
-            Scope::Function(_, t) => Ok(t),
-            Scope::Loop(enclosing) => enclosing.get_function_type(token),
-            Scope::Global => Err(Error::new(
+            ScopeLevel::Function(_, t) => Ok(t),
+            ScopeLevel::Loop(enclosing) => enclosing.get_function_type(token),
+            ScopeLevel::Global => Err(Error::new(
                 token,
                 "Can only define return statements inside a function",
             )),
@@ -22,9 +22,9 @@ impl Scope {
     }
     fn enclosing(&mut self) {
         *self = match self {
-            Scope::Global => unreachable!("global scope doesn't have an enclosing scope"),
-            Scope::Loop(s) => *s.clone(),
-            Scope::Function(..) => Scope::Global,
+            ScopeLevel::Global => unreachable!("global scope doesn't have an enclosing scope"),
+            ScopeLevel::Loop(s) => *s.clone(),
+            ScopeLevel::Function(..) => ScopeLevel::Global,
         }
     }
 
@@ -34,19 +34,18 @@ impl Scope {
         type_decl: &NEWTypes,
     ) {
         match self {
-            Scope::Function(name, _) => {
+            ScopeLevel::Function(name, _) => {
                 *func_stack_size.get_mut(name).unwrap() += type_decl.size();
                 *func_stack_size.get_mut(name).unwrap() = align(func_stack_size[name], type_decl);
             }
-            Scope::Loop(s) => s.increment_stack_size(func_stack_size, type_decl),
-            Scope::Global => unreachable!(),
+            ScopeLevel::Loop(s) => s.increment_stack_size(func_stack_size, type_decl),
+            ScopeLevel::Global => unreachable!(),
         }
     }
 }
 pub struct TypeChecker {
-    scope: Scope,
-    env: Environment<NEWTypes>,
-    global_env: Environment<NEWTypes>,
+    scope: ScopeLevel,
+    env: Scope,
     returns_all_paths: bool,
     func_stack_size: HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
     const_labels: HashMap<String, usize>,
@@ -68,11 +67,11 @@ macro_rules! cast {
 }
 
 impl TypeChecker {
-    pub fn new() -> Self {
+    pub fn new(env: Scope) -> Self {
         TypeChecker {
-            env: Environment::new(None),
-            global_env: Environment::new(None),
-            scope: Scope::Global,
+            env,
+            // global_env: Environment::new(None),
+            scope: ScopeLevel::Global,
             returns_all_paths: false,
             func_stack_size: HashMap::new(),
             const_labels: HashMap::new(),
@@ -80,11 +79,14 @@ impl TypeChecker {
         }
     }
     pub fn check(
-        &mut self,
+        mut self,
         statements: &mut Vec<Stmt>,
-    ) -> Option<(&HashMap<String, usize>, &HashMap<String, usize>)> {
+    ) -> Option<(HashMap<String, usize>, HashMap<String, usize>, Scope)> {
         match self.check_statements(statements) {
-            Ok(_) => Some((&self.func_stack_size, &self.const_labels)),
+            Ok(_) => {
+                self.env.reset_current();
+                Some((self.func_stack_size, self.const_labels, self.env))
+            }
             Err(_) => None,
         }
     }
@@ -113,18 +115,17 @@ impl TypeChecker {
             Stmt::Function(return_type, name, params, body) => {
                 self.function_definition(return_type, name, params.clone(), body)
             }
-            Stmt::FunctionDeclaration(return_type, name, params) => {
-                self.function_declaration(return_type, name, params)
+            Stmt::FunctionDeclaration() => {
+                self.env.enter();
+                self.env.exit();
+                Ok(())
             }
             Stmt::Return(keyword, ref mut value) => self.return_statement(keyword, value),
             Stmt::Expr(ref mut expr) => match self.expr_type(expr) {
                 Ok(_) => Ok(()),
                 Err(e) => Err(e),
             },
-            Stmt::Block(statements) => self.block(
-                statements,
-                Environment::new(Some(Box::new(self.env.clone()))),
-            ),
+            Stmt::Block(statements) => self.block(statements),
             Stmt::If(keyword, ref mut cond, then_branch, else_branch) => {
                 self.if_statement(keyword, cond, then_branch, else_branch)
             }
@@ -135,8 +136,8 @@ impl TypeChecker {
             Stmt::For(left_paren, init, ref mut cond, inc, body) => {
                 self.for_statement(left_paren, init, cond, inc, body)
             }
-            Stmt::EnumDef(t) => self.env.insert_enum_symbols(t, &mut vec![]),
-            Stmt::TypeDef(name) => self.typedef(name),
+            // Stmt::EnumDef(t) => self.env.insert_enum_symbols(t, &mut vec![]),
+            // Stmt::TypeDef(name) => self.typedef(name),
             Stmt::Break(keyword) => self.break_statement(keyword),
             Stmt::Continue(keyword) => self.continue_statement(keyword),
         }
@@ -147,7 +148,7 @@ impl TypeChecker {
         body: &mut Stmt,
         cond: &mut Expr,
     ) -> Result<(), Error> {
-        self.scope = Scope::Loop(Box::new(self.scope.clone()));
+        self.scope = ScopeLevel::Loop(Box::new(self.scope.clone()));
         self.visit(body)?;
         self.scope.enclosing();
 
@@ -171,15 +172,8 @@ impl TypeChecker {
         inc: &mut Option<Expr>,
         body: &mut Stmt,
     ) -> Result<(), Error> {
-        // emulate:
-        // {
-        //     init
-        //     cond {
-        //         body
-        //     }
-        //     inc
-        // }
-        self.env = Environment::new(Some(Box::new(self.env.clone())));
+        // self.env = Environment::new(Some(Box::new(self.env.clone())));
+        self.env.enter();
 
         if let Some(init) = init {
             self.visit(&mut *init)?;
@@ -194,7 +188,7 @@ impl TypeChecker {
             }
         }
 
-        self.scope = Scope::Loop(Box::new(self.scope.clone()));
+        self.scope = ScopeLevel::Loop(Box::new(self.scope.clone()));
         self.visit(body)?;
 
         if let Some(inc) = inc {
@@ -203,20 +197,21 @@ impl TypeChecker {
 
         self.scope.enclosing();
 
-        self.env = *self.env.enclosing.as_ref().unwrap().clone();
+        self.env.exit();
+        // self.env = *self.env.enclosing.as_ref().unwrap().clone();
 
         self.returns_all_paths = false;
         Ok(())
     }
     fn break_statement(&mut self, token: &Token) -> Result<(), Error> {
-        if matches!(self.scope, Scope::Loop(..)) {
+        if matches!(self.scope, ScopeLevel::Loop(..)) {
             Ok(())
         } else {
             Err(Error::new(token, "'break' statement must be inside loop"))
         }
     }
     fn continue_statement(&mut self, token: &Token) -> Result<(), Error> {
-        if matches!(self.scope, Scope::Loop(..)) {
+        if matches!(self.scope, ScopeLevel::Loop(..)) {
             Ok(())
         } else {
             Err(Error::new(
@@ -226,16 +221,16 @@ impl TypeChecker {
         }
     }
 
-    fn typedef(&mut self, name: &Token) -> Result<(), Error> {
-        if self.env.current.symbols.contains_key(&name.unwrap_string()) {
-            return Err(Error::new(
-                &name,
-                &format!("Redefinition of '{}'", name.unwrap_string()),
-            ));
-        }
-        self.env.declare_type(name.unwrap_string());
-        Ok(())
-    }
+    // fn typedef(&mut self, name: &Token) -> Result<(), Error> {
+    //     if self.env.current.symbols.contains_key(&name.unwrap_string()) {
+    //         return Err(Error::new(
+    //             &name,
+    //             &format!("Redefinition of '{}'", name.unwrap_string()),
+    //         ));
+    //     }
+    //     self.env.declare_type(name.unwrap_string());
+    //     Ok(())
+    // }
     fn while_statement(
         &mut self,
         left_paren: &Token,
@@ -250,7 +245,7 @@ impl TypeChecker {
             ));
         }
 
-        self.scope = Scope::Loop(Box::new(self.scope.clone()));
+        self.scope = ScopeLevel::Loop(Box::new(self.scope.clone()));
         self.visit(body)?;
         self.scope.enclosing();
 
@@ -263,21 +258,15 @@ impl TypeChecker {
         var_name: &Token,
         is_global: &mut bool,
     ) -> Result<(), Error> {
-        let name = var_name.unwrap_string();
+        // let name = var_name.unwrap_string();
 
-        if self.env.current.symbols.contains_key(&name) {
-            return Err(Error::new(
-                var_name,
-                &format!("Redefinition of symbol '{}'", var_name.unwrap_string()),
-            ));
-        }
         if type_decl.is_void() {
             return Err(Error::new(
                 var_name,
                 &format!("Can't assign to 'void' {}", var_name.unwrap_string()),
             ));
         }
-        self.env.insert_enum_symbols(type_decl, &mut vec![])?;
+        // self.env.insert_enum_symbols(type_decl, &mut vec![])?;
 
         if self.is_global() {
             *is_global = true;
@@ -285,7 +274,7 @@ impl TypeChecker {
             self.scope
                 .increment_stack_size(&mut self.func_stack_size, type_decl);
         }
-        self.env.declare_var(name, type_decl.clone());
+        // self.env.declare_var(name, type_decl.clone());
         Ok(())
     }
     fn check_type_compatibility(
@@ -310,15 +299,15 @@ impl TypeChecker {
         exprs: &mut [Expr],
         is_global: &mut bool,
     ) -> Result<(), Error> {
-        let name = var_name.unwrap_string();
-        if self.env.current.symbols.contains_key(&name) {
-            return Err(Error::new(
-                var_name,
-                &format!("Redefinition of symbol '{}'", name),
-            ));
-        }
-        self.env.insert_enum_symbols(type_decl, &mut vec![])?;
-        self.env.init_var(name, type_decl.clone());
+        // let name = var_name.unwrap_string();
+        // if self.env.current.symbols.contains_key(&name) {
+        //     return Err(Error::new(
+        //         var_name,
+        //         &format!("Redefinition of symbol '{}'", name),
+        //     ));
+        // }
+        // self.env.insert_enum_symbols(type_decl, &mut vec![])?;
+        // self.env.init_var(name, type_decl.clone());
 
         // then type-check all assigns
         let mut types = vec![];
@@ -353,18 +342,18 @@ impl TypeChecker {
         expr: &mut Expr,
         is_global: &mut bool,
     ) -> Result<(), Error> {
-        self.env.insert_enum_symbols(type_decl, &mut vec![])?;
+        // self.env.insert_enum_symbols(type_decl, &mut vec![])?;
 
-        let name = var_name.unwrap_string();
+        // let name = var_name.unwrap_string();
         let mut value_type = self.expr_type(expr)?;
         *is_global = self.is_global();
 
-        if self.env.current.symbols.contains_key(&name) {
-            return Err(Error::new(
-                var_name,
-                &format!("Redefinition of variable '{}'", name),
-            ));
-        }
+        // if self.env.current.symbols.contains_key(&name) {
+        //     return Err(Error::new(
+        //         var_name,
+        //         &format!("Redefinition of variable '{}'", name),
+        //     ));
+        // }
 
         crate::arr_decay!(value_type, expr, var_name, *is_global);
         self.check_type_compatibility(var_name, type_decl, &value_type)?;
@@ -381,7 +370,7 @@ impl TypeChecker {
             self.scope
                 .increment_stack_size(&mut self.func_stack_size, type_decl);
         }
-        self.env.init_var(name, type_decl.clone());
+        // self.env.init_var(name, type_decl.clone());
 
         Ok(())
     }
@@ -459,41 +448,42 @@ impl TypeChecker {
         }
         Ok(())
     }
-    fn function_declaration(
-        &mut self,
-        return_type: &mut NEWTypes,
-        name_token: &Token,
-        params: &Vec<(NEWTypes, Token)>,
-    ) -> Result<(), Error> {
-        self.env.insert_enum_symbols(return_type, &mut vec![])?;
+    // fn function_declaration(
+    //     &mut self,
+    //     return_type: &mut NEWTypes,
+    //     name_token: &Token,
+    //     params: &Vec<(NEWTypes, Token)>,
+    // ) -> Result<(), Error> {
+    // self.env.insert_enum_symbols(return_type, &mut vec![])?;
 
-        match self.global_env.get_symbol(name_token) {
-            Ok(Symbols::FuncDecl(f)) => {
-                self.cmp_decl(name_token, &f, return_type, params)?;
-                self.global_env.declare_func(
-                    return_type.clone(),
-                    &name_token.unwrap_string(),
-                    params.clone(),
-                    FunctionKind::Declaration,
-                );
-                Ok(())
-            }
-            Ok(Symbols::FuncDef(f)) => self.cmp_decl(name_token, &f, return_type, params),
-            Ok(Symbols::Var(_)) | Ok(Symbols::TypeDef) => Err(Error::new(
-                name_token,
-                "Redefintion of symbol with same name",
-            )),
-            Err(_) => {
-                self.global_env.declare_func(
-                    return_type.clone(),
-                    &name_token.unwrap_string(),
-                    params.clone(),
-                    FunctionKind::Declaration,
-                );
-                Ok(())
-            }
-        }
-    }
+    // match self.global_env.get_symbol(name_token) {
+    //     Ok(Symbols::FuncDecl(f)) => {
+    //         self.cmp_decl(name_token, &f, return_type, params)?;
+    //         self.global_env.declare_func(
+    //             return_type.clone(),
+    //             &name_token.unwrap_string(),
+    //             params.clone(),
+    //             FunctionKind::Declaration,
+    //         );
+    //         Ok(())
+    //     }
+    //     Ok(Symbols::FuncDef(f)) => self.cmp_decl(name_token, &f, return_type, params),
+    //     Ok(Symbols::Var(_)) | Ok(Symbols::TypeDef) => Err(Error::new(
+    //         name_token,
+    //         "Redefintion of symbol with same name",
+    //     )),
+    //     Err(_) => {
+    //         self.global_env.declare_func(
+    //             return_type.clone(),
+    //             &name_token.unwrap_string(),
+    //             params.clone(),
+    //             FunctionKind::Declaration,
+    //         );
+    //         Ok(())
+    //     }
+    // }
+    //     Ok(())
+    // }
     fn function_definition(
         &mut self,
         return_type: &mut NEWTypes,
@@ -507,45 +497,19 @@ impl TypeChecker {
                 "Can only define functions in global scope",
             ));
         }
-        self.env.insert_enum_symbols(return_type, &mut vec![])?;
-
         let name = name_token.unwrap_string();
 
-        match self.global_env.get_symbol(name_token) {
-            Ok(Symbols::FuncDef(_)) => {
-                return Err(Error::new(
-                    name_token,
-                    &format!("Redefinition of function '{}'", name),
-                ))
-            }
-            Ok(Symbols::FuncDecl(f)) => self.cmp_decl(name_token, &f, return_type, &params)?,
-            _ => self.global_env.declare_func(
-                return_type.clone(),
-                &name,
-                params.clone(),
-                FunctionKind::Definition,
-            ),
-        }
-
         // have to push scope before declaring local variables
-        self.scope = Scope::Function(name.clone(), return_type.clone());
-        let mut env = Environment::new(Some(Box::new(self.env.clone()))); // create new scope for function body
-
-        // initialize stack size for current function-scope
+        self.scope = ScopeLevel::Function(name.clone(), return_type.clone());
         self.func_stack_size.insert(name.clone(), 0);
-        for (type_decl, name) in params.iter().by_ref() {
-            env.insert_enum_symbols(type_decl, &mut vec![])?;
-
-            // add params to stack-size
+        for (type_decl, _) in params.iter().by_ref() {
             self.scope
                 .increment_stack_size(&mut self.func_stack_size, type_decl);
-
-            // initialize params in local scope
-            env.init_var(name.unwrap_string(), type_decl.clone())
         }
+
         // check function body
-        let err = self.block(body, env);
-        self.scope = Scope::Global;
+        let err = self.block(body);
+        self.scope = ScopeLevel::Global;
 
         if let Err(e) = err {
             return Err(e);
@@ -560,7 +524,7 @@ impl TypeChecker {
         if !return_type.is_void() && !self.returns_all_paths {
             Err(Error::new(
                 name_token,
-                "non-void function doesnt return in all code paths",
+                "Non-void function doesnt return in all code paths",
             ))
         } else {
             self.returns_all_paths = false;
@@ -572,7 +536,7 @@ impl TypeChecker {
             Err(Error::new(
                 name_token,
                 &format!(
-                    "expected 'main()' return type 'int', found: '{}'",
+                    "Expected 'main' return type 'int', found: '{}'",
                     *return_type
                 ),
             ))
@@ -588,36 +552,6 @@ impl TypeChecker {
                 name_token.clone(),
                 Some(Expr::new(ExprKind::Number(0), ValueKind::Rvalue)),
             ));
-        }
-    }
-    fn cmp_decl(
-        &self,
-        name_token: &Token,
-        declaration: &Function,
-        return_type: &NEWTypes,
-        params: &Vec<(NEWTypes, Token)>,
-    ) -> Result<(), Error> {
-        if declaration.return_type != *return_type {
-            Err(Error::new(
-                name_token,
-                &format!(
-                    "Conflicting return-types in function-declarations: expected {}, found {}",
-                    declaration.return_type, return_type
-                ),
-            ))
-        } else if declaration.arity() != params.len() {
-            Err(Error::new(name_token,
-                &format!("Mismatched number of parameters in function-declarations: expected {}, found {}",
-                    declaration.arity(),params.len())))
-        } else {
-            for (i, (types, token)) in params.iter().enumerate() {
-                if *types != declaration.params[i].0 {
-                    return Err(Error::new(token,
-                        &format!("Mismatched parameter-types in function-declarations: expected '{}', found '{}'",
-                            declaration.params[i].0,types)));
-                }
-            }
-            Ok(())
         }
     }
     fn return_statement(&mut self, keyword: &Token, expr: &mut Option<Expr>) -> Result<(), Error> {
@@ -770,8 +704,8 @@ impl TypeChecker {
     }
     fn ident(&mut self, token: &Token) -> Result<NEWTypes, Error> {
         match self.env.get_symbol(token)? {
-            Symbols::Var(v) => Ok(v),
-            Symbols::TypeDef | Symbols::FuncDef(..) | Symbols::FuncDecl(..) => Err(Error::new(
+            Symbols::Variable(v) => Ok(v.get_type()),
+            Symbols::TypeDef(..) | Symbols::Func(..) => Err(Error::new(
                 token,
                 &format!(
                     "Symbol '{}' doesn't exist as variable",
@@ -919,19 +853,19 @@ impl TypeChecker {
             arg_types.push(t);
         }
 
-        match self.global_env.get_symbol(func_name) {
-            Err(_) => Err(Error::new(
-                left_paren,
-                &format!("No function '{}' exists", func_name.unwrap_string()),
-            )),
-            Ok(Symbols::Var(_)) | Ok(Symbols::TypeDef) => Err(Error::new(
+        match self.env.get_symbol(func_name).unwrap() {
+            Symbols::Variable(_) | Symbols::TypeDef(..) => Err(Error::new(
                 left_paren,
                 &format!("Symbol '{}' already exists", func_name.unwrap_string()),
             )),
-            Ok(Symbols::FuncDecl(function)) | Ok(Symbols::FuncDef(function)) => {
+            Symbols::Func(function) => {
                 if function.arity() == args.len() {
-                    self.args_and_params_match(left_paren, &function.params, arg_types)?;
-                    Ok(function.return_type)
+                    self.args_and_params_match(
+                        left_paren,
+                        &function.clone().get_params(),
+                        arg_types,
+                    )?;
+                    Ok(function.get_return_type())
                 } else {
                     Err(Error::new(
                         left_paren,
@@ -957,11 +891,11 @@ impl TypeChecker {
         }
         Ok(())
     }
-    fn block(&mut self, body: &mut Vec<Stmt>, env: Environment<NEWTypes>) -> Result<(), Error> {
-        self.env = env;
+    fn block(&mut self, body: &mut Vec<Stmt>) -> Result<(), Error> {
+        self.env.enter();
         let result = self.check_statements(body);
 
-        self.env = *self.env.enclosing.as_ref().unwrap().clone();
+        self.env.exit();
         result
     }
 
@@ -1190,7 +1124,7 @@ impl TypeChecker {
         }
     }
     fn is_global(&self) -> bool {
-        self.scope == Scope::Global
+        self.scope == ScopeLevel::Global
     }
 }
 

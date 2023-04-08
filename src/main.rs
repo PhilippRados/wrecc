@@ -35,18 +35,18 @@ fn main() {
     };
 
     // Parse statements
-    let mut statements = match Parser::new(tokens).parse() {
+    let (mut statements, env) = match Parser::new(tokens).parse() {
         Some(s) => s,
         None => return,
     };
 
     // Check for errors
-    let mut typechecker = TypeChecker::new();
-    let (func_stack, const_labels) = match typechecker.check(&mut statements) {
+    let typechecker = TypeChecker::new(env);
+    let (func_stack, const_labels, env) = match typechecker.check(&mut statements) {
         Some(result) => result,
         None => return,
     };
 
     // generate x8664 assembly
-    Compiler::new(func_stack, const_labels).compile(&statements);
+    Compiler::new(func_stack, const_labels, env).compile(&statements);
 }

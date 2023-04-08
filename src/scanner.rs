@@ -351,7 +351,7 @@ impl<'a> Scanner<'a> {
             })
             .collect::<String>();
         if last_char != '"' {
-            return Err(Error::new_scan_error(self, "Unterminated String"));
+            return Err(Error::new_scan_error(self, "Unterminated string"));
         }
 
         Ok(result)
@@ -699,7 +699,8 @@ mod tests {
             line_index: 1,
             column: 13,
             line_string: "char some = '12'".to_string(),
-            msg: "char literal must contain single character".to_string(),
+            msg: "Character literal must contain single character enclosed by single quotes ('')"
+                .to_string(),
         })];
         assert_eq!(result, expected);
     }

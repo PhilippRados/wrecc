@@ -30,9 +30,7 @@ pub enum NEWTypes {
     Struct(StructInfo),
     Union(StructInfo),
 
-    // the boolean is an indicator for the typechecker and codegenerator
-    //whether or not the current enum members should be inserted into the symbol table
-    Enum(Option<String>, Vec<(Token, i32)>, bool),
+    Enum(Option<String>, Vec<(Token, i32)>),
 }
 
 pub trait EnumValue<T> {
@@ -87,7 +85,7 @@ mod struct_ref {
         pub(crate) fn update(&self, members: Vec<(NEWTypes, Token)>) {
             IS_COMPLETE.with(|list| {
                 let mut types = list.borrow_mut();
-                types[self.index] = true.into();
+                types[self.index] = true;
             });
             CUSTOMS.with(|list| {
                 let mut types = list.borrow_mut();

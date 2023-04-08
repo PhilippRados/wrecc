@@ -1,5 +1,4 @@
 use crate::common::{expr::Expr, token::Token, types::NEWTypes};
-use std::fmt::Display;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Stmt {
@@ -20,11 +19,8 @@ pub enum Stmt {
         Box<Stmt>,
     ),
     Function(NEWTypes, Token, Vec<(NEWTypes, Token)>, Vec<Stmt>),
-    FunctionDeclaration(NEWTypes, Token, Vec<(NEWTypes, Token)>),
+    FunctionDeclaration(),
     Return(Token, Option<Expr>),
     Break(Token),
     Continue(Token),
-    // insert typedef names and enum constants into same namespace used by idents
-    EnumDef(NEWTypes),
-    TypeDef(Token),
 }

@@ -1,4 +1,4 @@
-void printf(char* f,int d, int d);
+void printf(char* f,int d, int d2);
 
 struct Emp {
   int age;

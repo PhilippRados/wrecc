@@ -723,8 +723,14 @@ impl Parser {
             if let NEWTypes::Array { of, .. } = param_type {
                 param_type = NEWTypes::Pointer(of);
             }
+            // insert parameters into symbol table
+            self.env.declare_symbol(
+                &name,
+                Symbols::Variable(SymbolInfo::new(param_type.clone(), false)),
+            )?;
 
             params.push((param_type, name));
+
             if self.matches(vec![TokenKind::Comma]).is_none() {
                 break;
             }
@@ -787,14 +793,6 @@ impl Parser {
                 self.env
                     .declare_global_symbol(name.unwrap_string(), Symbols::Func(func));
             }
-        }
-
-        // insert parameters into symbol table
-        for (type_decl, name) in params.iter() {
-            self.env.declare_symbol(
-                &name,
-                Symbols::Variable(SymbolInfo::new(type_decl.clone(), false)),
-            )?;
         }
 
         let body = self.block()?;

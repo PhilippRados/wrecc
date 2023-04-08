@@ -3,10 +3,9 @@ use crate::common::{expr::Expr, token::Token, types::NEWTypes};
 #[derive(PartialEq, Clone, Debug)]
 pub enum Stmt {
     Expr(Expr),
-    // bool indicates if global declaration or not
-    DeclareVar(NEWTypes, Token, bool),
-    InitVar(NEWTypes, Token, Expr, bool),
-    InitList(NEWTypes, Token, Vec<Expr>, bool),
+    DeclareVar(NEWTypes, Token),
+    InitVar(NEWTypes, Token, Expr),
+    InitList(NEWTypes, Token, Vec<Expr>),
     Block(Vec<Stmt>),
     If(Token, Expr, Box<Stmt>, Box<Option<Stmt>>),
     While(Token, Expr, Box<Stmt>),

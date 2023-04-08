@@ -97,16 +97,12 @@ impl Compiler {
                 self.execute_expr(expr)?.free(); // result isn't used
                 Ok(())
             }
-            Stmt::DeclareVar(type_decl, name, is_global) => {
-                self.declare_var(type_decl, name, *is_global)
-            }
-            Stmt::InitVar(type_decl, name, expr, is_global) => {
+            Stmt::DeclareVar(type_decl, name) => self.declare_var(type_decl, name),
+            Stmt::InitVar(type_decl, name, expr) => {
                 let value_reg = self.execute_expr(expr)?;
-                self.init_var(type_decl, name, value_reg, *is_global)
+                self.init_var(type_decl, name, value_reg)
             }
-            Stmt::InitList(type_decl, name, exprs, is_global) => {
-                self.init_list(type_decl, name, exprs, *is_global)
-            }
+            Stmt::InitList(type_decl, name, exprs) => self.init_list(type_decl, name, exprs),
             Stmt::Block(statements) => self.block(statements),
             Stmt::FunctionDeclaration() => {
                 self.env.enter();
@@ -167,9 +163,8 @@ impl Compiler {
         type_decl: &NEWTypes,
         name: &Token,
         exprs: &[Expr],
-        is_global: bool,
     ) -> Result<(), std::fmt::Error> {
-        match is_global {
+        match self.env.get_symbol(name).unwrap().is_global() {
             true => {
                 writeln!(self.output, "\n\t.data\n_{}:", name.unwrap_string())?;
 
@@ -179,9 +174,10 @@ impl Compiler {
                 );
             }
             false => {
-                self.declare_var(type_decl, name, is_global)?;
+                self.declare_var(type_decl, name)?;
             }
         }
+        let is_global = self.env.get_symbol(name).unwrap().is_global();
         for e in exprs.iter() {
             match (is_global, &e.kind) {
                 // init-list is assignment syntax sugar
@@ -349,15 +345,10 @@ impl Compiler {
             None => writeln!(self.output, "\tjmp    {}", function_epilogue),
         }
     }
-    fn declare_var(
-        &mut self,
-        type_decl: &NEWTypes,
-        name: &Token,
-        is_global: bool,
-    ) -> Result<(), std::fmt::Error> {
+    fn declare_var(&mut self, type_decl: &NEWTypes, name: &Token) -> Result<(), std::fmt::Error> {
         let type_decl = type_decl.clone();
 
-        let reg = match is_global {
+        let reg = match self.env.get_symbol(name).unwrap().is_global() {
             true => {
                 writeln!(
                     self.output,
@@ -382,11 +373,10 @@ impl Compiler {
         type_decl: &NEWTypes,
         var_name: &Token,
         value_reg: Register,
-        is_global: bool,
     ) -> Result<(), std::fmt::Error> {
         let name = var_name.unwrap_string();
 
-        match is_global {
+        match self.env.get_symbol(var_name).unwrap().is_global() {
             true => {
                 writeln!(
                     self.output,
@@ -402,7 +392,7 @@ impl Compiler {
                 );
             }
             false => {
-                self.declare_var(type_decl, var_name, is_global)?;
+                self.declare_var(type_decl, var_name)?;
 
                 self.cg_assign(
                     self.env
@@ -473,12 +463,7 @@ impl Compiler {
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
-            self.init_var(
-                type_decl,
-                param_name,
-                Register::Arg(i, type_decl.clone()),
-                false,
-            )?;
+            self.init_var(type_decl, param_name, Register::Arg(i, type_decl.clone()))?;
         }
         Ok(())
     }
@@ -1174,6 +1159,7 @@ impl Compiler {
         is_global: bool,
         free: bool,
     ) -> Result<Register, std::fmt::Error> {
+        // TODO: check if is_global is necessary
         if is_global && matches!(reg, Register::Label(..)) {
             return Ok(reg);
         }

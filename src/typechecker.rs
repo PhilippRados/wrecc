@@ -103,14 +103,10 @@ impl TypeChecker {
     }
     fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
         match statement {
-            Stmt::DeclareVar(type_decl, var_name, is_global) => {
-                self.declare_var(type_decl, var_name, is_global)
-            }
-            Stmt::InitVar(type_decl, name, ref mut expr, is_global) => {
-                self.init_var(type_decl, name, expr, is_global)
-            }
-            Stmt::InitList(type_decl, var_name, exprs, is_global) => {
-                self.init_list(type_decl, var_name, exprs, is_global)
+            Stmt::DeclareVar(type_decl, var_name) => self.declare_var(type_decl, var_name),
+            Stmt::InitVar(type_decl, name, ref mut expr) => self.init_var(type_decl, name, expr),
+            Stmt::InitList(type_decl, var_name, exprs) => {
+                self.init_list(type_decl, var_name, exprs)
             }
             Stmt::Function(return_type, name, params, body) => {
                 self.function_definition(return_type, name, params.clone(), body)
@@ -252,29 +248,19 @@ impl TypeChecker {
         self.returns_all_paths = false;
         Ok(())
     }
-    fn declare_var(
-        &mut self,
-        type_decl: &mut NEWTypes,
-        var_name: &Token,
-        is_global: &mut bool,
-    ) -> Result<(), Error> {
-        // let name = var_name.unwrap_string();
-
+    fn declare_var(&mut self, type_decl: &mut NEWTypes, var_name: &Token) -> Result<(), Error> {
         if type_decl.is_void() {
             return Err(Error::new(
                 var_name,
                 &format!("Can't assign to 'void' {}", var_name.unwrap_string()),
             ));
         }
-        // self.env.insert_enum_symbols(type_decl, &mut vec![])?;
 
-        if self.is_global() {
-            *is_global = true;
-        } else {
+        if !self.env.get_symbol(var_name).unwrap().is_global() {
             self.scope
                 .increment_stack_size(&mut self.func_stack_size, type_decl);
         }
-        // self.env.declare_var(name, type_decl.clone());
+
         Ok(())
     }
     fn check_type_compatibility(
@@ -297,24 +283,14 @@ impl TypeChecker {
         type_decl: &mut NEWTypes,
         var_name: &Token,
         exprs: &mut [Expr],
-        is_global: &mut bool,
     ) -> Result<(), Error> {
-        // let name = var_name.unwrap_string();
-        // if self.env.current.symbols.contains_key(&name) {
-        //     return Err(Error::new(
-        //         var_name,
-        //         &format!("Redefinition of symbol '{}'", name),
-        //     ));
-        // }
-        // self.env.insert_enum_symbols(type_decl, &mut vec![])?;
-        // self.env.init_var(name, type_decl.clone());
-
-        // then type-check all assigns
+        // type-check all assigns
         let mut types = vec![];
         for e in exprs.iter_mut() {
             types.push(self.expr_type(e)?);
         }
-        if self.is_global() {
+        // check if every expression is constant if global
+        if self.env.get_symbol(var_name).unwrap().is_global() {
             for e in exprs.iter().by_ref() {
                 if let ExprKind::Assign { r_expr, .. } = &e.kind {
                     if !is_constant(r_expr) {
@@ -327,7 +303,6 @@ impl TypeChecker {
                     unreachable!()
                 }
             }
-            *is_global = true;
         } else {
             self.scope
                 .increment_stack_size(&mut self.func_stack_size, type_decl);
@@ -340,26 +315,15 @@ impl TypeChecker {
         type_decl: &mut NEWTypes,
         var_name: &Token,
         expr: &mut Expr,
-        is_global: &mut bool,
     ) -> Result<(), Error> {
-        // self.env.insert_enum_symbols(type_decl, &mut vec![])?;
-
-        // let name = var_name.unwrap_string();
         let mut value_type = self.expr_type(expr)?;
-        *is_global = self.is_global();
+        let is_global = self.env.get_symbol(var_name).unwrap().is_global();
 
-        // if self.env.current.symbols.contains_key(&name) {
-        //     return Err(Error::new(
-        //         var_name,
-        //         &format!("Redefinition of variable '{}'", name),
-        //     ));
-        // }
-
-        crate::arr_decay!(value_type, expr, var_name, *is_global);
+        crate::arr_decay!(value_type, expr, var_name, is_global);
         self.check_type_compatibility(var_name, type_decl, &value_type)?;
         self.maybe_cast(type_decl, &value_type, expr);
 
-        if *is_global {
+        if is_global {
             if !is_constant(expr) {
                 return Err(Error::new(
                     var_name,
@@ -370,7 +334,6 @@ impl TypeChecker {
             self.scope
                 .increment_stack_size(&mut self.func_stack_size, type_decl);
         }
-        // self.env.init_var(name, type_decl.clone());
 
         Ok(())
     }
@@ -448,42 +411,6 @@ impl TypeChecker {
         }
         Ok(())
     }
-    // fn function_declaration(
-    //     &mut self,
-    //     return_type: &mut NEWTypes,
-    //     name_token: &Token,
-    //     params: &Vec<(NEWTypes, Token)>,
-    // ) -> Result<(), Error> {
-    // self.env.insert_enum_symbols(return_type, &mut vec![])?;
-
-    // match self.global_env.get_symbol(name_token) {
-    //     Ok(Symbols::FuncDecl(f)) => {
-    //         self.cmp_decl(name_token, &f, return_type, params)?;
-    //         self.global_env.declare_func(
-    //             return_type.clone(),
-    //             &name_token.unwrap_string(),
-    //             params.clone(),
-    //             FunctionKind::Declaration,
-    //         );
-    //         Ok(())
-    //     }
-    //     Ok(Symbols::FuncDef(f)) => self.cmp_decl(name_token, &f, return_type, params),
-    //     Ok(Symbols::Var(_)) | Ok(Symbols::TypeDef) => Err(Error::new(
-    //         name_token,
-    //         "Redefintion of symbol with same name",
-    //     )),
-    //     Err(_) => {
-    //         self.global_env.declare_func(
-    //             return_type.clone(),
-    //             &name_token.unwrap_string(),
-    //             params.clone(),
-    //             FunctionKind::Declaration,
-    //         );
-    //         Ok(())
-    //     }
-    // }
-    //     Ok(())
-    // }
     fn function_definition(
         &mut self,
         return_type: &mut NEWTypes,
@@ -491,12 +418,6 @@ impl TypeChecker {
         params: Vec<(NEWTypes, Token)>,
         body: &mut Vec<Stmt>,
     ) -> Result<(), Error> {
-        if !self.is_global() {
-            return Err(Error::new(
-                name_token,
-                "Can only define functions in global scope",
-            ));
-        }
         let name = name_token.unwrap_string();
 
         // have to push scope before declaring local variables
@@ -817,7 +738,7 @@ impl TypeChecker {
         if matches!(l_type, NEWTypes::Array { .. }) {
             return Err(Error::new(
                 token,
-                &format!("array {} is not assignable", l_type),
+                &format!("Array {} is not assignable", l_type),
             ));
         }
 
@@ -841,7 +762,7 @@ impl TypeChecker {
     ) -> Result<NEWTypes, Error> {
         let func_name = match &callee.kind {
             ExprKind::Ident(func_name) => func_name,
-            _ => return Err(Error::new(left_paren, "function-name has to be identifier")),
+            _ => return Err(Error::new(left_paren, "Function-name has to be identifier")),
         };
 
         let mut arg_types: Vec<NEWTypes> = Vec::new();

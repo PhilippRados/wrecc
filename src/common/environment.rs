@@ -78,12 +78,16 @@ pub struct SymbolInfo {
     // optional because info isn't known at moment of insertion
     // stack-register that identifier resides in
     pub reg: Option<Register>,
+
+    // wether or not symbol was declared in global scope
+    pub is_global: bool,
 }
 
 impl SymbolInfo {
-    pub fn new(type_decl: NEWTypes) -> Self {
+    pub fn new(type_decl: NEWTypes, is_global: bool) -> Self {
         SymbolInfo {
             type_decl,
+            is_global,
             reg: None,
         }
     }
@@ -99,6 +103,7 @@ impl SymbolInfo {
 }
 #[derive(Clone, PartialEq, Debug)]
 pub enum Symbols {
+    // also includes enum-constants
     Variable(SymbolInfo),
     TypeDef(NEWTypes),
     Func(Function),
@@ -108,6 +113,12 @@ impl Symbols {
         match self {
             Symbols::Variable(s) => s,
             _ => unreachable!("cant unwrap var on func"),
+        }
+    }
+    pub fn is_global(&self) -> bool {
+        match self {
+            Symbols::Variable(SymbolInfo { is_global, .. }) => *is_global,
+            _ => unreachable!(),
         }
     }
 }
@@ -166,6 +177,9 @@ impl Scope {
     }
     pub fn reset_current(&mut self) {
         self.current = 0;
+    }
+    pub fn is_global(&self) -> bool {
+        self.current == 0
     }
     pub fn create(&mut self) {
         let new = Environment::new(Some(self.current));

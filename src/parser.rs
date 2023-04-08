@@ -308,6 +308,7 @@ impl Parser {
                         index as usize,
                         NEWTypes::Primitive(Types::Int),
                     )),
+                    is_global: self.env.is_global(),
                 }),
             )?;
 
@@ -460,8 +461,10 @@ impl Parser {
         } else {
             type_decl = self.parse_arr(type_decl)?;
 
-            self.env
-                .declare_symbol(&name, Symbols::Variable(SymbolInfo::new(type_decl.clone())))?;
+            self.env.declare_symbol(
+                &name,
+                Symbols::Variable(SymbolInfo::new(type_decl.clone(), self.env.is_global())),
+            )?;
 
             if self.matches(vec![TokenKind::Equal]).is_some() {
                 self.var_initialization(name, type_decl)
@@ -472,7 +475,7 @@ impl Parser {
                     "Expect ';' after variable declaration",
                 )?;
 
-                Ok(Stmt::DeclareVar(type_decl, name, false))
+                Ok(Stmt::DeclareVar(type_decl, name))
             }
         }
     }
@@ -488,13 +491,13 @@ impl Parser {
                 );
 
                 self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
-                Ok(Stmt::InitList(type_decl, name, assign_sugar, false))
+                Ok(Stmt::InitList(type_decl, name, assign_sugar))
             }
             None => {
                 let r_value = self.expression()?;
 
                 self.consume(TokenKind::Semicolon, "Expect ';' after variable definition")?;
-                Ok(Stmt::InitVar(type_decl, name, r_value, false))
+                Ok(Stmt::InitVar(type_decl, name, r_value))
             }
         }
     }
@@ -733,6 +736,13 @@ impl Parser {
             return Err(Error::new(&name, "Functions can't return array-type"));
         }
 
+        if !self.env.is_global() {
+            return Err(Error::new(
+                &name,
+                "Can only define functions in global scope",
+            ));
+        }
+
         self.env.create();
         let params = self.parse_params()?;
 
@@ -777,8 +787,10 @@ impl Parser {
 
         // insert parameters into symbol table
         for (type_decl, name) in params.iter() {
-            self.env
-                .declare_symbol(&name, Symbols::Variable(SymbolInfo::new(type_decl.clone())))?;
+            self.env.declare_symbol(
+                &name,
+                Symbols::Variable(SymbolInfo::new(type_decl.clone(), false)),
+            )?;
         }
 
         let body = self.block()?;

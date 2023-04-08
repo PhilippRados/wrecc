@@ -307,9 +307,17 @@ impl<'a> Scanner<'a> {
                 self,
                 "Expected character literal found end of file",
             ))?;
-            char = self.escape_char(char_to_escape)?;
+            char = match self.escape_char(char_to_escape) {
+                Ok(c) => c,
+                Err(e) => {
+                    self.consume_until('\'');
+                    return Err(e);
+                }
+            }
         }
         if !self.matches('\'') {
+            // finish parsing the char so that scanner synchronizes
+            self.consume_until('\'');
             return Err(Error::new_scan_error(
                 self,
                 "Character literal must contain single character enclosed by single quotes ('')",
@@ -355,6 +363,12 @@ impl<'a> Scanner<'a> {
         }
 
         Ok(result)
+    }
+    fn consume_until(&mut self, end: char) {
+        self.source
+            .by_ref()
+            .take_while(|c| *c != end)
+            .for_each(|_| {});
     }
 }
 
@@ -716,7 +730,8 @@ mod tests {
             line_index: 1,
             column: 13,
             line_string: "char some = ''".to_string(),
-            msg: "char literal must contain single character".to_string(),
+            msg: "Character literal must contain single character enclosed by single quotes ('')"
+                .to_string(),
         })];
         assert_eq!(result, expected);
     }

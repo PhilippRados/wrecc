@@ -769,6 +769,7 @@ impl TypeChecker {
         }
 
         match self.env.get_symbol(func_name).unwrap() {
+            // TODO: maybe move this to parser because id will be fixed
             Symbols::Variable(_) | Symbols::TypeDef(..) => Err(Error::new(
                 left_paren,
                 &format!(

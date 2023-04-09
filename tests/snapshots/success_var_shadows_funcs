@@ -1,0 +1,4 @@
+Error: Symbol 'main' already exists but not as function
+|
+4   main();
+|       ^

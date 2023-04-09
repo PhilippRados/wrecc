@@ -7,7 +7,7 @@ use std::collections::HashMap;
 enum ScopeLevel {
     Global,
     Loop(Box<ScopeLevel>),
-    Function(String, NEWTypes), // function name and return type
+    Function(Token, NEWTypes), // function name and return type
 }
 impl ScopeLevel {
     fn get_function_type(&self, token: &Token) -> Result<&NEWTypes, Error> {
@@ -28,17 +28,20 @@ impl ScopeLevel {
         }
     }
 
-    fn increment_stack_size(
-        &mut self,
-        func_stack_size: &mut HashMap<String, usize>,
-        type_decl: &NEWTypes,
-    ) {
+    fn increment_stack_size(&mut self, type_decl: &NEWTypes, env: &mut Scope) {
         match self {
             ScopeLevel::Function(name, _) => {
-                *func_stack_size.get_mut(name).unwrap() += type_decl.size();
-                *func_stack_size.get_mut(name).unwrap() = align(func_stack_size[name], type_decl);
+                let mut size = env
+                    .get_global_symbol(name)
+                    .unwrap()
+                    .unwrap_func()
+                    .get_stack_size();
+                size += type_decl.size();
+                size = align(size, type_decl);
+
+                env.set_stack_size(name, size);
             }
-            ScopeLevel::Loop(s) => s.increment_stack_size(func_stack_size, type_decl),
+            ScopeLevel::Loop(s) => s.increment_stack_size(type_decl, env),
             ScopeLevel::Global => unreachable!(),
         }
     }
@@ -47,7 +50,6 @@ pub struct TypeChecker {
     scope: ScopeLevel,
     env: Scope,
     returns_all_paths: bool,
-    func_stack_size: HashMap<String, usize>, // typechecker passes info about how many stack allocation there are in a function
     const_labels: HashMap<String, usize>,
     const_label_count: usize,
 }
@@ -70,22 +72,17 @@ impl TypeChecker {
     pub fn new(env: Scope) -> Self {
         TypeChecker {
             env,
-            // global_env: Environment::new(None),
             scope: ScopeLevel::Global,
             returns_all_paths: false,
-            func_stack_size: HashMap::new(),
             const_labels: HashMap::new(),
             const_label_count: 0,
         }
     }
-    pub fn check(
-        mut self,
-        statements: &mut Vec<Stmt>,
-    ) -> Option<(HashMap<String, usize>, HashMap<String, usize>, Scope)> {
+    pub fn check(mut self, statements: &mut Vec<Stmt>) -> Option<(HashMap<String, usize>, Scope)> {
         match self.check_statements(statements) {
             Ok(_) => {
                 self.env.reset_current();
-                Some((self.func_stack_size, self.const_labels, self.env))
+                Some((self.const_labels, self.env))
             }
             Err(_) => None,
         }
@@ -257,8 +254,7 @@ impl TypeChecker {
         }
 
         if !self.env.get_symbol(var_name).unwrap().is_global() {
-            self.scope
-                .increment_stack_size(&mut self.func_stack_size, type_decl);
+            self.scope.increment_stack_size(type_decl, &mut self.env);
         }
 
         Ok(())
@@ -304,8 +300,7 @@ impl TypeChecker {
                 }
             }
         } else {
-            self.scope
-                .increment_stack_size(&mut self.func_stack_size, type_decl);
+            self.scope.increment_stack_size(type_decl, &mut self.env);
         }
 
         Ok(())
@@ -331,8 +326,7 @@ impl TypeChecker {
                 ));
             }
         } else {
-            self.scope
-                .increment_stack_size(&mut self.func_stack_size, type_decl);
+            self.scope.increment_stack_size(type_decl, &mut self.env);
         }
 
         Ok(())
@@ -418,29 +412,29 @@ impl TypeChecker {
         params: Vec<(NEWTypes, Token)>,
         body: &mut Vec<Stmt>,
     ) -> Result<(), Error> {
-        let name = name_token.unwrap_string();
-
         // have to push scope before declaring local variables
-        self.scope = ScopeLevel::Function(name.clone(), return_type.clone());
-        self.func_stack_size.insert(name.clone(), 0);
+        self.scope = ScopeLevel::Function(name_token.clone(), return_type.clone());
         for (type_decl, _) in params.iter().by_ref() {
-            self.scope
-                .increment_stack_size(&mut self.func_stack_size, type_decl);
+            self.scope.increment_stack_size(type_decl, &mut self.env);
         }
 
         // check function body
         let err = self.block(body);
         self.scope = ScopeLevel::Global;
 
-        if let Err(e) = err {
-            return Err(e);
-        }
+        err?;
 
         self.main_returns_int(name_token, return_type)?;
         self.implicit_return_main(name_token, body);
 
         // align function stack by 16Bytes
-        *self.func_stack_size.get_mut(&name).unwrap() = align_by(self.func_stack_size[&name], 16);
+        let size = self
+            .env
+            .get_symbol(name_token)
+            .unwrap()
+            .unwrap_func()
+            .get_stack_size();
+        self.env.set_stack_size(name_token, align_by(size, 16));
 
         if !return_type.is_void() && !self.returns_all_paths {
             Err(Error::new(
@@ -777,7 +771,10 @@ impl TypeChecker {
         match self.env.get_symbol(func_name).unwrap() {
             Symbols::Variable(_) | Symbols::TypeDef(..) => Err(Error::new(
                 left_paren,
-                &format!("Symbol '{}' already exists", func_name.unwrap_string()),
+                &format!(
+                    "Symbol '{}' already exists but not as function",
+                    func_name.unwrap_string()
+                ),
             )),
             Symbols::Func(function) => {
                 if function.arity() == args.len() {

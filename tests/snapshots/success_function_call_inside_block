@@ -2,7 +2,3 @@ Error: Can only define functions in global scope
 |
 5     int some() {
 |         ^
-Error: No function 'some' exists
-|
-8     some();
-|         ^

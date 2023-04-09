@@ -39,6 +39,12 @@ impl Function {
     pub fn get_return_type(self) -> NEWTypes {
         self.return_type
     }
+    pub fn set_stack_size(&mut self, size: usize) {
+        self.stack_space = size
+    }
+    pub fn get_stack_size(&mut self) -> usize {
+        self.stack_space
+    }
     pub fn cmp(&self, token: &Token, other: &Function) -> Result<(), Error> {
         if self.return_type != other.return_type {
             Err(Error::new(
@@ -112,6 +118,12 @@ impl Symbols {
     pub fn unwrap_var(self) -> SymbolInfo {
         match self {
             Symbols::Variable(s) => s,
+            _ => unreachable!("cant unwrap var on func"),
+        }
+    }
+    pub fn unwrap_func(self) -> Function {
+        match self {
+            Symbols::Func(f) => f,
             _ => unreachable!("cant unwrap var on func"),
         }
     }
@@ -281,7 +293,21 @@ impl Scope {
                 .insert(name.unwrap_string(), Symbols::Variable(s.clone()));
         }
     }
+    pub fn set_stack_size(&mut self, name: &Token, size: usize) {
+        if let Symbols::Func(ref mut s) = self.get_symbol(name).unwrap() {
+            s.set_stack_size(size);
+            self.env
+                .get_mut(0)
+                .unwrap()
+                .current
+                .symbols
+                .insert(name.unwrap_string(), Symbols::Func(s.clone()));
+        }
+    }
 
+    pub fn get_global_symbol(&self, var_name: &Token) -> Result<Symbols, Error> {
+        self.env.get(0).unwrap().get_symbol(var_name, &self.env)
+    }
     pub fn get_symbol(&self, var_name: &Token) -> Result<Symbols, Error> {
         self.env
             .get(self.current)

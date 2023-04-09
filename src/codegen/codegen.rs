@@ -23,8 +23,6 @@ pub struct Compiler {
     env: Scope,
     function_name: Option<String>,
 
-    func_stack_size: HashMap<String, usize>,
-
     // index of current label
     label_index: usize,
 
@@ -42,15 +40,10 @@ pub struct Compiler {
     jump_labels: Vec<(usize, usize)>,
 }
 impl Compiler {
-    pub fn new(
-        func_stack_size: HashMap<String, usize>,
-        const_labels: HashMap<String, usize>,
-        env: Scope,
-    ) -> Self {
+    pub fn new(const_labels: HashMap<String, usize>, env: Scope) -> Self {
         Compiler {
             env,
             const_labels,
-            func_stack_size,
             output: String::new(),
             scratch: ScratchRegisters::new(),
             current_bp_offset: 0,
@@ -109,9 +102,7 @@ impl Compiler {
                 self.env.exit();
                 Ok(())
             }
-            Stmt::Function(_, name, params, body) => {
-                self.function_definition(name.unwrap_string(), params, body)
-            }
+            Stmt::Function(_, name, params, body) => self.function_definition(name, params, body),
             Stmt::Return(_, expr) => self.return_statement(expr),
             Stmt::If(_, cond, then_branch, else_branch) => {
                 self.if_statement(cond, then_branch, else_branch)
@@ -346,8 +337,6 @@ impl Compiler {
         }
     }
     fn declare_var(&mut self, type_decl: &NEWTypes, name: &Token) -> Result<(), std::fmt::Error> {
-        let type_decl = type_decl.clone();
-
         let reg = match self.env.get_symbol(name).unwrap().is_global() {
             true => {
                 writeln!(
@@ -356,13 +345,16 @@ impl Compiler {
                     name.unwrap_string(),
                     type_decl.size()
                 )?;
-                Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl))
+                Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl.clone()))
             }
             false => {
                 self.current_bp_offset += type_decl.size();
                 self.current_bp_offset = align(self.current_bp_offset, &type_decl);
 
-                Register::Stack(StackRegister::new(self.current_bp_offset, type_decl))
+                Register::Stack(StackRegister::new(
+                    self.current_bp_offset,
+                    type_decl.clone(),
+                ))
             }
         };
         self.env.set_reg(name, reg);
@@ -410,12 +402,12 @@ impl Compiler {
     }
     fn function_definition(
         &mut self,
-        name: String,
+        name: &Token,
         params: &[(NEWTypes, Token)],
         body: &Vec<Stmt>,
     ) -> Result<(), std::fmt::Error> {
         // save function name for return label jump
-        self.function_name = Some(name.clone());
+        self.function_name = Some(name.unwrap_string());
 
         // generate function code
         self.cg_func_preamble(&name, params)?;
@@ -427,33 +419,37 @@ impl Compiler {
 
         Ok(())
     }
-    fn allocate_stack(&mut self, name: &str) -> Result<(), std::fmt::Error> {
-        if self.func_stack_size[name] > 0 {
-            writeln!(
-                self.output,
-                "\tsubq    ${},%rsp",
-                self.func_stack_size[name]
-            )?;
+    fn allocate_stack(&mut self, name: &Token) -> Result<(), std::fmt::Error> {
+        let stack_size = self
+            .env
+            .get_symbol(name)
+            .unwrap()
+            .unwrap_func()
+            .get_stack_size();
+        if stack_size > 0 {
+            writeln!(self.output, "\tsubq    ${},%rsp", stack_size)?;
         }
         Ok(())
     }
-    fn dealloc_stack(&mut self, name: &str) -> Result<(), std::fmt::Error> {
-        if self.func_stack_size[name] > 0 {
-            writeln!(
-                self.output,
-                "\taddq    ${},%rsp",
-                self.func_stack_size[name]
-            )?;
+    fn dealloc_stack(&mut self, name: &Token) -> Result<(), std::fmt::Error> {
+        let stack_size = self
+            .env
+            .get_symbol(name)
+            .unwrap()
+            .unwrap_func()
+            .get_stack_size();
+        if stack_size > 0 {
+            writeln!(self.output, "\taddq    ${},%rsp", stack_size)?;
         }
         Ok(())
     }
     fn cg_func_preamble(
         &mut self,
-        name: &str,
+        name: &Token,
         params: &[(NEWTypes, Token)],
     ) -> Result<(), std::fmt::Error> {
-        writeln!(self.output, "\n\t.text\n\t.globl _{}", name)?;
-        writeln!(self.output, "_{}:", name)?; // generate function label
+        writeln!(self.output, "\n\t.text\n\t.globl _{}", name.unwrap_string())?;
+        writeln!(self.output, "_{}:", name.unwrap_string())?; // generate function label
         writeln!(self.output, "\tpushq   %rbp\n\tmovq    %rsp, %rbp")?; // setup base pointer and stackpointer
 
         // allocate stack-space for local vars
@@ -467,8 +463,8 @@ impl Compiler {
         }
         Ok(())
     }
-    fn cg_func_postamble(&mut self, name: &str) -> Result<(), std::fmt::Error> {
-        writeln!(self.output, "{}_epilogue:", name)?;
+    fn cg_func_postamble(&mut self, name: &Token) -> Result<(), std::fmt::Error> {
+        writeln!(self.output, "{}_epilogue:", name.unwrap_string())?;
         self.dealloc_stack(name)?;
         self.env.exit();
 

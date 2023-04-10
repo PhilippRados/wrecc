@@ -20,7 +20,7 @@ macro_rules! convert_reg {
 pub struct Compiler {
     scratch: ScratchRegisters,
     output: String,
-    env: Scope,
+    env: Vec<Symbols>,
     function_name: Option<String>,
 
     // index of current label
@@ -40,7 +40,7 @@ pub struct Compiler {
     jump_labels: Vec<(usize, usize)>,
 }
 impl Compiler {
-    pub fn new(const_labels: HashMap<String, usize>, env: Scope) -> Self {
+    pub fn new(const_labels: HashMap<String, usize>, env: Vec<Symbols>) -> Self {
         Compiler {
             env,
             const_labels,
@@ -97,11 +97,6 @@ impl Compiler {
             }
             Stmt::InitList(type_decl, name, exprs) => self.init_list(type_decl, name, exprs),
             Stmt::Block(statements) => self.block(statements),
-            Stmt::FunctionDeclaration() => {
-                self.env.enter();
-                self.env.exit();
-                Ok(())
-            }
             Stmt::Function(_, name, params, body) => self.function_definition(name, params, body),
             Stmt::Return(_, expr) => self.return_statement(expr),
             Stmt::If(_, cond, then_branch, else_branch) => {
@@ -155,20 +150,24 @@ impl Compiler {
         name: &Token,
         exprs: &[Expr],
     ) -> Result<(), std::fmt::Error> {
-        match self.env.get_symbol(name).unwrap().is_global() {
+        match self.env.get(name.token.get_index()).unwrap().is_global() {
             true => {
                 writeln!(self.output, "\n\t.data\n_{}:", name.unwrap_string())?;
 
-                self.env.set_reg(
-                    name,
-                    Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl.clone())),
-                );
+                self.env
+                    .get_mut(name.token.get_index())
+                    .unwrap()
+                    .unwrap_var_mut()
+                    .set_reg(Register::Label(LabelRegister::Var(
+                        name.unwrap_string(),
+                        type_decl.clone(),
+                    )));
             }
             false => {
                 self.declare_var(type_decl, name)?;
             }
         }
-        let is_global = self.env.get_symbol(name).unwrap().is_global();
+        let is_global = self.env.get(name.token.get_index()).unwrap().is_global();
         for e in exprs.iter() {
             match (is_global, &e.kind) {
                 // init-list is assignment syntax sugar
@@ -196,8 +195,6 @@ impl Compiler {
         inc: &Option<Expr>,
         body: &Stmt,
     ) -> Result<(), std::fmt::Error> {
-        self.env.enter();
-
         let body_label = create_label(&mut self.label_index);
         let cond_label = create_label(&mut self.label_index);
 
@@ -239,8 +236,6 @@ impl Compiler {
         writeln!(self.output, "L{}:\n\tnop", end_label)?;
 
         self.jump_labels.pop();
-
-        self.env.exit();
 
         Ok(())
     }
@@ -337,7 +332,7 @@ impl Compiler {
         }
     }
     fn declare_var(&mut self, type_decl: &NEWTypes, name: &Token) -> Result<(), std::fmt::Error> {
-        let reg = match self.env.get_symbol(name).unwrap().is_global() {
+        let reg = match self.env.get(name.token.get_index()).unwrap().is_global() {
             true => {
                 writeln!(
                     self.output,
@@ -357,7 +352,11 @@ impl Compiler {
                 ))
             }
         };
-        self.env.set_reg(name, reg);
+        self.env
+            .get_mut(name.token.get_index())
+            .unwrap()
+            .unwrap_var_mut()
+            .set_reg(reg);
         Ok(())
     }
     fn init_var(
@@ -368,7 +367,12 @@ impl Compiler {
     ) -> Result<(), std::fmt::Error> {
         let name = var_name.unwrap_string();
 
-        match self.env.get_symbol(var_name).unwrap().is_global() {
+        match self
+            .env
+            .get(var_name.token.get_index())
+            .unwrap()
+            .is_global()
+        {
             true => {
                 writeln!(
                     self.output,
@@ -378,17 +382,18 @@ impl Compiler {
                     value_reg.base_name()
                 )?;
 
-                self.env.set_reg(
-                    var_name,
-                    Register::Label(LabelRegister::Var(name, type_decl.clone())),
-                );
+                self.env
+                    .get_mut(var_name.token.get_index())
+                    .unwrap()
+                    .unwrap_var_mut()
+                    .set_reg(Register::Label(LabelRegister::Var(name, type_decl.clone())));
             }
             false => {
                 self.declare_var(type_decl, var_name)?;
 
                 self.cg_assign(
                     self.env
-                        .get_symbol(var_name)
+                        .get(var_name.token.get_index())
                         .unwrap()
                         .unwrap_var()
                         .get_reg(),
@@ -422,7 +427,7 @@ impl Compiler {
     fn allocate_stack(&mut self, name: &Token) -> Result<(), std::fmt::Error> {
         let stack_size = self
             .env
-            .get_symbol(name)
+            .get_mut(name.token.get_index())
             .unwrap()
             .unwrap_func()
             .get_stack_size();
@@ -434,7 +439,7 @@ impl Compiler {
     fn dealloc_stack(&mut self, name: &Token) -> Result<(), std::fmt::Error> {
         let stack_size = self
             .env
-            .get_symbol(name)
+            .get_mut(name.token.get_index())
             .unwrap()
             .unwrap_func()
             .get_stack_size();
@@ -455,8 +460,6 @@ impl Compiler {
         // allocate stack-space for local vars
         self.allocate_stack(name)?;
 
-        self.env.enter();
-
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
             self.init_var(type_decl, param_name, Register::Arg(i, type_decl.clone()))?;
@@ -466,18 +469,13 @@ impl Compiler {
     fn cg_func_postamble(&mut self, name: &Token) -> Result<(), std::fmt::Error> {
         writeln!(self.output, "{}_epilogue:", name.unwrap_string())?;
         self.dealloc_stack(name)?;
-        self.env.exit();
 
         writeln!(self.output, "\tpopq    %rbp\n\tret")?;
         Ok(())
     }
 
     pub fn block(&mut self, statements: &Vec<Stmt>) -> Result<(), std::fmt::Error> {
-        self.env.enter();
-        let result = self.cg_stmts(statements);
-        self.env.exit();
-
-        result
+        self.cg_stmts(statements)
     }
 
     fn cg_literal(&mut self, num: usize, t: Types) -> Result<Register, std::fmt::Error> {
@@ -518,13 +516,12 @@ impl Compiler {
                 r_expr,
                 token,
             } => self.cg_comp_assign(l_expr, token, r_expr),
-            ExprKind::Ident(name) => Ok(
-                if let Ok(Symbols::Variable(v)) = self.env.get_symbol(name) {
-                    v.get_reg()
-                } else {
-                    unreachable!()
-                },
-            ),
+            ExprKind::Ident(name) => Ok(self
+                .env
+                .get(name.token.get_index())
+                .unwrap()
+                .unwrap_var()
+                .get_reg()),
             ExprKind::Call { callee, args, .. } => {
                 self.cg_call(callee, args, ast.type_decl.clone().unwrap())
             }
@@ -841,7 +838,7 @@ impl Compiler {
         if let NEWTypes::Struct(s) = l_value.get_type() {
             // when assigning structs have to assign each member
             for m in s.members().iter() {
-                let member_token = Token::default(TokenType::Ident(m.1.unwrap_string()));
+                let member_token = Token::default(TokenType::Ident(m.1.unwrap_string(), 0));
                 let member_lvalue = self.cg_member_access(l_value.clone(), &member_token, false)?;
                 let member_rvalue = self.cg_member_access(r_value.clone(), &member_token, false)?;
 

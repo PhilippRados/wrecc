@@ -70,7 +70,7 @@ impl<'a> Scanner<'a> {
             | TokenType::Arrow
             | TokenType::Do => 2,
             TokenType::String(s) => (s.len() + 2) as i32,
-            TokenType::Ident(s) => s.len() as i32,
+            TokenType::Ident(s, _) => s.len() as i32,
             TokenType::Int | TokenType::For => 3,
             TokenType::Void
             | TokenType::Char
@@ -266,7 +266,8 @@ impl<'a> Scanner<'a> {
                                 self.keywords.get(&value as &str).unwrap().clone(),
                             );
                         } else {
-                            self.add_token(&mut tokens, TokenType::Ident(value.to_string()))
+                            // use 0 as default value for symbol table index
+                            self.add_token(&mut tokens, TokenType::Ident(value.to_string(), 0))
                         }
                     } else {
                         self.err = true;
@@ -405,7 +406,7 @@ mod tests {
         let expected = vec![
             Token::new(TokenType::Bang, 3, 1, "!this".to_string()),
             Token::new(
-                TokenType::Ident("this".to_string()),
+                TokenType::Ident("this".to_string(), 0),
                 3,
                 2,
                 "!this".to_string(),
@@ -463,7 +464,7 @@ mod tests {
                 "int some = \"this is a string\"".to_string(),
             ),
             Token::new(
-                TokenType::Ident("some".to_string()),
+                TokenType::Ident("some".to_string(), 0),
                 1,
                 5,
                 "int some = \"this is a string\"".to_string(),
@@ -511,7 +512,7 @@ mod tests {
         let expected = vec![
             Token::new(TokenType::Int, 1, 1, "int some_long;".to_string()),
             Token::new(
-                TokenType::Ident("some_long".to_string()),
+                TokenType::Ident("some_long".to_string(), 0),
                 1,
                 5,
                 "int some_long;".to_string(),
@@ -530,7 +531,7 @@ mod tests {
                 "while (val >= 12) {*p = val}".to_string(),
             ),
             Token::new(
-                TokenType::Ident("val".to_string()),
+                TokenType::Ident("val".to_string(), 0),
                 2,
                 8,
                 "while (val >= 12) {*p = val}".to_string(),
@@ -566,7 +567,7 @@ mod tests {
                 "while (val >= 12) {*p = val}".to_string(),
             ),
             Token::new(
-                TokenType::Ident("p".to_string()),
+                TokenType::Ident("p".to_string(), 0),
                 2,
                 21,
                 "while (val >= 12) {*p = val}".to_string(),
@@ -578,7 +579,7 @@ mod tests {
                 "while (val >= 12) {*p = val}".to_string(),
             ),
             Token::new(
-                TokenType::Ident("val".to_string()),
+                TokenType::Ident("val".to_string(), 0),
                 2,
                 25,
                 "while (val >= 12) {*p = val}".to_string(),
@@ -649,7 +650,7 @@ mod tests {
         let expected = vec![
             Token::new(TokenType::Int, 2, 1, "int ä = 123".to_string()),
             Token::new(
-                TokenType::Ident("ä".to_string()),
+                TokenType::Ident("ä".to_string(), 0),
                 2,
                 5,
                 "int ä = 123".to_string(),
@@ -686,7 +687,7 @@ mod tests {
         let expected = vec![
             Token::new(TokenType::Char, 1, 1, "char some = '1'".to_string()),
             Token::new(
-                TokenType::Ident("some".to_string()),
+                TokenType::Ident("some".to_string(), 0),
                 1,
                 6,
                 "char some = '1'".to_string(),

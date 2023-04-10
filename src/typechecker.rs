@@ -28,18 +28,15 @@ impl ScopeLevel {
         }
     }
 
-    fn increment_stack_size(&mut self, type_decl: &NEWTypes, env: &mut Scope) {
+    fn increment_stack_size(&mut self, type_decl: &NEWTypes, env: &mut Vec<Symbols>) {
         match self {
             ScopeLevel::Function(name, _) => {
-                let mut size = env
-                    .get_global_symbol(name)
-                    .unwrap()
-                    .unwrap_func()
-                    .get_stack_size();
-                size += type_decl.size();
+                let func_symbol = env.get_mut(name.token.get_index()).expect("valid st index");
+
+                let mut size = func_symbol.unwrap_func().get_stack_size() + type_decl.size();
                 size = align(size, type_decl);
 
-                env.set_stack_size(name, size);
+                func_symbol.unwrap_func().set_stack_size(size);
             }
             ScopeLevel::Loop(s) => s.increment_stack_size(type_decl, env),
             ScopeLevel::Global => unreachable!(),
@@ -48,7 +45,7 @@ impl ScopeLevel {
 }
 pub struct TypeChecker {
     scope: ScopeLevel,
-    env: Scope,
+    env: Vec<Symbols>,
     returns_all_paths: bool,
     const_labels: HashMap<String, usize>,
     const_label_count: usize,
@@ -69,7 +66,7 @@ macro_rules! cast {
 }
 
 impl TypeChecker {
-    pub fn new(env: Scope) -> Self {
+    pub fn new(env: Vec<Symbols>) -> Self {
         TypeChecker {
             env,
             scope: ScopeLevel::Global,
@@ -78,12 +75,12 @@ impl TypeChecker {
             const_label_count: 0,
         }
     }
-    pub fn check(mut self, statements: &mut Vec<Stmt>) -> Option<(HashMap<String, usize>, Scope)> {
+    pub fn check(
+        mut self,
+        statements: &mut Vec<Stmt>,
+    ) -> Option<(HashMap<String, usize>, Vec<Symbols>)> {
         match self.check_statements(statements) {
-            Ok(_) => {
-                self.env.reset_current();
-                Some((self.const_labels, self.env))
-            }
+            Ok(_) => Some((self.const_labels, self.env)),
             Err(_) => None,
         }
     }
@@ -108,11 +105,6 @@ impl TypeChecker {
             Stmt::Function(return_type, name, params, body) => {
                 self.function_definition(return_type, name, params.clone(), body)
             }
-            Stmt::FunctionDeclaration() => {
-                self.env.enter();
-                self.env.exit();
-                Ok(())
-            }
             Stmt::Return(keyword, ref mut value) => self.return_statement(keyword, value),
             Stmt::Expr(ref mut expr) => match self.expr_type(expr) {
                 Ok(_) => Ok(()),
@@ -129,8 +121,6 @@ impl TypeChecker {
             Stmt::For(left_paren, init, ref mut cond, inc, body) => {
                 self.for_statement(left_paren, init, cond, inc, body)
             }
-            // Stmt::EnumDef(t) => self.env.insert_enum_symbols(t, &mut vec![]),
-            // Stmt::TypeDef(name) => self.typedef(name),
             Stmt::Break(keyword) => self.break_statement(keyword),
             Stmt::Continue(keyword) => self.continue_statement(keyword),
         }
@@ -165,9 +155,6 @@ impl TypeChecker {
         inc: &mut Option<Expr>,
         body: &mut Stmt,
     ) -> Result<(), Error> {
-        // self.env = Environment::new(Some(Box::new(self.env.clone())));
-        self.env.enter();
-
         if let Some(init) = init {
             self.visit(&mut *init)?;
         }
@@ -189,9 +176,6 @@ impl TypeChecker {
         }
 
         self.scope.enclosing();
-
-        self.env.exit();
-        // self.env = *self.env.enclosing.as_ref().unwrap().clone();
 
         self.returns_all_paths = false;
         Ok(())
@@ -253,7 +237,12 @@ impl TypeChecker {
             ));
         }
 
-        if !self.env.get_symbol(var_name).unwrap().is_global() {
+        if !self
+            .env
+            .get(var_name.token.get_index())
+            .unwrap()
+            .is_global()
+        {
             self.scope.increment_stack_size(type_decl, &mut self.env);
         }
 
@@ -286,7 +275,12 @@ impl TypeChecker {
             types.push(self.expr_type(e)?);
         }
         // check if every expression is constant if global
-        if self.env.get_symbol(var_name).unwrap().is_global() {
+        if self
+            .env
+            .get(var_name.token.get_index())
+            .unwrap()
+            .is_global()
+        {
             for e in exprs.iter().by_ref() {
                 if let ExprKind::Assign { r_expr, .. } = &e.kind {
                     if !is_constant(r_expr) {
@@ -312,7 +306,11 @@ impl TypeChecker {
         expr: &mut Expr,
     ) -> Result<(), Error> {
         let mut value_type = self.expr_type(expr)?;
-        let is_global = self.env.get_symbol(var_name).unwrap().is_global();
+        let is_global = self
+            .env
+            .get(var_name.token.get_index())
+            .unwrap()
+            .is_global();
 
         crate::arr_decay!(value_type, expr, var_name, is_global);
         self.check_type_compatibility(var_name, type_decl, &value_type)?;
@@ -430,11 +428,15 @@ impl TypeChecker {
         // align function stack by 16Bytes
         let size = self
             .env
-            .get_symbol(name_token)
+            .get_mut(name_token.token.get_index())
             .unwrap()
             .unwrap_func()
             .get_stack_size();
-        self.env.set_stack_size(name_token, align_by(size, 16));
+        self.env
+            .get_mut(name_token.token.get_index())
+            .unwrap()
+            .unwrap_func()
+            .set_stack_size(align_by(size, 16));
 
         if !return_type.is_void() && !self.returns_all_paths {
             Err(Error::new(
@@ -618,7 +620,7 @@ impl TypeChecker {
         }
     }
     fn ident(&mut self, token: &Token) -> Result<NEWTypes, Error> {
-        match self.env.get_symbol(token)? {
+        match self.env.get(token.token.get_index()).unwrap() {
             Symbols::Variable(v) => Ok(v.get_type()),
             Symbols::TypeDef(..) | Symbols::Func(..) => Err(Error::new(
                 token,
@@ -768,8 +770,7 @@ impl TypeChecker {
             arg_types.push(t);
         }
 
-        match self.env.get_symbol(func_name).unwrap() {
-            // TODO: maybe move this to parser because id will be fixed
+        match self.env.get(func_name.token.get_index()).unwrap() {
             Symbols::Variable(_) | Symbols::TypeDef(..) => Err(Error::new(
                 left_paren,
                 &format!(
@@ -784,7 +785,7 @@ impl TypeChecker {
                         &function.clone().get_params(),
                         arg_types,
                     )?;
-                    Ok(function.get_return_type())
+                    Ok(function.clone().get_return_type())
                 } else {
                     Err(Error::new(
                         left_paren,
@@ -811,11 +812,7 @@ impl TypeChecker {
         Ok(())
     }
     fn block(&mut self, body: &mut Vec<Stmt>) -> Result<(), Error> {
-        self.env.enter();
-        let result = self.check_statements(body);
-
-        self.env.exit();
-        result
+        self.check_statements(body)
     }
 
     fn is_valid_bin(token: &Token, left_type: &NEWTypes, right_type: &NEWTypes) -> bool {

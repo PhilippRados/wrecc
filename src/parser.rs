@@ -16,7 +16,8 @@ impl Parser {
             env: Scope::new(),
         }
     }
-    pub fn parse(mut self) -> Option<(Vec<Stmt>, Scope)> {
+    // return identifier namespace table
+    pub fn parse(mut self) -> Option<(Vec<Stmt>, Vec<Symbols>)> {
         let mut statements: Vec<Stmt> = Vec::new();
         let mut had_error = false;
 
@@ -34,8 +35,7 @@ impl Parser {
         if had_error {
             None
         } else {
-            self.env.reset_current();
-            Some((statements, self.env))
+            Some((statements, self.env.get_symbol_table()))
         }
     }
     fn synchronize(&mut self) {
@@ -105,7 +105,7 @@ impl Parser {
                 TokenType::Break => self.break_statement(token),
                 TokenType::Continue => self.continue_statement(token),
                 TokenType::LeftBrace => {
-                    self.env.create();
+                    self.env.enter();
                     Ok(Stmt::Block(self.block()?))
                 }
                 _ => unreachable!(),
@@ -156,7 +156,7 @@ impl Parser {
         //     }
         //     inc
         // }
-        self.env.create();
+        self.env.enter();
 
         let init = match self.matches_type() {
             Ok(type_decl) => Some(Box::new(self.type_declaration(type_decl)?)),
@@ -356,18 +356,16 @@ impl Parser {
 
         match (&name, has_members) {
             (Some(name), Some(_)) => {
-                self.env.check_redefinition(name)?;
-
                 Ok(match token.token {
                     TokenType::Struct | TokenType::Union => {
-                        self.env.declare_tag(
+                        self.env.declare_type(
                             name,
                             Tags::Aggregate(StructRef::new(token.clone().token)),
                         )?;
 
                         let members = self.parse_members(token)?;
 
-                        if let Tags::Aggregate(struct_ref) = self.env.get_type(name)? {
+                        if let Tags::Aggregate(struct_ref) = self.env.get_type(name)?.0 {
                             struct_ref.update(members);
 
                             match token.token {
@@ -389,7 +387,7 @@ impl Parser {
                         let members = self.parse_enum(token)?;
 
                         // declare the enum tag in the tag namespace
-                        self.env.declare_tag(name, Tags::Enum(members.clone()))?;
+                        self.env.declare_type(name, Tags::Enum(members.clone()))?;
 
                         NEWTypes::Enum(Some(name.unwrap_string()), members)
                     }
@@ -398,7 +396,7 @@ impl Parser {
             }
             (Some(name), None) => {
                 // lookup struct/union definition
-                let custom_type = self.env.get_type(name)?;
+                let custom_type = self.env.get_type(name)?.0;
                 if token.token != *custom_type.get_kind() {
                     return Err(Error::new(
                         name,
@@ -455,7 +453,7 @@ impl Parser {
         Err(Error::Indicator)
     }
     fn type_declaration(&mut self, mut type_decl: NEWTypes) -> Result<Stmt, Error> {
-        let name = self.consume(
+        let mut name = self.consume(
             TokenKind::Ident,
             "Expect identifier following type-specifier",
         )?;
@@ -465,10 +463,11 @@ impl Parser {
         } else {
             type_decl = self.parse_arr(type_decl)?;
 
-            self.env.declare_symbol(
+            let index = self.env.declare_symbol(
                 &name,
                 Symbols::Variable(SymbolInfo::new(type_decl.clone(), self.env.is_global())),
             )?;
+            name.token.update_index(index);
 
             if self.matches(vec![TokenKind::Equal]).is_some() {
                 self.var_initialization(name, type_decl)
@@ -717,17 +716,18 @@ impl Parser {
         }
         loop {
             let mut param_type = self.matches_type()?;
-            let name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
+            let mut name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
 
             param_type = self.parse_arr(param_type)?;
             if let NEWTypes::Array { of, .. } = param_type {
                 param_type = NEWTypes::Pointer(of);
             }
             // insert parameters into symbol table
-            self.env.declare_symbol(
+            let index = self.env.declare_symbol(
                 &name,
                 Symbols::Variable(SymbolInfo::new(param_type.clone(), false)),
             )?;
+            name.token.update_index(index);
 
             params.push((param_type, name));
 
@@ -741,7 +741,7 @@ impl Parser {
         )?;
         Ok(params)
     }
-    fn function(&mut self, return_type: NEWTypes, name: Token) -> Result<Stmt, Error> {
+    fn function(&mut self, return_type: NEWTypes, mut name: Token) -> Result<Stmt, Error> {
         if matches!(return_type, NEWTypes::Array { .. }) {
             return Err(Error::new(&name, "Functions can't return array-type"));
         }
@@ -752,14 +752,21 @@ impl Parser {
                 "Can only define functions in global scope",
             ));
         }
+        let existing = self.env.get_symbol(&name).ok();
+        let func = Function::new(return_type.clone());
+        let index = self.env.declare_func(&name, Symbols::Func(func))?;
 
-        self.env.create();
+        name.token.update_index(index);
+
+        // params can't be in same scope as function-name so
+        // they get added after they have been parsed
+        self.env.enter();
         let params = self.parse_params()?;
 
         if self.matches(vec![TokenKind::Semicolon]).is_some() {
-            self.function_declaration(return_type, name, params)
+            self.function_declaration(name, params, index, existing)
         } else {
-            self.function_definition(return_type, name, params)
+            self.function_definition(return_type, name, params, index, existing)
         }
     }
     fn function_definition(
@@ -767,32 +774,34 @@ impl Parser {
         return_type: NEWTypes,
         name: Token,
         params: Vec<(NEWTypes, Token)>,
+        index: usize,
+        existing: Option<(Symbols, usize)>,
     ) -> Result<Stmt, Error> {
+        self.env
+            .get_mut_symbol(index)
+            .unwrap_func()
+            .update(params.clone(), FunctionKind::Definition);
+
         self.consume(TokenKind::LeftBrace, "Expect '{' before function body.")?;
 
-        let func = Function::new(
-            return_type.clone(),
-            params.clone(),
-            FunctionKind::Definition,
-        );
-        // compare with matching symbol in symbol table
-        match self.env.get_symbol(&name) {
-            Ok(Symbols::Func(other)) => {
+        // compare with existing symbol in symbol table
+        match existing {
+            Some((Symbols::Func(other), ..)) => {
                 if other.clone().get_kind() == FunctionKind::Definition {
                     return Err(Error::new(
                         &name,
                         &format!("Redefinition of function '{}'", name.unwrap_string()),
                     ));
                 }
-                func.cmp(&name, &other)?;
+                self.env
+                    .get_mut_symbol(index)
+                    .unwrap_func()
+                    .cmp(&name, &other)?;
             }
-            Ok(Symbols::Variable(_)) | Ok(Symbols::TypeDef(..)) => {
+            Some((Symbols::Variable(_), ..)) | Some((Symbols::TypeDef(..), ..)) => {
                 return Err(Error::new(&name, "Redefinition of symbol with same name"));
             }
-            Err(_) => {
-                self.env
-                    .declare_global_symbol(name.unwrap_string(), Symbols::Func(func));
-            }
+            None => {}
         }
 
         let body = self.block()?;
@@ -801,33 +810,42 @@ impl Parser {
     }
     fn function_declaration(
         &mut self,
-        return_type: NEWTypes,
         name: Token,
         params: Vec<(NEWTypes, Token)>,
+        index: usize,
+        existing: Option<(Symbols, usize)>,
     ) -> Result<Stmt, Error> {
-        let func = Function::new(
-            return_type.clone(),
-            params.clone(),
-            FunctionKind::Declaration,
-        );
-        match self.env.get_symbol(&name) {
-            Ok(Symbols::Func(other)) => {
-                func.cmp(&name, &other)?;
-            }
-            Ok(Symbols::Variable(_)) | Ok(Symbols::TypeDef(..)) => {
-                return Err(Error::new(&name, "Redefinition of symbol with same name"))
-            }
-            Err(_) => {
+        self.env
+            .get_mut_symbol(index)
+            .unwrap_func()
+            .update(params, FunctionKind::Declaration);
+
+        match existing {
+            Some((Symbols::Func(other), ..)) => {
                 self.env
-                    .declare_global_symbol(name.unwrap_string(), Symbols::Func(func));
+                    .get_mut_symbol(index)
+                    .unwrap_func()
+                    .cmp(&name, &other)?;
+
+                // if existing element is a definition remove newly added declaration
+                // so that last function symbol with this name is a definition
+                // and can properly check for redefinitions
+                if other.get_kind() == FunctionKind::Definition {
+                    self.env.remove_symbol(index);
+                }
             }
+            Some((Symbols::Variable(_), ..)) | Some((Symbols::TypeDef(..), ..)) => {
+                return Err(Error::new(&name, "Redefinition of symbol with same name"));
+            }
+            None => {}
         }
 
-        // declaration params have their own scope that's why we need to
-        // exit out of it
+        // declaration params have their own scope
+        // that's why we need to exit out of it
         self.env.exit();
 
-        Ok(Stmt::FunctionDeclaration())
+        // don't need to generate any statement for declaration
+        Err(Error::Indicator)
     }
 
     fn expression(&mut self) -> Result<Expr, Error> {
@@ -1236,9 +1254,12 @@ impl Parser {
                 ValueKind::Rvalue,
             ));
         }
-        if let Some(s) = self.matches(vec![TokenKind::Ident]) {
+        if let Some(mut s) = self.matches(vec![TokenKind::Ident]) {
             // if identifier isn't known in symbol table then error
-            self.env.get_symbol(&s)?;
+            let (_, table_index) = self.env.get_symbol(&s)?;
+
+            // give the token the position of the symbol in symbol-table
+            s.token.update_index(table_index);
 
             return Ok(Expr::new(ExprKind::Ident(s), ValueKind::Lvalue));
         }
@@ -1315,7 +1336,7 @@ impl Parser {
                     }
                     // typedef
                     TokenType::Ident(..) => {
-                        if let Symbols::TypeDef(t) = self.env.get_symbol(&v)? {
+                        if let Symbols::TypeDef(t) = self.env.get_symbol(&v)?.0 {
                             self.tokens.next();
                             t
                         } else {

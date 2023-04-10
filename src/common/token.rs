@@ -114,7 +114,7 @@ impl From<&TokenType> for TokenKind {
             TokenType::LessEqual => TokenKind::LessEqual,
             TokenType::LessLess => TokenKind::LessLess,
             TokenType::LessLessEqual => TokenKind::LessLessEqual,
-            TokenType::Ident(_) => TokenKind::Ident,
+            TokenType::Ident(..) => TokenKind::Ident,
             TokenType::String(_) => TokenKind::String,
             TokenType::Number(_) => TokenKind::Number,
             TokenType::Else => TokenKind::Else,
@@ -207,7 +207,7 @@ pub enum TokenType {
     Colon,
 
     // Literals.
-    Ident(String),
+    Ident(String, usize), // idx to specify symbol table position
     String(String),
     CharLit(i8),
     Number(i64),
@@ -232,6 +232,20 @@ pub enum TokenType {
     Do,
     Break,
     Continue,
+}
+impl TokenType {
+    pub fn update_index(&mut self, new: usize) {
+        match self {
+            TokenType::Ident(_, i) => *i = new,
+            _ => unreachable!(),
+        }
+    }
+    pub fn get_index(&self) -> usize {
+        match self {
+            TokenType::Ident(_, i) => *i,
+            _ => unreachable!(),
+        }
+    }
 }
 impl Display for TokenType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -288,7 +302,7 @@ impl Display for TokenType {
                 TokenType::LessEqual => "'<='",
                 TokenType::LessLess => "'<<'",
                 TokenType::LessLessEqual => "'<<='",
-                TokenType::Ident(_) => "identifier",
+                TokenType::Ident(..) => "identifier",
                 TokenType::String(_) => "string",
                 TokenType::Number(_) => "number",
                 TokenType::Else => "'else'",
@@ -338,7 +352,7 @@ impl Token {
     }
     pub fn unwrap_string(&self) -> String {
         match &self.token {
-            TokenType::Ident(s) => s.clone(),
+            TokenType::Ident(s, ..) => s.clone(),
             TokenType::String(s) => s.clone(),
             _ => panic!("cant unwrap string on {} token", self.token),
         }

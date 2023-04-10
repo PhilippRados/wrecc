@@ -1,4 +1,4 @@
-Error: Undeclared symbol
+Error: Undeclared symbol 'c'
 |
 9   printf("%d\n",/*c*/ c);
 |                       ^

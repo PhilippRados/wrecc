@@ -1,6 +1,5 @@
 use crate::codegen::register::*;
 use crate::common::{error::*, token::*, types::*};
-use std::collections::HashMap;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum FunctionKind {
@@ -19,12 +18,13 @@ pub struct Function {
     kind: FunctionKind,
 }
 impl Function {
-    pub fn new(return_type: NEWTypes, params: Vec<(NEWTypes, Token)>, kind: FunctionKind) -> Self {
+    pub fn new(return_type: NEWTypes) -> Self {
+        // can only know return-type at point of declaration
         Function {
-            kind,
             stack_space: 0,
             return_type,
-            params,
+            kind: FunctionKind::Definition,
+            params: vec![],
         }
     }
     pub fn arity(&self) -> usize {
@@ -44,6 +44,10 @@ impl Function {
     }
     pub fn get_stack_size(&mut self) -> usize {
         self.stack_space
+    }
+    pub fn update(&mut self, params: Vec<(NEWTypes, Token)>, kind: FunctionKind) {
+        self.params = params;
+        self.kind = kind;
     }
     pub fn cmp(&self, token: &Token, other: &Function) -> Result<(), Error> {
         if self.return_type != other.return_type {
@@ -107,6 +111,9 @@ impl SymbolInfo {
         self.reg = Some(reg)
     }
 }
+trait TypeName {
+    fn type_name() -> &'static str;
+}
 #[derive(Clone, PartialEq, Debug)]
 pub enum Symbols {
     // also includes enum-constants
@@ -114,17 +121,29 @@ pub enum Symbols {
     TypeDef(NEWTypes),
     Func(Function),
 }
+impl TypeName for Symbols {
+    fn type_name() -> &'static str {
+        "symbol"
+    }
+}
 impl Symbols {
-    pub fn unwrap_var(self) -> SymbolInfo {
+    pub fn unwrap_var_mut(&mut self) -> &mut SymbolInfo {
         match self {
             Symbols::Variable(s) => s,
             _ => unreachable!("cant unwrap var on func"),
         }
     }
-    pub fn unwrap_func(self) -> Function {
+    // TODO: change this
+    pub fn unwrap_var(&self) -> &SymbolInfo {
+        match self {
+            Symbols::Variable(s) => s,
+            _ => unreachable!("cant unwrap var on func"),
+        }
+    }
+    pub fn unwrap_func(&mut self) -> &mut Function {
         match self {
             Symbols::Func(f) => f,
-            _ => unreachable!("cant unwrap var on func"),
+            _ => unreachable!(),
         }
     }
     pub fn is_global(&self) -> bool {
@@ -140,6 +159,11 @@ pub enum Tags {
     // struct/union
     Aggregate(StructRef),
     Enum(Vec<(Token, i32)>),
+}
+impl TypeName for Tags {
+    fn type_name() -> &'static str {
+        "type"
+    }
 }
 impl Tags {
     pub fn get_kind(&self) -> &TokenType {
@@ -163,225 +187,201 @@ impl Tags {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct Table {
-    symbols: HashMap<String, Symbols>,
-    tags: HashMap<String, Tags>,
+struct NameSpace<T> {
+    // (name, depth, index in table, element)
+    elems: Vec<(String, usize, usize, T)>,
 }
-impl Table {
-    pub fn new() -> Self {
-        Table {
-            symbols: HashMap::<String, Symbols>::new(),
-            tags: HashMap::<String, Tags>::new(),
+impl<T: Clone + TypeName + std::fmt::Debug> NameSpace<T> {
+    fn new() -> Self {
+        NameSpace { elems: vec![] }
+    }
+    // return sub-array of elements that are in current scope
+    fn get_current(&self, depth: usize) -> Vec<&(String, usize, usize, T)> {
+        self.elems
+            .iter()
+            .rev()
+            .take_while(|(_, d, ..)| *d >= depth)
+            .filter(|(_, d, ..)| *d == depth)
+            .collect()
+    }
+
+    // checks if element is in current scope
+    fn contains_key(&self, expected: &String, depth: usize) -> bool {
+        self.get_current(depth)
+            .iter()
+            .any(|(name, ..)| name == expected)
+    }
+    fn declare(&mut self, name: String, depth: usize, element: T) -> Result<usize, Error> {
+        self.elems.push((name, depth, self.elems.len(), element));
+        Ok(self.elems.len() - 1)
+    }
+    // returns a specific element and its index in st from all valid scopes
+    fn get(&self, var_name: &Token, depth: usize) -> Result<(T, usize), Error> {
+        let name = var_name.unwrap_string();
+        for d in (0..=depth).rev() {
+            if let Some((_, _, i, v)) = self.get_current(d).iter().find(|(id, ..)| *id == name) {
+                return Ok((v.clone(), *i));
+            }
         }
+        Err(Error::new(
+            &var_name,
+            &format!("Undeclared {} '{}'", T::type_name(), name),
+        ))
     }
 }
+
 #[derive(Debug)]
 pub struct Scope {
-    current: usize,
-    env: Vec<Environment>,
+    current_depth: usize,
+    symbols: NameSpace<Symbols>,
+    tags: NameSpace<Tags>,
 }
 impl Scope {
     pub fn new() -> Self {
         Scope {
-            current: 0,
-            env: vec![Environment::new(None)],
+            current_depth: 0,
+            symbols: NameSpace::new(),
+            tags: NameSpace::new(),
         }
-    }
-    pub fn reset_current(&mut self) {
-        self.current = 0;
     }
     pub fn is_global(&self) -> bool {
-        self.current == 0
-    }
-    pub fn create(&mut self) {
-        let new = Environment::new(Some(self.current));
-
-        self.env.push(new);
-        let len = self.env.len() - 1;
-        self.env.get_mut(self.current).unwrap().contained.push(len);
-
-        self.current = len;
+        self.current_depth == 0
     }
     pub fn enter(&mut self) {
-        // reset contained-index if already went through this scope
-        let index = self.env.get(self.current).unwrap().index;
-        if index == self.env.get(self.current).unwrap().contained.len() {
-            self.env.get_mut(self.current).unwrap().index = 0;
-        }
-
-        let prev = self.env.get(self.current).unwrap().index;
-        self.env.get_mut(self.current).unwrap().index += 1;
-
-        self.current = self.env.get(self.current).unwrap().contained[prev];
+        self.current_depth += 1
     }
     pub fn exit(&mut self) {
-        self.current = self
-            .env
-            .get(self.current)
-            .unwrap()
-            .enclosing
-            .expect("not global env");
+        self.current_depth -= 1;
+
+        // hacky solution but need a way to indicate when current env ends
+        let _ = self.symbols.declare(
+            "".to_string(),
+            self.current_depth,
+            Symbols::TypeDef(NEWTypes::Primitive(Types::Void)),
+        );
+        let _ = self
+            .tags
+            .declare("".to_string(), self.current_depth, Tags::Enum(vec![]));
     }
-    pub fn declare_symbol(&mut self, var_name: &Token, symbol: Symbols) -> Result<(), Error> {
+    pub fn declare_symbol(&mut self, var_name: &Token, symbol: Symbols) -> Result<usize, Error> {
         let name = var_name.unwrap_string();
-        if self
-            .env
-            .get(self.current)
-            .unwrap()
-            .current
-            .symbols
-            .contains_key(&name)
-        {
+        if self.symbols.contains_key(&name, self.current_depth) {
             return Err(Error::new(
-                var_name,
-                &format!("Redefinition of symbol '{}'", var_name.unwrap_string()),
+                &var_name,
+                &format!("Redefinition of symbol '{}'", name),
             ));
         }
-
-        self.env
-            .get_mut(self.current)
-            .unwrap()
-            .current
-            .symbols
-            .insert(name, symbol);
-        Ok(())
+        self.symbols.declare(name, self.current_depth, symbol)
     }
-
-    pub fn declare_global_symbol(&mut self, name: String, symbol: Symbols) {
-        // don't need to check for redefinitions because function
-        self.env
-            .get_mut(0)
-            .unwrap()
-            .current
-            .symbols
-            .insert(name, symbol);
+    // function has special checks for Redefinitions because
+    // there can be multiple declaration but only a single definition
+    pub fn declare_func(&mut self, var_name: &Token, symbol: Symbols) -> Result<usize, Error> {
+        self.symbols
+            .declare(var_name.unwrap_string(), self.current_depth, symbol)
     }
-    pub fn declare_tag(&mut self, var_name: &Token, tag: Tags) -> Result<(), Error> {
+    pub fn declare_type(&mut self, var_name: &Token, tag: Tags) -> Result<usize, Error> {
         let name = var_name.unwrap_string();
-        if self
-            .env
-            .get(self.current)
-            .unwrap()
-            .current
-            .tags
-            .contains_key(&name)
-        {
+        if self.tags.contains_key(&name, self.current_depth) {
             return Err(Error::new(
-                var_name,
-                &format!("Redefinition of symbol '{}'", var_name.unwrap_string()),
+                &var_name,
+                &format!("Redefinition of type '{}'", name),
             ));
         }
-
-        self.env
-            .get_mut(self.current)
-            .unwrap()
-            .current
-            .tags
-            .insert(name, tag);
-        Ok(())
+        self.tags.declare(name, self.current_depth, tag)
     }
-
-    pub fn set_reg(&mut self, name: &Token, reg: Register) {
-        if let Symbols::Variable(ref mut s) = self.get_symbol(name).unwrap() {
-            s.set_reg(reg);
-            // ugly but updating entry at name
-            self.env
-                .get_mut(self.current)
-                .unwrap()
-                .current
-                .symbols
-                .insert(name.unwrap_string(), Symbols::Variable(s.clone()));
+    pub fn get_symbol(&self, var_name: &Token) -> Result<(Symbols, usize), Error> {
+        self.symbols.get(var_name, self.current_depth)
+    }
+    pub fn remove_symbol(&mut self, index: usize) {
+        self.symbols.elems.remove(index);
+    }
+    pub fn get_type(&self, var_name: &Token) -> Result<(Tags, usize), Error> {
+        // TODO: convert this better
+        match self.tags.get(var_name, self.current_depth) {
+            Ok(t) => Ok(t),
+            Err(_) => Err(Error::UndeclaredType(var_name.clone())),
         }
     }
-    pub fn set_stack_size(&mut self, name: &Token, size: usize) {
-        if let Symbols::Func(ref mut s) = self.get_symbol(name).unwrap() {
-            s.set_stack_size(size);
-            self.env
-                .get_mut(0)
-                .unwrap()
-                .current
-                .symbols
-                .insert(name.unwrap_string(), Symbols::Func(s.clone()));
-        }
+    pub fn get_mut_symbol(&mut self, index: usize) -> &mut Symbols {
+        &mut self.symbols.elems.get_mut(index).unwrap().3
     }
 
-    pub fn get_global_symbol(&self, var_name: &Token) -> Result<Symbols, Error> {
-        self.env.get(0).unwrap().get_symbol(var_name, &self.env)
-    }
-    pub fn get_symbol(&self, var_name: &Token) -> Result<Symbols, Error> {
-        self.env
-            .get(self.current)
-            .unwrap()
-            .get_symbol(var_name, &self.env)
-    }
-
-    pub fn get_type(&self, var_name: &Token) -> Result<Tags, Error> {
-        self.env
-            .get(self.current)
-            .unwrap()
-            .get_type(var_name, &self.env)
-    }
-
-    pub fn check_redefinition(&self, name: &Token) -> Result<(), Error> {
-        if self
-            .env
-            .get(self.current)
-            .unwrap()
-            .current
-            .tags
-            .contains_key(&name.unwrap_string())
-        {
-            Err(Error::new(
-                name,
-                &format!("Redefinition of '{}'", name.unwrap_string()),
-            ))
-        } else {
-            Ok(())
-        }
+    pub fn get_symbol_table(self) -> Vec<Symbols> {
+        self.symbols
+            .elems
+            .into_iter()
+            .map(|(_, _, _, symbol)| symbol)
+            .collect()
     }
 }
-#[derive(Clone, Debug, PartialEq)]
-pub struct Environment {
-    // index to know which contained env is visited next
-    pub index: usize,
 
-    // Environments can hold multiple other environments
-    pub contained: Vec<usize>,
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn get_current_env() {
+        let namespace = NameSpace {
+            elems: vec![
+                (
+                    "s".to_string(),
+                    1,
+                    0,
+                    Symbols::Variable(SymbolInfo {
+                        type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
+                        reg: None,
+                        is_global: false,
+                    }),
+                ),
+                (
+                    "foo".to_string(),
+                    2,
+                    1,
+                    Symbols::Variable(SymbolInfo {
+                        type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
+                        reg: None,
+                        is_global: false,
+                    }),
+                ),
+                (
+                    "n".to_string(),
+                    1,
+                    2,
+                    Symbols::Variable(SymbolInfo {
+                        type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
+                        reg: None,
+                        is_global: false,
+                    }),
+                ),
+            ],
+        };
 
-    // current environment containing all identifiers
-    current: Table,
-
-    // every environment only has single outer environment
-    enclosing: Option<usize>,
-}
-impl Environment {
-    pub fn new(enclosing: Option<usize>) -> Self {
-        Environment {
-            index: 0,
-            contained: vec![],
-            current: Table::new(),
-            enclosing,
-        }
-    }
-
-    pub fn get_symbol(&self, var_name: &Token, envs: &Vec<Environment>) -> Result<Symbols, Error> {
-        let name = var_name.unwrap_string();
-        match self.current.symbols.get(&name) {
-            Some(v) => Ok(v.clone()),
-            None => match self.enclosing {
-                Some(env) => envs.get(env).unwrap().get_symbol(var_name, envs),
-                None => Err(Error::new(var_name, "Undeclared symbol")),
-            },
-        }
-    }
-    pub fn get_type(&self, var_name: &Token, envs: &Vec<Environment>) -> Result<Tags, Error> {
-        let name = var_name.unwrap_string();
-        match self.current.tags.get(&name) {
-            Some(v) => Ok(v.clone()),
-            None => match self.enclosing {
-                Some(env) => envs.get(env).unwrap().get_type(var_name, envs),
-                None => Err(Error::UndeclaredType(var_name.clone())),
-            },
-        }
+        let actual = namespace
+            .get_current(1)
+            .into_iter()
+            .map(|e| e.clone())
+            .collect::<Vec<(String, usize, usize, Symbols)>>();
+        let expected = vec![
+            (
+                "n".to_string(),
+                1,
+                2,
+                Symbols::Variable(SymbolInfo {
+                    type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
+                    reg: None,
+                    is_global: false,
+                }),
+            ),
+            (
+                "s".to_string(),
+                1,
+                0,
+                Symbols::Variable(SymbolInfo {
+                    type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
+                    reg: None,
+                    is_global: false,
+                }),
+            ),
+        ];
+        assert_eq!(actual, expected);
     }
 }

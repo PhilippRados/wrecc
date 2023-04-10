@@ -18,7 +18,6 @@ pub enum Stmt {
         Box<Stmt>,
     ),
     Function(NEWTypes, Token, Vec<(NEWTypes, Token)>, Vec<Stmt>),
-    FunctionDeclaration(),
     Return(Token, Option<Expr>),
     Break(Token),
     Continue(Token),

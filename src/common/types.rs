@@ -303,6 +303,13 @@ impl NEWTypes {
             _ => false,
         }
     }
+    pub fn is_integer(&self) -> bool {
+        match self {
+            NEWTypes::Primitive(Types::Void) => false,
+            NEWTypes::Primitive(_) | NEWTypes::Enum(..) => true,
+            _ => false,
+        }
+    }
 }
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Types {

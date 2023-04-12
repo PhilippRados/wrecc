@@ -95,6 +95,9 @@ impl Parser {
             TokenKind::Continue,
             TokenKind::LeftBrace,
             TokenKind::Do,
+            TokenKind::Switch,
+            TokenKind::Case,
+            TokenKind::Default,
         ]) {
             return match token.token {
                 TokenType::For => self.for_statement(),
@@ -108,10 +111,45 @@ impl Parser {
                     self.env.enter();
                     Ok(Stmt::Block(self.block()?))
                 }
+                TokenType::Switch => self.switch_statement(token),
+                TokenType::Case => self.case_statement(token),
+                TokenType::Default => self.default_statement(token),
                 _ => unreachable!(),
             };
         }
         self.expression_statement()
+    }
+    fn switch_statement(&mut self, token: Token) -> Result<Stmt, Error> {
+        self.consume(TokenKind::LeftParen, "Expect '(' after switch keyword")?;
+        let cond = self.expression()?;
+
+        self.consume(TokenKind::RightParen, "Expect ')' after switch condition")?;
+
+        let body = self.statement()?;
+
+        Ok(Stmt::Switch(token, cond, Box::new(body)))
+    }
+    fn case_statement(&mut self, token: Token) -> Result<Stmt, Error> {
+        // TODO: should allow constant expression when folding is implemented
+        let value = self
+            .consume(
+                TokenKind::Number,
+                "Expect integer-value following case-statement",
+            )?
+            .unwrap_num();
+
+        self.consume(TokenKind::Colon, "Expect ':' following case-statement")?;
+
+        let body = self.statement()?;
+
+        Ok(Stmt::Case(token, value, Box::new(body)))
+    }
+    fn default_statement(&mut self, token: Token) -> Result<Stmt, Error> {
+        self.consume(TokenKind::Colon, "Expect ':' following default-statement")?;
+
+        let body = self.statement()?;
+
+        Ok(Stmt::Default(token, Box::new(body)))
     }
     fn do_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
         let body = self.statement()?;

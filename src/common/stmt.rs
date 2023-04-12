@@ -21,4 +21,7 @@ pub enum Stmt {
     Return(Token, Option<Expr>),
     Break(Token),
     Continue(Token),
+    Switch(Token, Expr, Box<Stmt>),
+    Case(Token, i64, Box<Stmt>),
+    Default(Token, Box<Stmt>),
 }

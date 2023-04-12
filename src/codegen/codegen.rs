@@ -109,6 +109,10 @@ impl Compiler {
             Stmt::Continue(..) => {
                 self.jump_statement(self.jump_labels.last().expect("typechecker").1)
             }
+            // Stmt::Switch(_, cond, body) => self.switch_statement(),
+            // Stmt::Case(_, value, body) => self.case_statement(),
+            // Stmt::Default(_, body) => self.default_statement(),
+            _ => Ok(()),
         }
     }
     fn do_statement(&mut self, body: &Stmt, cond: &Expr) -> Result<(), std::fmt::Error> {

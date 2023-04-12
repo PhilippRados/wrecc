@@ -133,7 +133,6 @@ impl Symbols {
             _ => unreachable!("cant unwrap var on func"),
         }
     }
-    // TODO: change this
     pub fn unwrap_var(&self) -> &SymbolInfo {
         match self {
             Symbols::Variable(s) => s,

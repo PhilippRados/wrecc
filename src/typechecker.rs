@@ -3,44 +3,44 @@ use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types:
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-#[derive(PartialEq, Clone)]
-enum ScopeLevel {
+#[derive(PartialEq, Debug)]
+enum ScopeKind {
     Global,
-    Loop(Box<ScopeLevel>),
-    Function(Token, NEWTypes), // function name and return type
+    Loop,
+    // (function name, return type)
+    Function(Token, NEWTypes),
+    // (case-values in current switch, indicator if default exists)
+    Switch(Vec<i64>, bool),
 }
-impl ScopeLevel {
-    fn get_function_type(&self, token: &Token) -> Result<&NEWTypes, Error> {
-        match self {
-            ScopeLevel::Function(_, t) => Ok(t),
-            ScopeLevel::Loop(enclosing) => enclosing.get_function_type(token),
-            ScopeLevel::Global => Err(Error::new(
-                token,
-                "Can only define return statements inside a function",
-            )),
-        }
-    }
-    fn enclosing(&mut self) {
-        *self = match self {
-            ScopeLevel::Global => unreachable!("global scope doesn't have an enclosing scope"),
-            ScopeLevel::Loop(s) => *s.clone(),
-            ScopeLevel::Function(..) => ScopeLevel::Global,
-        }
-    }
-
-    fn increment_stack_size(&mut self, type_decl: &NEWTypes, env: &mut Vec<Symbols>) {
-        match self {
-            ScopeLevel::Function(name, _) => {
-                let func_symbol = env.get_mut(name.token.get_index()).expect("valid st index");
-
-                let mut size = func_symbol.unwrap_func().get_stack_size() + type_decl.size();
-                size = align(size, type_decl);
-
-                func_symbol.unwrap_func().set_stack_size(size);
+macro_rules! find_scope {
+    ($scope:expr,$($expected:pat_param)|+) => {{
+        let mut result = None;
+        for current in $scope.0.iter_mut().rev() {
+            if matches!(current, $($expected)|+) {
+                result = Some(current);
+                break;
             }
-            ScopeLevel::Loop(s) => s.increment_stack_size(type_decl, env),
-            ScopeLevel::Global => unreachable!(),
         }
+        result
+    }};
+}
+
+// vector to go through and check if certain statements are
+// enclosed by others. eg: return only in functions, break only in switch/loops
+#[derive(PartialEq, Debug)]
+struct ScopeLevel(Vec<ScopeKind>);
+impl ScopeLevel {
+    fn increment_stack_size(&mut self, type_decl: &NEWTypes, env: &mut Vec<Symbols>) {
+        let ScopeKind::Function(func_name, _) = find_scope!(self, ScopeKind::Function(..))
+            .expect("can only be called inside a function") else {unreachable!()};
+        let func_symbol = env
+            .get_mut(func_name.token.get_index())
+            .expect("valid table index");
+
+        let mut size = func_symbol.unwrap_func().get_stack_size() + type_decl.size();
+        size = align(size, type_decl);
+
+        func_symbol.unwrap_func().set_stack_size(size);
     }
 }
 pub struct TypeChecker {
@@ -69,7 +69,7 @@ impl TypeChecker {
     pub fn new(env: Vec<Symbols>) -> Self {
         TypeChecker {
             env,
-            scope: ScopeLevel::Global,
+            scope: ScopeLevel(vec![ScopeKind::Global]),
             returns_all_paths: false,
             const_labels: HashMap::new(),
             const_label_count: 0,
@@ -123,7 +123,87 @@ impl TypeChecker {
             }
             Stmt::Break(keyword) => self.break_statement(keyword),
             Stmt::Continue(keyword) => self.continue_statement(keyword),
+            Stmt::Switch(keyword, cond, body) => self.switch_statement(keyword, cond, body),
+            Stmt::Case(keyword, value, body) => self.case_statement(keyword, value, body),
+            Stmt::Default(keyword, body) => self.default_statement(keyword, body),
         }
+    }
+    fn switch_statement(
+        &mut self,
+        token: &Token,
+        cond: &mut Expr,
+        body: &mut Stmt,
+    ) -> Result<(), Error> {
+        let cond_type = self.expr_type(cond)?;
+        if !cond_type.is_integer() {
+            return Err(Error::new(
+                token,
+                &format!(
+                    "Switch conditional must be integer type, found '{}'",
+                    cond_type,
+                ),
+            ));
+        }
+        self.scope.0.push(ScopeKind::Switch(vec![], false));
+        let err = self.visit(body);
+        self.scope.0.pop();
+
+        err?;
+
+        // TODO: check returns in all paths
+        // self.self.returns_all_paths = false;
+
+        Ok(())
+    }
+    fn case_statement(
+        &mut self,
+        token: &Token,
+        value: &mut i64,
+        body: &mut Stmt,
+    ) -> Result<(), Error> {
+        match find_scope!(&mut self.scope, ScopeKind::Switch(..)) {
+            Some(ScopeKind::Switch(cases, _)) => {
+                if !cases.contains(value) {
+                    cases.push(*value)
+                } else {
+                    return Err(Error::new(
+                        token,
+                        &format!("Duplicate 'case'-statement with value {}", *value),
+                    ));
+                }
+            }
+            _ => {
+                return Err(Error::new(
+                    token,
+                    "'case'-statements have to be inside a 'switch'-statement",
+                ));
+            }
+        }
+
+        self.visit(body)?;
+        Ok(())
+    }
+    fn default_statement(&mut self, token: &Token, body: &mut Stmt) -> Result<(), Error> {
+        match find_scope!(&mut self.scope, ScopeKind::Switch(..)) {
+            Some(ScopeKind::Switch(_, defaults)) => {
+                if !*defaults {
+                    *defaults = true
+                } else {
+                    return Err(Error::new(
+                        token,
+                        "Can't have multiple 'default'-statements inside a 'switch'-statement",
+                    ));
+                }
+            }
+            _ => {
+                return Err(Error::new(
+                    token,
+                    "'default'-statements have to be inside a 'switch'-statement",
+                ));
+            }
+        }
+        self.visit(body)?;
+        Ok(())
     }
     fn do_statement(
         &mut self,
@@ -131,9 +211,9 @@ impl TypeChecker {
         body: &mut Stmt,
         cond: &mut Expr,
     ) -> Result<(), Error> {
-        self.scope = ScopeLevel::Loop(Box::new(self.scope.clone()));
+        self.scope.0.push(ScopeKind::Loop);
         self.visit(body)?;
-        self.scope.enclosing();
+        self.scope.0.pop();
 
         let cond_type = self.expr_type(cond)?;
         if !cond_type.is_scalar() {
@@ -168,46 +248,39 @@ impl TypeChecker {
             }
         }
 
-        self.scope = ScopeLevel::Loop(Box::new(self.scope.clone()));
+        self.scope.0.push(ScopeKind::Loop);
         self.visit(body)?;
 
         if let Some(inc) = inc {
             self.expr_type(inc)?;
         }
 
-        self.scope.enclosing();
+        self.scope.0.pop();
 
         self.returns_all_paths = false;
         Ok(())
     }
     fn break_statement(&mut self, token: &Token) -> Result<(), Error> {
-        if matches!(self.scope, ScopeLevel::Loop(..)) {
-            Ok(())
+        if find_scope!(&mut self.scope, ScopeKind::Loop | ScopeKind::Switch(..)).is_none() {
+            Err(Error::new(
+                token,
+                "'break' must be inside loop/switch-statement",
+            ))
         } else {
-            Err(Error::new(token, "'break' statement must be inside loop"))
+            Ok(())
         }
     }
     fn continue_statement(&mut self, token: &Token) -> Result<(), Error> {
-        if matches!(self.scope, ScopeLevel::Loop(..)) {
-            Ok(())
-        } else {
+        if find_scope!(&mut self.scope, ScopeKind::Loop).is_none() {
             Err(Error::new(
                 token,
                 "'continue' statement must be inside loop",
             ))
+        } else {
+            Ok(())
         }
     }
 
-    // fn typedef(&mut self, name: &Token) -> Result<(), Error> {
-    //     if self.env.current.symbols.contains_key(&name.unwrap_string()) {
-    //         return Err(Error::new(
-    //             &name,
-    //             &format!("Redefinition of '{}'", name.unwrap_string()),
-    //         ));
-    //     }
-    //     self.env.declare_type(name.unwrap_string());
-    //     Ok(())
-    // }
     fn while_statement(
         &mut self,
         left_paren: &Token,
@@ -222,9 +295,9 @@ impl TypeChecker {
             ));
         }
 
-        self.scope = ScopeLevel::Loop(Box::new(self.scope.clone()));
+        self.scope.0.push(ScopeKind::Loop);
         self.visit(body)?;
-        self.scope.enclosing();
+        self.scope.0.pop();
 
         self.returns_all_paths = false;
         Ok(())
@@ -411,14 +484,16 @@ impl TypeChecker {
         body: &mut Vec<Stmt>,
     ) -> Result<(), Error> {
         // have to push scope before declaring local variables
-        self.scope = ScopeLevel::Function(name_token.clone(), return_type.clone());
+        self.scope
+            .0
+            .push(ScopeKind::Function(name_token.clone(), return_type.clone()));
         for (type_decl, _) in params.iter().by_ref() {
             self.scope.increment_stack_size(type_decl, &mut self.env);
         }
 
         // check function body
         let err = self.block(body);
-        self.scope = ScopeLevel::Global;
+        self.scope.0.pop();
 
         err?;
 
@@ -441,7 +516,7 @@ impl TypeChecker {
         if !return_type.is_void() && !self.returns_all_paths {
             Err(Error::new(
                 name_token,
-                "Non-void function doesnt return in all code paths",
+                "Non-void function doesn't return in all code paths",
             ))
         } else {
             self.returns_all_paths = false;
@@ -473,7 +548,11 @@ impl TypeChecker {
     }
     fn return_statement(&mut self, keyword: &Token, expr: &mut Option<Expr>) -> Result<(), Error> {
         self.returns_all_paths = true;
-        let function_type = self.scope.get_function_type(keyword)?.clone();
+
+        let Some(ScopeKind::Function(_,function_type)) = find_scope!(&mut self.scope, ScopeKind::Function(..)) else {
+            return Err(Error::new(keyword,"Can only define return statements inside a function"));
+        };
+        let function_type = function_type.clone();
 
         if let Some(expr) = expr {
             let mut body_return = self.expr_type(expr)?;
@@ -1040,7 +1119,7 @@ impl TypeChecker {
         }
     }
     fn is_global(&self) -> bool {
-        self.scope == ScopeLevel::Global
+        self.scope.0.len() == 1
     }
 }
 
@@ -1114,5 +1193,55 @@ mod tests {
         let result = align_by(offset, 16);
 
         assert_eq!(result, 16);
+    }
+    #[test]
+    fn finds_nested_loop() {
+        let mut scopes = ScopeLevel(vec![
+            ScopeKind::Global,
+            ScopeKind::Loop,
+            ScopeKind::Switch(vec![], false),
+            ScopeKind::Switch(vec![], false),
+        ]);
+        let expected = true;
+        let actual = find_scope!(scopes, ScopeKind::Loop).is_some();
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn doesnt_find_switch() {
+        let mut scopes = ScopeLevel(vec![ScopeKind::Global, ScopeKind::Loop, ScopeKind::Loop]);
+        let expected = false;
+        let actual = find_scope!(scopes, ScopeKind::Switch(..)).is_some();
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn finds_and_mutates_scope() {
+        let mut scopes = ScopeLevel(vec![
+            ScopeKind::Global,
+            ScopeKind::Loop,
+            ScopeKind::Switch(vec![], false),
+            ScopeKind::Switch(vec![], false),
+            ScopeKind::Loop,
+        ]);
+        let expected = ScopeLevel(vec![
+            ScopeKind::Global,
+            ScopeKind::Loop,
+            ScopeKind::Switch(vec![], false),
+            ScopeKind::Switch(vec![1, 3], true),
+            ScopeKind::Loop,
+        ]);
+        let ScopeKind::Switch(cases, defaults) =
+            find_scope!(scopes, ScopeKind::Switch(..)).unwrap() else {unreachable!()};
+        cases.push(1);
+        cases.push(3);
+        *defaults = true;
+
+        let cases = cases.clone();
+        let defaults = defaults.clone();
+
+        assert_eq!(scopes, expected);
+        assert_eq!(cases, vec![1, 3]);
+        assert_eq!(defaults, true);
     }
 }

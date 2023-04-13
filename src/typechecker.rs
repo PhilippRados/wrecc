@@ -9,8 +9,9 @@ enum ScopeKind {
     Loop,
     // (function name, return type)
     Function(Token, NEWTypes),
-    // (case-values in current switch, indicator if default exists)
-    Switch(Vec<i64>, bool),
+    // all cases and defaults that are in a switch
+    // if Some(value) then case, if None then default
+    Switch(Vec<Option<i64>>),
 }
 macro_rules! find_scope {
     ($scope:expr,$($expected:pat_param)|+) => {{
@@ -53,7 +54,7 @@ pub struct TypeChecker {
     // save encountered switch-statements together with
     // with info about their cases and defaults, so that
     // codegen is simpler
-    switches: Vec<(Vec<i64>, bool)>,
+    switches: Vec<Vec<Option<i64>>>,
 }
 macro_rules! cast {
     ($ex:expr,$new_type:expr,$direction:path) => {
@@ -84,7 +85,7 @@ impl TypeChecker {
     pub fn check(
         mut self,
         statements: &mut Vec<Stmt>,
-    ) -> Option<(HashMap<String, usize>, Vec<Symbols>, Vec<(Vec<i64>, bool)>)> {
+    ) -> Option<(HashMap<String, usize>, Vec<Symbols>, Vec<Vec<Option<i64>>>)> {
         match self.check_statements(statements) {
             Ok(_) => Some((self.const_labels, self.env, self.switches)),
             Err(_) => None,
@@ -148,14 +149,14 @@ impl TypeChecker {
                 ),
             ));
         }
-        self.scope.0.push(ScopeKind::Switch(vec![], false));
+        self.scope.0.push(ScopeKind::Switch(vec![]));
         let err = self.visit(body);
 
-        let Some(ScopeKind::Switch(cases, defaults)) = self.scope.0.pop() else {
+        let Some(ScopeKind::Switch(labels)) = self.scope.0.pop() else {
             unreachable!("all other scopes should be popped off by themselves")
         };
 
-        self.switches.push((cases, defaults));
+        self.switches.push(labels);
 
         err?;
 
@@ -171,9 +172,9 @@ impl TypeChecker {
         body: &mut Stmt,
     ) -> Result<(), Error> {
         match find_scope!(&mut self.scope, ScopeKind::Switch(..)) {
-            Some(ScopeKind::Switch(cases, _)) => {
-                if !cases.contains(value) {
-                    cases.push(*value)
+            Some(ScopeKind::Switch(labels)) => {
+                if !labels.contains(&Some(*value)) {
+                    labels.push(Some(*value))
                 } else {
                     return Err(Error::new(
                         token,
@@ -194,9 +195,9 @@ impl TypeChecker {
     }
     fn default_statement(&mut self, token: &Token, body: &mut Stmt) -> Result<(), Error> {
         match find_scope!(&mut self.scope, ScopeKind::Switch(..)) {
-            Some(ScopeKind::Switch(_, defaults)) => {
-                if !*defaults {
-                    *defaults = true
+            Some(ScopeKind::Switch(labels)) => {
+                if !labels.contains(&None) {
+                    labels.push(None)
                 } else {
                     return Err(Error::new(
                         token,
@@ -1208,8 +1209,8 @@ mod tests {
         let mut scopes = ScopeLevel(vec![
             ScopeKind::Global,
             ScopeKind::Loop,
-            ScopeKind::Switch(vec![], false),
-            ScopeKind::Switch(vec![], false),
+            ScopeKind::Switch(vec![]),
+            ScopeKind::Switch(vec![]),
         ]);
         let expected = true;
         let actual = find_scope!(scopes, ScopeKind::Loop).is_some();
@@ -1229,28 +1230,23 @@ mod tests {
         let mut scopes = ScopeLevel(vec![
             ScopeKind::Global,
             ScopeKind::Loop,
-            ScopeKind::Switch(vec![], false),
-            ScopeKind::Switch(vec![], false),
+            ScopeKind::Switch(vec![]),
+            ScopeKind::Switch(vec![]),
             ScopeKind::Loop,
         ]);
         let expected = ScopeLevel(vec![
             ScopeKind::Global,
             ScopeKind::Loop,
-            ScopeKind::Switch(vec![], false),
-            ScopeKind::Switch(vec![1, 3], true),
+            ScopeKind::Switch(vec![]),
+            ScopeKind::Switch(vec![Some(1), None, Some(3)]),
             ScopeKind::Loop,
         ]);
-        let ScopeKind::Switch(cases, defaults) =
+        let ScopeKind::Switch(labels) =
             find_scope!(scopes, ScopeKind::Switch(..)).unwrap() else {unreachable!()};
-        cases.push(1);
-        cases.push(3);
-        *defaults = true;
-
-        let cases = cases.clone();
-        let defaults = defaults.clone();
+        labels.push(Some(1));
+        labels.push(None);
+        labels.push(Some(3));
 
         assert_eq!(scopes, expected);
-        assert_eq!(cases, vec![1, 3]);
-        assert_eq!(defaults, true);
     }
 }

@@ -40,17 +40,17 @@ pub struct Compiler {
     jump_labels: Vec<(usize, usize)>,
 
     // switch information, about cases and defaults
-    switches: VecDeque<(Vec<i64>, bool)>,
+    switches: VecDeque<Vec<Option<i64>>>,
 
-    // case-labels get defined in each switch and then the cases and defaults
-    // pop them in order of appearance
-    case_labels: VecDeque<usize>,
+    // case/default-labels get defined in each switch and then the
+    // respective case/default-statements pop them in order of appearance
+    switch_labels: VecDeque<usize>,
 }
 impl Compiler {
     pub fn new(
         const_labels: HashMap<String, usize>,
         env: Vec<Symbols>,
-        switches: Vec<(Vec<i64>, bool)>,
+        switches: Vec<Vec<Option<i64>>>,
     ) -> Self {
         Compiler {
             env,
@@ -63,7 +63,7 @@ impl Compiler {
             function_name: None,
             saved_args: Vec::new(),
             jump_labels: Vec::new(),
-            case_labels: VecDeque::new(),
+            switch_labels: VecDeque::new(),
         }
     }
 
@@ -125,41 +125,40 @@ impl Compiler {
         }
     }
     fn switch_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), std::fmt::Error> {
-        let (cases, has_default) = self.switches.pop_front().unwrap();
+        let switch_labels = self.switches.pop_front().unwrap();
 
-        let mut jump_labels: Vec<usize> = (0..cases.len())
+        let jump_labels: Vec<usize> = (0..switch_labels.len())
             .map(|_| create_label(&mut self.label_index))
             .collect();
 
         let cond_reg = self.execute_expr(cond)?;
 
-        for (case_value, label) in cases.iter().zip(jump_labels.clone()) {
-            writeln!(
-                self.output,
-                "\tcmp{}    ${}, {}\n\tje      L{}",
-                cond_reg.get_type().suffix(),
-                case_value,
-                cond_reg.name(),
-                label
-            )?;
+        let mut default_label = None;
+        for (kind, label) in switch_labels.iter().zip(jump_labels.clone()) {
+            match kind {
+                Some(case_value) => {
+                    writeln!(
+                        self.output,
+                        "\tcmp{}    ${}, {}\n\tje      L{}",
+                        cond_reg.get_type().suffix(),
+                        case_value,
+                        cond_reg.name(),
+                        label
+                    )?;
+                }
+                None => default_label = Some(label),
+            }
+        }
+        // default label has to be jumped to if no other cases match
+        if let Some(label) = default_label {
+            writeln!(self.output, "\tjmp     L{}", label)?
         }
         cond_reg.free();
-
-        let default_label = if has_default {
-            let label = create_label(&mut self.label_index);
-            jump_labels.push(label);
-            Some(label)
-        } else {
-            None
-        };
-        if let Some(label) = default_label {
-            writeln!(self.output, "\tjmp     L{}", label)?;
-        }
 
         let break_label = create_label(&mut self.label_index);
 
         self.jump_labels.push((break_label, 0));
-        self.case_labels.append(&mut jump_labels.into());
+        self.switch_labels.append(&mut jump_labels.into());
 
         self.visit(body)?;
 
@@ -170,7 +169,7 @@ impl Compiler {
         Ok(())
     }
     fn case_statement(&mut self, body: &Stmt) -> Result<(), std::fmt::Error> {
-        let label = self.case_labels.pop_front().unwrap();
+        let label = self.switch_labels.pop_front().unwrap();
 
         writeln!(self.output, "L{}:", label)?;
 

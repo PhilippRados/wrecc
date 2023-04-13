@@ -42,11 +42,11 @@ fn main() {
 
     // Check for errors
     let typechecker = TypeChecker::new(env);
-    let (const_labels, env) = match typechecker.check(&mut statements) {
+    let (const_labels, env, switches) = match typechecker.check(&mut statements) {
         Some(result) => result,
         None => return,
     };
 
     // generate x8664 assembly
-    Compiler::new(const_labels, env).compile(&statements);
+    Compiler::new(const_labels, env, switches).compile(&statements);
 }

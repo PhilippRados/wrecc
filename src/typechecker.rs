@@ -49,6 +49,11 @@ pub struct TypeChecker {
     returns_all_paths: bool,
     const_labels: HashMap<String, usize>,
     const_label_count: usize,
+
+    // save encountered switch-statements together with
+    // with info about their cases and defaults, so that
+    // codegen is simpler
+    switches: Vec<(Vec<i64>, bool)>,
 }
 macro_rules! cast {
     ($ex:expr,$new_type:expr,$direction:path) => {
@@ -73,14 +78,15 @@ impl TypeChecker {
             returns_all_paths: false,
             const_labels: HashMap::new(),
             const_label_count: 0,
+            switches: vec![],
         }
     }
     pub fn check(
         mut self,
         statements: &mut Vec<Stmt>,
-    ) -> Option<(HashMap<String, usize>, Vec<Symbols>)> {
+    ) -> Option<(HashMap<String, usize>, Vec<Symbols>, Vec<(Vec<i64>, bool)>)> {
         match self.check_statements(statements) {
-            Ok(_) => Some((self.const_labels, self.env)),
+            Ok(_) => Some((self.const_labels, self.env, self.switches)),
             Err(_) => None,
         }
     }
@@ -146,7 +152,12 @@ impl TypeChecker {
         }
         self.scope.0.push(ScopeKind::Switch(vec![], false));
         let err = self.visit(body);
-        self.scope.0.pop();
+
+        let Some(ScopeKind::Switch(cases, defaults)) = self.scope.0.pop() else {
+            unreachable!("all other scopes should be popped off by themselves")
+        };
+
+        self.switches.push((cases, defaults));
 
         err?;
 
@@ -550,7 +561,7 @@ impl TypeChecker {
         self.returns_all_paths = true;
 
         let Some(ScopeKind::Function(_,function_type)) = find_scope!(&mut self.scope, ScopeKind::Function(..)) else {
-            return Err(Error::new(keyword,"Can only define return statements inside a function"));
+            unreachable!("parser ensures that statements can only be contained in functions");
         };
         let function_type = function_type.clone();
 

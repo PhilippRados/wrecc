@@ -1,7 +1,7 @@
 use crate::codegen::register::*;
 use crate::common::{environment::*, expr::*, stmt::*, token::*, types::*};
 use crate::typechecker::{align_by, create_label};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Write;
 use std::fs::File;
 use std::io::Write as _;
@@ -38,11 +38,23 @@ pub struct Compiler {
 
     // loop labels saved so that break and continue jump to them
     jump_labels: Vec<(usize, usize)>,
+
+    // switch information, about cases and defaults
+    switches: VecDeque<(Vec<i64>, bool)>,
+
+    // case-labels get defined in each switch and then the cases and defaults
+    // pop them in order of appearance
+    case_labels: VecDeque<usize>,
 }
 impl Compiler {
-    pub fn new(const_labels: HashMap<String, usize>, env: Vec<Symbols>) -> Self {
+    pub fn new(
+        const_labels: HashMap<String, usize>,
+        env: Vec<Symbols>,
+        switches: Vec<(Vec<i64>, bool)>,
+    ) -> Self {
         Compiler {
             env,
+            switches: switches.into(),
             const_labels,
             output: String::new(),
             scratch: ScratchRegisters::new(),
@@ -51,6 +63,7 @@ impl Compiler {
             function_name: None,
             saved_args: Vec::new(),
             jump_labels: Vec::new(),
+            case_labels: VecDeque::new(),
         }
     }
 
@@ -109,11 +122,64 @@ impl Compiler {
             Stmt::Continue(..) => {
                 self.jump_statement(self.jump_labels.last().expect("typechecker").1)
             }
-            // Stmt::Switch(_, cond, body) => self.switch_statement(),
-            // Stmt::Case(_, value, body) => self.case_statement(),
-            // Stmt::Default(_, body) => self.default_statement(),
-            _ => Ok(()),
+            Stmt::Switch(_, cond, body) => self.switch_statement(cond, body),
+            Stmt::Case(_, _, body) | Stmt::Default(_, body) => self.case_statement(body),
         }
+    }
+    fn switch_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), std::fmt::Error> {
+        let (cases, has_default) = self.switches.pop_front().unwrap();
+
+        let mut jump_labels: Vec<usize> = (0..cases.len())
+            .into_iter()
+            .map(|_| create_label(&mut self.label_index))
+            .collect();
+
+        let cond_reg = self.execute_expr(cond)?;
+
+        for (case_value, label) in cases.iter().zip(jump_labels.clone()) {
+            writeln!(
+                self.output,
+                "\tcmp{}    ${}, {}\n\tje      L{}",
+                cond_reg.get_type().suffix(),
+                case_value,
+                cond_reg.name(),
+                label
+            )?;
+        }
+        cond_reg.free();
+
+        let default_label = if has_default {
+            let label = create_label(&mut self.label_index);
+            jump_labels.push(label);
+            Some(label)
+        } else {
+            None
+        };
+        if let Some(label) = default_label {
+            writeln!(self.output, "\tjmp     L{}", label)?;
+        }
+
+        let break_label = create_label(&mut self.label_index);
+
+        self.jump_labels.push((break_label, 0));
+        self.case_labels.append(&mut jump_labels.into());
+
+        self.visit(body)?;
+
+        writeln!(self.output, "L{}:", break_label)?;
+
+        self.jump_labels.pop();
+
+        Ok(())
+    }
+    fn case_statement(&mut self, body: &Stmt) -> Result<(), std::fmt::Error> {
+        let label = self.case_labels.pop_front().unwrap();
+
+        writeln!(self.output, "L{}:", label)?;
+
+        self.visit(body)?;
+
+        Ok(())
     }
     fn do_statement(&mut self, body: &Stmt, cond: &Expr) -> Result<(), std::fmt::Error> {
         let body_label = create_label(&mut self.label_index);
@@ -138,7 +204,7 @@ impl Compiler {
         )?;
         cond_reg.free();
 
-        writeln!(self.output, "L{}:\n\tnop", end_label)?;
+        writeln!(self.output, "L{}:", end_label)?;
 
         self.jump_labels.pop();
 
@@ -146,7 +212,7 @@ impl Compiler {
     }
 
     fn jump_statement(&mut self, label: usize) -> Result<(), std::fmt::Error> {
-        writeln!(self.output, "\tjmp    L{}", label)
+        writeln!(self.output, "\tjmp     L{}", label)
     }
     fn init_list(
         &mut self,
@@ -212,7 +278,7 @@ impl Compiler {
         writeln!(self.output, "\tjmp    L{}\nL{}:", cond_label, body_label)?;
         self.visit(body)?;
 
-        writeln!(self.output, "L{}:\n\tnop", inc_label)?;
+        writeln!(self.output, "L{}:", inc_label)?;
 
         if let Some(inc) = inc {
             self.execute_expr(inc)?.free();
@@ -237,7 +303,7 @@ impl Compiler {
             None => writeln!(self.output, "\tjmp    L{}", body_label)?,
         }
 
-        writeln!(self.output, "L{}:\n\tnop", end_label)?;
+        writeln!(self.output, "L{}:", end_label)?;
 
         self.jump_labels.pop();
 
@@ -269,7 +335,7 @@ impl Compiler {
 
         // don't know before wether loop contains break statement
         // could be checked by typechecker
-        writeln!(self.output, "L{}:\n\tnop", end_label)?;
+        writeln!(self.output, "L{}:", end_label)?;
 
         self.jump_labels.pop();
 

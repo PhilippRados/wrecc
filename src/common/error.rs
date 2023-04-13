@@ -22,11 +22,11 @@ impl Error {
             })
             .print_error(),
             Error::NotType(t) => {
-                Error::new(&t, &format!("Expected type-declaration, found {}", t.token))
+                Error::new(t, &format!("Expected type-declaration, found {}", t.token))
                     .print_error()
             }
             Error::UndeclaredType(t) => {
-                Error::new(&t, &format!("Undeclared type '{}'", t.unwrap_string())).print_error()
+                Error::new(t, &format!("Undeclared type '{}'", t.unwrap_string())).print_error()
             }
             Error::Indicator => (),
         }

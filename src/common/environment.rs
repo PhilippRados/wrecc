@@ -223,7 +223,7 @@ impl<T: Clone + TypeName + std::fmt::Debug> NameSpace<T> {
             }
         }
         Err(Error::new(
-            &var_name,
+            var_name,
             &format!("Undeclared {} '{}'", T::type_name(), name),
         ))
     }
@@ -266,7 +266,7 @@ impl Scope {
         let name = var_name.unwrap_string();
         if self.symbols.contains_key(&name, self.current_depth) {
             return Err(Error::new(
-                &var_name,
+                var_name,
                 &format!("Redefinition of symbol '{}'", name),
             ));
         }
@@ -282,7 +282,7 @@ impl Scope {
         let name = var_name.unwrap_string();
         if self.tags.contains_key(&name, self.current_depth) {
             return Err(Error::new(
-                &var_name,
+                var_name,
                 &format!("Redefinition of type '{}'", name),
             ));
         }

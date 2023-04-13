@@ -93,7 +93,7 @@ mod struct_ref {
             });
         }
         pub fn is_complete(&self) -> bool {
-            IS_COMPLETE.with(|list| list.borrow()[self.index].clone())
+            IS_COMPLETE.with(|list| list.borrow()[self.index])
         }
     }
 }
@@ -105,7 +105,7 @@ pub enum StructInfo {
 impl StructInfo {
     pub fn members(&self) -> Rc<Vec<(NEWTypes, Token)>> {
         match self {
-            StructInfo::Named(_, s) => s.get().into(),
+            StructInfo::Named(_, s) => s.get(),
             StructInfo::Anonymous(m) => Rc::new(m.clone()),
         }
     }

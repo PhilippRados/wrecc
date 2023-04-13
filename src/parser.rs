@@ -21,7 +21,7 @@ impl Parser {
         let mut statements: Vec<Stmt> = Vec::new();
         let mut had_error = false;
 
-        while self.tokens.peek() != None {
+        while self.tokens.peek().is_some() {
             match self.declaration() {
                 Ok(v) => statements.push(v),
                 Err(Error::Indicator) => (),
@@ -279,9 +279,8 @@ impl Parser {
 
         let then_branch = self.statement()?;
         let mut else_branch = None;
-        match self.matches(vec![TokenKind::Else]) {
-            Some(_) => else_branch = Some(self.statement()?),
-            None => (),
+        if self.matches(vec![TokenKind::Else]).is_some() {
+            else_branch = Some(self.statement()?)
         }
         Ok(Stmt::If(
             keyword,
@@ -589,7 +588,7 @@ impl Parser {
             // parse array-designator {[3] = value}
             if let NEWTypes::Array { of, .. } = type_decl {
                 if let Some(n) = self.matches(vec![TokenKind::Number]) {
-                    let n = n.unwrap_num() as usize * type_element_count(&**of); // have to offset by type
+                    let n = n.unwrap_num() as usize * type_element_count(of); // have to offset by type
                     result.0 = n;
                 } else {
                     return Err(Error::new(&t, "Expect number as array designator"));
@@ -1264,7 +1263,7 @@ impl Parser {
         if !self.check(TokenKind::RightParen) {
             loop {
                 args.push(self.expression()?);
-                if self.matches(vec![TokenKind::Comma]) == None {
+                if self.matches(vec![TokenKind::Comma]).is_none() {
                     break;
                 }
             }

@@ -91,9 +91,7 @@ impl Compiler {
     }
     fn cg_stmts(&mut self, statements: &Vec<Stmt>) -> Result<(), std::fmt::Error> {
         for s in statements {
-            if let Err(e) = self.visit(s) {
-                return Err(e);
-            }
+            self.visit(s)?
         }
         Ok(())
     }
@@ -130,7 +128,6 @@ impl Compiler {
         let (cases, has_default) = self.switches.pop_front().unwrap();
 
         let mut jump_labels: Vec<usize> = (0..cases.len())
-            .into_iter()
             .map(|_| create_label(&mut self.label_index))
             .collect();
 
@@ -414,7 +411,7 @@ impl Compiler {
             }
             false => {
                 self.current_bp_offset += type_decl.size();
-                self.current_bp_offset = align(self.current_bp_offset, &type_decl);
+                self.current_bp_offset = align(self.current_bp_offset, type_decl);
 
                 Register::Stack(StackRegister::new(
                     self.current_bp_offset,
@@ -485,9 +482,9 @@ impl Compiler {
         self.function_name = Some(name.unwrap_string());
 
         // generate function code
-        self.cg_func_preamble(&name, params)?;
+        self.cg_func_preamble(name, params)?;
         self.cg_stmts(body)?;
-        self.cg_func_postamble(&name)?;
+        self.cg_func_postamble(name)?;
 
         self.current_bp_offset = 0;
         self.function_name = None;

@@ -425,7 +425,7 @@ impl TypeChecker {
 
         if !old_type.is_scalar() || !new_type.is_scalar() {
             return Err(Error::new(
-                &token,
+                token,
                 &format!(
                     "Invalid cast from '{}' to '{}'. '{}' is not a scalar type",
                     old_type,

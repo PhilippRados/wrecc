@@ -104,27 +104,25 @@ impl TypeChecker {
     fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
         match statement {
             Stmt::DeclareVar(type_decl, var_name) => self.declare_var(type_decl, var_name),
-            Stmt::InitVar(type_decl, name, ref mut expr) => self.init_var(type_decl, name, expr),
+            Stmt::InitVar(type_decl, name, expr) => self.init_var(type_decl, name, expr),
             Stmt::InitList(type_decl, var_name, exprs) => {
                 self.init_list(type_decl, var_name, exprs)
             }
             Stmt::Function(return_type, name, params, body) => {
                 self.function_definition(return_type, name, params.clone(), body)
             }
-            Stmt::Return(keyword, ref mut value) => self.return_statement(keyword, value),
-            Stmt::Expr(ref mut expr) => match self.expr_type(expr) {
+            Stmt::Return(keyword, value) => self.return_statement(keyword, value),
+            Stmt::Expr(expr) => match self.expr_type(expr) {
                 Ok(_) => Ok(()),
                 Err(e) => Err(e),
             },
             Stmt::Block(statements) => self.block(statements),
-            Stmt::If(keyword, ref mut cond, then_branch, else_branch) => {
+            Stmt::If(keyword, cond, then_branch, else_branch) => {
                 self.if_statement(keyword, cond, then_branch, else_branch)
             }
-            Stmt::While(left_paren, ref mut cond, body) => {
-                self.while_statement(left_paren, cond, body)
-            }
+            Stmt::While(left_paren, cond, body) => self.while_statement(left_paren, cond, body),
             Stmt::Do(keyword, body, cond) => self.do_statement(keyword, body, cond),
-            Stmt::For(left_paren, init, ref mut cond, inc, body) => {
+            Stmt::For(left_paren, init, cond, inc, body) => {
                 self.for_statement(left_paren, init, cond, inc, body)
             }
             Stmt::Break(keyword) => self.break_statement(keyword),

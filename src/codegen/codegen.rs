@@ -149,7 +149,7 @@ impl Compiler {
                 None => default_label = Some(label),
             }
         }
-        // default label has to be jumped to if no other cases match
+        // default label has to be jumped to at the end (even if there are cases following it) if no other cases match
         if let Some(label) = default_label {
             writeln!(self.output, "\tjmp     L{}", label)?
         }
@@ -616,7 +616,7 @@ impl Compiler {
                 false_expr,
                 ..
             } => self.cg_ternary(cond, true_expr, false_expr),
-            ExprKind::Nop => unreachable!("only used in parser"),
+            ExprKind::Nop => Ok(Register::Void),
         }
     }
 

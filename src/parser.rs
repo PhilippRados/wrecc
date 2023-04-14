@@ -24,7 +24,6 @@ impl Parser {
         while self.tokens.peek().is_some() {
             match self.declaration() {
                 Ok(v) => statements.push(v),
-                Err(Error::Indicator) => (),
                 Err(e) => {
                     e.print_error();
                     self.synchronize();
@@ -62,6 +61,9 @@ impl Parser {
         }
     }
     fn declaration(&mut self) -> Result<Stmt, Error> {
+        if self.matches(vec![TokenKind::Semicolon]).is_some() {
+            return Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue)));
+        }
         match self.matches_type() {
             Ok(t) => {
                 if let Some(left) = self.matches(vec![TokenKind::LeftBracket]) {
@@ -70,15 +72,10 @@ impl Parser {
                         "Brackets not allowed here; Put them after the Identifier",
                     ));
                 }
-                match (
-                    t.clone(),
-                    self.matches(vec![TokenKind::Semicolon]).is_some(),
-                ) {
-                    // dont't generate any statement when defining type
-                    (NEWTypes::Struct(..) | NEWTypes::Union(..) | NEWTypes::Enum(..), true) => {
-                        Err(Error::Indicator)
-                    }
-                    _ => self.type_declaration(t),
+                if self.matches(vec![TokenKind::Semicolon]).is_some() {
+                    Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue)))
+                } else {
+                    self.type_declaration(t)
                 }
             }
             Err(_) if self.matches(vec![TokenKind::TypeDef]).is_some() => self.typedef(),
@@ -98,6 +95,7 @@ impl Parser {
             TokenKind::Switch,
             TokenKind::Case,
             TokenKind::Default,
+            TokenKind::Semicolon,
         ]) {
             return match token.token {
                 TokenType::For => self.for_statement(),
@@ -114,6 +112,7 @@ impl Parser {
                 TokenType::Switch => self.switch_statement(token),
                 TokenType::Case => self.case_statement(token),
                 TokenType::Default => self.default_statement(token),
+                TokenType::Semicolon => Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue))),
                 _ => unreachable!(),
             };
         }
@@ -243,7 +242,6 @@ impl Parser {
                 break;
             }
             let s = match self.declaration() {
-                Err(Error::Indicator) => continue,
                 Err(e @ Error::UndeclaredType(..)) => {
                     let token = self.tokens.next().ok_or(Error::Eof)?;
                     if let TokenType::Ident(..) = self.peek()?.token {
@@ -487,7 +485,7 @@ impl Parser {
 
         // doesnt need to generate any statements for later stages
         // because types get resolved in the parser
-        Err(Error::Indicator)
+        Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue)))
     }
     fn type_declaration(&mut self, mut type_decl: NEWTypes) -> Result<Stmt, Error> {
         let mut name = self.consume(
@@ -882,7 +880,7 @@ impl Parser {
         self.env.exit();
 
         // don't need to generate any statement for declaration
-        Err(Error::Indicator)
+        Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue)))
     }
 
     fn expression(&mut self) -> Result<Expr, Error> {

@@ -660,9 +660,10 @@ impl TypeChecker {
                 true_expr,
                 false_expr,
             } => self.ternary(token, cond, true_expr, false_expr)?,
+            // doesn't matter because it can only occur in expression-statements where type doesn't matter
+            ExprKind::Nop { .. } => NEWTypes::Primitive(Types::Void),
             ExprKind::ScaleUp { .. } => unreachable!("is only used in codegen"),
             ExprKind::ScaleDown { .. } => unreachable!("is only used in codegen"),
-            ExprKind::Nop { .. } => unreachable!("only used in parser"),
         });
         Ok(ast.type_decl.clone().unwrap())
     }

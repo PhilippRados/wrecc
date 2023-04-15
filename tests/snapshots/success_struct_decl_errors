@@ -1,15 +1,15 @@
 Error: 'struct Other' contains incomplete type
 |
 13     struct Other some;
-|      ^
+|                   ^
 Error: 'struct Another' contains incomplete type
 |
 18     struct Another some[6];
-|      ^
+|                     ^
 Error: 'struct some' contains incomplete type
 |
 23     struct some a;
-|      ^
+|                  ^
 Error: Expected type-declaration, found '}'
 |
 26 };

@@ -8,14 +8,14 @@ pub enum FunctionKind {
 }
 #[derive(Clone, PartialEq, Debug)]
 pub struct Function {
-    params: Vec<(NEWTypes, Token)>,
+    pub params: Vec<(NEWTypes, Token)>,
     return_type: NEWTypes,
 
     // how much stack space a function needs to allocate
     // info given in typechecker
     stack_space: usize,
 
-    kind: FunctionKind,
+    pub kind: FunctionKind,
 }
 impl Function {
     pub fn new(return_type: NEWTypes) -> Self {
@@ -23,15 +23,12 @@ impl Function {
         Function {
             stack_space: 0,
             return_type,
-            kind: FunctionKind::Definition,
+            kind: FunctionKind::Declaration,
             params: vec![],
         }
     }
     pub fn arity(&self) -> usize {
         self.params.len()
-    }
-    pub fn get_kind(self) -> FunctionKind {
-        self.kind
     }
     pub fn get_params(self) -> Vec<(NEWTypes, Token)> {
         self.params
@@ -44,10 +41,6 @@ impl Function {
     }
     pub fn get_stack_size(&mut self) -> usize {
         self.stack_space
-    }
-    pub fn update(&mut self, params: Vec<(NEWTypes, Token)>, kind: FunctionKind) {
-        self.params = params;
-        self.kind = kind;
     }
     pub fn cmp(&self, token: &Token, other: &Function) -> Result<(), Error> {
         if self.return_type != other.return_type {

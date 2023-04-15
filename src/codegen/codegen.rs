@@ -101,12 +101,7 @@ impl Compiler {
                 self.execute_expr(expr)?.free(); // result isn't used
                 Ok(())
             }
-            Stmt::DeclareVar(type_decl, name) => self.declare_var(type_decl, name),
-            Stmt::InitVar(type_decl, name, expr) => {
-                let value_reg = self.execute_expr(expr)?;
-                self.init_var(type_decl, name, value_reg)
-            }
-            Stmt::InitList(type_decl, name, exprs) => self.init_list(type_decl, name, exprs),
+            Stmt::Declaration(decls) => self.declaration(decls),
             Stmt::Block(statements) => self.block(statements),
             Stmt::Function(_, name, params, body) => self.function_definition(name, params, body),
             Stmt::Return(_, expr) => self.return_statement(expr),
@@ -396,6 +391,22 @@ impl Compiler {
             }
             None => writeln!(self.output, "\tjmp    {}", function_epilogue),
         }
+    }
+    fn declaration(&mut self, decls: &Vec<DeclarationKind>) -> Result<(), std::fmt::Error> {
+        for d in decls {
+            match d {
+                DeclarationKind::Decl(type_decl, name) => self.declare_var(type_decl, name)?,
+                DeclarationKind::Init(type_decl, name, expr) => {
+                    let value_reg = self.execute_expr(expr)?;
+                    self.init_var(type_decl, name, value_reg)?
+                }
+                DeclarationKind::InitList(type_decl, name, exprs) => {
+                    self.init_list(type_decl, name, exprs)?
+                }
+                DeclarationKind::FuncDecl(..) => (),
+            }
+        }
+        Ok(())
     }
     fn declare_var(&mut self, type_decl: &NEWTypes, name: &Token) -> Result<(), std::fmt::Error> {
         let reg = match self.env.get(name.token.get_index()).unwrap().is_global() {

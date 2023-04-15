@@ -104,11 +104,7 @@ impl TypeChecker {
     }
     fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
         match statement {
-            Stmt::DeclareVar(type_decl, var_name) => self.declare_var(type_decl, var_name),
-            Stmt::InitVar(type_decl, name, expr) => self.init_var(type_decl, name, expr),
-            Stmt::InitList(type_decl, var_name, exprs) => {
-                self.init_list(type_decl, var_name, exprs)
-            }
+            Stmt::Declaration(decls) => self.declaration(decls),
             Stmt::Function(return_type, name, params, body) => {
                 self.function_definition(return_type, name, params.clone(), body)
             }
@@ -310,6 +306,22 @@ impl TypeChecker {
         self.scope.0.pop();
 
         self.returns_all_paths = false;
+        Ok(())
+    }
+
+    fn declaration(&mut self, decls: &mut Vec<DeclarationKind>) -> Result<(), Error> {
+        for d in decls {
+            match d {
+                DeclarationKind::Decl(type_decl, name) => self.declare_var(type_decl, name)?,
+                DeclarationKind::Init(type_decl, name, expr) => {
+                    self.init_var(type_decl, name, expr)?
+                }
+                DeclarationKind::InitList(type_decl, name, exprs) => {
+                    self.init_list(type_decl, name, exprs)?
+                }
+                DeclarationKind::FuncDecl(..) => (),
+            }
+        }
         Ok(())
     }
     fn declare_var(&mut self, type_decl: &mut NEWTypes, var_name: &Token) -> Result<(), Error> {

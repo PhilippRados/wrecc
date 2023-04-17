@@ -9,7 +9,7 @@ pub enum FunctionKind {
 #[derive(Clone, PartialEq, Debug)]
 pub struct Function {
     pub params: Vec<(NEWTypes, Token)>,
-    return_type: NEWTypes,
+    pub return_type: NEWTypes,
 
     // how much stack space a function needs to allocate
     // info given in typechecker
@@ -32,9 +32,6 @@ impl Function {
     }
     pub fn get_params(self) -> Vec<(NEWTypes, Token)> {
         self.params
-    }
-    pub fn get_return_type(self) -> NEWTypes {
-        self.return_type
     }
     pub fn set_stack_size(&mut self, size: usize) {
         self.stack_space = size

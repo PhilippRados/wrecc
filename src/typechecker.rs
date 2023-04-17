@@ -890,7 +890,7 @@ impl TypeChecker {
                         &function.clone().get_params(),
                         arg_types,
                     )?;
-                    Ok(function.clone().get_return_type())
+                    Ok(function.clone().return_type)
                 } else {
                     Err(Error::new(
                         left_paren,

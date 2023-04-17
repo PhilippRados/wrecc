@@ -1284,7 +1284,14 @@ impl Parser {
     // has to happen in parser otherwise type could be defined after member-access
     fn has_complete_ident(&self, expr: &Expr, token: &Token) -> Result<(), Error> {
         let Some(ident) = get_ident(&expr) else {return Ok(())};
-        if let Ok((Symbols::Variable(SymbolInfo { type_decl, .. }), _)) = self.env.get_symbol(ident)
+        if let Ok((
+            Symbols::Variable(SymbolInfo { type_decl, .. })
+            | Symbols::Func(Function {
+                return_type: type_decl,
+                ..
+            }),
+            _,
+        )) = self.env.get_symbol(ident)
         {
             if !type_decl.is_complete() {
                 return Err(Error::new(

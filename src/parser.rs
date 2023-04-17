@@ -1,5 +1,6 @@
 use crate::codegen::register::*;
 use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
+use crate::into_newtype;
 use initializer_list_types::*;
 use std::iter::Peekable;
 use std::vec::IntoIter;
@@ -238,7 +239,7 @@ impl Parser {
         let mut statements = Vec::new();
 
         while let Some(token) = self.tokens.peek() {
-            if TokenKind::from(&token.token) == TokenKind::RightBrace {
+            if token.token == TokenType::RightBrace {
                 break;
             }
             let s = match self.external_declaration() {
@@ -416,22 +417,12 @@ impl Parser {
 
                         let members = self.parse_members(token)?;
 
-                        let Tags::Aggregate(struct_ref) = self.env.get_mut_type(index) else {
-                            unreachable!()
-                        };
+                        let custom_type = self.env.get_mut_type(index);
+                        let Tags::Aggregate(struct_ref) = custom_type else { unreachable!()};
+
                         struct_ref.update(members);
 
-                        match token.token {
-                            TokenType::Union => NEWTypes::Union(StructInfo::Named(
-                                name.unwrap_string(),
-                                struct_ref.clone(),
-                            )),
-                            TokenType::Struct => NEWTypes::Struct(StructInfo::Named(
-                                name.unwrap_string(),
-                                struct_ref.clone(),
-                            )),
-                            _ => unreachable!(),
-                        }
+                        into_newtype!(&token.token, name.unwrap_string(), custom_type.clone())
                     }
                     TokenType::Enum => {
                         let members = self.parse_enum(token)?;
@@ -441,7 +432,7 @@ impl Parser {
 
                         NEWTypes::Enum(Some(name.unwrap_string()), members)
                     }
-                    _ => unreachable!(),
+                    _ => unreachable!("only enums,structs and unions are aggregates"),
                 })
             }
             (Some(name), None) => {
@@ -477,30 +468,16 @@ impl Parser {
                     }
                 };
 
-                Ok(match token.token {
-                    TokenType::Union => NEWTypes::Union(StructInfo::Named(
-                        name.unwrap_string(),
-                        custom_type.unwrap_aggr(),
-                    )),
-                    TokenType::Struct => NEWTypes::Struct(StructInfo::Named(
-                        name.unwrap_string(),
-                        custom_type.unwrap_aggr(),
-                    )),
-                    TokenType::Enum => {
-                        NEWTypes::Enum(Some(name.unwrap_string()), custom_type.unwrap_enum())
-                    }
-                    _ => unreachable!(),
-                })
+                Ok(into_newtype!(
+                    &token.token,
+                    name.unwrap_string(),
+                    custom_type
+                ))
             }
-            (None, Some(_)) => Ok(match token.token {
-                TokenType::Union => {
-                    NEWTypes::Union(StructInfo::Anonymous(self.parse_members(token)?))
-                }
-                TokenType::Struct => {
-                    NEWTypes::Struct(StructInfo::Anonymous(self.parse_members(token)?))
-                }
-                TokenType::Enum => NEWTypes::Enum(None, self.parse_enum(token)?),
-                _ => unreachable!(),
+            (None, Some(_)) => Ok(if token.token == TokenType::Enum {
+                into_newtype!(self.parse_enum(token)?)
+            } else {
+                into_newtype!(token.token, self.parse_members(token)?)
             }),
             (None, None) => Err(Error::new(
                 token,

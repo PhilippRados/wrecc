@@ -304,6 +304,30 @@ impl NEWTypes {
         }
     }
 }
+
+// converts token of aggregate type into its corresponding type
+#[macro_export]
+macro_rules! into_newtype {
+    ($token:expr,$name:expr,$value:expr) => {
+        match $token {
+            TokenType::Struct => NEWTypes::Struct(StructInfo::Named($name, $value.unwrap_aggr())),
+            TokenType::Union => NEWTypes::Union(StructInfo::Named($name, $value.unwrap_aggr())),
+            TokenType::Enum => NEWTypes::Enum(Some($name), $value.unwrap_enum()),
+            _ => unreachable!("should only be used for aggregate types"),
+        }
+    };
+    ($token:expr,$value:expr) => {
+        match $token {
+            TokenType::Struct => NEWTypes::Struct(StructInfo::Anonymous($value)),
+            TokenType::Union => NEWTypes::Union(StructInfo::Anonymous($value)),
+            _ => unreachable!("should only be used for aggregate types"),
+        }
+    };
+    ($value:expr) => {
+        NEWTypes::Enum(None, $value)
+    };
+}
+// pub fn from_token(token: &TokenType, name: Option<String>, value: Tags) -> Self {}
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Types {
     Void,

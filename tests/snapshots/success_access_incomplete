@@ -1,0 +1,4 @@
+Error: Can't access members of incomplete type 'struct d*[4]'
+|
+7   printf("%d\n",*(&*a)[!-e]->outer);
+|                            ^

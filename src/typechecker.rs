@@ -760,7 +760,10 @@ impl TypeChecker {
             }
             _ => Err(Error::new(
                 token,
-                &format!("Can only access members of structs, not '{}'", expr_type),
+                &format!(
+                    "Can only access members of structs/unions, not '{}'",
+                    expr_type
+                ),
             )),
         }
     }

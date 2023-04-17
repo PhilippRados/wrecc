@@ -29,18 +29,7 @@ pub enum NEWTypes {
     Pointer(Box<NEWTypes>),
     Struct(StructInfo),
     Union(StructInfo),
-
     Enum(Option<String>, Vec<(Token, i32)>),
-}
-
-pub trait EnumValue<T> {
-    fn enum_value(n: i32) -> T;
-}
-
-impl EnumValue<NEWTypes> for NEWTypes {
-    fn enum_value(_n: i32) -> NEWTypes {
-        NEWTypes::Primitive(Types::Int)
-    }
 }
 
 // this code is shamelessly copied from the more sophisticated saltwater compiler
@@ -196,21 +185,6 @@ impl Display for NEWTypes {
         )
     }
 }
-impl NEWTypes {
-    fn union_biggest(&self) -> NEWTypes {
-        match self {
-            NEWTypes::Union(s) => s
-                .members()
-                .iter()
-                .max_by_key(|(type_decl, _)| type_decl.size())
-                .expect("union can't be empty, checked in parser")
-                .0
-                .clone(),
-            _ => unreachable!("not union"),
-        }
-    }
-}
-
 #[macro_export]
 macro_rules! arr_decay {
     ($arr:expr,$ast:expr,$token:expr,$is_global:expr) => {
@@ -307,6 +281,25 @@ impl NEWTypes {
         match self {
             NEWTypes::Primitive(Types::Void) => false,
             NEWTypes::Primitive(_) | NEWTypes::Enum(..) => true,
+            _ => false,
+        }
+    }
+    fn union_biggest(&self) -> NEWTypes {
+        match self {
+            NEWTypes::Union(s) => s
+                .members()
+                .iter()
+                .max_by_key(|(type_decl, _)| type_decl.size())
+                .expect("union can't be empty, checked in parser")
+                .0
+                .clone(),
+            _ => unreachable!("not union"),
+        }
+    }
+    pub fn is_complete(&self) -> bool {
+        match self {
+            NEWTypes::Struct(s) | NEWTypes::Union(s) => s.is_complete(),
+            NEWTypes::Pointer(to) | NEWTypes::Array { of: to, .. } => to.is_complete(),
             _ => false,
         }
     }

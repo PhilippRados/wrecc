@@ -409,29 +409,28 @@ impl Parser {
             (Some(name), Some(_)) => {
                 Ok(match token.token {
                     TokenType::Struct | TokenType::Union => {
-                        self.env.declare_type(
+                        let index = self.env.declare_type(
                             name,
                             Tags::Aggregate(StructRef::new(token.clone().token)),
                         )?;
 
                         let members = self.parse_members(token)?;
 
-                        if let Tags::Aggregate(struct_ref) = self.env.get_type(name)?.0 {
-                            struct_ref.update(members);
-
-                            match token.token {
-                                TokenType::Union => NEWTypes::Union(StructInfo::Named(
-                                    name.unwrap_string(),
-                                    struct_ref,
-                                )),
-                                TokenType::Struct => NEWTypes::Struct(StructInfo::Named(
-                                    name.unwrap_string(),
-                                    struct_ref,
-                                )),
-                                _ => unreachable!(),
-                            }
-                        } else {
+                        let Tags::Aggregate(struct_ref) = self.env.get_mut_type(index) else {
                             unreachable!()
+                        };
+                        struct_ref.update(members);
+
+                        match token.token {
+                            TokenType::Union => NEWTypes::Union(StructInfo::Named(
+                                name.unwrap_string(),
+                                struct_ref.clone(),
+                            )),
+                            TokenType::Struct => NEWTypes::Struct(StructInfo::Named(
+                                name.unwrap_string(),
+                                struct_ref.clone(),
+                            )),
+                            _ => unreachable!(),
                         }
                     }
                     TokenType::Enum => {
@@ -446,18 +445,37 @@ impl Parser {
                 })
             }
             (Some(name), None) => {
-                // lookup struct/union definition
-                let custom_type = self.env.get_type(name)?.0;
-                if token.token != *custom_type.get_kind() {
-                    return Err(Error::new(
-                        name,
-                        &format!(
-                            "Type '{}' already exists but not as {}",
-                            name.unwrap_string(),
-                            token.token
-                        ),
-                    ));
-                }
+                // lookup type-definition
+                let custom_type = match self.env.get_type(name) {
+                    Ok((t, _)) => {
+                        if token.token != *t.get_kind() {
+                            return Err(Error::new(
+                                name,
+                                &format!(
+                                    "Type '{}' already exists but not as {}",
+                                    name.unwrap_string(),
+                                    token.token
+                                ),
+                            ));
+                        }
+                        t
+                    }
+                    Err(_) => {
+                        let index = self.env.declare_type(
+                            name,
+                            match token.token {
+                                TokenType::Union | TokenType::Struct => {
+                                    Tags::Aggregate(StructRef::new(token.clone().token))
+                                }
+                                TokenType::Enum => {
+                                    return Err(Error::new(token, "Can't forward declare enums"))
+                                }
+                                _ => unreachable!(),
+                            },
+                        )?;
+                        self.env.get_mut_type(index).clone()
+                    }
+                };
 
                 Ok(match token.token {
                     TokenType::Union => NEWTypes::Union(StructInfo::Named(
@@ -1223,28 +1241,23 @@ impl Parser {
                     // a()
                     expr = self.call(token, expr)?;
                 }
-                TokenType::Dot => {
-                    // some_struct.member or some_union.member
+                TokenType::Dot | TokenType::Arrow => {
+                    self.has_complete_ident(&expr, &token)?;
+
+                    // some.member or some->member
                     if let Some(member) = self.matches(vec![TokenKind::Ident]) {
-                        expr = Expr::new(
-                            ExprKind::MemberAccess {
-                                token,
-                                member,
-                                expr: Box::new(expr),
-                            },
-                            ValueKind::Lvalue,
-                        );
-                    } else {
-                        return Err(Error::new(
-                            &token,
-                            "A member access must be followed by an identifer",
-                        ));
-                    }
-                }
-                TokenType::Arrow => {
-                    // some_struct->member
-                    if let Some(ident) = self.matches(vec![TokenKind::Ident]) {
-                        expr = arrow_sugar(expr, ident, token);
+                        expr = match token.token {
+                            TokenType::Dot => Expr::new(
+                                ExprKind::MemberAccess {
+                                    token,
+                                    member,
+                                    expr: Box::new(expr),
+                                },
+                                ValueKind::Lvalue,
+                            ),
+                            TokenType::Arrow => arrow_sugar(expr, member, token),
+                            _ => unreachable!(),
+                        }
                     } else {
                         return Err(Error::new(
                             &token,
@@ -1266,6 +1279,21 @@ impl Parser {
             }
         }
         Ok(expr)
+    }
+    // get var-name to lookup if type incomplete or not
+    // has to happen in parser otherwise type could be defined after member-access
+    fn has_complete_ident(&self, expr: &Expr, token: &Token) -> Result<(), Error> {
+        let Some(ident) = get_ident(&expr) else {return Ok(())};
+        if let Ok((Symbols::Variable(SymbolInfo { type_decl, .. }), _)) = self.env.get_symbol(ident)
+        {
+            if !type_decl.is_complete() {
+                return Err(Error::new(
+                    &token,
+                    &format!("Can't access members of incomplete type '{}'", type_decl),
+                ));
+            }
+        }
+        Ok(())
     }
     fn call(&mut self, left_paren: Token, callee: Expr) -> Result<Expr, Error> {
         let mut args = Vec::new();
@@ -1414,6 +1442,41 @@ impl Parser {
             start.push(t);
         }
         self.tokens = start.into_iter().peekable();
+    }
+}
+
+fn get_ident(expr: &Expr) -> Option<&Token> {
+    // get ident from an expression passed to a member access so:
+    // expr.member or expr->member
+    match &expr.kind {
+        ExprKind::Ident(s) => Some(s),
+        ExprKind::Grouping { expr }
+        | ExprKind::MemberAccess {
+            token: _,
+            member: _,
+            expr,
+        }
+        | ExprKind::Call {
+            left_paren: _,
+            callee: expr,
+            args: _,
+        }
+        | ExprKind::PostUnary {
+            token: _,
+            left: expr,
+            by_amount: _,
+        }
+        | ExprKind::Unary {
+            token: _,
+            right: expr,
+            is_global: _,
+        }
+        | ExprKind::Binary {
+            left: expr,
+            token: _,
+            right: _,
+        } => get_ident(expr),
+        _ => None,
     }
 }
 

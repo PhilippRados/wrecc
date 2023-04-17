@@ -18,11 +18,6 @@ pub enum Register {
     Arg(usize, NEWTypes),
     Void,
 }
-impl EnumValue<Register> for Register {
-    fn enum_value(n: i32) -> Register {
-        Register::Literal(n as usize, NEWTypes::Primitive(Types::Int))
-    }
-}
 impl Register {
     pub fn free(&self) {
         match self {

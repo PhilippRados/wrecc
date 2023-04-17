@@ -176,6 +176,12 @@ impl Tags {
             _ => unreachable!(),
         }
     }
+    pub fn is_complete(&self) -> bool {
+        match self {
+            Tags::Aggregate(s) => s.is_complete(),
+            Tags::Enum(_) => true, // can't forward declare enums according to ISO C
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -198,10 +204,10 @@ impl<T: Clone + TypeName + std::fmt::Debug> NameSpace<T> {
     }
 
     // checks if element is in current scope
-    fn contains_key(&self, expected: &String, depth: usize) -> bool {
+    fn contains_key(&self, expected: &String, depth: usize) -> Option<&(String, usize, usize, T)> {
         self.get_current(depth)
-            .iter()
-            .any(|(name, ..)| name == expected)
+            .into_iter()
+            .find(|(name, ..)| name == expected)
     }
     fn declare(&mut self, name: String, depth: usize, element: T) -> Result<usize, Error> {
         self.elems.push((name, depth, self.elems.len(), element));
@@ -257,7 +263,11 @@ impl Scope {
     }
     pub fn declare_symbol(&mut self, var_name: &Token, symbol: Symbols) -> Result<usize, Error> {
         let name = var_name.unwrap_string();
-        if self.symbols.contains_key(&name, self.current_depth) {
+        if self
+            .symbols
+            .contains_key(&name, self.current_depth)
+            .is_some()
+        {
             return Err(Error::new(
                 var_name,
                 &format!("Redefinition of symbol '{}'", name),
@@ -266,18 +276,22 @@ impl Scope {
         self.symbols.declare(name, self.current_depth, symbol)
     }
     // function has special checks for Redefinitions because
-    // there can be multiple declaration but only a single definition
+    // there can be multiple declarations but only a single definition
     pub fn declare_func(&mut self, var_name: &Token, symbol: Symbols) -> Result<usize, Error> {
         self.symbols
             .declare(var_name.unwrap_string(), self.current_depth, symbol)
     }
     pub fn declare_type(&mut self, var_name: &Token, tag: Tags) -> Result<usize, Error> {
         let name = var_name.unwrap_string();
-        if self.tags.contains_key(&name, self.current_depth) {
-            return Err(Error::new(
-                var_name,
-                &format!("Redefinition of type '{}'", name),
-            ));
+        match self.tags.contains_key(&name, self.current_depth) {
+            Some((.., tag)) if tag.is_complete() => {
+                return Err(Error::new(
+                    var_name,
+                    &format!("Redefinition of type '{}'", name),
+                ))
+            }
+            Some((.., index, _)) => return Ok(*index),
+            _ => (),
         }
         self.tags.declare(name, self.current_depth, tag)
     }
@@ -297,12 +311,15 @@ impl Scope {
     pub fn get_mut_symbol(&mut self, index: usize) -> &mut Symbols {
         &mut self.symbols.elems.get_mut(index).unwrap().3
     }
+    pub fn get_mut_type(&mut self, index: usize) -> &mut Tags {
+        &mut self.tags.elems.get_mut(index).unwrap().3
+    }
 
     pub fn get_symbol_table(self) -> Vec<Symbols> {
         self.symbols
             .elems
             .into_iter()
-            .map(|(_, _, _, symbol)| symbol)
+            .map(|(.., symbol)| symbol)
             .collect()
     }
 }

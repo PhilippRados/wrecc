@@ -686,10 +686,22 @@ impl TypeChecker {
             ExprKind::Comma { left, right } => self.comma(left, right)?,
             // doesn't matter because it can only occur in expression-statements where type doesn't matter
             ExprKind::Nop { .. } => NEWTypes::Primitive(Types::Void),
+            ExprKind::SizeofType { .. } => NEWTypes::Primitive(Types::Long),
+            ExprKind::SizeofExpr { expr, value } => self.sizeof_expr(expr, value)?,
             ExprKind::ScaleUp { .. } => unreachable!("is only used in codegen"),
             ExprKind::ScaleDown { .. } => unreachable!("is only used in codegen"),
         });
         Ok(ast.type_decl.clone().unwrap())
+    }
+    fn sizeof_expr(
+        &mut self,
+        expr: &mut Expr,
+        value: &mut Option<usize>,
+    ) -> Result<NEWTypes, Error> {
+        let expr_type = self.expr_type(expr)?;
+        *value = Some(expr_type.size());
+
+        Ok(NEWTypes::Primitive(Types::Long))
     }
     fn comma(&mut self, left: &mut Expr, right: &mut Expr) -> Result<NEWTypes, Error> {
         self.expr_type(left)?;

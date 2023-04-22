@@ -1153,6 +1153,7 @@ impl Parser {
             TokenKind::PlusPlus,
             TokenKind::MinusMinus,
             TokenKind::LeftParen,
+            TokenKind::Sizeof,
         ]) {
             return Ok(match token.token {
                 // ++a or --a is equivalent to a += 1 or a -= 1
@@ -1178,6 +1179,47 @@ impl Parser {
                     }
                     Err(e) => return Err(e),
                 },
+                TokenType::Sizeof => {
+                    // sizeof expr doesnt need parentheses but sizeof type does
+                    if let Some(t) = self.matches(vec![TokenKind::LeftParen]) {
+                        match self.matches_specifier() {
+                            Ok(type_decl) => {
+                                let type_decl = self.parse_arr(type_decl)?;
+                                self.consume(
+                                    TokenKind::RightParen,
+                                    "Expect closing ')' after sizeof",
+                                )?;
+                                Expr::new(
+                                    ExprKind::SizeofType {
+                                        value: type_decl.size(),
+                                    },
+                                    ValueKind::Rvalue,
+                                )
+                            }
+                            Err(Error::NotType(_) | Error::UndeclaredType(..)) => {
+                                self.insert_token(t);
+                                let right = self.var_assignment()?;
+                                Expr::new(
+                                    ExprKind::SizeofExpr {
+                                        expr: Box::new(right),
+                                        value: None,
+                                    },
+                                    ValueKind::Rvalue,
+                                )
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    } else {
+                        let right = self.unary()?;
+                        Expr::new(
+                            ExprKind::SizeofExpr {
+                                expr: Box::new(right),
+                                value: None,
+                            },
+                            ValueKind::Rvalue,
+                        )
+                    }
+                }
                 _ => {
                     let right = self.unary()?;
                     Expr::new(

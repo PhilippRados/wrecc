@@ -70,6 +70,14 @@ pub enum ExprKind {
         left: Box<Expr>,
         right: Box<Expr>,
     },
+    SizeofType {
+        value: usize,
+    },
+    // value gets filled in in typechecker
+    SizeofExpr {
+        expr: Box<Expr>,
+        value: Option<usize>,
+    },
     String(Token),
     Number(i64),
     CharLit(i8),
@@ -129,6 +137,8 @@ impl Display for ExprKind {
                     format!("'compound-assignment: {}'", token.token),
                 ExprKind::Ternary { .. } => "'ternary-expression'".to_string(),
                 ExprKind::Comma { .. } => "'comma-expression'".to_string(),
+                ExprKind::SizeofExpr { .. } | ExprKind::SizeofType { .. } =>
+                    "'sizeof-expression'".to_string(),
             }
         )
     }

@@ -636,6 +636,13 @@ impl Compiler {
 
             ExprKind::Comma { left, right } => self.cg_comma(left, right),
             ExprKind::Nop => Ok(Register::Void),
+            ExprKind::SizeofExpr {
+                value: Some(value), ..
+            }
+            | ExprKind::SizeofType { value } => {
+                Ok(Register::Literal(*value, NEWTypes::Primitive(Types::Long)))
+            }
+            _ => unreachable!("{:?}", ast),
         }
     }
     fn cg_comma(&mut self, left: &Expr, right: &Expr) -> Result<Register, std::fmt::Error> {

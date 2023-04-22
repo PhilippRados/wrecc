@@ -41,6 +41,7 @@ impl<'a> Scanner<'a> {
                 ("do", TokenType::Do),
                 ("break", TokenType::Break),
                 ("continue", TokenType::Continue),
+                ("sizeof", TokenType::Sizeof),
                 ("return", TokenType::Return),
             ]),
         }
@@ -59,32 +60,7 @@ impl<'a> Scanner<'a> {
             column: self.column,
             line_string: self.raw_source[(self.line - 1) as usize].clone(),
         });
-        self.column += Self::get_token_len(current_token);
-    }
-    fn get_token_len(token: TokenType) -> i32 {
-        match token {
-            TokenType::BangEqual
-            | TokenType::EqualEqual
-            | TokenType::GreaterEqual
-            | TokenType::LessEqual
-            | TokenType::Arrow
-            | TokenType::Do => 2,
-            TokenType::String(s) => (s.len() + 2) as i32,
-            TokenType::Ident(s, _) => s.len() as i32,
-            TokenType::Int | TokenType::For => 3,
-            TokenType::Void
-            | TokenType::Char
-            | TokenType::Else
-            | TokenType::Long
-            | TokenType::Enum => 4,
-            TokenType::While | TokenType::Union | TokenType::Break => 5,
-            TokenType::If => 2,
-            TokenType::Return | TokenType::Struct => 6,
-            TokenType::TypeDef => 7,
-            TokenType::Continue => 8,
-            TokenType::Number(n) => n.to_string().len() as i32,
-            _ => 1,
-        }
+        self.column += current_token.len() as i32;
     }
     pub fn scan_token(&mut self) -> Result<Vec<Token>, Vec<Error>> {
         let mut errors: Vec<Error> = Vec::new();

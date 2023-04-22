@@ -78,6 +78,7 @@ pub enum TokenKind {
     Do,
     Break,
     Continue,
+    Sizeof,
 }
 
 impl From<&TokenType> for TokenKind {
@@ -151,6 +152,7 @@ impl From<&TokenType> for TokenKind {
             TokenType::Question => TokenKind::Question,
             TokenType::Colon => TokenKind::Colon,
             TokenType::Do => TokenKind::Do,
+            TokenType::Sizeof => TokenKind::Sizeof,
         }
     }
 }
@@ -232,6 +234,7 @@ pub enum TokenType {
     Do,
     Break,
     Continue,
+    Sizeof,
 }
 impl TokenType {
     pub fn update_index(&mut self, new: usize) {
@@ -244,6 +247,46 @@ impl TokenType {
         match self {
             TokenType::Ident(_, i) => *i,
             _ => unreachable!(),
+        }
+    }
+    pub fn len(&self) -> usize {
+        match self {
+            TokenType::BangEqual
+            | TokenType::EqualEqual
+            | TokenType::GreaterEqual
+            | TokenType::LessEqual
+            | TokenType::Arrow
+            | TokenType::PlusPlus
+            | TokenType::MinusMinus
+            | TokenType::PlusEqual
+            | TokenType::MinusEqual
+            | TokenType::PipeEqual
+            | TokenType::ModEqual
+            | TokenType::AmpEqual
+            | TokenType::XorEqual
+            | TokenType::SlashEqual
+            | TokenType::StarEqual
+            | TokenType::GreaterGreater
+            | TokenType::LessLess
+            | TokenType::Do => 2,
+            TokenType::String(s) => s.len() + 2,
+            TokenType::Ident(s, _) => s.len(),
+            TokenType::Int
+            | TokenType::For
+            | TokenType::GreaterGreaterEqual
+            | TokenType::LessLessEqual => 3,
+            TokenType::Void
+            | TokenType::Char
+            | TokenType::Else
+            | TokenType::Long
+            | TokenType::Enum => 4,
+            TokenType::While | TokenType::Union | TokenType::Break => 5,
+            TokenType::If => 2,
+            TokenType::Return | TokenType::Struct | TokenType::Sizeof => 6,
+            TokenType::TypeDef => 7,
+            TokenType::Continue => 8,
+            TokenType::Number(n) => n.to_string().len(),
+            _ => 1,
         }
     }
 }
@@ -321,6 +364,7 @@ impl Display for TokenType {
                 TokenType::Question => "'?'",
                 TokenType::Colon => "':'",
                 TokenType::Do => "'do'",
+                TokenType::Sizeof => "'sizeof'",
             }
         )
     }

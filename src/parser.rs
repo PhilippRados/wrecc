@@ -373,28 +373,35 @@ impl Parser {
             ));
         }
         while self.matches(vec![TokenKind::RightBrace]).is_none() {
-            let mut member_type = self.matches_specifier()?;
-            let name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
+            let member_type = self.matches_type()?;
+            loop {
+                let member_specifier = self.parse_ptr(member_type.clone());
+                let name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
 
-            match member_type {
-                NEWTypes::Struct(ref s) | NEWTypes::Union(ref s) if !s.is_complete() => {
-                    return Err(Error::new(
-                        &name,
-                        &format!("'{}' contains incomplete type", member_type),
-                    ));
+                match member_specifier {
+                    NEWTypes::Struct(ref s) | NEWTypes::Union(ref s) if !s.is_complete() => {
+                        return Err(Error::new(
+                            &name,
+                            &format!("'{}' contains incomplete type", member_specifier),
+                        ));
+                    }
+                    _ if member_specifier.is_void() => {
+                        return Err(Error::new(
+                            &name,
+                            &format!("'{}' contains incomplete type", member_specifier),
+                        ));
+                    }
+                    _ => (),
                 }
-                _ => (),
-            }
-            member_type = self.parse_arr(member_type)?;
 
-            if member_type.is_void() {
-                return Err(Error::new(
-                    &name,
-                    &format!("{} member can't have type 'void'", token.token),
-                ));
+                let member_specifier = self.parse_arr(member_specifier)?;
+
+                members.push((member_specifier, name));
+                if self.matches(vec![TokenKind::Comma]).is_none() {
+                    break;
+                }
             }
 
-            members.push((member_type, name));
             self.consume(TokenKind::Semicolon, "Expect ';' after member declaration")?;
         }
 

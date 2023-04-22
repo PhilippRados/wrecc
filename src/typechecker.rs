@@ -38,10 +38,10 @@ impl ScopeLevel {
             .get_mut(func_name.token.get_index())
             .expect("valid table index");
 
-        let mut size = func_symbol.unwrap_func().get_stack_size() + type_decl.size();
+        let mut size = func_symbol.unwrap_func().stack_size + type_decl.size();
         size = align(size, type_decl);
 
-        func_symbol.unwrap_func().set_stack_size(size);
+        func_symbol.unwrap_func().stack_size = size;
     }
 }
 pub struct TypeChecker {
@@ -105,9 +105,7 @@ impl TypeChecker {
     fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
         match statement {
             Stmt::Declaration(decls) => self.declaration(decls),
-            Stmt::Function(return_type, name, params, body) => {
-                self.function_definition(return_type, name, params.clone(), body)
-            }
+            Stmt::Function(name, body) => self.function_definition(name, body),
             Stmt::Return(keyword, value) => self.return_statement(keyword, value),
             Stmt::Expr(expr) => match self.expr_type(expr) {
                 Ok(_) => Ok(()),
@@ -500,11 +498,24 @@ impl TypeChecker {
     }
     fn function_definition(
         &mut self,
-        return_type: &mut NEWTypes,
         name_token: &Token,
-        params: Vec<(NEWTypes, Token)>,
         body: &mut Vec<Stmt>,
     ) -> Result<(), Error> {
+        let return_type = self
+            .env
+            .get_mut(name_token.token.get_index())
+            .unwrap()
+            .unwrap_func()
+            .return_type
+            .clone();
+        let params = self
+            .env
+            .get_mut(name_token.token.get_index())
+            .unwrap()
+            .unwrap_func()
+            .params
+            .clone();
+
         // have to push scope before declaring local variables
         self.scope
             .0
@@ -519,7 +530,7 @@ impl TypeChecker {
 
         err?;
 
-        self.main_returns_int(name_token, return_type)?;
+        self.main_returns_int(name_token, &return_type)?;
         self.implicit_return_main(name_token, body);
 
         // align function stack by 16Bytes
@@ -528,12 +539,12 @@ impl TypeChecker {
             .get_mut(name_token.token.get_index())
             .unwrap()
             .unwrap_func()
-            .get_stack_size();
+            .stack_size;
         self.env
             .get_mut(name_token.token.get_index())
             .unwrap()
             .unwrap_func()
-            .set_stack_size(align_by(size, 16));
+            .stack_size = align_by(size, 16);
 
         if !return_type.is_void() && !self.returns_all_paths {
             Err(Error::new(
@@ -885,11 +896,7 @@ impl TypeChecker {
             )),
             Symbols::Func(function) => {
                 if function.arity() == args.len() {
-                    self.args_and_params_match(
-                        left_paren,
-                        &function.clone().get_params(),
-                        arg_types,
-                    )?;
+                    self.args_and_params_match(left_paren, &function.clone().params, arg_types)?;
                     Ok(function.clone().return_type)
                 } else {
                     Err(Error::new(

@@ -502,11 +502,11 @@ impl Parser {
         let mut decls = Vec::new();
         let decl = self.init_decl(type_decl.clone())?;
 
-        if let (DeclarationKind::FuncDecl(return_type, name, index, params), true) = (
+        if let (DeclarationKind::FuncDecl(name), true) = (
             decl.clone(),
             self.matches(vec![TokenKind::LeftBrace]).is_some(),
         ) {
-            return self.function_definition(return_type, name, params, index);
+            return self.function_definition(name);
         }
 
         decls.push(decl);
@@ -875,19 +875,14 @@ impl Parser {
 
         self.compare_existing(&name, index, existing.clone())?;
 
-        Ok(DeclarationKind::FuncDecl(return_type, name, index, params))
+        Ok(DeclarationKind::FuncDecl(name))
     }
-    fn function_definition(
-        &mut self,
-        return_type: NEWTypes,
-        name: Token,
-        params: Vec<(NEWTypes, Token)>,
-        index: usize,
-    ) -> Result<Stmt, Error> {
+    fn function_definition(&mut self, name: Token) -> Result<Stmt, Error> {
+        let index = name.token.get_index();
         self.env.get_mut_symbol(index).unwrap_func().kind = FunctionKind::Definition;
         let body = self.block()?;
 
-        Ok(Stmt::Function(return_type, name, params, body))
+        Ok(Stmt::Function(name, body))
     }
     fn expression(&mut self) -> Result<Expr, Error> {
         self.var_assignment()

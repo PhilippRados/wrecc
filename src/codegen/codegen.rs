@@ -103,7 +103,7 @@ impl Compiler {
             }
             Stmt::Declaration(decls) => self.declaration(decls),
             Stmt::Block(statements) => self.block(statements),
-            Stmt::Function(_, name, params, body) => self.function_definition(name, params, body),
+            Stmt::Function(name, body) => self.function_definition(name, body),
             Stmt::Return(_, expr) => self.return_statement(expr),
             Stmt::If(_, cond, then_branch, else_branch) => {
                 self.if_statement(cond, then_branch, else_branch)
@@ -485,14 +485,20 @@ impl Compiler {
     fn function_definition(
         &mut self,
         name: &Token,
-        params: &[(NEWTypes, Token)],
         body: &Vec<Stmt>,
     ) -> Result<(), std::fmt::Error> {
+        let params = self
+            .env
+            .get_mut(name.token.get_index())
+            .unwrap()
+            .unwrap_func()
+            .params
+            .clone();
         // save function name for return label jump
         self.function_name = Some(name.unwrap_string());
 
         // generate function code
-        self.cg_func_preamble(name, params)?;
+        self.cg_func_preamble(name, &params)?;
         self.cg_stmts(body)?;
         self.cg_func_postamble(name)?;
 
@@ -507,7 +513,7 @@ impl Compiler {
             .get_mut(name.token.get_index())
             .unwrap()
             .unwrap_func()
-            .get_stack_size();
+            .stack_size;
         if stack_size > 0 {
             writeln!(self.output, "\tsubq    ${},%rsp", stack_size)?;
         }
@@ -519,7 +525,7 @@ impl Compiler {
             .get_mut(name.token.get_index())
             .unwrap()
             .unwrap_func()
-            .get_stack_size();
+            .stack_size;
         if stack_size > 0 {
             writeln!(self.output, "\taddq    ${},%rsp", stack_size)?;
         }

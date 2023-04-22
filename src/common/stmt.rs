@@ -15,7 +15,7 @@ pub enum Stmt {
         Option<Expr>,
         Box<Stmt>,
     ),
-    Function(NEWTypes, Token, Vec<(NEWTypes, Token)>, Vec<Stmt>),
+    Function(Token, Vec<Stmt>),
     Return(Token, Option<Expr>),
     Break(Token),
     Continue(Token),
@@ -27,7 +27,7 @@ pub enum Stmt {
 #[derive(PartialEq, Clone, Debug)]
 pub enum DeclarationKind {
     Decl(NEWTypes, Token),
-    FuncDecl(NEWTypes, Token, usize, Vec<(NEWTypes, Token)>),
+    FuncDecl(Token),
     Init(NEWTypes, Token, Expr),
     InitList(NEWTypes, Token, Vec<Expr>),
 }

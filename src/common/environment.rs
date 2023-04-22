@@ -13,7 +13,7 @@ pub struct Function {
 
     // how much stack space a function needs to allocate
     // info given in typechecker
-    stack_space: usize,
+    pub stack_size: usize,
 
     pub kind: FunctionKind,
 }
@@ -21,7 +21,7 @@ impl Function {
     pub fn new(return_type: NEWTypes) -> Self {
         // can only know return-type at point of declaration
         Function {
-            stack_space: 0,
+            stack_size: 0,
             return_type,
             kind: FunctionKind::Declaration,
             params: vec![],
@@ -29,15 +29,6 @@ impl Function {
     }
     pub fn arity(&self) -> usize {
         self.params.len()
-    }
-    pub fn get_params(self) -> Vec<(NEWTypes, Token)> {
-        self.params
-    }
-    pub fn set_stack_size(&mut self, size: usize) {
-        self.stack_space = size
-    }
-    pub fn get_stack_size(&mut self) -> usize {
-        self.stack_space
     }
     pub fn cmp(&self, token: &Token, other: &Function) -> Result<(), Error> {
         if self.return_type != other.return_type {

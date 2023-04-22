@@ -327,7 +327,6 @@ macro_rules! into_newtype {
         NEWTypes::Enum(None, $value)
     };
 }
-// pub fn from_token(token: &TokenType, name: Option<String>, value: Tags) -> Self {}
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Types {
     Void,

@@ -568,7 +568,7 @@ impl Parser {
                 Ok(DeclarationKind::InitList(type_decl, name, assign_sugar))
             }
             None => {
-                let r_value = self.expression()?;
+                let r_value = self.var_assignment()?;
 
                 Ok(DeclarationKind::Init(type_decl, name, r_value))
             }
@@ -801,7 +801,7 @@ impl Parser {
                     }
                 }
                 _ => {
-                    elements[element_index] = self.expression()?;
+                    elements[element_index] = self.var_assignment()?;
                     element_index += 1;
                 }
             }
@@ -892,13 +892,28 @@ impl Parser {
         Ok(Stmt::Function(name, body))
     }
     fn expression(&mut self) -> Result<Expr, Error> {
-        self.var_assignment()
+        self.comma()
+    }
+    fn comma(&mut self) -> Result<Expr, Error> {
+        let mut expr = self.var_assignment()?;
+
+        while self.matches(vec![TokenKind::Comma]).is_some() {
+            expr = Expr::new(
+                ExprKind::Comma {
+                    left: Box::new(expr),
+                    right: Box::new(self.var_assignment()?),
+                },
+                ValueKind::Rvalue,
+            )
+        }
+
+        Ok(expr)
     }
     fn var_assignment(&mut self) -> Result<Expr, Error> {
         let expr = self.ternary_conditional()?;
 
         if let Some(t) = self.matches(vec![TokenKind::Equal]) {
-            let value = self.expression()?;
+            let value = self.var_assignment()?;
             return Ok(Expr::new(
                 ExprKind::Assign {
                     l_expr: Box::new(expr),
@@ -1285,7 +1300,7 @@ impl Parser {
         let mut args = Vec::new();
         if !self.check(TokenKind::RightParen) {
             loop {
-                args.push(self.expression()?);
+                args.push(self.var_assignment()?);
                 if self.matches(vec![TokenKind::Comma]).is_none() {
                     break;
                 }

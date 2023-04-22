@@ -66,6 +66,10 @@ pub enum ExprKind {
         true_expr: Box<Expr>,
         false_expr: Box<Expr>,
     },
+    Comma {
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
     String(Token),
     Number(i64),
     CharLit(i8),
@@ -124,6 +128,7 @@ impl Display for ExprKind {
                 ExprKind::CompoundAssign { token, .. } =>
                     format!("'compound-assignment: {}'", token.token),
                 ExprKind::Ternary { .. } => "'ternary-expression'".to_string(),
+                ExprKind::Comma { .. } => "'comma-expression'".to_string(),
             }
         )
     }

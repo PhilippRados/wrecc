@@ -683,12 +683,18 @@ impl TypeChecker {
                 true_expr,
                 false_expr,
             } => self.ternary(token, cond, true_expr, false_expr)?,
+            ExprKind::Comma { left, right } => self.comma(left, right)?,
             // doesn't matter because it can only occur in expression-statements where type doesn't matter
             ExprKind::Nop { .. } => NEWTypes::Primitive(Types::Void),
             ExprKind::ScaleUp { .. } => unreachable!("is only used in codegen"),
             ExprKind::ScaleDown { .. } => unreachable!("is only used in codegen"),
         });
         Ok(ast.type_decl.clone().unwrap())
+    }
+    fn comma(&mut self, left: &mut Expr, right: &mut Expr) -> Result<NEWTypes, Error> {
+        self.expr_type(left)?;
+
+        Ok(self.expr_type(right)?)
     }
     fn ternary(
         &mut self,

@@ -1,0 +1,13 @@
+0
+1
+2
+Found it
+1 2 3 4 5 6 7 8 9 10 i = 0
+This message will be printed for i = 1
+This message will be skipped for i = 2
+i = 2
+This message will be skipped for i = 4
+i = 4
+This message will be printed for i = 5
+This message will be skipped for i = 6
+Loop ended at i = 6

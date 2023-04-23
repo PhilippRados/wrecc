@@ -97,6 +97,7 @@ impl Parser {
             TokenKind::Case,
             TokenKind::Default,
             TokenKind::Semicolon,
+            TokenKind::Goto,
         ]) {
             return match token.token {
                 TokenType::For => self.for_statement(),
@@ -113,11 +114,30 @@ impl Parser {
                 TokenType::Switch => self.switch_statement(token),
                 TokenType::Case => self.case_statement(token),
                 TokenType::Default => self.default_statement(token),
+                TokenType::Goto => self.goto_statement(),
                 TokenType::Semicolon => Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue))),
                 _ => unreachable!(),
             };
         }
+        if let Some(ident) = self.matches(vec![TokenKind::Ident]) {
+            if self.matches(vec![TokenKind::Colon]).is_some() {
+                return self.label_statement(ident.clone());
+            }
+            // if not a label then has to be expression so have to insert ident back into iter
+            self.insert_token(ident)
+        }
         self.expression_statement()
+    }
+    fn goto_statement(&mut self) -> Result<Stmt, Error> {
+        let ident = self.consume(TokenKind::Ident, "Expect identifier following 'goto'")?;
+        self.consume(TokenKind::Semicolon, "Expect ';' after goto-statement")?;
+
+        Ok(Stmt::Goto(ident))
+    }
+    fn label_statement(&mut self, token: Token) -> Result<Stmt, Error> {
+        let body = self.statement()?;
+
+        Ok(Stmt::Label(token, Box::new(body)))
     }
     fn switch_statement(&mut self, token: Token) -> Result<Stmt, Error> {
         self.consume(TokenKind::LeftParen, "Expect '(' after switch keyword")?;
@@ -1453,7 +1473,7 @@ impl Parser {
                     }
                     // typedefed type
                     TokenType::Ident(..) => {
-                        if let Symbols::TypeDef(t) = self.env.get_symbol(&v)?.0 {
+                        if let Ok((Symbols::TypeDef(t), _)) = self.env.get_symbol(&v) {
                             self.tokens.next();
                             t
                         } else {

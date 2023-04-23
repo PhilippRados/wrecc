@@ -1,5 +1,6 @@
 use crate::codegen::register::*;
 use crate::common::{error::*, token::*, types::*};
+use std::collections::HashMap;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum FunctionKind {
@@ -16,6 +17,9 @@ pub struct Function {
     pub stack_size: usize,
 
     pub kind: FunctionKind,
+
+    // all the goto-labels that are unique to that function
+    pub labels: HashMap<String, usize>,
 }
 impl Function {
     pub fn new(return_type: NEWTypes) -> Self {
@@ -25,6 +29,7 @@ impl Function {
             return_type,
             kind: FunctionKind::Declaration,
             params: vec![],
+            labels: HashMap::new(),
         }
     }
     pub fn arity(&self) -> usize {
@@ -92,20 +97,12 @@ impl SymbolInfo {
         self.reg = Some(reg)
     }
 }
-trait TypeName {
-    fn type_name() -> &'static str;
-}
 #[derive(Clone, PartialEq, Debug)]
 pub enum Symbols {
     // also includes enum-constants
     Variable(SymbolInfo),
     TypeDef(NEWTypes),
     Func(Function),
-}
-impl TypeName for Symbols {
-    fn type_name() -> &'static str {
-        "symbol"
-    }
 }
 impl Symbols {
     pub fn unwrap_var_mut(&mut self) -> &mut SymbolInfo {
@@ -140,11 +137,6 @@ pub enum Tags {
     Aggregate(StructRef),
     Enum(Vec<(Token, i32)>),
 }
-impl TypeName for Tags {
-    fn type_name() -> &'static str {
-        "type"
-    }
-}
 impl Tags {
     pub fn get_kind(&self) -> &TokenType {
         match self {
@@ -177,7 +169,7 @@ struct NameSpace<T> {
     // (name, depth, index in table, element)
     elems: Vec<(String, usize, usize, T)>,
 }
-impl<T: Clone + TypeName + std::fmt::Debug> NameSpace<T> {
+impl<T: Clone + std::fmt::Debug> NameSpace<T> {
     fn new() -> Self {
         NameSpace { elems: vec![] }
     }
@@ -209,9 +201,10 @@ impl<T: Clone + TypeName + std::fmt::Debug> NameSpace<T> {
                 return Ok((v.clone(), *i));
             }
         }
+        // can only be symbol because type throws a special error
         Err(Error::new(
             var_name,
-            &format!("Undeclared {} '{}'", T::type_name(), name),
+            &format!("Undeclared symbol '{}'", name),
         ))
     }
 }

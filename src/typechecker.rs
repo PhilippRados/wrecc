@@ -7,8 +7,8 @@ use std::collections::HashMap;
 enum ScopeKind {
     Global,
     Loop,
-    // (function name, return type)
-    Function(Token, NEWTypes),
+    // (function name, return type, save all gotos so that can error if no matching label)
+    Function(Token, NEWTypes, Vec<Token>),
     // all cases and defaults that are in a switch
     // if Some(value) then case, if None then default
     Switch(Vec<Option<i64>>),
@@ -32,7 +32,7 @@ macro_rules! find_scope {
 struct ScopeLevel(Vec<ScopeKind>);
 impl ScopeLevel {
     fn increment_stack_size(&mut self, type_decl: &NEWTypes, env: &mut Vec<Symbols>) {
-        let ScopeKind::Function(func_name, _) = find_scope!(self, ScopeKind::Function(..))
+        let ScopeKind::Function(func_name, ..) = find_scope!(self, ScopeKind::Function(..))
             .expect("can only be called inside a function") else {unreachable!()};
         let func_symbol = env
             .get_mut(func_name.token.get_index())
@@ -42,6 +42,50 @@ impl ScopeLevel {
         size = align(size, type_decl);
 
         func_symbol.unwrap_func().stack_size = size;
+    }
+    fn insert_label(&mut self, name_token: &Token, env: &mut Vec<Symbols>) -> Result<(), Error> {
+        let name = name_token.unwrap_string();
+        let ScopeKind::Function(func_name, ..) = find_scope!(self,ScopeKind::Function(..))
+            .expect("ensured by parser that label is always inside function") else {unreachable!()};
+
+        let func_symbol = env.get_mut(func_name.token.get_index()).unwrap();
+
+        if func_symbol.unwrap_func().labels.contains_key(&name) {
+            return Err(Error::new(
+                name_token,
+                &format!("Redefinition of label {}", name),
+            ));
+        }
+        let len = func_symbol.unwrap_func().labels.len();
+        func_symbol.unwrap_func().labels.insert(name, len);
+        Ok(())
+    }
+    fn insert_goto(&mut self, name_token: Token) -> Result<(), Error> {
+        let ScopeKind::Function(.., gotos) = find_scope!(self,ScopeKind::Function(..))
+            .expect("ensured by parser that label is always inside function") else {unreachable!()};
+
+        gotos.push(name_token);
+        Ok(())
+    }
+    fn compare_gotos(&mut self, env: &mut Vec<Symbols>) -> Result<(), Error> {
+        let ScopeKind::Function(func_name, _,gotos) = find_scope!(self,ScopeKind::Function(..))
+            .expect("ensured by parser that label is always inside function") else {unreachable!()};
+
+        let func_symbol = env.get_mut(func_name.token.get_index()).unwrap();
+        for g in gotos {
+            let label = g.unwrap_string();
+            if !func_symbol.unwrap_func().labels.contains_key(&label) {
+                return Err(Error::new(
+                    g,
+                    &format!(
+                        "No label '{}' in function '{}'",
+                        label,
+                        func_name.unwrap_string()
+                    ),
+                ));
+            }
+        }
+        Ok(())
     }
 }
 pub struct TypeChecker {
@@ -125,7 +169,18 @@ impl TypeChecker {
             Stmt::Switch(keyword, cond, body) => self.switch_statement(keyword, cond, body),
             Stmt::Case(keyword, value, body) => self.case_statement(keyword, value, body),
             Stmt::Default(keyword, body) => self.default_statement(keyword, body),
+            Stmt::Goto(label) => self.goto_statement(label),
+            Stmt::Label(name, body) => self.label_statement(name, body),
         }
+    }
+    fn goto_statement(&mut self, label: &Token) -> Result<(), Error> {
+        self.scope.insert_goto(label.clone())?;
+        Ok(())
+    }
+    fn label_statement(&mut self, name_token: &Token, body: &mut Stmt) -> Result<(), Error> {
+        self.scope.insert_label(name_token, &mut self.env)?;
+        self.visit(body)?;
+        Ok(())
     }
     fn switch_statement(
         &mut self,
@@ -517,15 +572,19 @@ impl TypeChecker {
             .clone();
 
         // have to push scope before declaring local variables
-        self.scope
-            .0
-            .push(ScopeKind::Function(name_token.clone(), return_type.clone()));
+        self.scope.0.push(ScopeKind::Function(
+            name_token.clone(),
+            return_type.clone(),
+            vec![],
+        ));
         for (type_decl, _) in params.iter().by_ref() {
             self.scope.increment_stack_size(type_decl, &mut self.env);
         }
 
         // check function body
         let err = self.block(body);
+        self.scope.compare_gotos(&mut self.env)?;
+
         self.scope.0.pop();
 
         err?;
@@ -582,7 +641,7 @@ impl TypeChecker {
     fn return_statement(&mut self, keyword: &Token, expr: &mut Option<Expr>) -> Result<(), Error> {
         self.returns_all_paths = true;
 
-        let Some(ScopeKind::Function(_,function_type)) = find_scope!(&mut self.scope, ScopeKind::Function(..)) else {
+        let Some(ScopeKind::Function(_,function_type,_)) = find_scope!(&mut self.scope, ScopeKind::Function(..)) else {
             unreachable!("parser ensures that statements can only be contained in functions");
         };
         let function_type = function_type.clone();

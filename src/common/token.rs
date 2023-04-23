@@ -79,6 +79,7 @@ pub enum TokenKind {
     Break,
     Continue,
     Sizeof,
+    Goto,
 }
 
 impl From<&TokenType> for TokenKind {
@@ -153,6 +154,7 @@ impl From<&TokenType> for TokenKind {
             TokenType::Colon => TokenKind::Colon,
             TokenType::Do => TokenKind::Do,
             TokenType::Sizeof => TokenKind::Sizeof,
+            TokenType::Goto => TokenKind::Goto,
         }
     }
 }
@@ -235,6 +237,7 @@ pub enum TokenType {
     Break,
     Continue,
     Sizeof,
+    Goto,
 }
 impl TokenType {
     pub fn update_index(&mut self, new: usize) {
@@ -279,7 +282,8 @@ impl TokenType {
             | TokenType::Char
             | TokenType::Else
             | TokenType::Long
-            | TokenType::Enum => 4,
+            | TokenType::Enum
+            | TokenType::Goto => 4,
             TokenType::While | TokenType::Union | TokenType::Break => 5,
             TokenType::If => 2,
             TokenType::Return | TokenType::Struct | TokenType::Sizeof => 6,
@@ -365,6 +369,7 @@ impl Display for TokenType {
                 TokenType::Colon => "':'",
                 TokenType::Do => "'do'",
                 TokenType::Sizeof => "'sizeof'",
+                TokenType::Goto => "'goto'",
             }
         )
     }

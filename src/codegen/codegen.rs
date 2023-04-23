@@ -21,7 +21,7 @@ pub struct Compiler {
     scratch: ScratchRegisters,
     output: String,
     env: Vec<Symbols>,
-    function_name: Option<String>,
+    function_name: Option<Token>,
 
     // index of current label
     label_index: usize,
@@ -117,8 +117,37 @@ impl Compiler {
             }
             Stmt::Switch(_, cond, body) => self.switch_statement(cond, body),
             Stmt::Case(_, _, body) | Stmt::Default(_, body) => self.case_statement(body),
+            Stmt::Goto(label) => self.goto_statement(label),
+            Stmt::Label(name, body) => self.label_statement(name, body),
         }
     }
+    fn goto_statement(&mut self, label: &Token) -> Result<(), std::fmt::Error> {
+        let function_index = self.function_name.clone().unwrap().token.get_index();
+        let label_index = self
+            .env
+            .get_mut(function_index)
+            .unwrap()
+            .unwrap_func()
+            .labels[&label.unwrap_string()];
+
+        writeln!(self.output, "\tjmp    L{}", label_index)?;
+        Ok(())
+    }
+    fn label_statement(&mut self, name: &Token, body: &Stmt) -> Result<(), std::fmt::Error> {
+        let function_index = self.function_name.clone().unwrap().token.get_index();
+        let label_index = self
+            .env
+            .get_mut(function_index)
+            .unwrap()
+            .unwrap_func()
+            .labels[&name.unwrap_string()];
+
+        writeln!(self.output, "L{}:", label_index)?;
+        self.visit(body)?;
+
+        Ok(())
+    }
+
     fn switch_statement(&mut self, cond: &Expr, body: &Stmt) -> Result<(), std::fmt::Error> {
         let switch_labels = self.switches.pop_front().unwrap();
 
@@ -370,10 +399,7 @@ impl Compiler {
     fn return_statement(&mut self, value: &Option<Expr>) -> Result<(), std::fmt::Error> {
         let function_epilogue = format!(
             "{}_epilogue",
-            self.function_name
-                .as_ref()
-                .expect("typechecker catches nested function-declarations")
-                .clone()
+            self.function_name.clone().unwrap().unwrap_string()
         );
         match value {
             Some(expr) => {
@@ -487,15 +513,15 @@ impl Compiler {
         name: &Token,
         body: &Vec<Stmt>,
     ) -> Result<(), std::fmt::Error> {
-        let params = self
-            .env
-            .get_mut(name.token.get_index())
-            .unwrap()
-            .unwrap_func()
-            .params
-            .clone();
+        let func_symbol = self.env.get_mut(name.token.get_index()).unwrap();
+        let params = func_symbol.unwrap_func().params.clone();
+        // let labels = ;
+
+        for (_, value) in &mut func_symbol.unwrap_func().labels {
+            *value = create_label(&mut self.label_index);
+        }
         // save function name for return label jump
-        self.function_name = Some(name.unwrap_string());
+        self.function_name = Some(name.clone());
 
         // generate function code
         self.cg_func_preamble(name, &params)?;

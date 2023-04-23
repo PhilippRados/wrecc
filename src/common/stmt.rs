@@ -22,6 +22,8 @@ pub enum Stmt {
     Switch(Token, Expr, Box<Stmt>),
     Case(Token, i64, Box<Stmt>),
     Default(Token, Box<Stmt>),
+    Goto(Token),
+    Label(Token, Box<Stmt>),
 }
 
 #[derive(PartialEq, Clone, Debug)]

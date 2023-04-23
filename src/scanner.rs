@@ -43,6 +43,7 @@ impl<'a> Scanner<'a> {
                 ("continue", TokenType::Continue),
                 ("sizeof", TokenType::Sizeof),
                 ("return", TokenType::Return),
+                ("goto", TokenType::Goto),
             ]),
         }
     }

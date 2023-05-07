@@ -1,5 +1,4 @@
 void printf(char* s, char* c);
-int* malloc(int d);
 
 int main() {
   char* c[4];

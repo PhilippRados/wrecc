@@ -11,7 +11,7 @@ use std::rc::Rc;
 macro_rules! convert_reg {
     ($self:ident,$reg:ident,$($pattern:pat_param)|+) => {
         match $reg {
-            $($pattern)|+ => $self.scratch_temp($reg)?,
+            $($pattern)|+ => $self.make_temp($reg)?,
             _ => $reg
         }
     };
@@ -32,6 +32,9 @@ pub struct Compiler {
     // which args have to be pushed on stack before entering next function
     // so that they don't get overwritten
     saved_args: Vec<Register>,
+
+    // offset from base-pointer; spilled variables stay after local-variable stack-locations
+    spill_bp_offset: usize,
 
     // offset from base-pointer where variable stays
     current_bp_offset: usize,
@@ -59,6 +62,7 @@ impl Compiler {
             output: String::new(),
             scratch: ScratchRegisters::new(),
             current_bp_offset: 0,
+            spill_bp_offset: 0,
             label_index: 0,
             function_name: None,
             saved_args: Vec::new(),
@@ -98,7 +102,7 @@ impl Compiler {
     fn visit(&mut self, statement: &Stmt) -> Result<(), std::fmt::Error> {
         match statement {
             Stmt::Expr(expr) => {
-                self.execute_expr(expr)?.free(); // result isn't used
+                self.execute_expr(expr)?.free(&mut self.output); // result isn't used
                 Ok(())
             }
             Stmt::Declaration(decls) => self.declaration(decls),
@@ -155,7 +159,7 @@ impl Compiler {
             .map(|_| create_label(&mut self.label_index))
             .collect();
 
-        let cond_reg = self.execute_expr(cond)?;
+        let mut cond_reg = self.execute_expr(cond)?;
 
         let mut default_label = None;
         for (kind, label) in switch_labels.iter().zip(jump_labels.clone()) {
@@ -177,7 +181,7 @@ impl Compiler {
         if let Some(label) = default_label {
             writeln!(self.output, "\tjmp     L{}", label)?
         }
-        cond_reg.free();
+        cond_reg.free(&mut self.output);
 
         let break_label = create_label(&mut self.label_index);
 
@@ -222,7 +226,7 @@ impl Compiler {
             cond_reg.name(),
             body_label
         )?;
-        cond_reg.free();
+        cond_reg.free(&mut self.output);
 
         writeln!(self.output, "L{}:", end_label)?;
 
@@ -262,16 +266,16 @@ impl Compiler {
             match (is_global, &e.kind) {
                 // init-list is assignment syntax sugar
                 (true, ExprKind::Assign { r_expr, .. }) => {
-                    let r_value = self.execute_expr(r_expr)?;
+                    let mut r_value = self.execute_expr(r_expr)?;
                     writeln!(
                         self.output,
                         "\t.{} {}",
                         r_value.get_type().complete_suffix(),
                         r_value.base_name()
                     )?;
-                    r_value.free()
+                    r_value.free(&mut self.output)
                 }
-                (false, _) => self.execute_expr(e)?.free(),
+                (false, _) => self.execute_expr(e)?.free(&mut self.output),
                 _ => unreachable!(),
             };
         }
@@ -301,7 +305,7 @@ impl Compiler {
         writeln!(self.output, "L{}:", inc_label)?;
 
         if let Some(inc) = inc {
-            self.execute_expr(inc)?.free();
+            self.execute_expr(inc)?.free(&mut self.output);
         }
 
         writeln!(self.output, "L{}:", cond_label)?;
@@ -318,7 +322,7 @@ impl Compiler {
                     cond_reg.name(),
                     body_label
                 )?;
-                cond_reg.free();
+                cond_reg.free(&mut self.output);
             }
             None => writeln!(self.output, "\tjmp    L{}", body_label)?,
         }
@@ -351,7 +355,7 @@ impl Compiler {
             cond_reg.name(),
             body_label
         )?;
-        cond_reg.free();
+        cond_reg.free(&mut self.output);
 
         // don't know before wether loop contains break statement
         // could be checked by typechecker
@@ -380,7 +384,7 @@ impl Compiler {
             cond_reg.get_type().suffix(),
             cond_reg.name()
         )?;
-        cond_reg.free();
+        cond_reg.free(&mut self.output);
 
         if !else_branch.is_none() {
             else_label = create_label(&mut self.label_index);
@@ -403,7 +407,7 @@ impl Compiler {
         );
         match value {
             Some(expr) => {
-                let return_value = self.execute_expr(expr)?;
+                let mut return_value = self.execute_expr(expr)?;
                 writeln!(
                     self.output,
                     "\tmov{}    {}, {}\n\tjmp    {}",
@@ -412,7 +416,7 @@ impl Compiler {
                     return_value.get_type().return_reg(),
                     function_epilogue
                 )?;
-                return_value.free();
+                return_value.free(&mut self.output);
                 Ok(())
             }
             None => writeln!(self.output, "\tjmp    {}", function_epilogue),
@@ -445,15 +449,10 @@ impl Compiler {
                 )?;
                 Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl.clone()))
             }
-            false => {
-                self.current_bp_offset += type_decl.size();
-                self.current_bp_offset = align(self.current_bp_offset, type_decl);
-
-                Register::Stack(StackRegister::new(
-                    self.current_bp_offset,
-                    type_decl.clone(),
-                ))
-            }
+            false => Register::Stack(StackRegister::new(
+                &mut self.current_bp_offset,
+                type_decl.clone(),
+            )),
         };
         self.env
             .get_mut(name.token.get_index())
@@ -502,7 +501,7 @@ impl Compiler {
                         .get_reg(),
                     value_reg,
                 )?
-                .free();
+                .free(&mut self.output);
             }
         }
 
@@ -515,20 +514,25 @@ impl Compiler {
     ) -> Result<(), std::fmt::Error> {
         let func_symbol = self.env.get_mut(name.token.get_index()).unwrap();
         let params = func_symbol.unwrap_func().params.clone();
-        // let labels = ;
 
         for (_, value) in &mut func_symbol.unwrap_func().labels {
             *value = create_label(&mut self.label_index);
         }
         // save function name for return label jump
         self.function_name = Some(name.clone());
+        self.current_bp_offset = 0;
+        self.spill_bp_offset = self
+            .env
+            .get_mut(name.token.get_index())
+            .unwrap()
+            .unwrap_func()
+            .stack_size;
 
         // generate function code
         self.cg_func_preamble(name, &params)?;
         self.cg_stmts(body)?;
         self.cg_func_postamble(name)?;
 
-        self.current_bp_offset = 0;
         self.function_name = None;
 
         Ok(())
@@ -546,6 +550,7 @@ impl Compiler {
         Ok(())
     }
     fn dealloc_stack(&mut self, name: &Token) -> Result<(), std::fmt::Error> {
+        // TODO: also have to deallocate spilled regs
         let stack_size = self
             .env
             .get_mut(name.token.get_index())
@@ -553,6 +558,7 @@ impl Compiler {
             .unwrap_func()
             .stack_size;
         if stack_size > 0 {
+            // writeln!(self.output, "\taddq    ${},%rsp", self.spill_bp_offset)?;
             writeln!(self.output, "\taddq    ${},%rsp", stack_size)?;
         }
         Ok(())
@@ -659,20 +665,19 @@ impl Compiler {
                 false_expr,
                 ..
             } => self.cg_ternary(cond, true_expr, false_expr),
-
             ExprKind::Comma { left, right } => self.cg_comma(left, right),
-            ExprKind::Nop => Ok(Register::Void),
             ExprKind::SizeofExpr {
                 value: Some(value), ..
             }
             | ExprKind::SizeofType { value } => {
                 Ok(Register::Literal(*value, NEWTypes::Primitive(Types::Long)))
             }
-            _ => unreachable!("{:?}", ast),
+            ExprKind::Nop => Ok(Register::Void),
+            _ => unreachable!("can only be sizeof but all cases covered"),
         }
     }
     fn cg_comma(&mut self, left: &Expr, right: &Expr) -> Result<Register, std::fmt::Error> {
-        self.execute_expr(left)?.free();
+        self.execute_expr(left)?.free(&mut self.output);
 
         Ok(self.execute_expr(right)?)
     }
@@ -696,14 +701,14 @@ impl Compiler {
             cond_reg.name(),
             else_label
         )?;
-        cond_reg.free();
+        cond_reg.free(&mut self.output);
 
-        let result = Register::Scratch(
-            self.scratch.scratch_alloc(),
+        let result = Register::Temp(TempRegister::new(
+            &mut self.scratch,
             true_expr.clone().type_decl.unwrap(),
-            ValueKind::Rvalue,
-        );
-        let true_reg = self.execute_expr(true_expr)?;
+            &mut self.spill_bp_offset,
+        ));
+        let mut true_reg = self.execute_expr(true_expr)?;
 
         // copy both expressions into result register
         writeln!(
@@ -713,12 +718,12 @@ impl Compiler {
             true_reg.name(),
             result.name()
         )?;
-        true_reg.free();
+        true_reg.free(&mut self.output);
 
         writeln!(self.output, "\tjmp     L{}", done_label)?;
         writeln!(self.output, "L{}:", else_label)?;
 
-        let false_reg = self.execute_expr(false_expr)?;
+        let mut false_reg = self.execute_expr(false_expr)?;
 
         writeln!(
             self.output,
@@ -727,7 +732,7 @@ impl Compiler {
             false_reg.name(),
             result.name()
         )?;
-        false_reg.free();
+        false_reg.free(&mut self.output);
 
         writeln!(self.output, "L{}:", done_label)?;
 
@@ -790,14 +795,20 @@ impl Compiler {
         let l_reg = self.execute_expr(l_expr)?;
         let r_reg = self.execute_expr(r_expr)?;
 
-        let mut temp_scratch = Register::Scratch(
-            self.scratch.scratch_alloc(),
+        let temp_scratch = Register::Temp(TempRegister::new(
+            &mut self.scratch,
             l_reg.get_type(),
-            ValueKind::Rvalue,
-        );
+            &mut self.spill_bp_offset,
+        ));
+        let mut temp_scratch = if !temp_scratch.is_scratch() {
+            Register::Spare(SpareRegister::new(temp_scratch))
+        } else {
+            temp_scratch
+        };
+
         // have to do integer-promotion in codegen
-        if temp_scratch.get_type().size() < Types::Int.size()
-            && (matches!(l_reg, Register::Scratch(..) | Register::Stack(..)))
+        if (temp_scratch.get_type().size() < Types::Int.size())
+            && matches!(l_reg, Register::Temp(..) | Register::Stack(..))
         {
             temp_scratch.set_type(NEWTypes::Primitive(Types::Int));
             writeln!(
@@ -817,6 +828,9 @@ impl Compiler {
                 temp_scratch.name(),
             )?;
         }
+        if let Register::Spare(..) = temp_scratch {
+            temp_scratch.free(&mut self.output);
+        }
         let mut bin_reg = self.cg_binary(temp_scratch, &token.comp_to_binary(), r_reg)?;
 
         // we can do this because typechecker would catch any type-errors
@@ -831,17 +845,20 @@ impl Compiler {
         expr: &Expr,
         by_amount: &usize,
     ) -> Result<Register, std::fmt::Error> {
-        let reg = self.execute_expr(expr)?;
-        let mut return_reg = Register::Scratch(
-            self.scratch.scratch_alloc(),
-            reg.get_type(),
-            ValueKind::Rvalue,
-        );
+        let mut reg = self.execute_expr(expr)?;
+        let mut return_reg = Register::Temp(TempRegister::new(
+            &mut self.scratch,
+            expr.type_decl.clone().unwrap(),
+            &mut self.spill_bp_offset,
+        ));
+
+        (reg, return_reg) = self.validate_registers(reg, return_reg)?;
 
         // assign value to return-register before binary operation
         // have to do integer-promotion in codegen
         if return_reg.get_type().size() < Types::Int.size() {
             return_reg.set_type(NEWTypes::Primitive(Types::Int));
+
             writeln!(
                 self.output,
                 "movs{}{}   {}, {}",
@@ -877,7 +894,10 @@ impl Compiler {
             )?,
             _ => unreachable!(),
         };
-        reg.free();
+        reg.free(&mut self.output);
+        if let Register::Spare(..) = return_reg {
+            return_reg.free(&mut self.output);
+        }
 
         Ok(return_reg)
     }
@@ -905,16 +925,15 @@ impl Compiler {
         Ok(value_reg)
     }
     fn cg_scale_up(&mut self, expr: &Expr, by_amount: &usize) -> Result<Register, std::fmt::Error> {
-        let mut value_reg = self.execute_expr(expr)?;
-        value_reg = convert_reg!(self, value_reg, Register::Literal(..) | Register::Stack(..));
+        let value_reg = self.execute_expr(expr)?;
 
-        writeln!(
-            self.output,
-            "imul{}   ${}, {}",
-            value_reg.get_type().suffix(),
-            by_amount,
-            value_reg.name()
+        let mut value_reg = self.cg_mult(
+            Register::Literal(*by_amount, NEWTypes::Primitive(Types::Int)),
+            value_reg,
         )?;
+        if let Register::Spare(..) = value_reg {
+            value_reg.free(&mut self.output)
+        }
 
         Ok(value_reg)
     }
@@ -931,22 +950,32 @@ impl Compiler {
     fn cg_cast_up(&mut self, expr: &Expr, new_type: NEWTypes) -> Result<Register, std::fmt::Error> {
         let mut value_reg = self.execute_expr(expr)?;
 
-        if matches!(value_reg, Register::Scratch(..) | Register::Stack(..)) {
-            let dest_reg = Register::Scratch(
-                self.scratch.scratch_alloc(),
+        if matches!(value_reg, Register::Temp(..) | Register::Stack(..)) {
+            let dest_reg = Register::Temp(TempRegister::new(
+                &mut self.scratch,
                 new_type.clone(),
-                ValueKind::Rvalue,
-            );
+                &mut self.spill_bp_offset,
+            ));
+
+            let mut dest_reg = if !dest_reg.is_scratch() {
+                Register::Spare(SpareRegister::new(dest_reg))
+            } else {
+                dest_reg
+            };
 
             writeln!(
                 self.output,
                 "movs{}{}   {}, {}", //sign extend smaller type
-                expr.type_decl.clone().unwrap().suffix(),
+                value_reg.get_type().suffix(),
                 new_type.suffix(),
                 value_reg.name(),
-                dest_reg.name()
+                dest_reg.name(),
             )?;
-            value_reg.free();
+
+            value_reg.free(&mut self.output);
+            if let Register::Spare(..) = dest_reg {
+                dest_reg.free(&mut self.output);
+            }
             Ok(dest_reg)
         } else {
             value_reg.set_type(new_type);
@@ -965,13 +994,17 @@ impl Compiler {
                 let member_lvalue = self.cg_member_access(l_value.clone(), &member_token, false)?;
                 let member_rvalue = self.cg_member_access(r_value.clone(), &member_token, false)?;
 
-                self.cg_assign(member_lvalue, member_rvalue)?.free();
+                self.cg_assign(member_lvalue, member_rvalue)?
+                    .free(&mut self.output);
             }
-            r_value.free();
+            r_value.free(&mut self.output);
             Ok(l_value)
         } else {
             // can't move from mem to mem so make temp scratch-register
-            r_value = convert_reg!(self, r_value, Register::Stack(..) | Register::Label(..));
+            if matches!(r_value, Register::Stack(..) | Register::Label(..)) || r_value.is_spilled()
+            {
+                r_value = self.force_scratch(r_value)?;
+            }
             r_value = self.convert_to_rval(r_value)?;
 
             writeln!(
@@ -981,7 +1014,7 @@ impl Compiler {
                 r_value.name(),
                 l_value.name(),
             )?;
-            r_value.free();
+            r_value.free(&mut self.output);
             Ok(l_value)
         }
     }
@@ -999,11 +1032,11 @@ impl Compiler {
         assert!(args.len() <= 6, "function cant have more than 6 args");
 
         let callee_saved_regs = self.registers_in_use();
-        self.spill_regs(&callee_saved_regs)?;
+        self.save_regs(&callee_saved_regs)?;
 
         // moving the arguments into their designated registers
         for (i, expr) in args.iter().enumerate().rev() {
-            let reg = self.execute_expr(expr)?;
+            let mut reg = self.execute_expr(expr)?;
 
             let arg = Register::Arg(i, expr.type_decl.clone().unwrap());
             writeln!(
@@ -1013,18 +1046,21 @@ impl Compiler {
                 reg.name(),
                 arg.name(),
             )?;
-            reg.free();
+            reg.free(&mut self.output);
 
             self.saved_args.push(arg);
         }
 
         writeln!(self.output, "\tcall    _{}", func_name)?;
 
-        self.unspill_regs(&callee_saved_regs, args.len())?;
+        self.restore_regs(&callee_saved_regs, args.len())?;
 
         if !return_type.is_void() {
-            let reg_index = self.scratch.scratch_alloc();
-            let return_reg = Register::Scratch(reg_index, return_type.clone(), ValueKind::Rvalue);
+            let return_reg = Register::Temp(TempRegister::new(
+                &mut self.scratch,
+                return_type.clone(),
+                &mut self.spill_bp_offset,
+            ));
             writeln!(
                 self.output,
                 "\tmov{}    {}, {}",
@@ -1049,15 +1085,15 @@ impl Compiler {
             .iter()
             .filter(|r| r.borrow().in_use)
             .for_each(|r| {
-                regs.push(Register::Scratch(
-                    Rc::clone(r),
-                    NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
-                    ValueKind::Rvalue,
-                ));
+                regs.push(Register::Temp(TempRegister {
+                    reg: TempKind::Scratch(Rc::clone(&r)),
+                    type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
+                    value_kind: ValueKind::Rvalue,
+                }));
             });
         regs
     }
-    fn spill_regs(&mut self, callee_saved_regs: &Vec<Register>) -> Result<(), std::fmt::Error> {
+    fn save_regs(&mut self, callee_saved_regs: &Vec<Register>) -> Result<(), std::fmt::Error> {
         // push registers that are in use currently onto stack so they won't be overwritten during function
         for reg in callee_saved_regs.iter().by_ref() {
             writeln!(self.output, "\tpushq   {}", reg.base_name())?;
@@ -1069,7 +1105,7 @@ impl Compiler {
         }
         Ok(())
     }
-    fn unspill_regs(
+    fn restore_regs(
         &mut self,
         callee_saved_regs: &Vec<Register>,
         args_len: usize,
@@ -1117,7 +1153,7 @@ impl Compiler {
             left.name(),
             true_label
         )?;
-        left.free();
+        left.free(&mut self.output);
 
         let mut right = self.execute_expr(right)?;
         right = convert_reg!(self, right, Register::Literal(..));
@@ -1132,14 +1168,14 @@ impl Compiler {
             right.name(),
             false_label
         )?;
-        right.free();
+        right.free(&mut self.output);
 
         let done_label = create_label(&mut self.label_index);
-        let result = Register::Scratch(
-            self.scratch.scratch_alloc(),
+        let result = Register::Temp(TempRegister::new(
+            &mut self.scratch,
             NEWTypes::Primitive(Types::Int),
-            ValueKind::Rvalue,
-        );
+            &mut self.spill_bp_offset,
+        ));
         // if expression true write 1 in result and skip false label
         writeln!(
             self.output,
@@ -1173,7 +1209,7 @@ impl Compiler {
             left.name(),
             false_label
         )?;
-        left.free();
+        left.free(&mut self.output);
 
         // left is true if right false jump to false label
         let mut right = self.execute_expr(right)?;
@@ -1185,15 +1221,15 @@ impl Compiler {
             right.name(),
             false_label
         )?;
-        right.free();
+        right.free(&mut self.output);
 
         // if no prior jump was taken expression is true
         let true_label = create_label(&mut self.label_index);
-        let result = Register::Scratch(
-            self.scratch.scratch_alloc(),
+        let result = Register::Temp(TempRegister::new(
+            &mut self.scratch,
             NEWTypes::Primitive(Types::Int),
-            ValueKind::Rvalue,
-        );
+            &mut self.spill_bp_offset,
+        ));
         writeln!(
             self.output,
             "\tmovl    $1, {}\n\tjmp    L{}",
@@ -1215,9 +1251,8 @@ impl Compiler {
         new_type: NEWTypes,
     ) -> Result<Register, std::fmt::Error> {
         let mut reg = self.execute_expr(right)?;
-        if matches!(reg, Register::Literal(..)) {
-            reg = self.scratch_temp(reg)?;
-        }
+        reg = convert_reg!(self, reg, Register::Literal(..));
+
         match token.token {
             TokenType::Bang => self.cg_bang(reg),
             TokenType::Minus => self.cg_negate(reg),
@@ -1232,19 +1267,24 @@ impl Compiler {
 
         Ok(reg)
     }
-    fn cg_bang(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
+    fn cg_bang(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {
+        // compares reg-value with 0
         writeln!(
             self.output,
             "\tcmp{} $0, {}\n\tsete %al",
             reg.get_type().suffix(),
             reg.name()
-        )?; // compares reg-value with 0
+        )?;
 
-        let result = Register::Scratch(
-            self.scratch.scratch_alloc(),
+        let mut result = Register::Temp(TempRegister::new(
+            &mut self.scratch,
             reg.get_type(),
-            ValueKind::Rvalue,
-        );
+            &mut self.spill_bp_offset,
+        ));
+        if !result.is_scratch() {
+            result = self.force_scratch(result)?;
+        }
+
         // sets %al to 1 if comparison true and to 0 when false and then copies %al to current reg
         if reg.get_type() == NEWTypes::Primitive(Types::Char) {
             writeln!(self.output, "\tmovb %al, {}", result.name())?;
@@ -1256,7 +1296,10 @@ impl Compiler {
                 result.name()
             )?;
         }
-        reg.free();
+        reg.free(&mut self.output);
+        if let Register::Spare(..) = result {
+            result.free(&mut self.output);
+        }
 
         Ok(result)
     }
@@ -1271,23 +1314,30 @@ impl Compiler {
     }
     fn cg_address_at(
         &mut self,
-        reg: Register,
+        mut reg: Register,
         is_global: bool,
         free: bool,
     ) -> Result<Register, std::fmt::Error> {
         if is_global && matches!(reg, Register::Label(..)) {
             return Ok(reg);
         }
-        let dest = Register::Scratch(
-            self.scratch.scratch_alloc(),
+        let mut dest = Register::Temp(TempRegister::new(
+            &mut self.scratch,
             NEWTypes::Pointer(Box::new(reg.get_type())),
-            ValueKind::Rvalue,
-        );
+            &mut self.spill_bp_offset,
+        ));
+        if !dest.is_scratch() {
+            dest = self.force_scratch(dest)?;
+        }
         writeln!(self.output, "\tleaq    {}, {}", reg.name(), dest.name())?;
 
         if free {
-            reg.free();
+            reg.free(&mut self.output);
         }
+        if let Register::Spare(..) = dest {
+            dest.free(&mut self.output);
+        }
+
         Ok(dest)
     }
     fn cg_deref(
@@ -1295,15 +1345,23 @@ impl Compiler {
         mut reg: Register,
         new_type: NEWTypes,
     ) -> Result<Register, std::fmt::Error> {
-        reg = convert_reg!(self, reg, Register::Label(..) | Register::Stack(..));
+        if let Register::Label(..) | Register::Stack(..) = reg {
+            reg = self.force_scratch(reg)?;
+        }
         reg = self.convert_to_rval(reg)?;
 
         reg.set_type(new_type);
         reg.set_value_kind(ValueKind::Lvalue);
+
+        if let Register::Spare(..) = reg {
+            reg.free(&mut self.output);
+        }
+
         Ok(reg)
     }
 
     fn cg_add(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+        let (mut left, right) = self.validate_registers(left, right)?;
         writeln!(
             self.output,
             "\tadd{} {}, {}\n",
@@ -1312,10 +1370,13 @@ impl Compiler {
             right.name()
         )?;
 
-        left.free();
+        left.free(&mut self.output);
         Ok(right)
     }
     fn cg_sub(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+        // let left = self.make_temp(left)?;
+        let (mut right, left) = self.validate_registers(right, left)?;
+
         writeln!(
             self.output,
             "\tsub{} {}, {}\n",
@@ -1324,11 +1385,21 @@ impl Compiler {
             left.name()
         )?;
 
-        right.free();
+        right.free(&mut self.output);
         Ok(left)
     }
 
-    fn cg_mult(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+    fn cg_mult(
+        &mut self,
+        mut left: Register,
+        right: Register,
+    ) -> Result<Register, std::fmt::Error> {
+        // imul expects register as destination
+        let right = if !right.is_scratch() {
+            self.force_scratch(right)?
+        } else {
+            right
+        };
         writeln!(
             self.output,
             "\timul{} {}, {}\n",
@@ -1337,11 +1408,12 @@ impl Compiler {
             right.name()
         )?;
 
-        left.free();
+        left.free(&mut self.output);
         Ok(right)
     }
 
     fn cg_div(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+        let (mut left, right) = self.validate_registers(left, right)?;
         writeln!(
             self.output,
             "\tmov{} {}, {}",
@@ -1369,11 +1441,12 @@ impl Compiler {
             right.name()
         )?;
 
-        left.free();
+        left.free(&mut self.output);
         Ok(right)
     }
 
     fn cg_mod(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+        let (mut left, right) = self.validate_registers(left, right)?;
         writeln!(
             self.output,
             "\tmov{} {}, {}",
@@ -1400,11 +1473,12 @@ impl Compiler {
             right.name()
         )?;
 
-        left.free();
+        left.free(&mut self.output);
         Ok(right)
     }
 
     fn cg_bit_xor(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+        let (mut left, right) = self.validate_registers(left, right)?;
         writeln!(
             self.output,
             "\txor{} {}, {}\n",
@@ -1413,10 +1487,11 @@ impl Compiler {
             right.name()
         )?;
 
-        left.free();
+        left.free(&mut self.output);
         Ok(right)
     }
     fn cg_bit_or(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+        let (mut left, right) = self.validate_registers(left, right)?;
         writeln!(
             self.output,
             "\tor{} {}, {}\n",
@@ -1425,10 +1500,11 @@ impl Compiler {
             right.name()
         )?;
 
-        left.free();
+        left.free(&mut self.output);
         Ok(right)
     }
     fn cg_bit_and(&mut self, left: Register, right: Register) -> Result<Register, std::fmt::Error> {
+        let (mut left, right) = self.validate_registers(left, right)?;
         writeln!(
             self.output,
             "\tand{} {}, {}\n",
@@ -1437,15 +1513,18 @@ impl Compiler {
             right.name()
         )?;
 
-        left.free();
+        left.free(&mut self.output);
         Ok(right)
     }
     fn cg_shift(
         &mut self,
         direction: &str,
         left: Register,
-        right: Register,
+        mut right: Register,
     ) -> Result<Register, std::fmt::Error> {
+        // destination register has to be reg or mem
+        let left = self.make_temp(left)?;
+
         // expects shift amount to be in %cl (4th arg register)
         writeln!(
             self.output,
@@ -1454,7 +1533,7 @@ impl Compiler {
             right.name(),
             Register::Arg(3, right.get_type()).name()
         )?;
-        right.free();
+        right.free(&mut self.output);
 
         writeln!(
             self.output,
@@ -1472,6 +1551,7 @@ impl Compiler {
         left: Register,
         right: Register,
     ) -> Result<Register, std::fmt::Error> {
+        let (mut right, mut left) = self.validate_registers(right, left)?;
         writeln!(
             self.output,
             "\tcmp{} {}, {}",
@@ -1479,6 +1559,10 @@ impl Compiler {
             right.name(),
             left.name()
         )?;
+
+        if !right.is_scratch() {
+            right = self.force_scratch(right)?;
+        }
         // write ZF to %al based on operator and zero extend %right_register with value of %al
         writeln!(self.output, "\t{operator} %al",)?;
         if right.get_type() == NEWTypes::Primitive(Types::Char) {
@@ -1492,31 +1576,22 @@ impl Compiler {
             )?;
         }
 
-        left.free();
+        left.free(&mut self.output);
         Ok(right)
     }
 
     fn cg_binary(
         &mut self,
-        mut left_reg: Register,
+        left_reg: Register,
         token: &TokenType,
-        mut right_reg: Register,
+        right_reg: Register,
     ) -> Result<Register, std::fmt::Error> {
-        left_reg = convert_reg!(
-            self,
-            left_reg,
-            Register::Literal(..) | Register::Label(..) | Register::Stack(..)
-        );
-        right_reg = convert_reg!(
-            self,
-            right_reg,
-            Register::Literal(..) | Register::Label(..) | Register::Stack(..)
+        let (left_reg, right_reg) = (
+            self.convert_to_rval(left_reg)?,
+            self.convert_to_rval(right_reg)?,
         );
 
-        left_reg = self.convert_to_rval(left_reg)?;
-        right_reg = self.convert_to_rval(right_reg)?;
-
-        match token {
+        let mut result = match token {
             TokenType::Plus => self.cg_add(left_reg, right_reg),
             TokenType::Minus => self.cg_sub(left_reg, right_reg),
             TokenType::Star => self.cg_mult(left_reg, right_reg),
@@ -1534,30 +1609,126 @@ impl Compiler {
             TokenType::Less => self.cg_comparison("setl", left_reg, right_reg),
             TokenType::LessEqual => self.cg_comparison("setle", left_reg, right_reg),
             _ => unreachable!(),
+        }?;
+
+        // if register is spare register because was spilled then mov back into previous reg
+        if let Register::Spare(..) = result {
+            result.free(&mut self.output)
+        }
+        Ok(result)
+    }
+    // checks to see if two registers are allowed to be in the same instruction, otherwise convert one
+    // see: https://www.cs.virginia.edu/~evans/cs216/guides/x86.html
+    fn validate_registers(
+        &mut self,
+        left: Register,
+        right: Register,
+    ) -> Result<(Register, Register), std::fmt::Error> {
+        match (&left, &right) {
+            (.., Register::Literal(..)) => {
+                let right = self.make_temp(right)?;
+                // since new temporary register can also be spilled check again
+                self.validate_registers(left, right)
+            }
+            // don't want to overwrite variable
+            (.., Register::Stack(..) | Register::Label(..)) => {
+                if self.scratch.is_all_spilled() {
+                    writeln!(
+                        self.output,
+                        "\tmov{}    {}, {}",
+                        right.get_type().suffix(),
+                        right.name(),
+                        right.get_type().return_reg(),
+                    )?;
+                    let result = Register::Temp(TempRegister::new(
+                        &mut self.scratch,
+                        right.get_type(),
+                        &mut self.spill_bp_offset,
+                    ));
+
+                    writeln!(
+                        self.output,
+                        "\tmov{}    {}, {}",
+                        result.get_type().suffix(),
+                        right.get_type().return_reg(),
+                        result.name(),
+                    )?;
+                    let right = self.force_scratch(result)?;
+                    Ok((left, right))
+                } else {
+                    let right = self.force_scratch(right)?;
+                    Ok((left, right))
+                }
+            }
+            (Register::Stack(..), Register::Temp(tempkind)) if tempkind.is_spilled() => {
+                let right = self.force_scratch(right)?;
+                Ok((left, right))
+            }
+            (Register::Temp(l_temp), Register::Temp(r_temp))
+                if l_temp.is_spilled() && r_temp.is_spilled() =>
+            {
+                let right = self.force_scratch(right)?;
+                Ok((left, right))
+            }
+            _ => Ok((left, right)),
         }
     }
-    fn convert_to_rval(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {
-        if reg.is_lval() {
-            reg = self.scratch_temp(reg)?
-        }
-        Ok(reg)
-    }
-    fn scratch_temp(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
-        let temp_scratch = Register::Scratch(
-            self.scratch.scratch_alloc(),
-            reg.get_type(),
-            ValueKind::Rvalue,
-        );
+    fn force_scratch(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {
+        let scratch = if self.scratch.is_all_spilled() {
+            let dest = if matches!(reg, Register::Literal(..)) {
+                Register::Temp(TempRegister::new(
+                    &mut self.scratch,
+                    reg.get_type(),
+                    &mut self.spill_bp_offset,
+                ))
+            } else {
+                reg.clone()
+            };
+            Register::Spare(SpareRegister::new(dest))
+        } else {
+            let result = Register::Temp(TempRegister::new(
+                &mut self.scratch,
+                reg.get_type(),
+                &mut self.spill_bp_offset,
+            ));
+            reg.free(&mut self.output);
+            result
+        };
 
         writeln!(
             self.output,
             "\tmov{}    {}, {}",
-            temp_scratch.get_type().suffix(),
+            scratch.get_type().suffix(),
             reg.name(),
-            temp_scratch.name(),
+            scratch.name()
         )?;
-        reg.free();
-        Ok(temp_scratch)
+
+        Ok(scratch)
+    }
+    fn convert_to_rval(&mut self, reg: Register) -> Result<Register, std::fmt::Error> {
+        // only scratch-registers need conversion
+        if reg.is_lval() {
+            self.force_scratch(reg)
+        } else {
+            Ok(reg)
+        }
+    }
+    fn make_temp(&mut self, mut reg: Register) -> Result<Register, std::fmt::Error> {
+        let result = Register::Temp(TempRegister::new(
+            &mut self.scratch,
+            reg.get_type(),
+            &mut self.spill_bp_offset,
+        ));
+
+        writeln!(
+            self.output,
+            "\tmov{}    {}, {}",
+            result.get_type().suffix(),
+            reg.name(),
+            result.name(),
+        )?;
+        reg.free(&mut self.output);
+        Ok(result)
     }
 }
 

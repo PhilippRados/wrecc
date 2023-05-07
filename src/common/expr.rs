@@ -117,9 +117,13 @@ impl Display for ExprKind {
             f,
             "{}",
             match self {
-                ExprKind::Binary { token, .. } => format!("'binary-expression': {}", token.token),
-                ExprKind::Unary { token, .. } => format!("'unary-expression': {}", token.token),
-                ExprKind::Grouping { .. } => "'grouping-expression'".to_string(),
+                ExprKind::Binary { left, token, right } => format!(
+                    "Binary: {}\n\tleft: {}\n\tright {}",
+                    token.token, left.kind, right.kind
+                ),
+                ExprKind::Unary { token, right, .. } =>
+                    format!("Unary: {}\n\tright: {}", token.token, right.kind),
+                ExprKind::Grouping { expr } => format!("Grouping:\n\t{}", expr.kind),
                 ExprKind::Assign { .. } => "'assign-expression'".to_string(),
                 ExprKind::Logical { token, .. } => format!("'logical-expression': {}", token.token),
                 ExprKind::Call { .. } => "'call-expression'".to_string(),

@@ -6,14 +6,14 @@ mod parser;
 mod scanner;
 mod typechecker;
 
-use codegen::codegen::*;
+use codegen::{codegen::*, register_allocation::*};
 use common::error::*;
 use parser::*;
 use scanner::*;
 use typechecker::*;
 
 fn main() {
-    // read input file
+    // Read input file
     let args: Vec<String> = std::env::args().collect();
     let file = match args.len() {
         2 => &args[1],
@@ -47,6 +47,19 @@ fn main() {
         None => return,
     };
 
-    // generate x8664 assembly
-    Compiler::new(const_labels, env, switches).compile(&statements);
+    // Turn AST into IR
+    let (ir, live_intervals) = Compiler::new(const_labels, env, switches).translate(&statements);
+
+    // Fill in physical registers
+    let ir = RegisterAllocation::new(live_intervals).allocate(ir);
+
+    // Generate x8664 assembly
+    use std::io::Write;
+    let mut output =
+        std::fs::File::create("/Users/philipprados/documents/coding/Rust/rucc/generated.s")
+            .expect("create failed");
+
+    for instr in ir {
+        writeln!(output, "{}", instr).expect("write failed");
+    }
 }

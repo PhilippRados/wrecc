@@ -12,20 +12,23 @@ pub struct Function {
     pub params: Vec<(NEWTypes, Token)>,
     pub return_type: NEWTypes,
 
-    // how much stack space a function needs to allocate
-    // info given in typechecker
+    // how much stack space a function needs to allocate info given in typechecker
     pub stack_size: usize,
 
+    // can either be definition/declaration
     pub kind: FunctionKind,
 
     // all the goto-labels that are unique to that function
     pub labels: HashMap<String, usize>,
+
+    pub epilogue_index: usize,
 }
 impl Function {
     pub fn new(return_type: NEWTypes) -> Self {
         // can only know return-type at point of declaration
         Function {
             stack_size: 0,
+            epilogue_index: 0,
             return_type,
             kind: FunctionKind::Declaration,
             params: vec![],

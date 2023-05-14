@@ -1,8 +1,5 @@
 use crate::common::expr::ValueKind;
 use crate::common::types::*;
-use std::cell::RefCell;
-use std::fmt::Write;
-use std::rc::Rc;
 
 static ARG_REGISTER_MAP: &[[&str; 6]] = &[
     ["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"],
@@ -12,14 +9,15 @@ static ARG_REGISTER_MAP: &[[&str; 6]] = &[
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Register {
-    // scratch/spilled-registers hold temporary expression results
+    // virtual register that can be infinite in amount; get transformed into pysical registers
+    // in register-allocation pass
     Temp(TempRegister),
     // variables that live on the local function-stack
     Stack(StackRegister),
     // Labels can be Strings and global variables
     Label(LabelRegister),
-    // Special register only used for spilling
-    Spare(SpareRegister),
+    // register used for return values
+    Return(NEWTypes),
     // numerical constants
     Literal(usize, NEWTypes),
     // registers that are used in function calls for arguments
@@ -28,17 +26,6 @@ pub enum Register {
     Void,
 }
 impl Register {
-    pub fn free(&mut self, output: &mut String) {
-        match self {
-            Register::Void
-            | Register::Stack(_)
-            | Register::Arg(..)
-            | Register::Label(_)
-            | Register::Literal(..) => (),
-            Register::Spare(reg) => *self = reg.free(output),
-            Register::Temp(reg) => reg.free(),
-        }
-    }
     pub fn name(&self) -> String {
         match self {
             Register::Void => unimplemented!(),
@@ -46,19 +33,18 @@ impl Register {
             Register::Label(reg) => reg.name(),
             Register::Literal(n, _) => format!("${n}"),
             Register::Temp(reg) => reg.name(),
-            Register::Spare(reg) => reg.name(),
+            Register::Return(t) => t.return_reg(),
             Register::Arg(i, type_decl) => self.get_arg_reg(*i, type_decl),
         }
     }
     // name as 64bit register
     pub fn base_name(&self) -> String {
         match self {
-            Register::Void => unimplemented!(),
+            Register::Void | Register::Return(..) => unimplemented!(),
             Register::Stack(reg) => reg.name(),
             Register::Label(reg) => reg.base_name(),
             Register::Literal(n, ..) => format!("{n}"),
             Register::Temp(reg) => reg.base_name(),
-            Register::Spare(reg) => reg.base_name.to_string(),
             Register::Arg(i, _) => ARG_REGISTER_MAP[2][*i].to_string(),
         }
     }
@@ -75,12 +61,12 @@ impl Register {
     }
     pub fn set_type(&mut self, type_decl: NEWTypes) {
         match self {
-            Register::Void => unimplemented!(),
+            Register::Void | Register::Return(..) => unimplemented!(),
             Register::Label(reg) => reg.set_type(type_decl),
             Register::Literal(_, old_decl) => *old_decl = type_decl,
             Register::Stack(reg) => reg.type_decl = type_decl,
             Register::Temp(reg) => reg.type_decl = type_decl,
-            Register::Spare(reg) => reg.set_type(type_decl),
+            // Register::Spare(reg) => reg.set_type(type_decl),
             Register::Arg(_, old_decl) => *old_decl = type_decl,
         }
     }
@@ -91,25 +77,25 @@ impl Register {
             Register::Literal(_, type_decl) => type_decl.clone(),
             Register::Stack(reg) => reg.type_decl.clone(),
             Register::Temp(reg) => reg.type_decl.clone(),
-            Register::Spare(reg) => reg.dest.get_type(),
+            Register::Return(t) => t.clone(),
             Register::Arg(_, type_decl) => type_decl.clone(),
         }
     }
     pub fn is_lval(&self) -> bool {
-        matches!(self, Register::Temp(reg) if reg.value_kind == ValueKind::Lvalue && !reg.is_spilled())
+        matches!(self, Register::Temp(reg) if reg.value_kind == ValueKind::Lvalue)
     }
-    pub fn is_scratch(&self) -> bool {
-        match self {
-            Register::Temp(reg) => !reg.is_spilled(),
-            _ => false,
-        }
-    }
-    pub fn is_spilled(&self) -> bool {
-        match self {
-            Register::Temp(reg) => reg.is_spilled(),
-            _ => false,
-        }
-    }
+    // pub fn is_scratch(&self) -> bool {
+    //     match self {
+    //         Register::Temp(reg) => !reg.is_spilled(),
+    //         _ => false,
+    //     }
+    // }
+    // pub fn is_spilled(&self) -> bool {
+    //     match self {
+    //         Register::Temp(reg) => reg.is_spilled(),
+    //         _ => false,
+    //     }
+    // }
     pub fn set_value_kind(&mut self, new_val_kind: ValueKind) {
         if let Register::Temp(reg) = self {
             reg.value_kind = new_val_kind
@@ -168,103 +154,54 @@ impl StackRegister {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct SpareRegister {
-    dest: Box<Register>,
-    base_name: &'static str,
-}
-impl SpareRegister {
-    pub fn new(dest: Register) -> Self {
-        SpareRegister {
-            dest: Box::new(dest),
-            base_name: "r12",
-        }
-    }
-    fn name(&self) -> String {
-        format!("%{}{}", self.base_name, self.dest.get_type().reg_suffix())
-    }
-    fn free(&self, output: &mut String) -> Register {
-        writeln!(
-            output,
-            "\tmov{}   {}, {}",
-            self.dest.get_type().suffix(),
-            self.name(),
-            self.dest.name()
-        )
-        .unwrap();
-        *self.dest.clone()
-    }
-    fn set_type(&mut self, new_type: NEWTypes) {
-        self.dest.set_type(new_type)
-    }
-}
-
 #[derive(Debug, PartialEq, Clone)]
 pub enum TempKind {
-    Scratch(Rc<RefCell<ScratchRegister>>),
+    Scratch(ScratchRegister),
     Spilled(StackRegister),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct TempRegister {
     pub type_decl: NEWTypes,
-    pub reg: TempKind,
+    pub reg: Option<TempKind>,
     // output: Rc<RefCell<String>>,
     pub value_kind: ValueKind,
+    // index into list of intervals
+    pub id: usize,
 }
 impl TempRegister {
-    pub fn new(
-        scratches: &mut ScratchRegisters,
-        type_decl: NEWTypes,
-        spill_bp_offset: &mut usize,
-    ) -> Self {
-        let reg = scratches.scratch_alloc(type_decl.clone(), spill_bp_offset);
-
+    pub fn new(type_decl: NEWTypes, instr_count: usize) -> Self {
         TempRegister {
+            id: instr_count,
             type_decl,
-            reg,
-            // output: Rc::clone(&output),
+            reg: None,
             value_kind: ValueKind::Rvalue,
-        }
-    }
-    fn free(&self) {
-        match &self.reg {
-            TempKind::Scratch(reg) => reg.borrow_mut().free(),
-            TempKind::Spilled(..) => (),
         }
     }
     fn name(&self) -> String {
         match (&self.reg, &self.value_kind) {
-            (TempKind::Scratch(reg), ValueKind::Rvalue) => reg.borrow().name(&self.type_decl),
-            (TempKind::Scratch(..), ValueKind::Lvalue) => self.base_name(),
-            (TempKind::Spilled(reg), ..) => reg.name(),
+            (Some(TempKind::Scratch(reg)), ValueKind::Rvalue) => reg.name(&self.type_decl),
+            (Some(TempKind::Scratch(..)), ValueKind::Lvalue) => self.base_name(),
+            (Some(TempKind::Spilled(reg)), ..) => reg.name(),
+            _ => unreachable!("register should always be filled by allocator"),
         }
     }
     fn base_name(&self) -> String {
         match (&self.reg, &self.value_kind) {
             // base_name for scratch-register is just it's 64bit name
-            (TempKind::Scratch(reg), ValueKind::Rvalue) => {
-                reg.borrow()
-                    .name(&NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
-                        Types::Void,
-                    ))))
-            }
-            (TempKind::Scratch(reg), ValueKind::Lvalue) => {
+            (Some(TempKind::Scratch(reg)), ValueKind::Rvalue) => reg.name(&NEWTypes::Pointer(
+                Box::new(NEWTypes::Primitive(Types::Void)),
+            )),
+            (Some(TempKind::Scratch(reg)), ValueKind::Lvalue) => {
                 format!(
                     "({})",
-                    reg.borrow()
-                        .name(&NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
-                            Types::Void
-                        ))))
+                    reg.name(&NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
+                        Types::Void
+                    ))))
                 )
             }
-            (TempKind::Spilled(reg), ..) => reg.name(),
-        }
-    }
-    pub fn is_spilled(&self) -> bool {
-        match &self.reg {
-            TempKind::Spilled(..) => true,
-            TempKind::Scratch(..) => false,
+            (Some(TempKind::Spilled(reg)), ..) => reg.name(),
+            _ => unreachable!(),
         }
     }
 }
@@ -276,58 +213,7 @@ pub struct ScratchRegister {
 }
 
 impl ScratchRegister {
-    fn free(&mut self) {
-        self.in_use = false;
-    }
     fn name(&self, type_decl: &NEWTypes) -> String {
         format!("{}{}", self.base_name, type_decl.reg_suffix())
-    }
-}
-
-#[derive(Debug)]
-pub struct ScratchRegisters {
-    pub registers: [Rc<RefCell<ScratchRegister>>; 4],
-}
-impl ScratchRegisters {
-    pub fn scratch_alloc(&mut self, type_decl: NEWTypes, spill_bp_offset: &mut usize) -> TempKind {
-        for r in self.registers.iter() {
-            if !r.borrow().in_use {
-                r.borrow_mut().in_use = true;
-                return TempKind::Scratch(Rc::clone(&r));
-            }
-        }
-        // when no more registers free has to spill register to stack
-        // whenever it is used and it needs to be in physical register
-        // then it's converted
-        TempKind::Spilled(StackRegister::new(spill_bp_offset, type_decl))
-    }
-    pub fn new() -> Self {
-        ScratchRegisters {
-            registers: [
-                Rc::new(RefCell::new(ScratchRegister {
-                    in_use: false,
-                    base_name: "%r8",
-                })),
-                Rc::new(RefCell::new(ScratchRegister {
-                    in_use: false,
-                    base_name: "%r9",
-                })),
-                Rc::new(RefCell::new(ScratchRegister {
-                    in_use: false,
-                    base_name: "%r10",
-                })),
-                Rc::new(RefCell::new(ScratchRegister {
-                    in_use: false,
-                    base_name: "%r11",
-                })),
-            ],
-        }
-    }
-    pub fn is_all_spilled(&self) -> bool {
-        !self
-            .registers
-            .iter()
-            .map(|r| r.borrow().in_use)
-            .any(|in_use| !in_use)
     }
 }

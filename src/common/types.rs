@@ -205,6 +205,9 @@ macro_rules! arr_decay {
     };
 }
 impl NEWTypes {
+    pub fn default() -> NEWTypes {
+        NEWTypes::Primitive(Types::Int)
+    }
     pub fn pointer_to(&mut self) {
         *self = NEWTypes::Pointer(Box::new(self.clone()));
     }
@@ -359,7 +362,7 @@ impl TypeInfo for Types {
     }
     fn complete_suffix(&self) -> String {
         String::from(match self {
-            Types::Void => unreachable!(),
+            Types::Void => "zero",
             Types::Char => "byte",
             Types::Int => "long",
             Types::Long => "quad",

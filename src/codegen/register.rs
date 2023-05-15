@@ -164,9 +164,8 @@ pub enum TempKind {
 pub struct TempRegister {
     pub type_decl: NEWTypes,
     pub reg: Option<TempKind>,
-    // output: Rc<RefCell<String>>,
     pub value_kind: ValueKind,
-    // index into list of intervals
+    // key into interval hashmap
     pub id: usize,
 }
 impl TempRegister {
@@ -175,6 +174,15 @@ impl TempRegister {
             id: instr_count,
             type_decl,
             reg: None,
+            value_kind: ValueKind::Rvalue,
+        }
+    }
+    // boilerplate register that is only access it's base-name
+    pub fn default(reg: ScratchRegister) -> Self {
+        TempRegister {
+            type_decl: NEWTypes::default(),
+            id: 0,
+            reg: Some(TempKind::Scratch(reg)),
             value_kind: ValueKind::Rvalue,
         }
     }

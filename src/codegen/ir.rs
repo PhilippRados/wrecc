@@ -112,14 +112,14 @@ impl Display for Ir {
                     to.name()
                 ),
                 Ir::Movs(from, to) => format!(
-                    "\tmovs{}{}   {}, {}",
+                    "\tmovs{}{}  {}, {}",
                     from.get_type().suffix(),
                     to.get_type().suffix(),
                     from.name(),
                     to.name()
                 ),
                 Ir::Movz(from, to) => format!(
-                    "\tmovz{}{}   {}, {}",
+                    "\tmovz{}{}  {}, {}",
                     from.get_type().suffix(),
                     to.get_type().suffix(),
                     from.name(),
@@ -138,7 +138,7 @@ impl Display for Ir {
                     right.name()
                 ),
                 Ir::Add(left, right) => format!(
-                    "\tadd{}   {}, {}",
+                    "\tadd{}    {}, {}",
                     right.get_type().suffix(),
                     left.name(),
                     right.name()
@@ -166,7 +166,7 @@ impl Display for Ir {
                     right.name()
                 ),
                 Ir::Load(from, to) => format!(
-                    "\tlea{}   {}, {}",
+                    "\tlea{}    {}, {}",
                     to.get_type().suffix(),
                     from.name(),
                     to.name()

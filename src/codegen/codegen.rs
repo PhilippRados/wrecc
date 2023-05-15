@@ -66,7 +66,7 @@ impl Compiler {
             switches: switches.into(),
             const_labels,
             output: Vec::with_capacity(100),
-            live_intervals: HashMap::with_capacity(100),
+            live_intervals: HashMap::with_capacity(30),
             instruction_counter: 0,
             current_bp_offset: 0,
             spill_bp_offset: 0,
@@ -841,8 +841,8 @@ impl Compiler {
         // TODO: implement args by pushing on stack
         assert!(args.len() <= 6, "function cant have more than 6 args");
 
-        let callee_saved_regs = self.registers_in_use();
-        self.save_regs(&callee_saved_regs);
+        let saved_args = unique(&self.saved_args).into_iter().collect();
+        self.save_args(&saved_args);
 
         // moving the arguments into their designated registers
         for (i, expr) in args.iter().enumerate().rev() {
@@ -857,7 +857,7 @@ impl Compiler {
 
         self.write_out(Ir::Call(func_name));
 
-        self.restore_regs(&callee_saved_regs, args.len());
+        self.restore_args(&saved_args, args.len());
 
         if !return_type.is_void() {
             let return_reg = Register::Temp(TempRegister::new(
@@ -870,46 +870,26 @@ impl Compiler {
             Register::Void
         }
     }
-    fn registers_in_use(&self) -> Vec<Register> {
-        let mut regs = Vec::new();
-
-        unique(&self.saved_args).into_iter().for_each(|r| {
-            regs.push(r);
-        });
-
-        // TODO: have to check this in register-allocator
-        // self.scratch
-        //     .registers
-        //     .iter()
-        //     .filter(|r| r.borrow().in_use)
-        //     .for_each(|r| {
-        //         regs.push(Register::Temp(TempRegister {
-        //             reg: TempKind::Scratch(Rc::clone(&r)),
-        //             type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
-        //             value_kind: ValueKind::Rvalue,
-        //         }));
-        //     });
-        regs
-    }
-    fn save_regs(&mut self, callee_saved_regs: &Vec<Register>) {
+    // can only save args in this pass because scratch-registers are first used in register-allocation pass
+    fn save_args(&mut self, args: &Vec<Register>) {
         // push registers that are in use currently onto stack so they won't be overwritten during function
-        for reg in callee_saved_regs.iter() {
+        for reg in args.iter() {
             self.write_out(Ir::Push(reg.clone()));
         }
 
         // have to 16byte align stack depending on amount of pushs before
-        if !callee_saved_regs.is_empty() && callee_saved_regs.len() % 2 != 0 {
+        if !args.is_empty() && args.len() % 2 != 0 {
             self.write_out(Ir::SubSp(8));
         }
     }
-    fn restore_regs(&mut self, callee_saved_regs: &Vec<Register>, args_len: usize) {
+    fn restore_args(&mut self, args: &Vec<Register>, args_len: usize) {
         // undo the stack alignment from before call
-        if !callee_saved_regs.is_empty() && callee_saved_regs.len() % 2 != 0 {
+        if !args.is_empty() && args.len() % 2 != 0 {
             self.write_out(Ir::AddSp(8));
         }
 
         // pop registers from before function call back to scratch registers
-        for reg in callee_saved_regs.iter().rev().by_ref() {
+        for reg in args.iter().rev().by_ref() {
             self.write_out(Ir::Pop(reg.clone()));
         }
         // pop all argument registers from current function-call of stack

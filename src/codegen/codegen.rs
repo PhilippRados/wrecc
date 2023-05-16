@@ -21,7 +21,7 @@ pub struct Compiler {
     instruction_counter: usize,
 
     // intervals for register allocation that keep track of lifetime of virtual-registers
-    live_intervals: HashMap<usize, (usize, Option<TempKind>)>,
+    live_intervals: HashMap<usize, (usize, Option<TempRegister>)>,
 
     // symbol table
     env: Vec<Symbols>,
@@ -38,9 +38,6 @@ pub struct Compiler {
     // which args have to be pushed on stack before entering next function
     // so that they don't get overwritten
     saved_args: Vec<Register>,
-
-    // offset from base-pointer; spilled variables stay after local-variable stack-locations
-    spill_bp_offset: usize,
 
     // offset from base-pointer where variable stays
     current_bp_offset: usize,
@@ -69,7 +66,6 @@ impl Compiler {
             live_intervals: HashMap::with_capacity(30),
             instruction_counter: 0,
             current_bp_offset: 0,
-            spill_bp_offset: 0,
             label_index: 0,
             function_name: None,
             saved_args: Vec::new(),
@@ -81,11 +77,15 @@ impl Compiler {
     pub fn translate(
         mut self,
         statements: &Vec<Stmt>,
-    ) -> (Vec<Ir>, HashMap<usize, (usize, Option<TempKind>)>) {
+    ) -> (
+        Vec<Ir>,
+        HashMap<usize, (usize, Option<TempRegister>)>,
+        Vec<Symbols>,
+    ) {
         self.cg_const_labels();
         self.cg_stmts(statements);
 
-        (self.output, self.live_intervals)
+        (self.output, self.live_intervals, self.env)
     }
     fn write_out(&mut self, instruction: Ir) {
         self.instruction_counter += 1;
@@ -476,12 +476,6 @@ impl Compiler {
         // save function name for return label jump
         self.function_name = Some(name.clone());
         self.current_bp_offset = 0;
-        self.spill_bp_offset = self
-            .env
-            .get_mut(name.token.get_index())
-            .unwrap()
-            .unwrap_func()
-            .stack_size;
 
         // generate function code
         self.cg_func_preamble(name, &params);
@@ -514,7 +508,7 @@ impl Compiler {
         }
     }
     fn cg_func_preamble(&mut self, name: &Token, params: &[(NEWTypes, Token)]) {
-        self.write_out(Ir::FuncSetup(name.unwrap_string()));
+        self.write_out(Ir::FuncSetup(name.clone()));
 
         // allocate stack-space for local vars
         self.allocate_stack(name);
@@ -1113,8 +1107,11 @@ impl Compiler {
     }
 
     fn cg_mult(&mut self, left: Register, right: Register) -> Register {
-        // imul expects register as destination
-        let right = convert_reg!(self, right, Register::Stack(..) | Register::Literal(..));
+        let right = convert_reg!(
+            self,
+            right,
+            Register::Stack(..) | Register::Label(..) | Register::Literal(..)
+        );
         self.write_out(Ir::Imul(left.clone(), right.clone()));
 
         self.free(left);

@@ -1,5 +1,5 @@
 use crate::codegen::register::*;
-use crate::common::types::*;
+use crate::common::{token::*, types::*};
 use std::fmt::Display;
 
 // Intermediate representation as an assembly instruction abstraction to simplify register allocation.
@@ -26,7 +26,7 @@ pub enum Ir {
     Call(String),
 
     // Function stuff
-    FuncSetup(String),
+    FuncSetup(Token),
     FuncTeardown,
     AddSp(usize),
     SubSp(usize),
@@ -97,7 +97,8 @@ impl Display for Ir {
                 Ir::JmpCond(cond, label_index) => format!("\tj{}     L{}", cond, label_index),
                 Ir::FuncSetup(name) => format!(
                     "\n\t.text\n\t.globl _{}\n_{}:\n\tpushq   %rbp\n\tmovq    %rsp, %rbp\n",
-                    name, name
+                    name.unwrap_string(),
+                    name.unwrap_string()
                 ),
                 Ir::FuncTeardown => String::from("\tpopq    %rbp\n\tret"),
                 Ir::SubSp(value) => format!("\tsubq    ${},%rsp", value),
@@ -126,13 +127,13 @@ impl Display for Ir {
                     to.name()
                 ),
                 Ir::Cmp(left, right) => format!(
-                    "\tcmp{}   {}, {}",
+                    "\tcmp{}    {}, {}",
                     right.get_type().suffix(),
                     left.name(),
                     right.name()
                 ),
                 Ir::Sub(left, right) => format!(
-                    "\tsub{}   {}, {}",
+                    "\tsub{}    {}, {}",
                     right.get_type().suffix(),
                     left.name(),
                     right.name()
@@ -150,7 +151,7 @@ impl Display for Ir {
                     right.name()
                 ),
                 Ir::Idiv(reg) => format!(
-                    "\t{}\n\tidiv{} {}",
+                    "\t{}\n\tidiv{}   {}",
                     match reg.get_type().size() {
                         0..=7 => "cdq",
                         _ => "cqo",
@@ -159,7 +160,7 @@ impl Display for Ir {
                     reg.name()
                 ),
                 Ir::Shift(direction, left, right) => format!(
-                    "\tsa{}{}   {}, {}",
+                    "\tsa{}{}    {}, {}",
                     direction,
                     right.get_type().suffix(),
                     left.name(),
@@ -179,7 +180,7 @@ impl Display for Ir {
                     right.name(),
                 ),
                 Ir::Or(left, right) => format!(
-                    "\tor{}    {}, {}",
+                    "\tor{}     {}, {}",
                     right.get_type().suffix(),
                     left.name(),
                     right.name(),

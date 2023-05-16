@@ -84,18 +84,6 @@ impl Register {
     pub fn is_lval(&self) -> bool {
         matches!(self, Register::Temp(reg) if reg.value_kind == ValueKind::Lvalue)
     }
-    // pub fn is_scratch(&self) -> bool {
-    //     match self {
-    //         Register::Temp(reg) => !reg.is_spilled(),
-    //         _ => false,
-    //     }
-    // }
-    // pub fn is_spilled(&self) -> bool {
-    //     match self {
-    //         Register::Temp(reg) => reg.is_spilled(),
-    //         _ => false,
-    //     }
-    // }
     pub fn set_value_kind(&mut self, new_val_kind: ValueKind) {
         if let Register::Temp(reg) = self {
             reg.value_kind = new_val_kind

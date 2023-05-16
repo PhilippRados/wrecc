@@ -1,17 +1,32 @@
 use crate::codegen::{ir::*, register::*};
+use crate::common::environment::*;
 use std::collections::HashMap;
 
 // gets IR with virtual registers as input and fills them in with physical registers
 // using linear scan; spilling when no more registers are free
 pub struct RegisterAllocation {
-    live_intervals: HashMap<usize, (usize, Option<TempKind>)>,
+    live_intervals: HashMap<usize, (usize, Option<TempRegister>)>,
     registers: ScratchRegisters,
+    spill_index: usize,
+
+    // offset from base-pointer; spilled variables stay after local-variable stack-locations
+    spill_bp_offset: usize,
+
+    env: Vec<Symbols>,
+    counter: usize,
 }
 
 impl RegisterAllocation {
-    pub fn new(live_intervals: HashMap<usize, (usize, Option<TempKind>)>) -> Self {
+    pub fn new(
+        env: Vec<Symbols>,
+        live_intervals: HashMap<usize, (usize, Option<TempRegister>)>,
+    ) -> Self {
         RegisterAllocation {
             live_intervals,
+            env,
+            counter: 0,
+            spill_bp_offset: 0,
+            spill_index: 0,
             registers: ScratchRegisters::new(),
         }
     }
@@ -20,44 +35,141 @@ impl RegisterAllocation {
 
         for (i, mut instr) in ir.drain(..).enumerate() {
             self.expire_old_intervals(i);
+            self.counter = i;
 
             let (left, right) = instr.get_regs();
-            self.alloc(left);
-            self.alloc(right);
 
-            if let Ir::Call(..) = instr {
-                let saved = self.save_regs(&mut result);
-                result.push(instr);
-                self.restore_regs(&mut result, saved);
-            } else {
-                result.push(instr);
+            self.alloc(left, self.get_reg(&right), &mut result);
+            // WARN: None should be left-reg
+            self.alloc(right, None, &mut result);
+
+            match &instr {
+                Ir::Call(..) => {
+                    let saved = self.save_regs(&mut result);
+                    result.push(instr);
+                    self.restore_regs(&mut result, saved);
+                }
+                Ir::FuncSetup(name) => {
+                    self.spill_bp_offset = self
+                        .env
+                        .get_mut(name.token.get_index())
+                        .unwrap()
+                        .unwrap_func()
+                        .stack_size;
+                    result.push(instr);
+                }
+                _ => result.push(instr),
             }
         }
         result
     }
-    pub fn alloc(&mut self, reg: Option<&mut Register>) {
+    #[rustfmt::skip]
+    pub fn alloc(&mut self, reg: Option<&mut Register>, other: Option<usize>, ir: &mut Vec<Ir>) {
         // only needs to fill in virtual registers whose interval doesn't have a register assigned to it
         if let Some(Register::Temp(reg)) = reg {
-            match self.live_intervals.get_mut(&reg.id) {
-                Some((.., Some(entry))) => reg.reg = Some(entry.clone()),
-                Some((.., entry @ None)) => {
-                    if let Some(scratch) = self.registers.alloc() {
-                        // assign interval-register
-                        *entry = Some(TempKind::Scratch(
-                            self.registers.0.get(scratch).unwrap().clone(),
-                        ));
-                        // assign instruction register
-                        reg.reg = Some(TempKind::Scratch(
-                            self.registers.0.get(scratch).unwrap().clone(),
-                        ));
-                    } else {
-                        // spill
-                        unimplemented!("spilling")
-                    }
+            let value = match self.live_intervals.get(&reg.id) {
+                Some((..,Some(scratch @ TempRegister {reg: Some(TempKind::Scratch(..)),..}),)) =>{ reg.reg = scratch.reg.clone(); scratch.clone()},
+                Some((..,Some(TempRegister {reg: Some(TempKind::Spilled(..)),..},),)) => {
+                    // if current register is spilled then unspill that regiser
+                    let scratch = self.unspill(ir, reg.id, other);
+                    reg.reg = Some(scratch.clone());
+                    reg.clone()
+                }
+                Some((.., None)) => {
+                    // if unknown register allocate new physical register
+                    let scratch = self.get_scratch(ir, other);
+                    reg.reg = Some(scratch.clone());
+                    reg.clone()
                 }
                 _ => unreachable!(),
+            };
+            // assign register to interval and instruction
+            self.live_intervals.get_mut(&reg.id).unwrap().1 = Some(value);
+        }
+
+    }
+    fn get_scratch(&mut self, ir: &mut Vec<Ir>, other: Option<usize>) -> TempKind {
+        if let Some(scratch) = self.registers.alloc() {
+            TempKind::Scratch(self.registers.0.get(scratch).unwrap().clone())
+        } else {
+            self.spill(ir, other)
+        }
+    }
+    fn spill(&mut self, ir: &mut Vec<Ir>, other: Option<usize>) -> TempKind {
+        let spill_reg_idx = self.heuristic(other);
+        let spill_interval = self.get_interval_of_reg(spill_reg_idx);
+        let Some((_,Some(entry))) = self.live_intervals.get_mut(&spill_interval) else {unreachable!()};
+
+        let prev_reg = entry.clone();
+        entry.reg = Some(TempKind::Spilled(StackRegister::new(
+            &mut self.spill_bp_offset,
+            entry.type_decl.clone(),
+        )));
+
+        ir.push(Ir::Mov(
+            Register::Temp(prev_reg.clone()),
+            Register::Temp(entry.clone()),
+        ));
+        prev_reg.reg.unwrap()
+    }
+    fn get_interval_of_reg(&self, reg: usize) -> usize {
+        let active_intervals = self
+            .live_intervals
+            .iter()
+            .filter(|(_, (end, s))| end > &&self.counter && s.is_some());
+
+        for (key, (.., r)) in active_intervals {
+            if let Some(TempRegister {
+                reg: Some(TempKind::Scratch(scratch)),
+                ..
+            }) = r.clone()
+            {
+                if self.registers.0.get(reg).unwrap() == &scratch {
+                    return *key;
+                }
             }
         }
+        unreachable!()
+    }
+
+    fn unspill(&mut self, ir: &mut Vec<Ir>, id: usize, other: Option<usize>) -> TempKind {
+        let Some((.., Some(entry))) = self.live_intervals.get_mut(&id) else {unreachable!()};
+
+        let mut entry = entry.clone(); // for borrow checker
+        let prev_reg = entry.clone();
+        let new = self.get_scratch(ir, other);
+
+        entry.reg = Some(new.clone());
+        ir.push(Ir::Mov(Register::Temp(prev_reg), Register::Temp(entry)));
+        new
+    }
+    // gets the corresponding scratch-register if the operand is one
+    fn get_reg(&self, reg: &Option<&mut Register>) -> Option<usize> {
+        if let Some(Register::Temp(TempRegister { id, .. })) = reg {
+            if let Some((
+                ..,
+                Some(TempRegister {
+                    reg: Some(TempKind::Scratch(r)),
+                    ..
+                }),
+            )) = self.live_intervals.get(&id)
+            {
+                return self.registers.0.iter().position(|scratch| scratch == r);
+            }
+        }
+        None
+    }
+    // chooses which register to spill besides other
+    fn heuristic(&mut self, other: Option<usize>) -> usize {
+        if let Some(other) = other {
+            if other == self.spill_index {
+                self.spill_index = (self.spill_index + 1) % self.registers.0.len();
+                return self.spill_index;
+            }
+        }
+        let prev = self.spill_index;
+        self.spill_index = (self.spill_index + 1) % self.registers.0.len();
+        prev
     }
     fn expire_old_intervals(&mut self, instr_idx: usize) {
         // marks freed interval-registers as available again
@@ -66,7 +178,11 @@ impl RegisterAllocation {
             .values()
             .filter(|(end, _)| *end == instr_idx)
         {
-            if let Some(TempKind::Scratch(reg)) = reg {
+            if let Some(TempRegister {
+                reg: Some(TempKind::Scratch(reg)),
+                ..
+            }) = reg
+            {
                 if let Some(scratch) = self.registers.0.iter_mut().find(|scratch| scratch == &reg) {
                     scratch.in_use = false;
                 }

@@ -48,10 +48,11 @@ fn main() {
     };
 
     // Turn AST into IR
-    let (ir, live_intervals) = Compiler::new(const_labels, env, switches).translate(&statements);
+    let (ir, live_intervals, env) =
+        Compiler::new(const_labels, env, switches).translate(&statements);
 
     // Fill in physical registers
-    let ir = RegisterAllocation::new(live_intervals).allocate(ir);
+    let ir = RegisterAllocation::new(env, live_intervals).allocate(ir);
 
     // Generate x8664 assembly
     use std::io::Write;

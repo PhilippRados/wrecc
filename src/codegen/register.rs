@@ -66,7 +66,6 @@ impl Register {
             Register::Literal(_, old_decl) => *old_decl = type_decl,
             Register::Stack(reg) => reg.type_decl = type_decl,
             Register::Temp(reg) => reg.type_decl = type_decl,
-            // Register::Spare(reg) => reg.set_type(type_decl),
             Register::Arg(_, old_decl) => *old_decl = type_decl,
         }
     }

@@ -47,7 +47,6 @@ impl RegisterAllocation {
                 }
                 _ => (),
             }
-            // let (left, right) = instr.get_regs();
 
             match &instr {
                 Ir::Call(..) => {
@@ -211,7 +210,7 @@ impl RegisterAllocation {
         if !regs.is_empty() && regs.len() % 2 != 0 {
             ir.push(Ir::AddSp(8));
         }
-        for reg in regs {
+        for reg in regs.into_iter().rev() {
             ir.push(Ir::Pop(reg));
         }
     }

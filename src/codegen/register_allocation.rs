@@ -1,11 +1,12 @@
 use crate::codegen::{ir::*, register::*};
 use crate::common::environment::*;
+use crate::common::types::NEWTypes;
 use std::collections::HashMap;
 
 // gets IR with virtual registers as input and fills them in with physical registers
 // using linear scan; spilling when no more registers are free
 pub struct RegisterAllocation {
-    live_intervals: HashMap<usize, (usize, Option<TempRegister>)>,
+    live_intervals: HashMap<usize, (usize, NEWTypes, Option<TempKind>)>,
     registers: ScratchRegisters,
     spill_index: usize,
 
@@ -19,7 +20,7 @@ pub struct RegisterAllocation {
 impl RegisterAllocation {
     pub fn new(
         env: Vec<Symbols>,
-        live_intervals: HashMap<usize, (usize, Option<TempRegister>)>,
+        live_intervals: HashMap<usize, (usize, NEWTypes, Option<TempKind>)>,
     ) -> Self {
         RegisterAllocation {
             live_intervals,
@@ -68,66 +69,83 @@ impl RegisterAllocation {
         }
         result
     }
-    #[rustfmt::skip]
     pub fn alloc(&mut self, reg: &mut TempRegister, other: Option<usize>, ir: &mut Vec<Ir>) {
         // only needs to fill in virtual registers whose interval doesn't have a register assigned to it
         let value = match self.live_intervals.get(&reg.id) {
-            Some((..,Some(scratch @ TempRegister {reg: Some(TempKind::Scratch(..)),..}))) =>{ reg.reg = scratch.reg.clone(); scratch.clone()},
-            Some((..,Some(TempRegister {reg: Some(TempKind::Spilled(..)),..}))) => {
-                // if current register is spilled then unspill that regiser
-                let scratch = self.unspill(ir, reg.id, other);
+            Some((.., Some(scratch @ TempKind::Scratch(..)))) => {
                 reg.reg = Some(scratch.clone());
-                reg.clone()
+                scratch.clone()
+            }
+            Some((.., Some(TempKind::Spilled(..)))) => {
+                // if current register is spilled then unspill that regiser and spill another register
+                let scratch = self.unspill(ir, reg, other);
+                reg.reg = Some(scratch.clone());
+                scratch
             }
             Some((.., None)) => {
                 // if unknown register allocate new physical register
-                let scratch = self.get_scratch(ir, other);
+                let scratch = self.get_scratch(ir, reg, other);
                 reg.reg = Some(scratch.clone());
-                reg.clone()
+                scratch
             }
             _ => unreachable!(),
         };
-        // assign register to interval and instruction
-        self.live_intervals.get_mut(&reg.id).unwrap().1 = Some(value);
-
+        // assign register to the interval
+        self.live_intervals.get_mut(&reg.id).unwrap().2 = Some(value);
     }
-    fn get_scratch(&mut self, ir: &mut Vec<Ir>, other: Option<usize>) -> TempKind {
+    fn get_scratch(
+        &mut self,
+        ir: &mut Vec<Ir>,
+        reg: &mut TempRegister,
+        other: Option<usize>,
+    ) -> TempKind {
         if let Some(scratch) = self.registers.alloc() {
             TempKind::Scratch(self.registers.0.get(scratch).unwrap().clone())
         } else {
-            self.spill(ir, other)
+            self.spill(ir, reg, other)
         }
     }
-    fn spill(&mut self, ir: &mut Vec<Ir>, other: Option<usize>) -> TempKind {
+    fn spill(
+        &mut self,
+        ir: &mut Vec<Ir>,
+        reg: &mut TempRegister,
+        other: Option<usize>,
+    ) -> TempKind {
+        // find the interval to spill
         let spill_reg_idx = self.heuristic(other);
         let spill_interval = self.get_interval_of_reg(spill_reg_idx);
-        let Some((_,Some(entry))) = self.live_intervals.get_mut(&spill_interval) else {unreachable!()};
+        let Some((_,type_decl,Some(entry))) = self.live_intervals.get_mut(&spill_interval) else {unreachable!()};
 
-        let prev_reg = entry.clone();
-        entry.reg = Some(TempKind::Spilled(StackRegister::new(
+        // save the current register
+        let mut prev = reg.clone();
+        prev.reg = Some(entry.clone());
+        prev.type_decl = type_decl.clone();
+
+        // generate the new stack-position to spill to
+        let mut new = reg.clone();
+        new.type_decl = type_decl.clone();
+        new.reg = Some(TempKind::Spilled(StackRegister::new(
             &mut self.spill_bp_offset,
-            entry.type_decl.clone(),
+            type_decl.clone(),
         )));
 
-        ir.push(Ir::Mov(
-            Register::Temp(prev_reg.clone()),
-            Register::Temp(entry.clone()),
-        ));
-        prev_reg.reg.unwrap()
+        // change the interval register to the stackregister
+        *entry = new.reg.clone().unwrap();
+
+        ir.push(Ir::Mov(Register::Temp(prev.clone()), Register::Temp(new)));
+
+        // return the now free register
+        prev.reg.unwrap()
     }
     fn get_interval_of_reg(&self, reg: usize) -> usize {
         let active_intervals = self
             .live_intervals
             .iter()
-            .filter(|(_, (end, s))| end > &&self.counter && s.is_some());
+            .filter(|(_, (end, _, s))| end > &&self.counter && s.is_some());
 
         for (key, (.., r)) in active_intervals {
-            if let Some(TempRegister {
-                reg: Some(TempKind::Scratch(scratch)),
-                ..
-            }) = r.clone()
-            {
-                if self.registers.0.get(reg).unwrap() == &scratch {
+            if let Some(TempKind::Scratch(scratch)) = &r {
+                if self.registers.0.get(reg).unwrap() == scratch {
                     return *key;
                 }
             }
@@ -135,27 +153,31 @@ impl RegisterAllocation {
         unreachable!()
     }
 
-    fn unspill(&mut self, ir: &mut Vec<Ir>, id: usize, other: Option<usize>) -> TempKind {
-        let Some((.., Some(entry))) = self.live_intervals.get_mut(&id) else {unreachable!()};
+    fn unspill(
+        &mut self,
+        ir: &mut Vec<Ir>,
+        reg: &mut TempRegister,
+        other: Option<usize>,
+    ) -> TempKind {
+        let Some((..,type_decl, Some(entry))) = self.live_intervals.get_mut(&reg.id) else {unreachable!()};
 
-        let mut entry = entry.clone(); // for borrow checker
-        let prev_reg = entry.clone();
-        let new = self.get_scratch(ir, other);
+        let mut prev_reg = reg.clone();
+        prev_reg.type_decl = type_decl.clone();
+        prev_reg.reg = Some(entry.clone());
 
-        entry.reg = Some(new.clone());
-        ir.push(Ir::Mov(Register::Temp(prev_reg), Register::Temp(entry)));
-        new
+        let mut new = reg.clone();
+        new.type_decl = type_decl.clone();
+        new.reg = Some(self.get_scratch(ir, reg, other));
+
+        ir.push(Ir::Mov(
+            Register::Temp(prev_reg),
+            Register::Temp(new.clone()),
+        ));
+        new.reg.unwrap()
     }
     // gets the corresponding scratch-register given the interval-id to a tempregister
     fn get_reg(&self, reg_id: usize) -> Option<usize> {
-        if let Some((
-            ..,
-            Some(TempRegister {
-                reg: Some(TempKind::Scratch(r)),
-                ..
-            }),
-        )) = self.live_intervals.get(&reg_id)
-        {
+        if let Some((.., Some(TempKind::Scratch(r)))) = self.live_intervals.get(&reg_id) {
             return self.registers.0.iter().position(|scratch| scratch == r);
         }
         None
@@ -177,20 +199,16 @@ impl RegisterAllocation {
         for (.., reg) in self
             .live_intervals
             .values()
-            .filter(|(end, _)| *end == instr_idx)
+            .filter(|(end, ..)| *end == instr_idx)
         {
-            if let Some(TempRegister {
-                reg: Some(TempKind::Scratch(reg)),
-                ..
-            }) = reg
-            {
+            if let Some(TempKind::Scratch(reg)) = reg {
                 if let Some(scratch) = self.registers.0.iter_mut().find(|scratch| scratch == &reg) {
                     scratch.in_use = false;
                 }
             }
         }
     }
-    // TODO: would be nice if arguments registers would also be saved in this pass to avoid duplicate
+    // TODO: would be nice if arguments registers would also be saved in this pass to avoid duplication
     fn save_regs(&self, ir: &mut Vec<Ir>) -> Vec<Register> {
         let mut result = Vec::new();
         for scratch in self.registers.0.iter().filter(|r| r.in_use) {

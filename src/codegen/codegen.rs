@@ -21,7 +21,7 @@ pub struct Compiler {
     instruction_counter: usize,
 
     // intervals for register allocation that keep track of lifetime of virtual-registers
-    live_intervals: HashMap<usize, (usize, Option<TempRegister>)>,
+    live_intervals: HashMap<usize, (usize, NEWTypes, Option<TempKind>)>,
 
     // symbol table
     env: Vec<Symbols>,
@@ -79,7 +79,7 @@ impl Compiler {
         statements: &Vec<Stmt>,
     ) -> (
         Vec<Ir>,
-        HashMap<usize, (usize, Option<TempRegister>)>,
+        HashMap<usize, (usize, NEWTypes, Option<TempKind>)>,
         Vec<Symbols>,
     ) {
         self.cg_const_labels();
@@ -1286,7 +1286,7 @@ impl Compiler {
     fn free(&mut self, reg: Register) {
         if let Register::Temp(reg) = reg {
             self.live_intervals
-                .insert(reg.id, (self.instruction_counter, None));
+                .insert(reg.id, (self.instruction_counter, reg.type_decl, None));
         }
     }
 }

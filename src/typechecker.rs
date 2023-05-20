@@ -1149,6 +1149,8 @@ impl TypeChecker {
                 TokenType::Star => self.check_deref(token, right_type, right)?,
                 TokenType::Bang => {
                     Self::lval_to_rval(right);
+                    self.maybe_cast(&NEWTypes::Primitive(Types::Int), &right_type, right);
+
                     NEWTypes::Primitive(Types::Int)
                 }
                 TokenType::Minus | TokenType::Tilde => {
@@ -1164,6 +1166,8 @@ impl TypeChecker {
                             ),
                         ));
                     }
+
+                    self.maybe_cast(&NEWTypes::Primitive(Types::Int), &right_type, right);
                     NEWTypes::Primitive(Types::Int)
                 }
                 _ => unreachable!(), // ++a or --a are evaluated as compound assignment

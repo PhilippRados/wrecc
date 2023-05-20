@@ -1,0 +1,19 @@
+int printf(char* s, int d);
+
+int long_function(int a, long b, char c) {
+  printf("%d\n", a);
+  printf("%d\n", b);
+  printf("%d\n", c);
+
+  int result = (3 - 1) * 8 + -2 & !(c % b) * 56 - a % (5 + -2 * 5 / c) * 3 << (1 >= 0) * 1 + (22) * (~b + 4 > 3);
+  printf("func-result: %d\n", result);
+
+  return result;
+}
+
+int main() {
+  int a = 19;
+
+  printf("%d\n", 4 << 2 | 9 * (1 + 3) & 2 + (a ^= 3 + long_function(a, a - 3, a * 5)) + 9 * 3 % (-2 * 4));
+  printf("%d\n", a);
+}

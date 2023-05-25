@@ -156,9 +156,10 @@ pub struct TempRegister {
     pub id: usize,
 }
 impl TempRegister {
-    pub fn new(type_decl: NEWTypes, instr_count: usize) -> Self {
+    pub fn new(type_decl: NEWTypes, key_counter: &mut usize) -> Self {
+        *key_counter += 1;
         TempRegister {
-            id: instr_count,
+            id: *key_counter,
             type_decl,
             reg: None,
             value_kind: ValueKind::Rvalue,

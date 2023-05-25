@@ -17,8 +17,11 @@ pub struct Compiler {
     // outputs intermediate-representation that doesn't contain physical registers yet
     output: Vec<Ir>,
 
-    // keep track of current instruction index for live-intervals in register allocation
+    // keep track of current instruction for live-intervals in register allocation
     instruction_counter: usize,
+
+    // key for temporary register into live-intervals
+    interval_counter: usize,
 
     // intervals for register allocation that keep track of lifetime of virtual-registers
     // (key:register-id, values: (end of lifetime, reg-type, physical register))
@@ -65,6 +68,7 @@ impl Compiler {
             const_labels,
             output: Vec::with_capacity(100),
             live_intervals: HashMap::with_capacity(30),
+            interval_counter: 0,
             instruction_counter: 0,
             current_bp_offset: 0,
             label_index: 0,
@@ -621,7 +625,7 @@ impl Compiler {
 
         let result = Register::Temp(TempRegister::new(
             true_expr.clone().type_decl.unwrap(),
-            self.instruction_counter,
+            &mut self.interval_counter,
         ));
         let true_reg = self.execute_expr(true_expr);
 
@@ -690,7 +694,7 @@ impl Compiler {
 
         let mut temp_scratch = Register::Temp(TempRegister::new(
             l_reg.get_type(),
-            self.instruction_counter,
+            &mut self.interval_counter,
         ));
 
         // have to do integer-promotion in codegen
@@ -714,7 +718,7 @@ impl Compiler {
         let reg = self.execute_expr(expr);
         let mut return_reg = Register::Temp(TempRegister::new(
             expr.type_decl.clone().unwrap(),
-            self.instruction_counter,
+            &mut self.interval_counter,
         ));
 
         // assign value to return-register before binary operation
@@ -777,7 +781,7 @@ impl Compiler {
         ) {
             let dest_reg = Register::Temp(TempRegister::new(
                 new_type.clone(),
-                self.instruction_counter,
+                &mut self.interval_counter,
             ));
 
             self.write_out(Ir::Movs(value_reg.clone(), dest_reg.clone()));
@@ -841,7 +845,7 @@ impl Compiler {
         if !return_type.is_void() {
             let return_reg = Register::Temp(TempRegister::new(
                 return_type.clone(),
-                self.instruction_counter,
+                &mut self.interval_counter,
             ));
             self.write_out(Ir::Mov(Register::Return(return_type), return_reg.clone()));
             return_reg
@@ -914,7 +918,7 @@ impl Compiler {
         let done_label = create_label(&mut self.label_index);
         let result = Register::Temp(TempRegister::new(
             NEWTypes::Primitive(Types::Int),
-            self.instruction_counter,
+            &mut self.interval_counter,
         ));
         // if expression true write 1 in result and skip false label
         self.write_out(Ir::LabelDefinition(true_label));
@@ -964,7 +968,7 @@ impl Compiler {
         let true_label = create_label(&mut self.label_index);
         let result = Register::Temp(TempRegister::new(
             NEWTypes::Primitive(Types::Int),
-            self.instruction_counter,
+            &mut self.interval_counter,
         ));
         self.write_out(Ir::Mov(
             Register::Literal(1, NEWTypes::default()),
@@ -1017,7 +1021,10 @@ impl Compiler {
         ));
         self.write_out(Ir::Set("sete"));
 
-        let result = Register::Temp(TempRegister::new(reg.get_type(), self.instruction_counter));
+        let result = Register::Temp(TempRegister::new(
+            reg.get_type(),
+            &mut self.interval_counter,
+        ));
 
         // sets %al to 1 if comparison true and to 0 when false and then copies %al to current reg
         if reg.get_type() == NEWTypes::Primitive(Types::Char) {
@@ -1047,7 +1054,7 @@ impl Compiler {
         }
         let dest = Register::Temp(TempRegister::new(
             NEWTypes::Pointer(Box::new(reg.get_type())),
-            self.instruction_counter,
+            &mut self.interval_counter,
         ));
         self.write_out(Ir::Load(reg.clone(), dest.clone()));
 
@@ -1261,7 +1268,10 @@ impl Compiler {
         }
     }
     fn make_temp(&mut self, reg: Register) -> Register {
-        let result = Register::Temp(TempRegister::new(reg.get_type(), self.instruction_counter));
+        let result = Register::Temp(TempRegister::new(
+            reg.get_type(),
+            &mut self.interval_counter,
+        ));
 
         self.write_out(Ir::Mov(reg.clone(), result.clone()));
         self.free(reg);
@@ -1270,6 +1280,7 @@ impl Compiler {
     }
     fn free(&mut self, reg: Register) {
         if let Register::Temp(reg) = reg {
+            assert!(!self.live_intervals.contains_key(&reg.id));
             self.live_intervals
                 .insert(reg.id, (self.instruction_counter, reg.type_decl, None));
         }

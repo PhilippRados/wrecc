@@ -941,13 +941,13 @@ impl TypeChecker {
             _ => return Err(Error::new(left_paren, "Function-name has to be identifier")),
         };
 
-        let mut arg_types: Vec<NEWTypes> = Vec::new();
+        let mut arg_types: Vec<(&mut Expr, NEWTypes)> = Vec::new();
         for expr in args.iter_mut() {
             let mut t = self.expr_type(expr)?;
 
             crate::arr_decay!(t, expr, left_paren, false);
             self.maybe_int_promote(expr, &mut t);
-            arg_types.push(t);
+            arg_types.push((expr, t));
         }
 
         match self.env.get(func_name.token.get_index()).unwrap() {
@@ -959,7 +959,7 @@ impl TypeChecker {
                 ),
             )),
             Symbols::Func(function) => {
-                if function.arity() == args.len() {
+                if function.arity() == arg_types.len() {
                     self.args_and_params_match(left_paren, &function.clone().params, arg_types)?;
                     Ok(function.clone().return_type)
                 } else {
@@ -980,10 +980,15 @@ impl TypeChecker {
         &self,
         left_paren: &Token,
         params: &[(NEWTypes, Token)],
-        args: Vec<NEWTypes>,
+        args: Vec<(&mut Expr, NEWTypes)>,
     ) -> Result<(), Error> {
-        for (i, type_decl) in args.iter().enumerate() {
-            self.check_type_compatibility(left_paren, &params[i].0, type_decl)?;
+        for (i, (expr, type_decl)) in args.into_iter().enumerate() {
+            self.check_type_compatibility(left_paren, &params[i].0, &type_decl)?;
+
+            // since char is integer promoted don't cast it back down
+            if params[i].0.size() > NEWTypes::Primitive(Types::Char).size() {
+                self.maybe_cast(&params[i].0, &type_decl, expr);
+            }
         }
         Ok(())
     }

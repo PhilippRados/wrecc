@@ -21,6 +21,7 @@ pub struct Compiler {
     instruction_counter: usize,
 
     // intervals for register allocation that keep track of lifetime of virtual-registers
+    // (key:register-id, values: (end of lifetime, reg-type, physical register))
     live_intervals: HashMap<usize, (usize, NEWTypes, Option<TempKind>)>,
 
     // symbol table
@@ -484,34 +485,14 @@ impl Compiler {
 
         self.function_name = None;
     }
-    fn allocate_stack(&mut self, name: &Token) {
-        let stack_size = self
-            .env
-            .get_mut(name.token.get_index())
-            .unwrap()
-            .unwrap_func()
-            .stack_size;
-        if stack_size > 0 {
-            self.write_out(Ir::SubSp(stack_size));
-        }
-    }
-    fn dealloc_stack(&mut self, name: &Token) {
-        // TODO: also have to deallocate spilled regs
-        let stack_size = self
-            .env
-            .get_mut(name.token.get_index())
-            .unwrap()
-            .unwrap_func()
-            .stack_size;
-        if stack_size > 0 {
-            self.write_out(Ir::AddSp(stack_size));
-        }
-    }
     fn cg_func_preamble(&mut self, name: &Token, params: &[(NEWTypes, Token)]) {
-        self.write_out(Ir::FuncSetup(name.clone()));
-
-        // allocate stack-space for local vars
-        self.allocate_stack(name);
+        let stack_size = self
+            .env
+            .get_mut(name.token.get_index())
+            .unwrap()
+            .unwrap_func()
+            .stack_size;
+        self.write_out(Ir::FuncSetup(name.clone(), stack_size));
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
@@ -521,9 +502,13 @@ impl Compiler {
     fn cg_func_postamble(&mut self, name: &Token, epilogue_index: usize) {
         self.write_out(Ir::LabelDefinition(epilogue_index));
 
-        self.dealloc_stack(name);
-
-        self.write_out(Ir::FuncTeardown)
+        let stack_size = self
+            .env
+            .get_mut(name.token.get_index())
+            .unwrap()
+            .unwrap_func()
+            .stack_size;
+        self.write_out(Ir::FuncTeardown(stack_size))
     }
 
     pub fn block(&mut self, statements: &Vec<Stmt>) {

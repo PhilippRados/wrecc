@@ -592,19 +592,6 @@ impl TypeChecker {
         self.main_returns_int(name_token, &return_type)?;
         self.implicit_return_main(name_token, body);
 
-        // align function stack by 16Bytes
-        let size = self
-            .env
-            .get_mut(name_token.token.get_index())
-            .unwrap()
-            .unwrap_func()
-            .stack_size;
-        self.env
-            .get_mut(name_token.token.get_index())
-            .unwrap()
-            .unwrap_func()
-            .stack_size = align_by(size, 16);
-
         if !return_type.is_void() && !self.returns_all_paths {
             Err(Error::new(
                 name_token,

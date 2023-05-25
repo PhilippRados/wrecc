@@ -7,13 +7,19 @@ use std::collections::HashMap;
 // using linear scan; spilling when no more registers are free
 pub struct RegisterAllocation {
     live_intervals: HashMap<usize, (usize, NEWTypes, Option<TempKind>)>,
+
+    // physical registers
     registers: ScratchRegisters,
+
+    // index for next register to spill
     spill_index: usize,
 
     // offset from base-pointer; spilled variables stay after local-variable stack-locations
     spill_bp_offset: usize,
 
     env: Vec<Symbols>,
+
+    // instruction-counter
     counter: usize,
 }
 
@@ -31,7 +37,7 @@ impl RegisterAllocation {
             registers: ScratchRegisters::new(),
         }
     }
-    pub fn allocate(mut self, mut ir: Vec<Ir>) -> Vec<Ir> {
+    pub fn generate(mut self, mut ir: Vec<Ir>) -> Vec<Ir> {
         let mut result = Vec::with_capacity(ir.len());
 
         for (i, mut instr) in ir.drain(..).enumerate() {
@@ -49,13 +55,14 @@ impl RegisterAllocation {
                 _ => (),
             }
 
-            match &instr {
+            match &mut instr {
                 Ir::Call(..) => {
                     let saved = self.save_regs(&mut result);
                     result.push(instr);
                     self.restore_regs(&mut result, saved);
                 }
-                Ir::FuncSetup(name) => {
+                Ir::FuncSetup(name, ..) => {
+                    // get current bp-offset so that spilled regs know where to spill
                     self.spill_bp_offset = self
                         .env
                         .get_mut(name.token.get_index())
@@ -63,6 +70,23 @@ impl RegisterAllocation {
                         .unwrap_func()
                         .stack_size;
                     result.push(instr);
+                }
+                Ir::FuncTeardown(stack_size) => {
+                    // when function is done update stack-size if registers where spilled to stack
+                    if *stack_size != self.spill_bp_offset {
+                        *stack_size = self.spill_bp_offset;
+                        // backtrack trough result and update func-setup
+                        let Ir::FuncSetup(_,setup_size) = result
+                            .iter_mut()
+                            .rev()
+                            .filter(|instr| matches!(instr, Ir::FuncSetup(..)))
+                            .nth(0)
+                            .unwrap() else {
+                                unreachable!()
+                        };
+                        *setup_size = self.spill_bp_offset;
+                    }
+                    result.push(instr)
                 }
                 _ => result.push(instr),
             }

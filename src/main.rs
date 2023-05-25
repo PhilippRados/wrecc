@@ -52,7 +52,7 @@ fn main() {
         Compiler::new(const_labels, env, switches).translate(&statements);
 
     // Fill in physical registers
-    let ir = RegisterAllocation::new(env, live_intervals).allocate(ir);
+    let ir = RegisterAllocation::new(env, live_intervals).generate(ir);
 
     // Generate x8664 assembly
     use std::io::Write;

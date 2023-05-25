@@ -8,7 +8,6 @@ use std::fmt::Display;
 pub enum Ir {
     // name
     GlobalDeclaration(String),
-    // TODO: check if needs type or if can use reg-type
     // type, value
     GlobalInit(NEWTypes, Register),
     // label index, value
@@ -26,8 +25,9 @@ pub enum Ir {
     Call(String),
 
     // Function stuff
-    FuncSetup(Token),
-    FuncTeardown,
+    // usize to allocate/deallocate stack-space
+    FuncSetup(Token, usize),
+    FuncTeardown(usize),
     AddSp(usize),
     SubSp(usize),
 
@@ -95,12 +95,31 @@ impl Display for Ir {
                 Ir::LabelDefinition(label_index) => format!("L{}:", label_index),
                 Ir::Jmp(label_index) => format!("\tjmp     L{}", label_index),
                 Ir::JmpCond(cond, label_index) => format!("\tj{}     L{}", cond, label_index),
-                Ir::FuncSetup(name) => format!(
-                    "\n\t.text\n\t.globl _{}\n_{}:\n\tpushq   %rbp\n\tmovq    %rsp, %rbp\n",
-                    name.unwrap_string(),
-                    name.unwrap_string()
-                ),
-                Ir::FuncTeardown => String::from("\tpopq    %rbp\n\tret"),
+                Ir::FuncSetup(name, stack_size) => {
+                    let mut result = format!(
+                        "\n\t.text\n\t.globl _{}\n_{}:\n\tpushq   %rbp\n\tmovq    %rsp, %rbp\n",
+                        name.unwrap_string(),
+                        name.unwrap_string()
+                    );
+                    // have to keep stack 16B aligned
+                    if *stack_size > 0 {
+                        let size = format!(
+                            "\tsubq    ${},%rsp\n",
+                            crate::typechecker::align_by(*stack_size, 16)
+                        );
+                        result.push_str(&size);
+                    }
+                    result
+                }
+                Ir::FuncTeardown(stack_size) => {
+                    match stack_size {
+                        0 => String::from("\tpopq    %rbp\n\tret"),
+                        n => format!(
+                            "\taddq    ${},%rsp\n\tpopq    %rbp\n\tret",
+                            crate::typechecker::align_by(*n, 16)
+                        ),
+                    }
+                }
                 Ir::SubSp(value) => format!("\tsubq    ${},%rsp", value),
                 Ir::AddSp(value) => format!("\taddq    ${},%rsp", value),
                 Ir::Push(reg) => format!("\tpushq   {}", reg.base_name()),

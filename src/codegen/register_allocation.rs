@@ -243,7 +243,7 @@ impl RegisterAllocation {
             .registers
             .0
             .iter()
-            .filter(|r| r.in_use)
+            .filter(|r| r.in_use && !r.callee_saved)
             .map(|r| Register::Temp(TempRegister::default(r.clone())))
             .collect();
 
@@ -288,18 +288,23 @@ impl ScratchRegisters {
             ScratchRegister {
                 in_use: false,
                 base_name: "%r10",
+                callee_saved: false,
             },
             ScratchRegister {
                 in_use: false,
                 base_name: "%r11",
+                callee_saved: false,
             },
+            // don't have to manually preserve these values across function calls
             ScratchRegister {
                 in_use: false,
                 base_name: "%r12",
+                callee_saved: true,
             },
             ScratchRegister {
                 in_use: false,
                 base_name: "%r13",
+                callee_saved: true,
             },
         ])
     }

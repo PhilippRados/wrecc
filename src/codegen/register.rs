@@ -230,6 +230,7 @@ impl TempRegister {
 pub struct ScratchRegister {
     pub in_use: bool,
     pub base_name: &'static str,
+    pub callee_saved: bool,
 }
 
 impl ScratchRegister {

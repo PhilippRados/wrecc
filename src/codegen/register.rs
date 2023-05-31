@@ -1,7 +1,7 @@
 use crate::common::expr::ValueKind;
 use crate::common::types::*;
 
-static ARG_REGISTER_MAP: &[[&str; 6]] = &[
+pub static ARG_REGISTER_MAP: &[[&str; 6]] = &[
     ["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"],
     ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"],
     ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"],
@@ -122,8 +122,14 @@ impl LabelRegister {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+enum StackKind {
+    Signed,
+    Unsigned,
+}
+#[derive(Debug, Clone, PartialEq)]
 pub struct StackRegister {
     pub bp_offset: usize,
+    kind: StackKind,
     type_decl: NEWTypes,
 }
 impl StackRegister {
@@ -133,11 +139,29 @@ impl StackRegister {
 
         StackRegister {
             bp_offset: *bp_offset,
+            kind: StackKind::Signed,
             type_decl,
         }
     }
+    pub fn new_pushed(arg_index: usize) -> Self {
+        assert!(arg_index >= 6);
+        let arg_stack_index: usize =
+            (arg_index as isize - ARG_REGISTER_MAP[0].len() as isize) as usize;
+        const PUSHED_PARAM_OFFSET: usize = 16;
+        let bp_offset =
+            PUSHED_PARAM_OFFSET + arg_stack_index * NEWTypes::Primitive(Types::Long).size();
+
+        Self {
+            bp_offset,
+            kind: StackKind::Unsigned,
+            type_decl: NEWTypes::Primitive(Types::Long),
+        }
+    }
     pub fn name(&self) -> String {
-        format!("-{}(%rbp)", self.bp_offset)
+        match self.kind {
+            StackKind::Signed => format!("-{}(%rbp)", self.bp_offset),
+            StackKind::Unsigned => format!("{}(%rbp)", self.bp_offset),
+        }
     }
 }
 

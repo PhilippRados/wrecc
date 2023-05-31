@@ -28,6 +28,8 @@ pub enum Ir {
     // usize to allocate/deallocate stack-space
     FuncSetup(Token, usize),
     FuncTeardown(usize),
+    SaveRegs(Vec<Register>),
+    RestoreRegs,
     AddSp(usize),
     SubSp(usize),
 
@@ -212,6 +214,8 @@ impl Display for Ir {
                 ),
                 Ir::Not(reg) => format!("\tnot{}    {}", reg.get_type().suffix(), reg.name()),
                 Ir::Neg(reg) => format!("\tneg{}    {}", reg.get_type().suffix(), reg.name()),
+                Ir::SaveRegs(..) | Ir::RestoreRegs =>
+                    unreachable!("will be replaced in register-allocation"),
             }
         )
     }

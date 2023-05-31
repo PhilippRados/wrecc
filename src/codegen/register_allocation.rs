@@ -19,6 +19,9 @@ pub struct RegisterAllocation {
 
     env: Vec<Symbols>,
 
+    // registers that are saved before function call
+    saved_regs: Vec<Vec<Register>>,
+
     // instruction-counter
     counter: usize,
 }
@@ -31,6 +34,7 @@ impl RegisterAllocation {
         RegisterAllocation {
             live_intervals,
             env,
+            saved_regs: Vec::new(),
             counter: 0,
             spill_bp_offset: 0,
             spill_index: 0,
@@ -56,10 +60,11 @@ impl RegisterAllocation {
             }
 
             match &mut instr {
-                Ir::Call(..) => {
-                    let saved = self.save_regs(&mut result);
-                    result.push(instr);
-                    self.restore_regs(&mut result, saved);
+                Ir::SaveRegs(v) => {
+                    self.save_regs(&mut result, v.clone());
+                }
+                Ir::RestoreRegs => {
+                    self.restore_regs(&mut result);
                 }
                 Ir::FuncSetup(name, ..) => {
                     // get current bp-offset so that spilled regs know where to spill
@@ -69,6 +74,7 @@ impl RegisterAllocation {
                         .unwrap()
                         .unwrap_func()
                         .stack_size;
+
                     result.push(instr);
                 }
                 Ir::FuncTeardown(stack_size) => {
@@ -232,28 +238,37 @@ impl RegisterAllocation {
             }
         }
     }
-    // TODO: would be nice if arguments registers would also be saved in this pass to avoid duplication
-    fn save_regs(&self, ir: &mut Vec<Ir>) -> Vec<Register> {
-        let mut result = Vec::new();
-        for scratch in self.registers.0.iter().filter(|r| r.in_use) {
-            let reg = Register::Temp(TempRegister::default(scratch.clone()));
+    fn save_regs(&mut self, ir: &mut Vec<Ir>, saved_args: Vec<Register>) {
+        let used_scratch_regs = self
+            .registers
+            .0
+            .iter()
+            .filter(|r| r.in_use)
+            .map(|r| Register::Temp(TempRegister::default(r.clone())))
+            .collect();
 
+        let current_saved = [saved_args, used_scratch_regs].concat();
+
+        for reg in current_saved.iter() {
             ir.push(Ir::Push(reg.clone()));
-            result.push(reg);
         }
+
         // align stack
-        if !result.is_empty() && result.len() % 2 != 0 {
+        if !current_saved.is_empty() && current_saved.len() % 2 != 0 {
             ir.push(Ir::SubSp(8));
         }
-        result
+
+        self.saved_regs.push(current_saved);
     }
 
-    fn restore_regs(&self, ir: &mut Vec<Ir>, regs: Vec<Register>) {
-        if !regs.is_empty() && regs.len() % 2 != 0 {
+    fn restore_regs(&mut self, ir: &mut Vec<Ir>) {
+        let saved = self.saved_regs.pop().expect("restore always after save");
+
+        if !saved.is_empty() && saved.len() % 2 != 0 {
             ir.push(Ir::AddSp(8));
         }
-        for reg in regs.into_iter().rev() {
-            ir.push(Ir::Pop(reg));
+        for reg in saved.iter().rev() {
+            ir.push(Ir::Pop(reg.clone()));
         }
     }
 }
@@ -272,19 +287,19 @@ impl ScratchRegisters {
         ScratchRegisters([
             ScratchRegister {
                 in_use: false,
-                base_name: "%r8",
-            },
-            ScratchRegister {
-                in_use: false,
-                base_name: "%r9",
-            },
-            ScratchRegister {
-                in_use: false,
                 base_name: "%r10",
             },
             ScratchRegister {
                 in_use: false,
                 base_name: "%r11",
+            },
+            ScratchRegister {
+                in_use: false,
+                base_name: "%r12",
+            },
+            ScratchRegister {
+                in_use: false,
+                base_name: "%r13",
             },
         ])
     }

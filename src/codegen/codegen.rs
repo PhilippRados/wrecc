@@ -469,10 +469,9 @@ impl Compiler {
     fn function_definition(&mut self, name: &Token, body: &Vec<Stmt>) {
         let func_symbol = self.env.get_mut(name.token.get_index()).unwrap();
         let params = func_symbol.unwrap_func().params.clone();
+
         let function_epilogue = create_label(&mut self.label_index);
         func_symbol.unwrap_func().epilogue_index = function_epilogue;
-
-        assert!(func_symbol.unwrap_func().epilogue_index == function_epilogue);
 
         // create a label for all goto-labels inside a function
         for (_, value) in &mut func_symbol.unwrap_func().labels {
@@ -500,7 +499,19 @@ impl Compiler {
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
-            self.init_var(type_decl, param_name, Register::Arg(i, type_decl.clone()));
+            if i < ARG_REGISTER_MAP[0].len() {
+                self.init_var(type_decl, param_name, Register::Arg(i, type_decl.clone()));
+            } else {
+                // if not in designated arg-regsiter get from stack
+                let reg = Register::Temp(TempRegister::new(
+                    type_decl.clone(),
+                    &mut self.interval_counter,
+                ));
+                let pushed = Register::Stack(StackRegister::new_pushed(i));
+
+                self.write_out(Ir::Mov(pushed, reg.clone()));
+                self.init_var(type_decl, param_name, reg);
+            }
         }
     }
     fn cg_func_postamble(&mut self, name: &Token, epilogue_index: usize) {
@@ -821,26 +832,36 @@ impl Compiler {
             ExprKind::Ident(func_name) => func_name.unwrap_string(),
             _ => unreachable!("typechecker"),
         };
-        // TODO: implement args by pushing on stack
-        assert!(args.len() <= 6, "function cant have more than 6 args");
 
         let saved_args = unique(&self.saved_args).into_iter().collect();
-        self.save_args(&saved_args);
+        self.write_out(Ir::SaveRegs(saved_args));
+
+        // align stack if pushes args
+        if args.len() >= ARG_REGISTER_MAP[0].len() && args.len() % 2 != 0 {
+            self.write_out(Ir::SubSp(8));
+        }
 
         // moving the arguments into their designated registers
         for (i, expr) in args.iter().enumerate().rev() {
-            let reg = self.execute_expr(expr);
+            let mut reg = self.execute_expr(expr);
 
-            let arg = Register::Arg(i, expr.type_decl.clone().unwrap());
-            self.write_out(Ir::Mov(reg.clone(), arg.clone()));
+            // push first six registers into designated argument-registers; others onto stack
+            if i < ARG_REGISTER_MAP[0].len() {
+                let arg = Register::Arg(i, expr.type_decl.clone().unwrap());
+                self.write_out(Ir::Mov(reg.clone(), arg.clone()));
+
+                self.saved_args.push(arg);
+            } else {
+                reg = convert_reg!(self, reg, Register::Literal(..));
+                self.write_out(Ir::Push(reg.clone()));
+            }
             self.free(reg);
-
-            self.saved_args.push(arg);
         }
 
         self.write_out(Ir::Call(func_name));
 
-        self.restore_args(&saved_args, args.len());
+        self.remove_spilled_args(args.len());
+        self.restore_regs(args.len());
 
         if !return_type.is_void() {
             let return_reg = Register::Temp(TempRegister::new(
@@ -853,31 +874,20 @@ impl Compiler {
             Register::Void
         }
     }
-    // can only save args in this pass because scratch-registers are first used in register-allocation pass
-    fn save_args(&mut self, args: &Vec<Register>) {
-        // push registers that are in use currently onto stack so they won't be overwritten during function
-        for reg in args.iter() {
-            self.write_out(Ir::Push(reg.clone()));
-        }
+    fn restore_regs(&mut self, args_len: usize) {
+        self.write_out(Ir::RestoreRegs);
 
-        // have to 16byte align stack depending on amount of pushs before
-        if !args.is_empty() && args.len() % 2 != 0 {
-            self.write_out(Ir::SubSp(8));
-        }
-    }
-    fn restore_args(&mut self, args: &Vec<Register>, args_len: usize) {
-        // undo the stack alignment from before call
-        if !args.is_empty() && args.len() % 2 != 0 {
-            self.write_out(Ir::AddSp(8));
-        }
-
-        // pop registers from before function call back to scratch registers
-        for reg in args.iter().rev().by_ref() {
-            self.write_out(Ir::Pop(reg.clone()));
-        }
         // pop all argument registers from current function-call of stack
         for _ in 0..args_len {
             self.saved_args.pop();
+        }
+    }
+    fn remove_spilled_args(&mut self, args_len: usize) {
+        let spilled_args = args_len as isize - ARG_REGISTER_MAP[0].len() as isize;
+        let alignment_offset = if spilled_args % 2 != 0 { 8 } else { 0 };
+
+        if spilled_args > 0 {
+            self.write_out(Ir::AddSp((spilled_args * 8 + alignment_offset) as usize));
         }
     }
 

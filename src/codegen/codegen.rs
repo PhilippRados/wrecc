@@ -18,7 +18,7 @@ pub struct Compiler {
     output: Vec<Ir>,
 
     // keep track of current instruction for live-intervals in register allocation
-    instruction_counter: usize,
+    instr_counter: usize,
 
     // key for temporary register into live-intervals
     interval_counter: usize,
@@ -38,10 +38,6 @@ pub struct Compiler {
 
     // map containing Strings and their corresponding label-index
     const_labels: HashMap<String, usize>,
-
-    // which args have to be pushed on stack before entering next function
-    // so that they don't get overwritten
-    saved_args: Vec<Register>,
 
     // offset from base-pointer where variable stays
     current_bp_offset: usize,
@@ -69,11 +65,10 @@ impl Compiler {
             output: Vec::with_capacity(100),
             live_intervals: HashMap::with_capacity(30),
             interval_counter: 0,
-            instruction_counter: 0,
+            instr_counter: 0,
             current_bp_offset: 0,
             label_index: 0,
             function_name: None,
-            saved_args: Vec::new(),
             jump_labels: Vec::new(),
             switch_labels: VecDeque::new(),
         }
@@ -93,7 +88,7 @@ impl Compiler {
         (self.output, self.live_intervals, self.env)
     }
     fn write_out(&mut self, instruction: Ir) {
-        self.instruction_counter += 1;
+        self.instr_counter += 1;
         self.output.push(instruction)
     }
     fn cg_const_labels(&mut self) {
@@ -499,10 +494,14 @@ impl Compiler {
 
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
-            if i < ARG_REGISTER_MAP[0].len() {
-                self.init_var(type_decl, param_name, Register::Arg(i, type_decl.clone()));
+            if i < ARG_REGS.len() {
+                let arg = Register::Arg(ArgRegister::new(i), type_decl.clone(), {
+                    self.interval_counter += 1;
+                    self.interval_counter
+                });
+                self.init_var(type_decl, param_name, arg);
             } else {
-                // if not in designated arg-regsiter get from stack
+                // if not in designated arg-register get from stack
                 let reg = Register::Temp(TempRegister::new(
                     type_decl.clone(),
                     &mut self.interval_counter,
@@ -833,25 +832,29 @@ impl Compiler {
             _ => unreachable!("typechecker"),
         };
 
-        let saved_args = unique(&self.saved_args).into_iter().collect();
-        self.write_out(Ir::SaveRegs(saved_args));
+        self.write_out(Ir::SaveRegs);
 
         // align stack if pushes args
-        if args.len() >= ARG_REGISTER_MAP[0].len() && args.len() % 2 != 0 {
+        if args.len() >= ARG_REGS.len() && args.len() % 2 != 0 {
             self.write_out(Ir::SubSp(8));
         }
+        let mut arg_regs = Vec::new();
 
         // moving the arguments into their designated registers
         for (i, expr) in args.iter().enumerate().rev() {
             let mut reg = self.execute_expr(expr);
 
             // push first six registers into designated argument-registers; others onto stack
-            if i < ARG_REGISTER_MAP[0].len() {
-                let arg = Register::Arg(i, expr.type_decl.clone().unwrap());
+            if i < ARG_REGS.len() {
+                let arg = Register::Arg(ArgRegister::new(i), expr.type_decl.clone().unwrap(), {
+                    self.interval_counter += 1;
+                    self.interval_counter
+                });
                 self.write_out(Ir::Mov(reg.clone(), arg.clone()));
 
-                self.saved_args.push(arg);
+                arg_regs.push(arg);
             } else {
+                // TODO: Literal should be allowed to be pushed
                 reg = convert_reg!(self, reg, Register::Literal(..));
                 self.write_out(Ir::Push(reg.clone()));
             }
@@ -861,7 +864,10 @@ impl Compiler {
         self.write_out(Ir::Call(func_name));
 
         self.remove_spilled_args(args.len());
-        self.restore_regs(args.len());
+        for reg in arg_regs {
+            self.free(reg);
+        }
+        self.write_out(Ir::RestoreRegs);
 
         if !return_type.is_void() {
             let return_reg = Register::Temp(TempRegister::new(
@@ -874,16 +880,8 @@ impl Compiler {
             Register::Void
         }
     }
-    fn restore_regs(&mut self, args_len: usize) {
-        self.write_out(Ir::RestoreRegs);
-
-        // pop all argument registers from current function-call of stack
-        for _ in 0..args_len {
-            self.saved_args.pop();
-        }
-    }
     fn remove_spilled_args(&mut self, args_len: usize) {
-        let spilled_args = args_len as isize - ARG_REGISTER_MAP[0].len() as isize;
+        let spilled_args = args_len as isize - ARG_REGS.len() as isize;
         let alignment_offset = if spilled_args % 2 != 0 { 8 } else { 0 };
 
         if spilled_args > 0 {
@@ -1127,7 +1125,14 @@ impl Compiler {
             Register::Stack(..) | Register::Label(..) | Register::Literal(..)
         );
         self.write_out(Ir::Mov(left.clone(), Register::Return(left.get_type())));
-        // rax / rcx => rax
+        // rdx(3rd Argument register) stores remainder
+        let rdx_reg = Register::Arg(ArgRegister::new(2), right.get_type(), {
+            self.interval_counter += 1;
+            self.interval_counter
+        });
+        self.write_out(Ir::Occ(rdx_reg.clone()));
+
+        // rax / right => rax
         self.write_out(Ir::Idiv(right.clone()));
 
         // move rax(div result) into right reg
@@ -1145,11 +1150,18 @@ impl Compiler {
         );
         self.write_out(Ir::Mov(left.clone(), Register::Return(left.get_type())));
 
+        // rdx(3rd Argument register) stores remainder
+        let rdx_reg = Register::Arg(ArgRegister::new(2), right.get_type(), {
+            self.interval_counter += 1;
+            self.interval_counter
+        });
+        self.write_out(Ir::Occ(rdx_reg.clone()));
+
         // rax % rcx => rdx
         self.write_out(Ir::Idiv(right.clone()));
-        // rdx(3nd Argument register) stores remainder
-        self.write_out(Ir::Mov(Register::Arg(2, right.get_type()), right.clone()));
+        self.write_out(Ir::Mov(rdx_reg.clone(), right.clone()));
 
+        self.free(rdx_reg);
         self.free(left);
         right
     }
@@ -1192,14 +1204,17 @@ impl Compiler {
         let left = self.make_temp(left);
 
         // expects shift amount to be in %cl (4th arg register)
-        self.write_out(Ir::Mov(right.clone(), Register::Arg(3, right.get_type())));
+        let mut cl_reg = Register::Arg(ArgRegister::new(3), right.get_type(), {
+            self.interval_counter += 1;
+            self.interval_counter
+        });
+        self.write_out(Ir::Mov(right.clone(), cl_reg.clone()));
         self.free(right);
 
-        self.write_out(Ir::Shift(
-            direction,
-            Register::Arg(3, NEWTypes::Primitive(Types::Char)),
-            left.clone(),
-        ));
+        cl_reg.set_type(NEWTypes::Primitive(Types::Char));
+        self.write_out(Ir::Shift(direction, cl_reg.clone(), left.clone()));
+
+        self.free(cl_reg);
 
         left
     }
@@ -1289,24 +1304,20 @@ impl Compiler {
         result
     }
     fn free(&mut self, reg: Register) {
-        if let Register::Temp(reg) = reg {
-            assert!(!self.live_intervals.contains_key(&reg.id));
-            self.live_intervals
-                .insert(reg.id, (self.instruction_counter, reg.type_decl, None));
+        match reg {
+            Register::Temp(reg) => {
+                assert!(!self.live_intervals.contains_key(&reg.id));
+                self.live_intervals
+                    .insert(reg.id, (self.instr_counter, reg.type_decl, None));
+            }
+            Register::Arg(_, type_decl, id) => {
+                assert!(!self.live_intervals.contains_key(&id));
+                self.live_intervals
+                    .insert(id, (self.instr_counter, type_decl, None));
+            }
+            _ => (),
         }
     }
-}
-
-fn unique(vec: &[Register]) -> Vec<Register> {
-    let mut result = Vec::new();
-
-    vec.iter().for_each(|r| {
-        if !result.contains(r) {
-            result.push(r.clone());
-        }
-    });
-
-    result
 }
 
 pub fn align(offset: usize, type_decl: &NEWTypes) -> usize {

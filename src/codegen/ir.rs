@@ -28,7 +28,7 @@ pub enum Ir {
     // usize to allocate/deallocate stack-space
     FuncSetup(Token, usize),
     FuncTeardown(usize),
-    SaveRegs(Vec<Register>),
+    SaveRegs,
     RestoreRegs,
     AddSp(usize),
     SubSp(usize),
@@ -58,6 +58,10 @@ pub enum Ir {
 
     // unary
     Neg(Register),
+
+    // helper instruction to indicate the a register is occupied
+    Occ(Register),
+    DBG(String),
 }
 impl Ir {
     pub fn get_regs(&mut self) -> (Option<&mut Register>, Option<&mut Register>) {
@@ -65,6 +69,7 @@ impl Ir {
             Ir::GlobalInit(_, reg) => (None, Some(reg)),
             Ir::Push(reg) => (None, Some(reg)),
             Ir::Pop(reg) => (None, Some(reg)),
+            Ir::Occ(reg) => (None, Some(reg)),
             Ir::Mov(left, right)
             | Ir::Movs(left, right)
             | Ir::Movz(left, right)
@@ -214,7 +219,8 @@ impl Display for Ir {
                 ),
                 Ir::Not(reg) => format!("\tnot{}    {}", reg.get_type().suffix(), reg.name()),
                 Ir::Neg(reg) => format!("\tneg{}    {}", reg.get_type().suffix(), reg.name()),
-                Ir::SaveRegs(..) | Ir::RestoreRegs =>
+                Ir::DBG(info) => format!("#{}", info),
+                Ir::SaveRegs | Ir::RestoreRegs | Ir::Occ(..) =>
                     unreachable!("will be replaced in register-allocation"),
             }
         )

@@ -12,20 +12,20 @@ pub static ARG_REGS: &[[&str; 3]; 6] = &[
 
 #[derive(Debug, Clone)]
 pub enum Register {
-    // virtual register that can be infinite in amount; get transformed into pysical registers
+    // Virtual register that can be infinite in amount; get transformed into pysical registers
     // in register-allocation pass
     Temp(TempRegister),
-    // variables that live on the local function-stack
+    // Variables that live on the local function-stack
     Stack(StackRegister),
     // Labels can be Strings and global variables
     Label(LabelRegister),
-    // registers used in function calls for arguments
-    Arg(ArgRegister, NEWTypes, usize),
-    // register used for return values
+    // Registers used in function calls for arguments, and in special operations
+    Arg(ArgRegister),
+    // Register used for return values
     Return(NEWTypes),
-    // numerical constants
+    // Numerical constants
     Literal(usize, NEWTypes),
-    // indicator register for functions returning void
+    // Indicator register for functions returning void
     Void,
 }
 impl Register {
@@ -37,7 +37,7 @@ impl Register {
             Register::Literal(n, _) => format!("${n}"),
             Register::Temp(reg) => reg.name(),
             Register::Return(t) => t.return_reg(),
-            Register::Arg(reg, type_decl, ..) => reg.name(type_decl),
+            Register::Arg(reg) => reg.name(),
         }
     }
     // name as 64bit register
@@ -48,7 +48,7 @@ impl Register {
             Register::Label(reg) => reg.base_name(),
             Register::Literal(n, ..) => format!("{n}"),
             Register::Temp(reg) => reg.base_name(),
-            Register::Arg(reg, ..) => reg.base_name().to_string(),
+            Register::Arg(reg) => reg.base_name().to_string(),
         }
     }
     pub fn set_type(&mut self, type_decl: NEWTypes) {
@@ -58,7 +58,7 @@ impl Register {
             Register::Literal(_, old_type) => *old_type = type_decl,
             Register::Stack(reg) => reg.type_decl = type_decl,
             Register::Temp(reg) => reg.type_decl = type_decl,
-            Register::Arg(_, old_type, _) => *old_type = type_decl,
+            Register::Arg(reg) => reg.type_decl = type_decl,
         }
     }
     pub fn get_type(&self) -> NEWTypes {
@@ -69,7 +69,7 @@ impl Register {
             Register::Stack(reg) => reg.type_decl.clone(),
             Register::Temp(reg) => reg.type_decl.clone(),
             Register::Return(t) => t.clone(),
-            Register::Arg(_, type_decl, _) => type_decl.clone(),
+            Register::Arg(reg) => reg.type_decl.clone(),
         }
     }
     pub fn is_lval(&self) -> bool {
@@ -168,16 +168,18 @@ pub struct TempRegister {
     pub type_decl: NEWTypes,
     pub reg: Option<TempKind>,
     pub value_kind: ValueKind,
+    pub start_idx: usize,
     // key into interval hashmap
     pub id: usize,
 }
 impl TempRegister {
-    pub fn new(type_decl: NEWTypes, key_counter: &mut usize) -> Self {
+    pub fn new(type_decl: NEWTypes, key_counter: &mut usize, instr_counter: usize) -> Self {
         *key_counter += 1;
         TempRegister {
             id: *key_counter,
             type_decl,
             reg: None,
+            start_idx: instr_counter,
             value_kind: ValueKind::Rvalue,
         }
     }
@@ -187,6 +189,7 @@ impl TempRegister {
             type_decl: NEWTypes::default(),
             id: 0,
             reg: Some(TempKind::Scratch(reg)),
+            start_idx: 0,
             value_kind: ValueKind::Rvalue,
         }
     }
@@ -234,10 +237,10 @@ impl PartialEq<dyn ScratchRegister> for dyn ScratchRegister {
         self.base_name() != other.base_name()
     }
 }
+// hacky way to get clone to work on trait object
 pub trait ScratchClone {
     fn clone_box(&self) -> Box<dyn ScratchRegister>;
 }
-
 impl<T> ScratchClone for T
 where
     T: 'static + ScratchRegister + Clone,
@@ -246,7 +249,6 @@ where
         Box::new(self.clone())
     }
 }
-
 impl Clone for Box<dyn ScratchRegister> {
     fn clone(&self) -> Box<dyn ScratchRegister> {
         self.clone_box()
@@ -261,10 +263,7 @@ pub struct RegularRegister {
 
 impl RegularRegister {
     pub fn new(base_name: &'static str) -> Self {
-        RegularRegister {
-            in_use: false,
-            base_name,
-        }
+        RegularRegister { in_use: false, base_name }
     }
 }
 
@@ -285,21 +284,47 @@ impl ScratchRegister for RegularRegister {
         self.in_use = false
     }
 }
-
 #[derive(Debug, PartialEq, Clone)]
 pub struct ArgRegister {
+    pub type_decl: NEWTypes,
+    pub start_idx: usize,
+    pub id: usize,
+    pub reg: ArgRegisterKind,
+}
+impl ArgRegister {
+    pub fn new(
+        arg_index: usize,
+        type_decl: NEWTypes,
+        key_counter: &mut usize,
+        instr_counter: usize,
+    ) -> Self {
+        *key_counter += 1;
+        ArgRegister {
+            id: *key_counter,
+            start_idx: instr_counter,
+            type_decl,
+            reg: ArgRegisterKind::new(arg_index),
+        }
+    }
+    fn name(&self) -> String {
+        self.reg.name(&self.type_decl)
+    }
+    fn base_name(&self) -> String {
+        self.reg.base_name().to_string()
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ArgRegisterKind {
     in_use: bool,
     names: [&'static str; 3],
 }
-impl ArgRegister {
+impl ArgRegisterKind {
     pub fn new(index: usize) -> Self {
-        ArgRegister {
-            in_use: false,
-            names: ARG_REGS[index],
-        }
+        ArgRegisterKind { in_use: false, names: ARG_REGS[index] }
     }
 }
-impl ScratchRegister for ArgRegister {
+impl ScratchRegister for ArgRegisterKind {
     fn base_name(&self) -> &'static str {
         self.names[0]
     }

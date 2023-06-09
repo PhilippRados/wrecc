@@ -1,4 +1,4 @@
-use crate::codegen::{ir::*, register::*};
+use crate::codegen::{ir::*, register::*, register_allocation::*};
 use crate::common::{environment::*, expr::*, stmt::*, token::*, types::*};
 use crate::typechecker::{align_by, create_label};
 use std::collections::{HashMap, VecDeque};
@@ -25,7 +25,7 @@ pub struct Compiler {
 
     // intervals for register allocation that keep track of lifetime of virtual-registers
     // (key:register-id, values: (end of lifetime, reg-type, physical register))
-    live_intervals: HashMap<usize, (usize, NEWTypes, Option<TempKind>)>,
+    live_intervals: HashMap<usize, IntervalEntry>,
 
     // symbol table
     env: Vec<Symbols>,
@@ -77,11 +77,7 @@ impl Compiler {
     pub fn translate(
         mut self,
         statements: &Vec<Stmt>,
-    ) -> (
-        Vec<Ir>,
-        HashMap<usize, (usize, NEWTypes, Option<TempKind>)>,
-        Vec<Symbols>,
-    ) {
+    ) -> (Vec<Ir>, HashMap<usize, IntervalEntry>, Vec<Symbols>) {
         self.cg_const_labels();
         self.cg_stmts(statements);
 
@@ -495,16 +491,19 @@ impl Compiler {
         // initialize parameters
         for (i, (type_decl, param_name)) in params.iter().enumerate() {
             if i < ARG_REGS.len() {
-                let arg = Register::Arg(ArgRegister::new(i), type_decl.clone(), {
-                    self.interval_counter += 1;
-                    self.interval_counter
-                });
+                let arg = Register::Arg(ArgRegister::new(
+                    i,
+                    type_decl.clone(),
+                    &mut self.interval_counter,
+                    self.instr_counter,
+                ));
                 self.init_var(type_decl, param_name, arg);
             } else {
                 // if not in designated arg-register get from stack
                 let reg = Register::Temp(TempRegister::new(
                     type_decl.clone(),
                     &mut self.interval_counter,
+                    self.instr_counter,
                 ));
                 let pushed = Register::Stack(StackRegister::new_pushed(i));
 
@@ -550,11 +549,9 @@ impl Compiler {
             ExprKind::Number(v) => self.cg_literal(*v as usize, Types::Int),
             ExprKind::CharLit(c) => self.cg_literal(*c as usize, Types::Char),
             ExprKind::Grouping { expr } => self.execute_expr(expr),
-            ExprKind::Unary {
-                token,
-                right,
-                is_global,
-            } => self.cg_unary(token, right, *is_global, ast.type_decl.clone().unwrap()),
+            ExprKind::Unary { token, right, is_global } => {
+                self.cg_unary(token, right, *is_global, ast.type_decl.clone().unwrap())
+            }
             ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
             ExprKind::Assign { l_expr, r_expr, .. } => {
                 let left_reg = self.execute_expr(l_expr);
@@ -562,11 +559,9 @@ impl Compiler {
 
                 self.cg_assign(left_reg, right_reg)
             }
-            ExprKind::CompoundAssign {
-                l_expr,
-                r_expr,
-                token,
-            } => self.cg_comp_assign(l_expr, token, r_expr),
+            ExprKind::CompoundAssign { l_expr, r_expr, token } => {
+                self.cg_comp_assign(l_expr, token, r_expr)
+            }
             ExprKind::Ident(name) => self
                 .env
                 .get(name.token.get_index())
@@ -576,36 +571,28 @@ impl Compiler {
             ExprKind::Call { callee, args, .. } => {
                 self.cg_call(callee, args, ast.type_decl.clone().unwrap())
             }
-            ExprKind::Cast {
-                expr, direction, ..
-            } => match direction.clone().expect("typechecker should fill this") {
-                CastDirection::Up => self.cg_cast_up(expr, ast.type_decl.clone().unwrap()),
-                CastDirection::Down => self.cg_cast_down(expr, ast.type_decl.clone().unwrap()),
-                CastDirection::Equal => self.execute_expr(expr),
-            },
+            ExprKind::Cast { expr, direction, .. } => {
+                match direction.clone().expect("typechecker should fill this") {
+                    CastDirection::Up => self.cg_cast_up(expr, ast.type_decl.clone().unwrap()),
+                    CastDirection::Down => self.cg_cast_down(expr, ast.type_decl.clone().unwrap()),
+                    CastDirection::Equal => self.execute_expr(expr),
+                }
+            }
             ExprKind::ScaleUp { expr, by } => self.cg_scale_up(expr, by),
             ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(expr, shift_amount),
             ExprKind::String(token) => self.cg_string(token.unwrap_string()),
-            ExprKind::PostUnary {
-                token,
-                left,
-                by_amount,
-            } => self.cg_postunary(token, left, by_amount),
+            ExprKind::PostUnary { token, left, by_amount } => {
+                self.cg_postunary(token, left, by_amount)
+            }
             ExprKind::MemberAccess { expr, member, .. } => {
                 let expr = self.execute_expr(expr);
                 self.cg_member_access(expr, member, true)
             }
             ExprKind::Ternary {
-                cond,
-                true_expr,
-                false_expr,
-                ..
+                cond, true_expr, false_expr, ..
             } => self.cg_ternary(cond, true_expr, false_expr),
             ExprKind::Comma { left, right } => self.cg_comma(left, right),
-            ExprKind::SizeofExpr {
-                value: Some(value), ..
-            }
-            | ExprKind::SizeofType { value } => {
+            ExprKind::SizeofExpr { value: Some(value), .. } | ExprKind::SizeofType { value } => {
                 Register::Literal(*value, NEWTypes::Primitive(Types::Long))
             }
             ExprKind::Nop => Register::Void,
@@ -636,6 +623,7 @@ impl Compiler {
         let result = Register::Temp(TempRegister::new(
             true_expr.clone().type_decl.unwrap(),
             &mut self.interval_counter,
+            self.instr_counter,
         ));
         let true_reg = self.execute_expr(true_expr);
 
@@ -705,6 +693,7 @@ impl Compiler {
         let mut temp_scratch = Register::Temp(TempRegister::new(
             l_reg.get_type(),
             &mut self.interval_counter,
+            self.instr_counter,
         ));
 
         // have to do integer-promotion in codegen
@@ -729,6 +718,7 @@ impl Compiler {
         let mut return_reg = Register::Temp(TempRegister::new(
             expr.type_decl.clone().unwrap(),
             &mut self.interval_counter,
+            self.instr_counter,
         ));
 
         // assign value to return-register before binary operation
@@ -792,6 +782,7 @@ impl Compiler {
             let dest_reg = Register::Temp(TempRegister::new(
                 new_type.clone(),
                 &mut self.interval_counter,
+                self.instr_counter,
             ));
 
             self.write_out(Ir::Movs(value_reg.clone(), dest_reg.clone()));
@@ -846,10 +837,12 @@ impl Compiler {
 
             // push first six registers into designated argument-registers; others onto stack
             if i < ARG_REGS.len() {
-                let arg = Register::Arg(ArgRegister::new(i), expr.type_decl.clone().unwrap(), {
-                    self.interval_counter += 1;
-                    self.interval_counter
-                });
+                let arg = Register::Arg(ArgRegister::new(
+                    i,
+                    expr.type_decl.clone().unwrap(),
+                    &mut self.interval_counter,
+                    self.instr_counter,
+                ));
                 self.write_out(Ir::Mov(reg.clone(), arg.clone()));
 
                 arg_regs.push(arg);
@@ -873,6 +866,7 @@ impl Compiler {
             let return_reg = Register::Temp(TempRegister::new(
                 return_type.clone(),
                 &mut self.interval_counter,
+                self.instr_counter,
             ));
             self.write_out(Ir::Mov(Register::Return(return_type), return_reg.clone()));
             return_reg
@@ -927,6 +921,7 @@ impl Compiler {
         let result = Register::Temp(TempRegister::new(
             NEWTypes::Primitive(Types::Int),
             &mut self.interval_counter,
+            self.instr_counter,
         ));
         // if expression true write 1 in result and skip false label
         self.write_out(Ir::LabelDefinition(true_label));
@@ -977,6 +972,7 @@ impl Compiler {
         let result = Register::Temp(TempRegister::new(
             NEWTypes::Primitive(Types::Int),
             &mut self.interval_counter,
+            self.instr_counter,
         ));
         self.write_out(Ir::Mov(
             Register::Literal(1, NEWTypes::default()),
@@ -1032,6 +1028,7 @@ impl Compiler {
         let result = Register::Temp(TempRegister::new(
             reg.get_type(),
             &mut self.interval_counter,
+            self.instr_counter,
         ));
 
         // sets %al to 1 if comparison true and to 0 when false and then copies %al to current reg
@@ -1063,6 +1060,7 @@ impl Compiler {
         let dest = Register::Temp(TempRegister::new(
             NEWTypes::Pointer(Box::new(reg.get_type())),
             &mut self.interval_counter,
+            self.instr_counter,
         ));
         self.write_out(Ir::Load(reg.clone(), dest.clone()));
 
@@ -1126,11 +1124,12 @@ impl Compiler {
         );
         self.write_out(Ir::Mov(left.clone(), Register::Return(left.get_type())));
         // rdx(3rd Argument register) stores remainder
-        let rdx_reg = Register::Arg(ArgRegister::new(2), right.get_type(), {
-            self.interval_counter += 1;
-            self.interval_counter
-        });
-        self.write_out(Ir::Occ(rdx_reg.clone()));
+        let rdx_reg = Register::Arg(ArgRegister::new(
+            2,
+            right.get_type(),
+            &mut self.interval_counter,
+            self.instr_counter,
+        ));
 
         // rax / right => rax
         self.write_out(Ir::Idiv(right.clone()));
@@ -1138,6 +1137,7 @@ impl Compiler {
         // move rax(div result) into right reg
         self.write_out(Ir::Mov(Register::Return(right.get_type()), right.clone()));
 
+        self.free(rdx_reg);
         self.free(left);
         right
     }
@@ -1151,11 +1151,12 @@ impl Compiler {
         self.write_out(Ir::Mov(left.clone(), Register::Return(left.get_type())));
 
         // rdx(3rd Argument register) stores remainder
-        let rdx_reg = Register::Arg(ArgRegister::new(2), right.get_type(), {
-            self.interval_counter += 1;
-            self.interval_counter
-        });
-        self.write_out(Ir::Occ(rdx_reg.clone()));
+        let rdx_reg = Register::Arg(ArgRegister::new(
+            2,
+            right.get_type(),
+            &mut self.interval_counter,
+            self.instr_counter,
+        ));
 
         // rax % rcx => rdx
         self.write_out(Ir::Idiv(right.clone()));
@@ -1204,10 +1205,12 @@ impl Compiler {
         let left = self.make_temp(left);
 
         // expects shift amount to be in %cl (4th arg register)
-        let mut cl_reg = Register::Arg(ArgRegister::new(3), right.get_type(), {
-            self.interval_counter += 1;
-            self.interval_counter
-        });
+        let mut cl_reg = Register::Arg(ArgRegister::new(
+            3,
+            right.get_type(),
+            &mut self.interval_counter,
+            self.instr_counter,
+        ));
         self.write_out(Ir::Mov(right.clone(), cl_reg.clone()));
         self.free(right);
 
@@ -1296,6 +1299,7 @@ impl Compiler {
         let result = Register::Temp(TempRegister::new(
             reg.get_type(),
             &mut self.interval_counter,
+            self.instr_counter,
         ));
 
         self.write_out(Ir::Mov(reg.clone(), result.clone()));
@@ -1307,13 +1311,22 @@ impl Compiler {
         match reg {
             Register::Temp(reg) => {
                 assert!(!self.live_intervals.contains_key(&reg.id));
-                self.live_intervals
-                    .insert(reg.id, (self.instr_counter, reg.type_decl, None));
+                self.live_intervals.insert(
+                    reg.id,
+                    IntervalEntry::new(reg.start_idx, self.instr_counter, None, reg.type_decl),
+                );
             }
-            Register::Arg(_, type_decl, id) => {
-                assert!(!self.live_intervals.contains_key(&id));
-                self.live_intervals
-                    .insert(id, (self.instr_counter, type_decl, None));
+            Register::Arg(reg) => {
+                assert!(!self.live_intervals.contains_key(&reg.id));
+                self.live_intervals.insert(
+                    reg.id,
+                    IntervalEntry::new(
+                        reg.start_idx,
+                        self.instr_counter,
+                        Some(reg.reg),
+                        reg.type_decl,
+                    ),
+                );
             }
             _ => (),
         }

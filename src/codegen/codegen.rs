@@ -465,7 +465,7 @@ impl Compiler {
         func_symbol.unwrap_func().epilogue_index = function_epilogue;
 
         // create a label for all goto-labels inside a function
-        for (_, value) in &mut func_symbol.unwrap_func().labels {
+        for value in func_symbol.unwrap_func().labels.values_mut() {
             *value = create_label(&mut self.label_index);
         }
         // save function name for return label jump
@@ -588,9 +588,9 @@ impl Compiler {
                 let expr = self.execute_expr(expr);
                 self.cg_member_access(expr, member, true)
             }
-            ExprKind::Ternary {
-                cond, true_expr, false_expr, ..
-            } => self.cg_ternary(cond, true_expr, false_expr),
+            ExprKind::Ternary { cond, true_expr, false_expr, .. } => {
+                self.cg_ternary(cond, true_expr, false_expr)
+            }
             ExprKind::Comma { left, right } => self.cg_comma(left, right),
             ExprKind::SizeofExpr { value: Some(value), .. } | ExprKind::SizeofType { value } => {
                 Register::Literal(*value, NEWTypes::Primitive(Types::Long))
@@ -709,9 +709,8 @@ impl Compiler {
 
         // we can do this because typechecker would catch any type-errors
         bin_reg.set_type(l_reg.get_type());
-        let result = self.cg_assign(l_reg, bin_reg);
 
-        result
+        self.cg_assign(l_reg, bin_reg)
     }
     fn cg_postunary(&mut self, token: &Token, expr: &Expr, by_amount: &usize) -> Register {
         let reg = self.execute_expr(expr);
@@ -759,12 +758,10 @@ impl Compiler {
     fn cg_scale_up(&mut self, expr: &Expr, by_amount: &usize) -> Register {
         let value_reg = self.execute_expr(expr);
 
-        let value_reg = self.cg_mult(
+        self.cg_mult(
             Register::Literal(*by_amount, NEWTypes::Primitive(Types::Int)),
             value_reg,
-        );
-
-        value_reg
+        )
     }
     fn cg_cast_down(&mut self, expr: &Expr, new_type: NEWTypes) -> Register {
         let mut value_reg = self.execute_expr(expr);
@@ -780,7 +777,7 @@ impl Compiler {
             Register::Temp(..) | Register::Stack(..) | Register::Label(..)
         ) {
             let dest_reg = Register::Temp(TempRegister::new(
-                new_type.clone(),
+                new_type,
                 &mut self.interval_counter,
                 self.instr_counter,
             ));

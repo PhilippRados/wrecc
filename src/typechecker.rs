@@ -664,11 +664,7 @@ impl TypeChecker {
                     }
                 }
             }
-            ExprKind::Unary {
-                token,
-                right,
-                is_global,
-            } => {
+            ExprKind::Unary { token, right, is_global } => {
                 *is_global = self.is_global();
 
                 self.evaluate_unary(token, right, *is_global)?
@@ -687,48 +683,30 @@ impl TypeChecker {
                 self.evaluate_logical(left, token, right)?
             }
             ExprKind::Ident(token) => self.ident(token)?,
-            ExprKind::Assign {
-                l_expr,
-                token,
-                r_expr,
-            } => {
+            ExprKind::Assign { l_expr, token, r_expr } => {
                 let l_type = self.expr_type(l_expr)?;
                 let r_type = self.expr_type(r_expr)?;
 
                 self.assign_var(l_expr, l_type, token, r_expr, r_type)?
             }
-            ExprKind::CompoundAssign {
-                l_expr,
-                token,
-                r_expr,
-            } => self.compound_assign(l_expr, token, r_expr)?,
-            ExprKind::Call {
-                left_paren,
-                callee,
-                args,
-            } => self.evaluate_call(left_paren, callee, args)?,
-            ExprKind::PostUnary {
-                left,
-                token,
-                by_amount,
-            } => self.evaluate_postunary(token, left, by_amount)?,
-            ExprKind::MemberAccess {
-                token,
-                expr,
-                member,
-            } => self.member_access(token, member, expr)?,
-            ExprKind::Cast {
-                token,
-                new_type,
-                expr,
-                direction,
-            } => self.explicit_cast(token, expr, new_type, direction)?,
-            ExprKind::Ternary {
-                token,
-                cond,
-                true_expr,
-                false_expr,
-            } => self.ternary(token, cond, true_expr, false_expr)?,
+            ExprKind::CompoundAssign { l_expr, token, r_expr } => {
+                self.compound_assign(l_expr, token, r_expr)?
+            }
+            ExprKind::Call { left_paren, callee, args } => {
+                self.evaluate_call(left_paren, callee, args)?
+            }
+            ExprKind::PostUnary { left, token, by_amount } => {
+                self.evaluate_postunary(token, left, by_amount)?
+            }
+            ExprKind::MemberAccess { token, expr, member } => {
+                self.member_access(token, member, expr)?
+            }
+            ExprKind::Cast { token, new_type, expr, direction } => {
+                self.explicit_cast(token, expr, new_type, direction)?
+            }
+            ExprKind::Ternary { token, cond, true_expr, false_expr } => {
+                self.ternary(token, cond, true_expr, false_expr)?
+            }
             ExprKind::Comma { left, right } => self.comma(left, right)?,
             // doesn't matter because it can only occur in expression-statements where type doesn't matter
             ExprKind::Nop { .. } => NEWTypes::Primitive(Types::Void),
@@ -752,7 +730,7 @@ impl TypeChecker {
     fn comma(&mut self, left: &mut Expr, right: &mut Expr) -> Result<NEWTypes, Error> {
         self.expr_type(left)?;
 
-        Ok(self.expr_type(right)?)
+        self.expr_type(right)
     }
     fn ternary(
         &mut self,
@@ -1030,10 +1008,7 @@ impl TypeChecker {
             _ => return,
         };
 
-        expr.kind = ExprKind::ScaleUp {
-            by: amount,
-            expr: Box::new(expr.clone()),
-        };
+        expr.kind = ExprKind::ScaleUp { by: amount, expr: Box::new(expr.clone()) };
     }
     fn evaluate_logical(
         &mut self,

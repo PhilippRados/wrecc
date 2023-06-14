@@ -129,7 +129,7 @@ impl RegisterAllocation {
         });
 
         if let Some((key, IntervalEntry { arg: Some(scratch), .. })) = new_arg_interval {
-            let key = key.clone();
+            let key = *key;
             let scratch = scratch.clone();
 
             let reg_in_use = self
@@ -188,7 +188,7 @@ impl RegisterAllocation {
                 // => need to move value out of arg-reg when it gets pushed
                 let TempKind::Scratch(scratch_reg) = self
                     .live_intervals
-                    .get(&link_key)
+                    .get(link_key)
                     .unwrap()
                     .scratch
                     .clone()
@@ -373,17 +373,14 @@ impl RegisterAllocation {
     fn is_redundant_instr(&mut self, instr: &mut Ir) -> bool {
         if let (true, (Some(left), Some(right))) = (matches!(instr, Ir::Mov(..)), instr.get_regs())
         {
-            match (left, right) {
-                (Register::Temp(left), Register::Arg(right)) => {
-                    let scratch_idx = self.get_reg(left.id);
-                    if let Some(scratch_idx) = scratch_idx {
-                        let left_name = self.registers.0.get(scratch_idx).unwrap().base_name();
+            if let (Register::Temp(left), Register::Arg(right)) = (left, right) {
+                let scratch_idx = self.get_reg(left.id);
+                if let Some(scratch_idx) = scratch_idx {
+                    let left_name = self.registers.0.get(scratch_idx).unwrap().base_name();
 
-                        return left_name == right.reg.base_name()
-                            && left.value_kind == ValueKind::Rvalue;
-                    }
+                    return left_name == right.reg.base_name()
+                        && left.value_kind == ValueKind::Rvalue;
                 }
-                _ => (),
             }
         }
         false
@@ -405,7 +402,7 @@ impl RegisterAllocation {
             ir.push(Ir::Push(reg.clone()));
 
             // WARN: should be fine passing 0 as interval-key since values are restored anyway before freeing regs
-            self.live_intervals.get_mut(&key).unwrap().scratch = Some(TempKind::Pushed(0));
+            self.live_intervals.get_mut(key).unwrap().scratch = Some(TempKind::Pushed(0));
             self.registers.free_reg(scratch.clone());
         }
 
@@ -428,7 +425,7 @@ impl RegisterAllocation {
 
             // mark popped registers as used again
             self.registers.activate_reg(scratch.clone());
-            self.live_intervals.get_mut(&key).unwrap().scratch =
+            self.live_intervals.get_mut(key).unwrap().scratch =
                 Some(TempKind::Scratch(scratch.clone()));
         }
     }

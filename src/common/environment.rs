@@ -84,11 +84,7 @@ pub struct SymbolInfo {
 
 impl SymbolInfo {
     pub fn new(type_decl: NEWTypes, is_global: bool) -> Self {
-        SymbolInfo {
-            type_decl,
-            is_global,
-            reg: None,
-        }
+        SymbolInfo { type_decl, is_global, reg: None }
     }
     pub fn get_type(&self) -> NEWTypes {
         self.type_decl.clone()

@@ -121,7 +121,7 @@ impl Parser {
         }
         if let Some(ident) = self.matches(vec![TokenKind::Ident]) {
             if self.matches(vec![TokenKind::Colon]).is_some() {
-                return self.label_statement(ident.clone());
+                return self.label_statement(ident);
             }
             // if not a label then has to be expression so have to insert ident back into iter
             self.insert_token(ident)
@@ -604,9 +604,9 @@ impl Parser {
         let is_def = self.peek()?.token == TokenType::LeftBrace;
         match existing {
             Some((Symbols::Func(other), ..)) => {
-                if is_def && other.clone().kind == FunctionKind::Definition {
+                if is_def && other.kind == FunctionKind::Definition {
                     return Err(Error::new(
-                        &name,
+                        name,
                         &format!("Redefinition of function '{}'", name.unwrap_string()),
                     ));
                 }
@@ -614,7 +614,7 @@ impl Parser {
                 self.env
                     .get_mut_symbol(index)
                     .unwrap_func()
-                    .cmp(&name, &other)?;
+                    .cmp(name, &other)?;
 
                 // if existing element is a definition remove newly added declaration
                 // so that last function symbol with this name is a definition
@@ -623,8 +623,8 @@ impl Parser {
                     self.env.remove_symbol(index);
                 }
             }
-            Some(_, ..) => {
-                return Err(Error::new(&name, "Redefinition of symbol with same name"));
+            Some(..) => {
+                return Err(Error::new(name, "Redefinition of symbol with same name"));
             }
             None => {}
         }
@@ -888,7 +888,7 @@ impl Parser {
             ));
         }
         let existing = self.env.get_symbol(&name).ok();
-        let func = Function::new(return_type.clone());
+        let func = Function::new(return_type);
         let index = self.env.declare_func(&name, Symbols::Func(func))?;
 
         name.token.update_index(index);
@@ -898,9 +898,9 @@ impl Parser {
         self.env.enter();
         let params = self.parse_params()?;
 
-        self.env.get_mut_symbol(index).unwrap_func().params = params.clone();
+        self.env.get_mut_symbol(index).unwrap_func().params = params;
 
-        self.compare_existing(&name, index, existing.clone())?;
+        self.compare_existing(&name, index, existing)?;
 
         Ok(DeclarationKind::FuncDecl(name))
     }
@@ -1210,9 +1210,7 @@ impl Parser {
                                     "Expect closing ')' after sizeof",
                                 )?;
                                 Expr::new(
-                                    ExprKind::SizeofType {
-                                        value: type_decl.size(),
-                                    },
+                                    ExprKind::SizeofType { value: type_decl.size() },
                                     ValueKind::Rvalue,
                                 )
                             }
@@ -1220,10 +1218,7 @@ impl Parser {
                                 self.insert_token(t);
                                 let right = self.var_assignment()?;
                                 Expr::new(
-                                    ExprKind::SizeofExpr {
-                                        expr: Box::new(right),
-                                        value: None,
-                                    },
+                                    ExprKind::SizeofExpr { expr: Box::new(right), value: None },
                                     ValueKind::Rvalue,
                                 )
                             }
@@ -1232,10 +1227,7 @@ impl Parser {
                     } else {
                         let right = self.unary()?;
                         Expr::new(
-                            ExprKind::SizeofExpr {
-                                expr: Box::new(right),
-                                value: None,
-                            },
+                            ExprKind::SizeofExpr { expr: Box::new(right), value: None },
                             ValueKind::Rvalue,
                         )
                     }
@@ -1304,11 +1296,7 @@ impl Parser {
                     if let Some(member) = self.matches(vec![TokenKind::Ident]) {
                         expr = match token.token {
                             TokenType::Dot => Expr::new(
-                                ExprKind::MemberAccess {
-                                    token,
-                                    member,
-                                    expr: Box::new(expr),
-                                },
+                                ExprKind::MemberAccess { token, member, expr: Box::new(expr) },
                                 ValueKind::Lvalue,
                             ),
                             TokenType::Arrow => arrow_sugar(expr, member, token),
@@ -1339,19 +1327,16 @@ impl Parser {
     // get var-name to lookup if type incomplete or not
     // has to happen in parser otherwise type could be defined after member-access
     fn has_complete_ident(&self, expr: &Expr, token: &Token) -> Result<(), Error> {
-        let Some(ident) = get_ident(&expr) else {return Ok(())};
+        let Some(ident) = get_ident(expr) else {return Ok(())};
         if let Ok((
             Symbols::Variable(SymbolInfo { type_decl, .. })
-            | Symbols::Func(Function {
-                return_type: type_decl,
-                ..
-            }),
+            | Symbols::Func(Function { return_type: type_decl, .. }),
             _,
         )) = self.env.get_symbol(ident)
         {
             if !type_decl.is_complete() {
                 return Err(Error::new(
-                    &token,
+                    token,
                     &format!("Can't access members of incomplete type '{}'", type_decl),
                 ));
             }
@@ -1408,9 +1393,7 @@ impl Parser {
             let expr = self.expression()?;
             self.consume(TokenKind::RightParen, "missing closing ')'")?;
             return Ok(Expr::new(
-                ExprKind::Grouping {
-                    expr: Box::new(expr.clone()),
-                },
+                ExprKind::Grouping { expr: Box::new(expr.clone()) },
                 expr.value_kind,
             ));
         }
@@ -1514,31 +1497,11 @@ fn get_ident(expr: &Expr) -> Option<&Token> {
     match &expr.kind {
         ExprKind::Ident(s) => Some(s),
         ExprKind::Grouping { expr }
-        | ExprKind::MemberAccess {
-            token: _,
-            member: _,
-            expr,
-        }
-        | ExprKind::Call {
-            left_paren: _,
-            callee: expr,
-            args: _,
-        }
-        | ExprKind::PostUnary {
-            token: _,
-            left: expr,
-            by_amount: _,
-        }
-        | ExprKind::Unary {
-            token: _,
-            right: expr,
-            is_global: _,
-        }
-        | ExprKind::Binary {
-            left: expr,
-            token: _,
-            right: _,
-        } => get_ident(expr),
+        | ExprKind::MemberAccess { token: _, member: _, expr }
+        | ExprKind::Call { left_paren: _, callee: expr, args: _ }
+        | ExprKind::PostUnary { token: _, left: expr, by_amount: _ }
+        | ExprKind::Unary { token: _, right: expr, is_global: _ }
+        | ExprKind::Binary { left: expr, token: _, right: _ } => get_ident(expr),
         _ => None,
     }
 }

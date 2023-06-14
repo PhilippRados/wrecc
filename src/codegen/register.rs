@@ -48,7 +48,7 @@ impl Register {
             Register::Label(reg) => reg.base_name(),
             Register::Literal(n, ..) => format!("{n}"),
             Register::Temp(reg) => reg.base_name(),
-            Register::Arg(reg) => reg.base_name().to_string(),
+            Register::Arg(reg) => reg.base_name(),
         }
     }
     pub fn set_type(&mut self, type_decl: NEWTypes) {

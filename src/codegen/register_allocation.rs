@@ -318,26 +318,19 @@ impl RegisterAllocation {
         self.spill_index = (self.spill_index + 1) % self.registers.0.len();
         prev
     }
-    // marks freed interval-registers as available again
+    // marks freed interval-registers as available again and removes interval from live_intervals
     fn expire_old_intervals(&mut self, instr_idx: usize, result: &mut Vec<Ir>) {
-        // TODO: remove this clone
-        for (key, expired_intervals) in self
+        let expired_keys: Vec<usize> = self
             .live_intervals
-            .clone()
             .iter()
             .filter(|(_, entry)| entry.end == instr_idx)
-        {
-            match &expired_intervals.scratch {
-                Some(TempKind::Scratch(scratch)) => {
-                    if let Some((.., other_interval)) =
-                        self.live_intervals.iter_mut().find(|(_, entry)| {
-                            if let Some(TempKind::Pushed(link_id)) = entry.scratch {
-                                self.counter < entry.end && link_id == *key
-                            } else {
-                                false
-                            }
-                        })
-                    {
+            .map(|(key, _)| *key)
+            .collect();
+
+        for key in expired_keys {
+            if let Some(expired_intervals) = self.live_intervals.remove(&key) {
+                if let Some(TempKind::Scratch(scratch)) = &expired_intervals.scratch {
+                    if let Some(other_interval) = self.find_same_reg_pushed(key) {
                         // if there exists another interval where this reg is pushed, pop that instead of freeing physical
                         result.push(Ir::Pop(Register::Temp(TempRegister::default(
                             scratch.clone(),
@@ -347,13 +340,22 @@ impl RegisterAllocation {
                         self.registers.free_reg(scratch.clone());
                     }
                 }
-                Some(TempKind::Pushed(..)) => {
-                    unreachable!("all pushed registers should be popped back before they're freed");
-                }
-                _ => (),
             }
         }
     }
+    fn find_same_reg_pushed(&mut self, key: usize) -> Option<&mut IntervalEntry> {
+        self.live_intervals
+            .iter_mut()
+            .find(|(_, entry)| {
+                if let Some(TempKind::Pushed(link_id)) = entry.scratch {
+                    self.counter < entry.end && link_id == key
+                } else {
+                    false
+                }
+            })
+            .map(|(_, value)| value)
+    }
+
     fn get_active_intervals(&self) -> Vec<(usize, Box<dyn ScratchRegister>)> {
         self.live_intervals
             .iter()
@@ -370,6 +372,7 @@ impl RegisterAllocation {
             })
             .collect()
     }
+    // occurs when scratch-register is already correct arg register
     fn is_redundant_instr(&mut self, instr: &mut Ir) -> bool {
         if let (true, (Some(left), Some(right))) = (matches!(instr, Ir::Mov(..)), instr.get_regs())
         {

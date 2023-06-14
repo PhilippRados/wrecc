@@ -357,7 +357,8 @@ impl RegisterAllocation {
     }
 
     fn get_active_intervals(&self) -> Vec<(usize, Box<dyn ScratchRegister>)> {
-        self.live_intervals
+        let mut active_intervals = self
+            .live_intervals
             .iter()
             .filter_map(|(key, entry)| {
                 if let Some(TempKind::Scratch(s)) = &entry.scratch {
@@ -370,7 +371,11 @@ impl RegisterAllocation {
                     None
                 }
             })
-            .collect()
+            .collect::<Vec<_>>();
+
+        // sort registers so that order is always the same and not determined by hashmap order -> compiler should be deterministic
+        active_intervals.sort_by(|(_, a), (_, b)| a.base_name().cmp(b.base_name()));
+        active_intervals
     }
     // occurs when scratch-register is already correct arg register
     fn is_redundant_instr(&mut self, instr: &mut Ir) -> bool {

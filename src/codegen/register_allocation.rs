@@ -69,6 +69,7 @@ impl RegisterAllocation {
             self.expire_old_intervals(i, &mut result);
             self.counter = i;
 
+            // TODO: move all peephole optimizations to extra pass
             if self.is_redundant_instr(&mut instr) {
                 continue;
             }
@@ -77,11 +78,15 @@ impl RegisterAllocation {
 
             match instr.get_regs() {
                 (Some(Register::Temp(left)), Some(Register::Temp(right))) => {
-                    self.alloc(left, self.get_reg(right.id), &mut result);
-                    self.alloc(right, self.get_reg(left.id), &mut result);
+                    let left_interferences = self.interfering_intervals(left.id, Some(right.id));
+                    self.alloc(left, left_interferences, &mut result);
+
+                    let right_interferences = self.interfering_intervals(right.id, Some(left.id));
+                    self.alloc(right, right_interferences, &mut result);
                 }
                 (Some(Register::Temp(reg)), _) | (_, Some(Register::Temp(reg))) => {
-                    self.alloc(reg, None, &mut result);
+                    let interferences = self.interfering_intervals(reg.id, None);
+                    self.alloc(reg, interferences, &mut result);
                 }
                 _ => (),
             }
@@ -149,6 +154,7 @@ impl RegisterAllocation {
                 self.live_intervals.get_mut(&occupied_key).unwrap().scratch =
                     Some(TempKind::Pushed(key));
             } else {
+                // if scratch isn't already used mark it as used for the arg-register
                 self.registers.activate_reg(Box::new(scratch.clone()));
 
                 self.live_intervals.get_mut(&key).unwrap().scratch =
@@ -157,7 +163,7 @@ impl RegisterAllocation {
         }
     }
 
-    fn alloc(&mut self, reg: &mut TempRegister, other: Option<usize>, ir: &mut Vec<Ir>) {
+    fn alloc(&mut self, reg: &mut TempRegister, other: Vec<usize>, ir: &mut Vec<Ir>) {
         // only needs to fill in virtual registers whose interval doesn't have a register assigned to it
         let value = match self.live_intervals.get(&reg.id) {
             Some(IntervalEntry {
@@ -179,30 +185,6 @@ impl RegisterAllocation {
                 reg.reg = Some(scratch.clone());
                 scratch
             }
-            Some(IntervalEntry {
-                scratch: Some(TempKind::Pushed(link_key)),
-                ..
-            }) => {
-                // TODO: remove this case
-                // should only happen when arg-register is used as scratch and scratch still holds value for arg-operation
-                // => need to move value out of arg-reg when it gets pushed
-                let TempKind::Scratch(scratch_reg) = self
-                    .live_intervals
-                    .get(link_key)
-                    .unwrap()
-                    .scratch
-                    .clone()
-                    .unwrap() else {unreachable!()};
-                ir.push(Ir::Pop(Register::Temp(TempRegister::default(
-                    scratch_reg.clone(),
-                ))));
-
-                let scratch_reg = TempKind::Scratch(scratch_reg);
-                self.live_intervals.get_mut(&reg.id).unwrap().scratch = Some(scratch_reg.clone());
-
-                reg.reg = Some(scratch_reg.clone());
-                scratch_reg
-            }
             _ => unreachable!(),
         };
         // assign register to the interval
@@ -212,22 +194,17 @@ impl RegisterAllocation {
         &mut self,
         ir: &mut Vec<Ir>,
         reg: &mut TempRegister,
-        other: Option<usize>,
+        other: Vec<usize>,
     ) -> TempKind {
-        if let Some(scratch) = self.registers.alloc() {
+        if let Some(scratch) = self.registers.alloc(&other) {
             TempKind::Scratch(self.registers.0.get(scratch).unwrap().clone())
         } else {
+            dbg!("spilling");
             self.spill(ir, reg, other)
         }
     }
-    fn spill(
-        &mut self,
-        ir: &mut Vec<Ir>,
-        reg: &mut TempRegister,
-        other: Option<usize>,
-    ) -> TempKind {
-        // find the interval to spill
-        let spill_reg_idx = self.heuristic(other);
+    fn spill(&mut self, ir: &mut Vec<Ir>, reg: &mut TempRegister, other: Vec<usize>) -> TempKind {
+        let spill_reg_idx = self.choose_spill_reg(other);
         let spill_interval = self.get_interval_of_reg(spill_reg_idx);
         let Some(IntervalEntry{ type_decl,scratch:Some(entry),.. }) = self.live_intervals.get_mut(&spill_interval) else {unreachable!()};
 
@@ -253,12 +230,7 @@ impl RegisterAllocation {
         prev.reg.unwrap()
     }
 
-    fn unspill(
-        &mut self,
-        ir: &mut Vec<Ir>,
-        reg: &mut TempRegister,
-        other: Option<usize>,
-    ) -> TempKind {
+    fn unspill(&mut self, ir: &mut Vec<Ir>, reg: &mut TempRegister, other: Vec<usize>) -> TempKind {
         let Some(IntervalEntry{ type_decl, scratch:Some(entry),.. }) = self.live_intervals.get_mut(&reg.id) else {unreachable!()};
 
         let mut prev_reg = reg.clone();
@@ -276,13 +248,35 @@ impl RegisterAllocation {
         new.reg.unwrap()
     }
     // gets the corresponding scratch-register given the interval-id to a tempregister
-    fn get_reg(&self, reg_id: usize) -> Option<usize> {
+    fn get_reg(&self, key: usize) -> Option<usize> {
         if let Some(IntervalEntry { scratch: Some(TempKind::Scratch(r)), .. }) =
-            self.live_intervals.get(&reg_id)
+            self.live_intervals.get(&key)
         {
             return self.registers.0.iter().position(|scratch| scratch == r);
         }
         None
+    }
+    // returns scratch-register-indices of intervals that will interfere own interval
+    fn interfering_intervals(&self, own_key: usize, other_key: Option<usize>) -> Vec<usize> {
+        let own_interval = self.live_intervals.get(&own_key).unwrap();
+
+        let mut interfering_arg_regs: Vec<_> = self
+            .live_intervals
+            .values()
+            .filter(|v| v.start <= own_interval.end && v.arg.is_some())
+            .map(|v| {
+                let name = v.arg.as_ref().unwrap().base_name();
+                self.registers
+                    .0
+                    .iter()
+                    .position(|scratch| scratch.base_name() == name)
+            })
+            .collect();
+
+        if let Some(other_key) = other_key {
+            interfering_arg_regs.push(self.get_reg(other_key));
+        }
+        interfering_arg_regs.into_iter().flatten().collect()
     }
     // gets corresponding interval-key given the index of the scratch-reg in the scratchregisters
     fn get_interval_of_reg(&self, reg_idx: usize) -> usize {
@@ -307,16 +301,14 @@ impl RegisterAllocation {
         return *matching_scratches.first().unwrap();
     }
     // chooses which register to spill besides other
-    fn heuristic(&mut self, other: Option<usize>) -> usize {
-        if let Some(other) = other {
-            if other == self.spill_index {
-                self.spill_index = (self.spill_index + 1) % self.registers.0.len();
-                return self.spill_index;
-            }
-        }
-        let prev = self.spill_index;
+    fn choose_spill_reg(&mut self, interfering_regs: Vec<usize>) -> usize {
         self.spill_index = (self.spill_index + 1) % self.registers.0.len();
-        prev
+
+        while interfering_regs.contains(&self.spill_index) {
+            self.spill_index = (self.spill_index + 1) % self.registers.0.len();
+        }
+
+        self.spill_index
     }
     // marks freed interval-registers as available again and removes interval from live_intervals
     fn expire_old_intervals(&mut self, instr_idx: usize, result: &mut Vec<Ir>) {
@@ -455,10 +447,15 @@ impl RegisterAllocation {
         *setup_size = self.spill_bp_offset;
     }
 }
-struct ScratchRegisters([Box<dyn ScratchRegister>; 6]);
+struct ScratchRegisters([Box<dyn ScratchRegister>; 8]);
 impl ScratchRegisters {
-    fn alloc(&mut self) -> Option<usize> {
-        for (i, r) in self.0.iter_mut().enumerate().filter(|(_, r)| !r.is_used()) {
+    fn alloc(&mut self, interfering_regs: &Vec<usize>) -> Option<usize> {
+        for (i, r) in self
+            .0
+            .iter_mut()
+            .enumerate()
+            .filter(|(i, r)| !r.is_used() && !interfering_regs.contains(i))
+        {
             r.in_use();
             return Some(i);
         }
@@ -485,13 +482,13 @@ impl ScratchRegisters {
     }
     fn new() -> Self {
         // sorted in descending order of occurance probability to reduce collisions
-        // don't use rdx and rcx as scratch-regs because of collisions with div/shift operations
-        // TODO: allow using rdx and rcx
         ScratchRegisters([
             Box::new(RegularRegister::new("%r10")),
             Box::new(RegularRegister::new("%r11")),
             Box::new(ArgRegisterKind::new(5)),
             Box::new(ArgRegisterKind::new(4)),
+            Box::new(ArgRegisterKind::new(3)),
+            Box::new(ArgRegisterKind::new(2)),
             Box::new(ArgRegisterKind::new(1)),
             Box::new(ArgRegisterKind::new(0)),
         ])

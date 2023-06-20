@@ -33,7 +33,7 @@ pub enum ExprKind {
     },
     Call {
         left_paren: Token,
-        callee: Box<Expr>,
+        name: Token,
         args: Vec<Expr>,
     },
     Cast {
@@ -104,11 +104,7 @@ pub struct Expr {
 }
 impl Expr {
     pub fn new(kind: ExprKind, value_kind: ValueKind) -> Self {
-        Expr {
-            type_decl: None,
-            kind,
-            value_kind,
-        }
+        Expr { type_decl: None, kind, value_kind }
     }
 }
 impl Display for ExprKind {

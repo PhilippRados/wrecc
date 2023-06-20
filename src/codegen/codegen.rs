@@ -568,8 +568,8 @@ impl Compiler {
                 .unwrap()
                 .unwrap_var()
                 .get_reg(),
-            ExprKind::Call { callee, args, .. } => {
-                self.cg_call(callee, args, ast.type_decl.clone().unwrap())
+            ExprKind::Call { name, args, .. } => {
+                self.cg_call(name, args, ast.type_decl.clone().unwrap())
             }
             ExprKind::Cast { expr, direction, .. } => {
                 match direction.clone().expect("typechecker should fill this") {
@@ -814,12 +814,7 @@ impl Compiler {
             l_value
         }
     }
-    fn cg_call(&mut self, callee: &Expr, args: &Vec<Expr>, return_type: NEWTypes) -> Register {
-        let func_name = match &callee.kind {
-            ExprKind::Ident(func_name) => func_name.unwrap_string(),
-            _ => unreachable!("typechecker"),
-        };
-
+    fn cg_call(&mut self, func_name: &Token, args: &Vec<Expr>, return_type: NEWTypes) -> Register {
         self.write_out(Ir::SaveRegs);
 
         // align stack if pushes args
@@ -851,7 +846,7 @@ impl Compiler {
             self.free(reg);
         }
 
-        self.write_out(Ir::Call(func_name));
+        self.write_out(Ir::Call(func_name.unwrap_string()));
 
         self.remove_spilled_args(args.len());
         for reg in arg_regs {

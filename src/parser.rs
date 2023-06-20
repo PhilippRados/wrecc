@@ -1354,14 +1354,17 @@ impl Parser {
             }
         }
         self.consume(TokenKind::RightParen, "Expect ')' after function call")?;
-        Ok(Expr::new(
-            ExprKind::Call {
-                left_paren,
-                callee: Box::new(callee),
-                args,
-            },
-            ValueKind::Rvalue,
-        ))
+        if let ExprKind::Ident(name) = callee.kind {
+            Ok(Expr::new(
+                ExprKind::Call { left_paren, name, args },
+                ValueKind::Rvalue,
+            ))
+        } else {
+            Err(Error::new(
+                &left_paren,
+                "Function-name has to be identifier",
+            ))
+        }
     }
     fn primary(&mut self) -> Result<Expr, Error> {
         if let Some(n) = self.matches(vec![TokenKind::Number]) {
@@ -1495,13 +1498,12 @@ fn get_ident(expr: &Expr) -> Option<&Token> {
     // get ident from an expression passed to a member access so:
     // expr.member or expr->member
     match &expr.kind {
-        ExprKind::Ident(s) => Some(s),
+        ExprKind::Ident(s) | ExprKind::Call { name: s, .. } => Some(s),
         ExprKind::Grouping { expr }
-        | ExprKind::MemberAccess { token: _, member: _, expr }
-        | ExprKind::Call { left_paren: _, callee: expr, args: _ }
-        | ExprKind::PostUnary { token: _, left: expr, by_amount: _ }
-        | ExprKind::Unary { token: _, right: expr, is_global: _ }
-        | ExprKind::Binary { left: expr, token: _, right: _ } => get_ident(expr),
+        | ExprKind::MemberAccess { expr, .. }
+        | ExprKind::PostUnary { left: expr, .. }
+        | ExprKind::Unary { right: expr, .. }
+        | ExprKind::Binary { left: expr, .. } => get_ident(expr),
         _ => None,
     }
 }

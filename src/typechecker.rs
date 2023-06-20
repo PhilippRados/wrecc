@@ -692,8 +692,8 @@ impl TypeChecker {
             ExprKind::CompoundAssign { l_expr, token, r_expr } => {
                 self.compound_assign(l_expr, token, r_expr)?
             }
-            ExprKind::Call { left_paren, callee, args } => {
-                self.evaluate_call(left_paren, callee, args)?
+            ExprKind::Call { left_paren, name, args } => {
+                self.evaluate_call(left_paren, name, args)?
             }
             ExprKind::PostUnary { left, token, by_amount } => {
                 self.evaluate_postunary(token, left, by_amount)?
@@ -911,14 +911,9 @@ impl TypeChecker {
     fn evaluate_call(
         &mut self,
         left_paren: &Token,
-        callee: &mut Expr,
+        func_name: &mut Token,
         args: &mut Vec<Expr>,
     ) -> Result<NEWTypes, Error> {
-        let func_name = match &callee.kind {
-            ExprKind::Ident(func_name) => func_name,
-            _ => return Err(Error::new(left_paren, "Function-name has to be identifier")),
-        };
-
         let mut arg_types: Vec<(&mut Expr, NEWTypes)> = Vec::new();
         for expr in args.iter_mut() {
             let mut t = self.expr_type(expr)?;

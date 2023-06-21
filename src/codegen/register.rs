@@ -228,15 +228,6 @@ impl std::fmt::Debug for dyn ScratchRegister {
     }
 }
 
-impl PartialEq<dyn ScratchRegister> for dyn ScratchRegister {
-    fn eq(&self, other: &dyn ScratchRegister) -> bool {
-        self.base_name() == other.base_name()
-    }
-
-    fn ne(&self, other: &dyn ScratchRegister) -> bool {
-        self.base_name() != other.base_name()
-    }
-}
 // hacky way to get clone to work on trait object
 pub trait ScratchClone {
     fn clone_box(&self) -> Box<dyn ScratchRegister>;

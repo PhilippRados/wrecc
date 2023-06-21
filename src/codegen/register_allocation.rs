@@ -252,7 +252,11 @@ impl RegisterAllocation {
         if let Some(IntervalEntry { scratch: Some(TempKind::Scratch(r)), .. }) =
             self.live_intervals.get(&key)
         {
-            return self.registers.0.iter().position(|scratch| scratch == r);
+            return self
+                .registers
+                .0
+                .iter()
+                .position(|scratch| scratch.base_name() == r.base_name());
         }
         None
     }
@@ -284,7 +288,7 @@ impl RegisterAllocation {
             .get_active_intervals()
             .iter()
             .filter_map(|(key, r)| {
-                if self.registers.0.get(reg_idx).unwrap() == r {
+                if self.registers.0.get(reg_idx).unwrap().base_name() == r.base_name() {
                     Some(*key)
                 } else {
                     None

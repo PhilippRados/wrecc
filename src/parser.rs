@@ -1756,6 +1756,7 @@ fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
     )
 }
 
+// TODO: this definitely needs a cleanup/rewrite
 // creates a list of types for any given initializer list
 mod initializer_list_types {
     use super::*;

@@ -17,11 +17,11 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let file = match args.len() {
         2 => &args[1],
-        _ => ErrorData::sys_exit("usage: rucc <file>", 22),
+        _ => ErrorData::sys_exit("Usage: rucc <file>", 22),
     };
 
     let source = fs::read_to_string(file)
-        .unwrap_or_else(|_| ErrorData::sys_exit(&format!("couldn't find file: '{}'", file), 2));
+        .unwrap_or_else(|_| ErrorData::sys_exit(&format!("Couldn't find file: '{}'", file), 2));
 
     // Scan input
     let tokens = match Scanner::new(&source).scan_token() {

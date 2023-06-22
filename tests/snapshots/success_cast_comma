@@ -1,0 +1,8 @@
+Error: Can't assign to type 'struct <anonymous>' with type 'char'
+|
+9   a = ((long)1, (char)7);
+|     ^
+Error: Can't assign to type 'struct <anonymous>' with type 'long'
+|
+10   a = (long)1, (char)7;
+|      ^

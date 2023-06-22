@@ -136,7 +136,9 @@ impl Display for ExprKind {
                 ExprKind::CompoundAssign { token, .. } =>
                     format!("'compound-assignment: {}'", token.token),
                 ExprKind::Ternary { .. } => "'ternary-expression'".to_string(),
-                ExprKind::Comma { .. } => "'comma-expression'".to_string(),
+                ExprKind::Comma { left, right } => {
+                    format!("Comma:\n\tleft: {}\n\tright: {}", left.kind, right.kind)
+                }
                 ExprKind::SizeofExpr { .. } | ExprKind::SizeofType { .. } =>
                     "'sizeof-expression'".to_string(),
             }

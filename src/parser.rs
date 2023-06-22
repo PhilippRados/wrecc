@@ -1252,7 +1252,7 @@ impl Parser {
     }
     fn typecast(&mut self, token: Token, type_decl: NEWTypes) -> Result<Expr, Error> {
         self.consume(TokenKind::RightParen, "Expect closing ')' after type-cast")?;
-        let expr = self.expression()?;
+        let expr = self.unary()?;
 
         Ok(Expr::new(
             ExprKind::Cast {

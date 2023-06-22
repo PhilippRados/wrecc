@@ -199,7 +199,6 @@ impl RegisterAllocation {
         if let Some(scratch) = self.registers.alloc(&other) {
             TempKind::Scratch(self.registers.0.get(scratch).unwrap().clone())
         } else {
-            dbg!("spilling");
             self.spill(ir, reg, other)
         }
     }

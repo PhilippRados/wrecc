@@ -24,7 +24,7 @@ pub enum Register {
     // Register used for return values
     Return(NEWTypes),
     // Numerical constants
-    Literal(usize, NEWTypes),
+    Literal(i64, NEWTypes),
     // Indicator register for functions returning void
     Void,
 }

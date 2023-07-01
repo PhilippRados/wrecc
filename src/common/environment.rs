@@ -231,6 +231,7 @@ impl Scope {
     pub fn exit(&mut self) {
         self.current_depth -= 1;
 
+        // TODO: clean this up
         // hacky solution but need a way to indicate when current env ends
         let _ = self.symbols.declare(
             "".to_string(),
@@ -304,7 +305,6 @@ impl Scope {
     }
 }
 
-// TODO: enable these tests again
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -162,7 +162,7 @@ impl Compiler {
                 Some(case_value) => {
                     // WARN: literal can also be negative so needs type i64
                     self.write_out(Ir::Cmp(
-                        Register::Literal(*case_value as usize, NEWTypes::default()),
+                        Register::Literal(*case_value, NEWTypes::default()),
                         cond_reg.clone(),
                     ));
                     self.write_out(Ir::JmpCond("e", label));
@@ -225,7 +225,8 @@ impl Compiler {
         self.write_out(Ir::Jmp(label));
     }
     fn init_list(&mut self, type_decl: &NEWTypes, name: &Token, exprs: &[Expr]) {
-        match self.env.get(name.token.get_index()).unwrap().is_global() {
+        let is_global = self.env.get(name.token.get_index()).unwrap().is_global();
+        match is_global {
             true => {
                 self.write_out(Ir::GlobalDeclaration(name.unwrap_string()));
 
@@ -242,7 +243,6 @@ impl Compiler {
                 self.declare_var(type_decl, name);
             }
         }
-        let is_global = self.env.get(name.token.get_index()).unwrap().is_global();
         for e in exprs.iter() {
             match (is_global, &e.kind) {
                 // init-list is assignment syntax sugar
@@ -408,7 +408,7 @@ impl Compiler {
                 self.write_out(Ir::GlobalDeclaration(name.unwrap_string()));
                 self.write_out(Ir::GlobalInit(
                     NEWTypes::Primitive(Types::Void),
-                    Register::Literal(type_decl.size(), NEWTypes::default()),
+                    Register::Literal(type_decl.size() as i64, NEWTypes::default()),
                 ));
                 Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl.clone()))
             }
@@ -528,15 +528,8 @@ impl Compiler {
         self.cg_stmts(statements)
     }
 
-    fn cg_literal(&mut self, num: usize, t: Types) -> Register {
-        Register::Literal(
-            num,
-            NEWTypes::Primitive(match t {
-                Types::Char => Types::Char,
-                _ if i32::try_from(num).is_ok() => Types::Int,
-                _ => Types::Long,
-            }),
-        )
+    fn cg_literal(&mut self, n: i64, type_decl: NEWTypes) -> Register {
+        Register::Literal(n, type_decl)
     }
     pub fn execute_expr(&mut self, ast: &Expr) -> Register {
         match &ast.kind {
@@ -546,8 +539,7 @@ impl Compiler {
 
                 self.cg_binary(left_reg, &token.token, right_reg)
             }
-            ExprKind::Number(v) => self.cg_literal(*v as usize, Types::Int),
-            ExprKind::CharLit(c) => self.cg_literal(*c as usize, Types::Char),
+            ExprKind::Literal(n) => self.cg_literal(*n, ast.type_decl.clone().unwrap()),
             ExprKind::Grouping { expr } => self.execute_expr(expr),
             ExprKind::Unary { token, right, is_global } => {
                 self.cg_unary(token, right, *is_global, ast.type_decl.clone().unwrap())
@@ -593,7 +585,7 @@ impl Compiler {
             }
             ExprKind::Comma { left, right } => self.cg_comma(left, right),
             ExprKind::SizeofExpr { value: Some(value), .. } | ExprKind::SizeofType { value } => {
-                Register::Literal(*value, NEWTypes::Primitive(Types::Long))
+                Register::Literal(*value as i64, NEWTypes::Primitive(Types::Long))
             }
             ExprKind::Nop => Register::Void,
             _ => unreachable!("can only be sizeof but all cases covered"),
@@ -661,7 +653,7 @@ impl Compiler {
             let address = self.cg_address_at(reg, false, free);
             let mut result = if offset != 0 {
                 self.cg_add(
-                    Register::Literal(offset, NEWTypes::Primitive(Types::Int)),
+                    Register::Literal(offset as i64, NEWTypes::Primitive(Types::Int)),
                     address,
                 )
             } else {
@@ -729,7 +721,7 @@ impl Compiler {
             self.write_out(Ir::Mov(reg.clone(), return_reg.clone()));
         }
 
-        let by_amount = Register::Literal(*by_amount, NEWTypes::default());
+        let by_amount = Register::Literal(*by_amount as i64, NEWTypes::default());
         match token.token {
             TokenType::PlusPlus => self.write_out(Ir::Add(by_amount, reg.clone())),
             TokenType::MinusMinus => self.write_out(Ir::Sub(by_amount, reg.clone())),
@@ -749,7 +741,7 @@ impl Compiler {
         // right shift number, equivalent to division (works bc type-size is 2^n)
         self.write_out(Ir::Shift(
             "r",
-            Register::Literal(*by_amount, NEWTypes::default()),
+            Register::Literal(*by_amount as i64, NEWTypes::default()),
             value_reg.clone(),
         ));
 
@@ -759,7 +751,7 @@ impl Compiler {
         let value_reg = self.execute_expr(expr);
 
         self.cg_mult(
-            Register::Literal(*by_amount, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(*by_amount as i64, NEWTypes::Primitive(Types::Int)),
             value_reg,
         )
     }

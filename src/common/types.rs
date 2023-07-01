@@ -120,10 +120,7 @@ impl TypeInfo for NEWTypes {
             NEWTypes::Union(_) => self.union_biggest().size(),
             NEWTypes::Pointer(_) => NEWTypes::Primitive(Types::Long).size(),
             NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).size(),
-            NEWTypes::Array {
-                amount,
-                of: element_type,
-            } => amount * element_type.size(),
+            NEWTypes::Array { amount, of: element_type } => amount * element_type.size(),
         }
     }
     fn reg_suffix(&self) -> String {
@@ -341,6 +338,7 @@ pub enum Types {
 }
 
 impl TypeInfo for Types {
+    // returns type-size in bytes
     fn size(&self) -> usize {
         match self {
             Types::Void => 0,

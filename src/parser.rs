@@ -150,13 +150,15 @@ impl Parser {
         Ok(Stmt::Switch(token, cond, Box::new(body)))
     }
     fn case_statement(&mut self, token: Token) -> Result<Stmt, Error> {
-        // TODO: should allow constant expression when folding is implemented
-        let value = self
-            .consume(
-                TokenKind::Number,
-                "Expect integer-value following case-statement",
-            )?
-            .unwrap_num();
+        let value = match self.var_assignment()?.integer_const_fold().kind {
+            ExprKind::Literal(n) => n,
+            _ => {
+                return Err(Error::new(
+                    &token,
+                    "Case value has to be integer constant expression",
+                ))
+            }
+        };
 
         self.consume(TokenKind::Colon, "Expect ':' following case-statement")?;
 
@@ -315,20 +317,25 @@ impl Parser {
         type_decl
     }
     fn parse_arr(&mut self, type_decl: NEWTypes) -> Result<NEWTypes, Error> {
-        if self.matches(vec![TokenKind::LeftBracket]).is_some() {
-            let size = self.consume(
-                TokenKind::Number,
-                "Expect array-size following array-declaration",
-            )?;
+        if let Some(token) = self.matches(vec![TokenKind::LeftBracket]) {
+            let size = match self.var_assignment()?.integer_const_fold().kind {
+                ExprKind::Literal(n) => n,
+                _ => {
+                    return Err(Error::new(
+                        &token,
+                        "Array size has to be integer constant expression",
+                    ))
+                }
+            };
             self.consume(
                 TokenKind::RightBracket,
                 "Expect closing ']' after array initialization",
             )?;
 
-            if size.unwrap_num() > 0 {
-                Ok(array_of(self.parse_arr(type_decl)?, size.unwrap_num()))
+            if size > 0 {
+                Ok(array_of(self.parse_arr(type_decl)?, size))
             } else {
-                Err(Error::new(&size, "Can't initialize array with size <= 0"))
+                Err(Error::new(&token, "Can't initialize array with size <= 0"))
             }
         } else {
             Ok(type_decl)
@@ -345,19 +352,16 @@ impl Parser {
         }
         while self.matches(vec![TokenKind::RightBrace]).is_none() {
             let ident = self.consume(TokenKind::Ident, "Expect identifier in enum definition")?;
-            if self.matches(vec![TokenKind::Equal]).is_some() {
-                if let Some(n) = self.matches(vec![TokenKind::Number, TokenKind::CharLit]) {
-                    index = match n.token {
-                        TokenType::CharLit(c) => c as i32,
-                        TokenType::Number(n) => n as i32,
-                        _ => {
-                            return Err(Error::new(
-                                &n,
-                                "Can only initialize enums with integer constants",
-                            ))
-                        }
+            if let Some(t) = self.matches(vec![TokenKind::Equal]) {
+                index = match self.var_assignment()?.integer_const_fold().kind {
+                    ExprKind::Literal(n) => n as i32,
+                    _ => {
+                        return Err(Error::new(
+                            &t,
+                            "Enum constant has to be integer constant expression",
+                        ))
                     }
-                }
+                };
             }
             members.push((ident.clone(), index));
 
@@ -367,7 +371,7 @@ impl Parser {
                 Symbols::Variable(SymbolInfo {
                     type_decl: NEWTypes::Primitive(Types::Int),
                     reg: Some(Register::Literal(
-                        index as usize,
+                        index as i64,
                         NEWTypes::Primitive(Types::Int),
                     )),
                     is_global: self.env.is_global(),
@@ -680,12 +684,16 @@ impl Parser {
         } else if let Some(t) = self.matches(vec![TokenKind::LeftBracket]) {
             // parse array-designator {[3] = value}
             if let NEWTypes::Array { of, .. } = type_decl {
-                if let Some(n) = self.matches(vec![TokenKind::Number]) {
-                    let n = n.unwrap_num() as usize * type_element_count(of); // have to offset by type
-                    result.0 = n;
-                } else {
-                    return Err(Error::new(&t, "Expect number as array designator"));
-                }
+                result.0 = match self.var_assignment()?.integer_const_fold().kind {
+                    ExprKind::Literal(n) => n as usize * type_element_count(of),
+                    _ => {
+                        return Err(Error::new(
+                            &t,
+                            "Array designator has to be integer constant expression",
+                        ))
+                    }
+                };
+
                 self.consume(
                     TokenKind::RightBracket,
                     "Expect closing ']' after array designator",
@@ -746,7 +754,7 @@ impl Parser {
                 Some(Ok(s
                     .as_bytes()
                     .iter()
-                    .map(|c| Expr::new(ExprKind::CharLit(*c as i8), ValueKind::Rvalue))
+                    .map(|c| Expr::new_literal(*c as i64, Types::Char))
                     .collect()))
             }
             _ => None,
@@ -911,7 +919,7 @@ impl Parser {
 
         Ok(Stmt::Function(name, body))
     }
-    fn expression(&mut self) -> Result<Expr, Error> {
+    pub fn expression(&mut self) -> Result<Expr, Error> {
         self.comma()
     }
     fn comma(&mut self) -> Result<Expr, Error> {
@@ -1183,7 +1191,7 @@ impl Parser {
                         ExprKind::CompoundAssign {
                             l_expr: Box::new(right),
                             token,
-                            r_expr: Box::new(Expr::new(ExprKind::Number(1), ValueKind::Rvalue)),
+                            r_expr: Box::new(Expr::new_literal(1, Types::Int)),
                         },
                         ValueKind::Rvalue,
                     )
@@ -1216,7 +1224,7 @@ impl Parser {
                             }
                             Err(Error::NotType(_) | Error::UndeclaredType(..)) => {
                                 self.insert_token(t);
-                                let right = self.var_assignment()?;
+                                let right = self.unary()?;
                                 Expr::new(
                                     ExprKind::SizeofExpr { expr: Box::new(right), value: None },
                                     ValueKind::Rvalue,
@@ -1368,25 +1376,34 @@ impl Parser {
     }
     fn primary(&mut self) -> Result<Expr, Error> {
         if let Some(n) = self.matches(vec![TokenKind::Number]) {
-            return Ok(Expr::new(
-                ExprKind::Number(n.unwrap_num()),
-                ValueKind::Rvalue,
+            let n = n.unwrap_num();
+            return Ok(Expr::new_literal(
+                n,
+                if i32::try_from(n).is_ok() {
+                    Types::Int
+                } else {
+                    Types::Long
+                },
             ));
         }
         if let Some(c) = self.matches(vec![TokenKind::CharLit]) {
-            return Ok(Expr::new(
-                ExprKind::CharLit(c.unwrap_char()),
-                ValueKind::Rvalue,
-            ));
+            return Ok(Expr::new_literal(c.unwrap_char() as i64, Types::Char));
         }
         if let Some(mut s) = self.matches(vec![TokenKind::Ident]) {
             // if identifier isn't known in symbol table then error
-            let (_, table_index) = self.env.get_symbol(&s)?;
+            let (symbol, table_index) = self.env.get_symbol(&s)?;
 
             // give the token the position of the symbol in symbol-table
             s.token.update_index(table_index);
 
-            return Ok(Expr::new(ExprKind::Ident(s), ValueKind::Lvalue));
+            return Ok(match symbol {
+                Symbols::Variable(v) => Expr {
+                    kind: ExprKind::Ident(s),
+                    value_kind: ValueKind::Lvalue,
+                    type_decl: Some(v.get_type()),
+                },
+                _ => Expr::new(ExprKind::Ident(s), ValueKind::Lvalue),
+            });
         }
         if let Some(s) = self.matches(vec![TokenKind::String]) {
             return Ok(Expr::new(ExprKind::String(s), ValueKind::Rvalue));
@@ -1620,14 +1637,14 @@ fn list_sugar_assign(
                 index_sugar(
                     token.clone(),
                     left.clone(),
-                    Expr::new(ExprKind::Number(arr_i as i64), ValueKind::Rvalue),
+                    Expr::new_literal(arr_i as i64, Types::Int),
                 ),
             )
             .into_iter()
             .enumerate()
             {
                 let value = if let ExprKind::Nop = list[i + offset].kind.clone() {
-                    Expr::new(ExprKind::Number(0), ValueKind::Rvalue)
+                    Expr::new_literal(0, Types::Int)
                 } else {
                     list[i + offset].clone()
                 };
@@ -1676,7 +1693,7 @@ fn list_sugar_assign(
             .enumerate()
             {
                 let value = if let ExprKind::Nop = list[i + offset].kind.clone() {
-                    Expr::new(ExprKind::Number(0), ValueKind::Rvalue)
+                    Expr::new_literal(0, Types::Int)
                 } else {
                     list[i + offset].clone()
                 };
@@ -1977,61 +1994,63 @@ mod initializer_list_types {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scanner::Scanner;
+
     macro_rules! token_default {
         ($token_type:expr) => {
             Token::new($token_type, 1, 1, "".to_string())
         };
     }
-    macro_rules! tok_vec {
-        ($($token_type:expr),+) => {{
-            let mut v:Vec<Token> = Vec::new();
-            $(v.push(token_default!($token_type));)+
-            v
-        }}
+
+    fn assert_ast(input: &str, expected: &str) {
+        let mut scanner = Scanner::new(input);
+        let tokens = scanner.scan_token().unwrap();
+
+        let mut parser = Parser::new(tokens);
+        let actual = parser.expression().unwrap();
+
+        assert_eq!(actual.kind.to_string(), expected);
     }
     #[test]
-    fn multidimensional_array_size() {
-        let input = NEWTypes::Array {
-            amount: 2,
-            of: Box::new(NEWTypes::Array {
-                amount: 2,
-                of: Box::new(NEWTypes::Primitive(Types::Int)),
-            }),
-        };
-        let actual = type_element_count(&input);
+    fn unary_precedence() {
+        let input = "-2++.some";
+        let expected = "Unary: '-'\n\
+            -MemberAccess: 'some'\n\
+            --PostUnary: '++'\n\
+            ---Literal: 2\n";
 
-        assert_eq!(actual, 4);
+        assert_ast(input, expected);
     }
 
     #[test]
     fn creates_ast_for_expression() {
-        let tokens = tok_vec![
-            TokenType::Number(32),
-            TokenType::Plus,
-            TokenType::Number(1),
-            TokenType::Star,
-            TokenType::Number(2)
-        ];
-        let mut p = Parser::new(tokens);
+        let input = "32 + 1 * 2";
+        let expected = "Binary: '+'\n\
+            -Literal: 32\n\
+            -Binary: '*'\n\
+            --Literal: 1\n\
+            --Literal: 2\n";
 
-        let result = p.expression();
-        let expected = Expr::new(
-            ExprKind::Binary {
-                left: Box::new(Expr::new(ExprKind::Number(32), ValueKind::Rvalue)),
-                token: token_default!(TokenType::Plus),
-                right: Box::new(Expr::new(
-                    ExprKind::Binary {
-                        left: Box::new(Expr::new(ExprKind::Number(1), ValueKind::Rvalue)),
-                        token: token_default!(TokenType::Star),
-                        right: Box::new(Expr::new(ExprKind::Number(2), ValueKind::Rvalue)),
-                    },
-                    ValueKind::Rvalue,
-                )),
-            },
-            ValueKind::Rvalue,
-        );
-        assert_eq!(result.unwrap(), expected);
+        assert_ast(input, expected);
     }
+    #[test]
+    fn nested_groupings() {
+        let input = "(3 / (6 - 7) * 2) + 1";
+        let expected = "Binary: '+'\n\
+            -Grouping:\n\
+            --Binary: '*'\n\
+            ---Binary: '/'\n\
+            ----Literal: 3\n\
+            ----Grouping:\n\
+            -----Binary: '-'\n\
+            ------Literal: 6\n\
+            ------Literal: 7\n\
+            ---Literal: 2\n\
+            -Literal: 1\n";
+
+        assert_ast(input, expected);
+    }
+
     #[test]
     fn matches_works_on_enums_with_values() {
         let tokens = vec![
@@ -2044,75 +2063,18 @@ mod tests {
         let expected = Some(token_default!(TokenType::Number(2)));
         assert_eq!(result, expected);
     }
+
     #[test]
-    fn nested_groupings() {
-        let tokens = tok_vec![
-            TokenType::LeftParen,
-            TokenType::Number(3),
-            TokenType::Slash,
-            TokenType::LeftParen,
-            TokenType::Number(6),
-            TokenType::Minus,
-            TokenType::Number(7),
-            TokenType::RightParen,
-            TokenType::Star,
-            TokenType::Number(2),
-            TokenType::RightParen,
-            TokenType::Plus,
-            TokenType::Number(1)
-        ];
-        let mut p = Parser::new(tokens);
+    fn multidimensional_array_size() {
+        let input = NEWTypes::Array {
+            amount: 2,
+            of: Box::new(NEWTypes::Array {
+                amount: 2,
+                of: Box::new(NEWTypes::Primitive(Types::Int)),
+            }),
+        };
+        let actual = type_element_count(&input);
 
-        let result = p.expression();
-        let expected = Expr::new(
-            ExprKind::Binary {
-                left: Box::new(Expr::new(
-                    ExprKind::Grouping {
-                        expr: Box::new(Expr::new(
-                            ExprKind::Binary {
-                                left: Box::new(Expr::new(
-                                    ExprKind::Binary {
-                                        left: Box::new(Expr::new(
-                                            ExprKind::Number(3),
-                                            ValueKind::Rvalue,
-                                        )),
-                                        token: token_default!(TokenType::Slash),
-                                        right: Box::new(Expr::new(
-                                            ExprKind::Grouping {
-                                                expr: Box::new(Expr::new(
-                                                    ExprKind::Binary {
-                                                        left: Box::new(Expr::new(
-                                                            ExprKind::Number(6),
-                                                            ValueKind::Rvalue,
-                                                        )),
-                                                        token: token_default!(TokenType::Minus),
-                                                        right: Box::new(Expr::new(
-                                                            ExprKind::Number(7),
-                                                            ValueKind::Rvalue,
-                                                        )),
-                                                    },
-                                                    ValueKind::Rvalue,
-                                                )),
-                                            },
-                                            ValueKind::Rvalue,
-                                        )),
-                                    },
-                                    ValueKind::Rvalue,
-                                )),
-                                token: token_default!(TokenType::Star),
-                                right: Box::new(Expr::new(ExprKind::Number(2), ValueKind::Rvalue)),
-                            },
-                            ValueKind::Rvalue,
-                        )),
-                    },
-                    ValueKind::Rvalue,
-                )),
-                token: token_default!(TokenType::Plus),
-                right: Box::new(Expr::new(ExprKind::Number(1), ValueKind::Rvalue)),
-            },
-            ValueKind::Rvalue,
-        );
-
-        assert_eq!(result.unwrap(), expected);
+        assert_eq!(actual, 4);
     }
 }

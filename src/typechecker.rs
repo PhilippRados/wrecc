@@ -621,7 +621,7 @@ impl TypeChecker {
 
             body.push(Stmt::Return(
                 name_token.clone(),
-                Some(Expr::new(ExprKind::Number(0), ValueKind::Rvalue)),
+                Some(Expr::new_literal(0, Types::Int)),
             ));
         }
     }
@@ -670,14 +670,7 @@ impl TypeChecker {
                 self.evaluate_unary(token, right, *is_global)?
             }
             ExprKind::Grouping { expr } => self.evaluate_grouping(expr)?,
-            ExprKind::Number(n) => {
-                if i32::try_from(*n).is_ok() {
-                    NEWTypes::Primitive(Types::Int)
-                } else {
-                    NEWTypes::Primitive(Types::Long)
-                }
-            }
-            ExprKind::CharLit(_) => NEWTypes::Primitive(Types::Char),
+            ExprKind::Literal(_) => ast.type_decl.clone().unwrap(),
             ExprKind::String(token) => self.string(token.unwrap_string())?,
             ExprKind::Logical { left, token, right } => {
                 self.evaluate_logical(left, token, right)?
@@ -1216,10 +1209,7 @@ pub fn create_label(index: &mut usize) -> usize {
 fn is_constant(expr: &Expr) -> bool {
     // 6.6 Constant Expressions
     match &expr.kind {
-        ExprKind::String(_)
-        | ExprKind::Number(_)
-        | ExprKind::CharLit(_)
-        | ExprKind::Cast { .. } => true,
+        ExprKind::String(_) | ExprKind::Literal(_) | ExprKind::Cast { .. } => true,
         // don't have to specify matching array-type because it decays into '&' anyway
         ExprKind::Unary { token, right, .. } if matches!(token.token, TokenType::Amp) => {
             matches!(&right.kind, ExprKind::Ident(_) | ExprKind::String(_))

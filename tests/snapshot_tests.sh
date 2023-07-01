@@ -1,5 +1,8 @@
 #!/bin/bash
 
+PASSED=0
+FAILED=0
+
 function assert_eq {
   if [ $# -eq 3 ]; then
     local snapshot=$1
@@ -13,7 +16,7 @@ function assert_eq {
   $(RUSTFLAGS="-A warnings" cargo r -q --release "$fixture" 2> static_err)
   found_error=$(cat static_err)
   if [[ "$found_error" = "" ]]; then
-    $(gcc-11 generated.s -o tmp1)
+    $(gcc generated.s -o tmp1)
     $(./tmp1 >& tmp)
   else
     $(cat static_err >& tmp)
@@ -22,8 +25,8 @@ function assert_eq {
   error=$(cat err)
 
   if [[ "$result" = "" && "$error" = "" ]];
-    then printf "\x1b[32mPASSED!\x1b[0m $name\n"
-    else printf "\x1b[31mFAILED!\x1b[0m $name\nexpected: '$(cat tests/snapshots/"$snapshot")'\nactual: '$(cat tmp)'\n\n"
+    then printf "\x1b[32mPASSED!\x1b[0m $name\n"; let "PASSED += 1"
+    else printf "\x1b[31mFAILED!\x1b[0m $name\nexpected: '$(cat tests/snapshots/"$snapshot")'\nactual: '$(cat tmp)'\n\n"; let "FAILED += 1"
   fi
 
   if [[ "$found_error" = "" ]]; then
@@ -42,4 +45,5 @@ for file in tests/fixtures/*; do
   fi
 done
 
-#assert_eq "success_simple_comparisons_and_equality" "tests/fixtures/simple_comparisons_and_equality" "siggi"
+# Prints out test-results
+printf "\nTests passed: $PASSED\nTests failed: $FAILED\n"

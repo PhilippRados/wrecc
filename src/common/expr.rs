@@ -1,4 +1,4 @@
-use crate::common::{token::Token, token::TokenType, types::NEWTypes, types::Types};
+use crate::common::{error::*, token::*, types::*};
 use std::fmt;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -114,17 +114,20 @@ impl Expr {
     }
     // https://en.cppreference.com/w/c/language/constant_expression
     pub fn integer_const_fold(self) -> Expr {
-        let fold_value: Result<i64, ExprKind> = match self.kind {
-            ExprKind::Literal(n) => Ok(n),
-            ExprKind::Ident(..) => {
+        match self.kind {
+            ExprKind::Literal(_) => self,
+            ExprKind::Ident(_) => {
                 // if let Some(Enum) = self.type_decl {}
-                Err(self.kind)
+                self
             }
-            ExprKind::Binary { left, token, right } => Self::binary_fold(left, token, right),
+            ExprKind::Binary { left, token, right } => {
+                // TODO: fix passing value_kind and type_decl
+                Self::binary_fold(left, token, right, self.value_kind, self.type_decl)
+            }
             ExprKind::Unary { token, right, is_global } => {
-                Self::unary_fold(token, right, is_global)
+                Self::unary_fold(token, right, is_global, self.value_kind, self.type_decl)
             }
-            ExprKind::Grouping { expr } => Err(expr.integer_const_fold().kind),
+            ExprKind::Grouping { expr } => expr.integer_const_fold(),
             ExprKind::Logical { left, token, right } => {
                 let left_fold = left.integer_const_fold();
                 let right_fold = right.integer_const_fold();
@@ -132,29 +135,35 @@ impl Expr {
                 if let (ExprKind::Literal(left_fold), ExprKind::Literal(right_fold)) =
                     (&left_fold.kind, &right_fold.kind)
                 {
-                    Ok(match token.token {
-                        TokenType::AmpAmp => {
-                            if *left_fold != 0 && *right_fold != 0 {
-                                1
-                            } else {
-                                0
+                    Expr::new_literal(
+                        match token.token {
+                            TokenType::AmpAmp => {
+                                if *left_fold != 0 && *right_fold != 0 {
+                                    1
+                                } else {
+                                    0
+                                }
                             }
-                        }
-                        TokenType::PipePipe => {
-                            if *left_fold != 0 || *right_fold != 0 {
-                                1
-                            } else {
-                                0
+                            TokenType::PipePipe => {
+                                if *left_fold != 0 || *right_fold != 0 {
+                                    1
+                                } else {
+                                    0
+                                }
                             }
-                        }
-                        _ => unreachable!("not logical token"),
-                    })
+                            _ => unreachable!("not logical token"),
+                        },
+                        Types::Int,
+                    )
                 } else {
-                    Err(ExprKind::Logical {
-                        left: Box::new(left_fold),
-                        right: Box::new(right_fold),
-                        token,
-                    })
+                    Expr {
+                        kind: ExprKind::Logical {
+                            left: Box::new(left_fold),
+                            right: Box::new(right_fold),
+                            token,
+                        },
+                        ..self
+                    }
                 }
             }
             ExprKind::Ternary { token, cond, true_expr, false_expr } => {
@@ -163,114 +172,180 @@ impl Expr {
                     true_expr.integer_const_fold(),
                     false_expr.integer_const_fold(),
                 );
-                match cond_fold.kind {
-                    ExprKind::Literal(0) => Err(false_fold.kind),
-                    ExprKind::Literal(_) => Err(true_fold.kind),
-                    _ => Err(ExprKind::Ternary {
-                        token,
-                        cond: Box::new(cond_fold),
-                        true_expr: Box::new(true_fold),
-                        false_expr: Box::new(false_fold),
-                    }),
+                match (&cond_fold.kind, &true_fold.kind, &false_fold.kind) {
+                    (ExprKind::Literal(0), _, ExprKind::Literal(_)) => false_fold,
+                    (ExprKind::Literal(0), ..) => false_fold,
+                    (ExprKind::Literal(_), ExprKind::Literal(_), _) => true_fold,
+                    (ExprKind::Literal(_), ..) => true_fold,
+                    _ => Expr {
+                        kind: ExprKind::Ternary {
+                            token,
+                            cond: Box::new(cond_fold),
+                            true_expr: Box::new(true_fold),
+                            false_expr: Box::new(false_fold),
+                        },
+                        ..self
+                    },
                 }
             }
-            ExprKind::Cast { new_type, direction, token, expr } => {
-                let right_fold = expr.integer_const_fold();
-                Err(ExprKind::Cast {
-                    expr: Box::new(right_fold),
-                    new_type,
-                    direction,
-                    token,
-                })
-            }
-            ExprKind::SizeofType { value } => Ok(value as i64),
+            ExprKind::Cast { new_type, direction, token, expr } => Self::const_cast(
+                token,
+                new_type,
+                direction,
+                expr,
+                self.value_kind,
+                self.type_decl,
+            ),
+            ExprKind::SizeofType { value } => Expr::new_literal(
+                value as i64,
+                if i32::try_from(value).is_ok() {
+                    Types::Int
+                } else {
+                    Types::Long
+                },
+            ),
             ExprKind::Assign { token, l_expr, r_expr } => {
                 let right_fold = r_expr.integer_const_fold();
-                Err(ExprKind::Assign {
-                    r_expr: Box::new(right_fold),
-                    l_expr,
-                    token,
-                })
+                Expr {
+                    kind: ExprKind::Assign {
+                        r_expr: Box::new(right_fold),
+                        l_expr,
+                        token,
+                    },
+                    ..self
+                }
             }
             ExprKind::CompoundAssign { token, l_expr, r_expr } => {
                 let right_fold = r_expr.integer_const_fold();
-                Err(ExprKind::CompoundAssign {
-                    r_expr: Box::new(right_fold),
-                    l_expr,
-                    token,
-                })
+                Expr {
+                    kind: ExprKind::CompoundAssign {
+                        r_expr: Box::new(right_fold),
+                        l_expr,
+                        token,
+                    },
+                    ..self
+                }
             }
             ExprKind::Comma { left, right } => {
                 let left_fold = left.integer_const_fold();
                 let right_fold = right.integer_const_fold();
 
-                Err(ExprKind::Comma {
-                    left: Box::new(left_fold),
-                    right: Box::new(right_fold),
-                })
+                Expr {
+                    kind: ExprKind::Comma {
+                        left: Box::new(left_fold),
+                        right: Box::new(right_fold),
+                    },
+                    ..self
+                }
             }
             ExprKind::Call { .. }
             | ExprKind::String(..)
             | ExprKind::MemberAccess { .. }
             | ExprKind::SizeofExpr { .. }
-            | ExprKind::PostUnary { .. } => Err(self.kind),
+            | ExprKind::PostUnary { .. } => self,
 
             ExprKind::ScaleUp { .. } | ExprKind::ScaleDown { .. } | ExprKind::Nop { .. } => {
                 unreachable!("not found during parsing")
             }
-        };
-        match fold_value {
-            Ok(n) => Expr::new_literal(n, Types::Int),
-            Err(kind) => Expr { kind, ..self },
         }
     }
-    fn binary_fold(left: Box<Expr>, token: Token, right: Box<Expr>) -> Result<i64, ExprKind> {
-        let left_fold = left.integer_const_fold();
-        let right_fold = right.integer_const_fold();
+    fn binary_fold(
+        left: Box<Expr>,
+        token: Token,
+        right: Box<Expr>,
+        value_kind: ValueKind,
+        type_decl: Option<NEWTypes>,
+    ) -> Expr {
+        let (left_fold, right_fold) = (left.integer_const_fold(), right.integer_const_fold());
 
-        if let (ExprKind::Literal(left_fold), ExprKind::Literal(right_fold)) =
+        if let (ExprKind::Literal(left), ExprKind::Literal(right)) =
             (&left_fold.kind, &right_fold.kind)
         {
-            Ok(match token.token {
-                TokenType::Plus => left_fold + right_fold,
-                TokenType::Minus => left_fold - right_fold,
-                TokenType::Star => left_fold * right_fold,
-                TokenType::Slash => left_fold / right_fold,
-                TokenType::Mod => left_fold % right_fold,
+            let (left_type, right_type) =
+                (left_fold.type_decl.unwrap(), right_fold.type_decl.unwrap());
 
-                TokenType::Pipe => left_fold | right_fold,
-                TokenType::Xor => left_fold ^ right_fold,
-                TokenType::Amp => left_fold & right_fold,
+            match token.token {
+                TokenType::Plus => Self::literal_type(left_type, right_type, left + right),
+                TokenType::Minus => Self::literal_type(left_type, right_type, left - right),
+                TokenType::Star => Self::literal_type(left_type, right_type, left * right),
+                TokenType::Slash => Self::literal_type(left_type, right_type, left / right),
+                TokenType::Mod => Self::literal_type(left_type, right_type, left % right),
 
-                TokenType::BangEqual => (left_fold != right_fold).into(),
-                TokenType::EqualEqual => (left_fold == right_fold).into(),
+                TokenType::Pipe => Self::literal_type(left_type, right_type, left | right),
+                TokenType::Xor => Self::literal_type(left_type, right_type, left ^ right),
+                TokenType::Amp => Self::literal_type(left_type, right_type, left & right),
 
-                TokenType::Greater => (left_fold > right_fold).into(),
-                TokenType::GreaterEqual => (left_fold >= right_fold).into(),
-                TokenType::Less => (left_fold < right_fold).into(),
-                TokenType::LessEqual => (left_fold <= right_fold).into(),
+                TokenType::GreaterGreater => {
+                    Self::literal_type(left_type, right_type, left >> right)
+                }
+                TokenType::LessLess => Self::literal_type(left_type, right_type, left << right),
 
-                TokenType::GreaterGreater => left_fold >> right_fold,
-                TokenType::LessLess => left_fold << right_fold,
+                TokenType::BangEqual => Expr::new_literal((left != right).into(), Types::Int),
+                TokenType::EqualEqual => Expr::new_literal((left == right).into(), Types::Int),
+
+                TokenType::Greater => Expr::new_literal((left > right).into(), Types::Int),
+                TokenType::GreaterEqual => Expr::new_literal((left >= right).into(), Types::Int),
+                TokenType::Less => Expr::new_literal((left < right).into(), Types::Int),
+                TokenType::LessEqual => Expr::new_literal((left <= right).into(), Types::Int),
+
                 _ => unreachable!("not binary token"),
-            })
+            }
         } else {
-            Err(ExprKind::Binary {
-                left: Box::new(left_fold),
-                right: Box::new(right_fold),
-                token,
-            })
+            Expr {
+                kind: ExprKind::Binary {
+                    left: Box::new(left_fold),
+                    right: Box::new(right_fold),
+                    token,
+                },
+                value_kind,
+                type_decl,
+            }
         }
     }
-    fn unary_fold(token: Token, right: Box<Expr>, is_global: bool) -> Result<i64, ExprKind> {
+    fn literal_type(left_type: NEWTypes, right_type: NEWTypes, value: i64) -> Expr {
+        let result_type = if left_type.size() > right_type.size() {
+            left_type
+        } else {
+            right_type
+        };
+        let result_type = if result_type.size() < Types::Int.size() {
+            NEWTypes::Primitive(Types::Int)
+        } else {
+            result_type
+        };
+
+        // if result > result_type {
+        //     Err(Error::new(&token, "Result is bigger than type-size"))
+        // } else {
+        Expr {
+            kind: ExprKind::Literal(value),
+            type_decl: Some(result_type),
+            value_kind: ValueKind::Rvalue,
+        }
+        // }
+    }
+
+    fn unary_fold(
+        token: Token,
+        right: Box<Expr>,
+        is_global: bool,
+        value_kind: ValueKind,
+        type_decl: Option<NEWTypes>,
+    ) -> Expr {
         let right_fold = right.integer_const_fold();
 
         match (&right_fold.kind, &token.token) {
             (ExprKind::Literal(right_fold), TokenType::Bang) => {
-                Ok(if *right_fold == 0 { 1 } else { 0 })
+                Expr::new_literal(if *right_fold == 0 { 1 } else { 0 }, Types::Int)
             }
-            (ExprKind::Literal(right_fold), TokenType::Tilde) => Ok((!right_fold).into()),
-            (ExprKind::Literal(right_fold), TokenType::Minus) => Ok(-right_fold),
+            (ExprKind::Literal(right_fold), TokenType::Tilde) => {
+                // todo!("proper type")
+                Expr::new_literal((!right_fold).into(), Types::Int)
+            }
+            (ExprKind::Literal(right_fold), TokenType::Minus) => {
+                // todo!("proper type")
+                Expr::new_literal(-right_fold, Types::Int)
+            }
             (
                 _,
                 TokenType::Star
@@ -280,12 +355,74 @@ impl Expr {
                 | TokenType::Bang
                 | TokenType::Tilde
                 | TokenType::Minus,
-            ) => Err(ExprKind::Unary {
-                token,
-                right: Box::new(right_fold),
-                is_global,
-            }),
+            ) => Expr {
+                kind: ExprKind::Unary {
+                    token,
+                    right: Box::new(right_fold),
+                    is_global,
+                },
+                value_kind,
+                type_decl,
+            },
             _ => unreachable!("not unary token {}", token.token),
+        }
+    }
+    fn const_cast(
+        token: Token,
+        new_type: NEWTypes,
+        direction: Option<CastDirection>,
+        expr: Box<Expr>,
+        value_kind: ValueKind,
+        type_decl: Option<NEWTypes>,
+    ) -> Expr {
+        let right_fold = expr.integer_const_fold();
+        if let ExprKind::Literal(right) = right_fold.kind {
+            let (n, new_type) =
+                Self::valid_cast(token, right_fold.type_decl.unwrap(), new_type, right).unwrap();
+            Expr {
+                kind: ExprKind::Literal(n),
+                type_decl: Some(new_type),
+                value_kind,
+            }
+        } else {
+            Expr {
+                kind: ExprKind::Cast {
+                    expr: Box::new(right_fold),
+                    new_type,
+                    direction,
+                    token,
+                },
+                value_kind,
+                type_decl,
+            }
+        }
+    }
+    fn valid_cast(
+        token: Token,
+        old_type: NEWTypes,
+        new_type: NEWTypes,
+        right_fold: i64,
+    ) -> Result<(i64, NEWTypes), Error> {
+        let result = match (&old_type, &new_type) {
+            (old, new) if !old.is_scalar() || !new.is_scalar() => None,
+            (_, NEWTypes::Primitive(Types::Char)) => Some(right_fold as i8 as i64),
+            (_, NEWTypes::Primitive(Types::Int) | NEWTypes::Enum(..)) => {
+                Some(right_fold as i32 as i64)
+            }
+            (_, NEWTypes::Primitive(Types::Long) | NEWTypes::Pointer(_)) => Some(right_fold),
+            _ => None,
+        };
+
+        if let Some(result) = result {
+            Ok((result, new_type))
+        } else {
+            Err(Error::new(
+                &token,
+                &format!(
+                    "Invalid constant-cast from '{}' to '{}'",
+                    old_type, new_type,
+                ),
+            ))
         }
     }
 }
@@ -444,6 +581,24 @@ mod tests {
     }
 
     #[test]
+    fn comp_fold() {
+        assert_fold("1 == 0", "0");
+        assert_fold("-2 == -2", "1");
+
+        assert_fold("3 != -2", "1");
+        assert_fold("3 != 3", "0");
+
+        assert_fold("3 > -2", "1");
+        assert_fold("3 > 3", "0");
+
+        assert_fold("3 >= -2", "1");
+        assert_fold("3 >= 3", "1");
+
+        assert_fold("'c' <= -2", "0");
+        assert_fold("3 <= -2", "0");
+    }
+
+    #[test]
     fn shift_fold() {
         assert_fold("'1' << 5", "1568");
         assert_fold("'1' >> 2", "12");
@@ -488,6 +643,8 @@ mod tests {
     #[test]
     fn char_fold() {
         assert_fold_type("'1' + '1'", "98", Types::Int);
+        assert_fold("-'1'", "-49");
+        assert_fold("!-'1'", "0");
     }
     #[test]
     fn type_conversions() {
@@ -496,7 +653,9 @@ mod tests {
 
         assert_fold_type("'a'", "'a'", Types::Char);
         assert_fold_type("2147483648", "2147483648", Types::Long);
-        assert_fold_type("-312127389", "-312127389", Types::Int);
+
+        assert_fold_type("-2147483648", "-2147483648", Types::Long);
+        assert_fold_type("-2147483647", "-2147483647", Types::Int);
     }
 
     #[test]
@@ -506,5 +665,13 @@ mod tests {
     }
 
     #[test]
-    fn const_cast() {}
+    fn const_cast() {
+        assert_fold_type("(long)'1' + '1'", "(long)98", Types::Long);
+        assert_fold_type("(char)2147483648", "(char)0", Types::Char);
+        assert_fold_type("(int)2147483648", "-2147483648", Types::Int);
+
+        assert_fold_type("!((long)'1' + '1')", "0", Types::Int);
+
+        // assert_err("(struct {int age})2", Error::IllegalCast)
+    }
 }

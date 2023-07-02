@@ -1123,6 +1123,7 @@ impl TypeChecker {
                     }
 
                     self.maybe_cast(&NEWTypes::Primitive(Types::Int), &right_type, right);
+                    // FIXME: can also return long
                     NEWTypes::Primitive(Types::Int)
                 }
                 _ => unreachable!(), // ++a or --a are evaluated as compound assignment

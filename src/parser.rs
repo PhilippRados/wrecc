@@ -343,7 +343,7 @@ impl Parser {
     }
     fn parse_enum(&mut self, token: &Token) -> Result<Vec<(Token, i32)>, Error> {
         let mut members = Vec::new();
-        let mut index = 0;
+        let mut index: i32 = 0;
         if self.check(TokenKind::RightBrace) {
             return Err(Error::new(
                 token,
@@ -1377,14 +1377,7 @@ impl Parser {
     fn primary(&mut self) -> Result<Expr, Error> {
         if let Some(n) = self.matches(vec![TokenKind::Number]) {
             let n = n.unwrap_num();
-            return Ok(Expr::new_literal(
-                n,
-                if i32::try_from(n).is_ok() {
-                    Types::Int
-                } else {
-                    Types::Long
-                },
-            ));
+            return Ok(Expr::new_literal(n, integer_type(n)));
         }
         if let Some(c) = self.matches(vec![TokenKind::CharLit]) {
             return Ok(Expr::new_literal(c.unwrap_char() as i64, Types::Char));

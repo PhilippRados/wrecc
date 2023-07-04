@@ -1106,25 +1106,33 @@ impl TypeChecker {
                     Self::lval_to_rval(right);
                     self.maybe_cast(&NEWTypes::Primitive(Types::Int), &right_type, right);
 
+                    if !right_type.is_scalar() {
+                        return Err(Error::new(
+                            token,
+                            &format!(
+                                "Invalid unary-expression {} with type '{}'. Must be scalar-type",
+                                token.token, right_type
+                            ),
+                        ));
+                    }
+
                     NEWTypes::Primitive(Types::Int)
                 }
                 TokenType::Minus | TokenType::Tilde => {
                     Self::lval_to_rval(right);
                     self.maybe_int_promote(right, &mut right_type);
 
-                    if matches!(right_type, NEWTypes::Pointer(_)) {
+                    if !right_type.is_integer() {
                         return Err(Error::new(
                             token,
                             &format!(
-                                "Invalid unary-expression '{}' with type '{}'",
+                                "Invalid unary-expression {} with type '{}'. Must be integer-type",
                                 token.token, right_type
                             ),
                         ));
                     }
 
-                    self.maybe_cast(&NEWTypes::Primitive(Types::Int), &right_type, right);
-                    // FIXME: can also return long
-                    NEWTypes::Primitive(Types::Int)
+                    right_type
                 }
                 _ => unreachable!(), // ++a or --a are evaluated as compound assignment
             })

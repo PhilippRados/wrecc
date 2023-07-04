@@ -1,4 +1,4 @@
-use crate::common::token::{Token, TokenKind, TokenType};
+use crate::common::token::*;
 use std::fmt::Display;
 use std::rc::Rc;
 pub use struct_ref::StructRef;
@@ -391,5 +391,13 @@ impl Types {
             Types::Int => "int",
             Types::Long => "long",
         }
+    }
+}
+
+pub fn integer_type(n: i64) -> Types {
+    if i32::try_from(n).is_ok() {
+        Types::Int
+    } else {
+        Types::Long
     }
 }

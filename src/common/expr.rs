@@ -196,14 +196,9 @@ impl Expr {
                 self.value_kind,
                 self.type_decl,
             ),
-            ExprKind::SizeofType { value } => Expr::new_literal(
-                value as i64,
-                if i32::try_from(value).is_ok() {
-                    Types::Int
-                } else {
-                    Types::Long
-                },
-            ),
+            ExprKind::SizeofType { value } => {
+                Expr::new_literal(value as i64, integer_type(value as i64))
+            }
             ExprKind::Assign { token, l_expr, r_expr } => {
                 let right_fold = r_expr.integer_const_fold();
                 Expr {
@@ -314,7 +309,7 @@ impl Expr {
             result_type
         };
 
-        // if result > result_type {
+        // if result > result_type.max() || result < result_type.min() {
         //     Err(Error::new(&token, "Result is bigger than type-size"))
         // } else {
         Expr {
@@ -339,23 +334,14 @@ impl Expr {
                 Expr::new_literal(if *right_fold == 0 { 1 } else { 0 }, Types::Int)
             }
             (ExprKind::Literal(right_fold), TokenType::Tilde) => {
-                // todo!("proper type")
-                Expr::new_literal((!right_fold).into(), Types::Int)
+                let right_fold: i64 = (!right_fold).into();
+                Expr::new_literal(right_fold, integer_type(right_fold))
             }
             (ExprKind::Literal(right_fold), TokenType::Minus) => {
-                // todo!("proper type")
-                Expr::new_literal(-right_fold, Types::Int)
+                let right_fold: i64 = -right_fold;
+                Expr::new_literal(right_fold, integer_type(right_fold))
             }
-            (
-                _,
-                TokenType::Star
-                | TokenType::Amp
-                | TokenType::PlusPlus
-                | TokenType::MinusMinus
-                | TokenType::Bang
-                | TokenType::Tilde
-                | TokenType::Minus,
-            ) => Expr {
+            (..) => Expr {
                 kind: ExprKind::Unary {
                     token,
                     right: Box::new(right_fold),
@@ -364,7 +350,6 @@ impl Expr {
                 value_kind,
                 type_decl,
             },
-            _ => unreachable!("not unary token {}", token.token),
         }
     }
     fn const_cast(
@@ -652,10 +637,12 @@ mod tests {
         assert_fold_type("'1' * 2147483648", "105226698752", Types::Long);
 
         assert_fold_type("'a'", "'a'", Types::Char);
+        assert_fold_type("-'a'", "-'a'", Types::Int);
+
         assert_fold_type("2147483648", "2147483648", Types::Long);
 
-        assert_fold_type("-2147483648", "-2147483648", Types::Long);
-        assert_fold_type("-2147483647", "-2147483647", Types::Int);
+        assert_fold_type("-2147483649", "-2147483649", Types::Long);
+        assert_fold_type("-2147483648", "-2147483648", Types::Int);
     }
 
     #[test]

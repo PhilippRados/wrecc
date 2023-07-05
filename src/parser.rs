@@ -378,7 +378,14 @@ impl Parser {
                 }),
             )?;
 
-            index += 1;
+            if let Some(inc) = index.checked_add(1) {
+                index = inc;
+            } else {
+                return Err(Error::new(
+                    &ident,
+                    "Enum constant overflow. Value has to be in range -2147483648 and 2147483647",
+                ));
+            }
             if !self.check(TokenKind::RightBrace) {
                 self.consume(
                     TokenKind::Comma,

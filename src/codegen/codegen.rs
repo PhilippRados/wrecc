@@ -529,7 +529,20 @@ impl Compiler {
     }
 
     fn cg_literal(&mut self, n: i64, type_decl: NEWTypes) -> Register {
-        Register::Literal(n, type_decl)
+        let literal_reg = Register::Literal(n, type_decl);
+
+        // 64bit literals are only allowed to move to scratch-register
+        if let Types::Long = integer_type(n) {
+            let scratch_reg = Register::Temp(TempRegister::new(
+                literal_reg.get_type(),
+                &mut self.interval_counter,
+                self.instr_counter,
+            ));
+            self.write_out(Ir::Mov(literal_reg, scratch_reg.clone()));
+            scratch_reg
+        } else {
+            literal_reg
+        }
     }
     pub fn execute_expr(&mut self, ast: &Expr) -> Register {
         match &ast.kind {

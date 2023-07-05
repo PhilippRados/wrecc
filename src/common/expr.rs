@@ -129,42 +129,7 @@ impl Expr {
             }
             ExprKind::Grouping { expr } => expr.integer_const_fold(),
             ExprKind::Logical { left, token, right } => {
-                let left_fold = left.integer_const_fold();
-                let right_fold = right.integer_const_fold();
-
-                if let (ExprKind::Literal(left_fold), ExprKind::Literal(right_fold)) =
-                    (&left_fold.kind, &right_fold.kind)
-                {
-                    Expr::new_literal(
-                        match token.token {
-                            TokenType::AmpAmp => {
-                                if *left_fold != 0 && *right_fold != 0 {
-                                    1
-                                } else {
-                                    0
-                                }
-                            }
-                            TokenType::PipePipe => {
-                                if *left_fold != 0 || *right_fold != 0 {
-                                    1
-                                } else {
-                                    0
-                                }
-                            }
-                            _ => unreachable!("not logical token"),
-                        },
-                        Types::Int,
-                    )
-                } else {
-                    Expr {
-                        kind: ExprKind::Logical {
-                            left: Box::new(left_fold),
-                            right: Box::new(right_fold),
-                            token,
-                        },
-                        ..self
-                    }
-                }
+                Self::logical_fold(token, left, right, self.value_kind, self.type_decl)
             }
             ExprKind::Ternary { token, cond, true_expr, false_expr } => {
                 let (cond_fold, true_fold, false_fold) = (
@@ -350,6 +315,59 @@ impl Expr {
                 value_kind,
                 type_decl,
             },
+        }
+    }
+    fn logical_fold(
+        token: Token,
+        left: Box<Expr>,
+        right: Box<Expr>,
+        value_kind: ValueKind,
+        type_decl: Option<NEWTypes>,
+    ) -> Expr {
+        let left_fold = left.integer_const_fold();
+        let right_fold = right.integer_const_fold();
+
+        match token.token {
+            TokenType::AmpAmp => match (&left_fold.kind, &right_fold.kind) {
+                (ExprKind::Literal(0), _) | (_, ExprKind::Literal(0)) => {
+                    Expr::new_literal(0, Types::Int)
+                }
+                (ExprKind::Literal(left), ExprKind::Literal(right))
+                    if *left != 0 && *right != 0 =>
+                {
+                    Expr::new_literal(1, Types::Int)
+                }
+                _ => Expr {
+                    kind: ExprKind::Logical {
+                        left: Box::new(left_fold),
+                        right: Box::new(right_fold),
+                        token,
+                    },
+                    value_kind,
+                    type_decl,
+                },
+            },
+
+            TokenType::PipePipe => match (&left_fold.kind, &right_fold.kind) {
+                (ExprKind::Literal(n), _) | (_, ExprKind::Literal(n)) if *n != 0 => {
+                    Expr::new_literal(1, Types::Int)
+                }
+                (ExprKind::Literal(left), ExprKind::Literal(right))
+                    if *left == 0 && *right == 0 =>
+                {
+                    Expr::new_literal(0, Types::Int)
+                }
+                _ => Expr {
+                    kind: ExprKind::Logical {
+                        left: Box::new(left_fold),
+                        right: Box::new(right_fold),
+                        token,
+                    },
+                    value_kind,
+                    type_decl,
+                },
+            },
+            _ => unreachable!("not logical token"),
         }
     }
     fn const_cast(

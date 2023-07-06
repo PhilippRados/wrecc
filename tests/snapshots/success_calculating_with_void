@@ -1,4 +1,4 @@
-Error: invalid binary expression: 'void' '+' 'int'
+Error: Invalid binary expression: 'void' '+' 'int'
 |
 4   int some = other() + 1;
 |                      ^

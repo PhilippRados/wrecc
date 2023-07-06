@@ -248,10 +248,7 @@ impl<'a> Scanner<'a> {
                         }
                     } else {
                         self.err = true;
-                        errors.push(Error::new_scan_error(
-                            self,
-                            &format!("Unexpected character: {c}").to_string(),
-                        ));
+                        errors.push(Error::new_scan_error(self, ErrorKind::UnexpectedChar(c)));
                         self.column += 1;
                     }
                 }
@@ -278,12 +275,12 @@ impl<'a> Scanner<'a> {
     fn char_lit(&mut self) -> Result<char, Error> {
         let mut char = self.source.next().ok_or(Error::new_scan_error(
             self,
-            "Expected character literal found end of file",
+            ErrorKind::Eof("character literal"),
         ))?;
         if char == '\\' {
             let char_to_escape = self.source.next().ok_or(Error::new_scan_error(
                 self,
-                "Expected character literal found end of file",
+                ErrorKind::Eof("character literal"),
             ))?;
             char = match self.escape_char(char_to_escape) {
                 Ok(c) => c,
@@ -296,15 +293,12 @@ impl<'a> Scanner<'a> {
         if !self.matches('\'') {
             // finish parsing the char so that scanner synchronizes
             self.consume_until('\'');
-            return Err(Error::new_scan_error(
-                self,
-                "Character literal must contain single character enclosed by single quotes ('')",
-            ));
+            return Err(Error::new_scan_error(self, ErrorKind::CharLiteralQuotes));
         }
         if !char.is_ascii() {
             return Err(Error::new_scan_error(
                 self,
-                "Character literal must be valid ascii value",
+                ErrorKind::CharLiteralAscii(char),
             ));
         };
 
@@ -321,7 +315,7 @@ impl<'a> Scanner<'a> {
             '\"' => Ok('\"'),
             _ => Err(Error::new_scan_error(
                 self,
-                &format!("Can't escape character '{}'", char_to_escape),
+                ErrorKind::InvalidEscape(char_to_escape),
             )),
         }
     }
@@ -337,7 +331,7 @@ impl<'a> Scanner<'a> {
             })
             .collect::<String>();
         if last_char != '"' {
-            return Err(Error::new_scan_error(self, "Unterminated string"));
+            return Err(Error::new_scan_error(self, ErrorKind::UnterminatedString));
         }
 
         Ok(result)
@@ -355,14 +349,38 @@ impl<'a> Scanner<'a> {
 mod tests {
     use super::*;
 
+    fn setup_generic(input: &str) -> Vec<Token> {
+        let mut scanner = Scanner::new(input);
+        if let Ok(tokens) = scanner.scan_token() {
+            tokens
+        } else {
+            unreachable!("want to test successfull scan")
+        }
+    }
+    fn setup_generic_err(input: &str) -> Vec<Error> {
+        let mut scanner = Scanner::new(input);
+        if let Err(errs) = scanner.scan_token() {
+            errs
+        } else {
+            unreachable!("want to test errors")
+        }
+    }
+
+    // helper functions when other token-information isn't necessary
+    fn setup(input: &str) -> Vec<TokenType> {
+        setup_generic(input).into_iter().map(|e| e.token).collect()
+    }
+
+    fn setup_err(input: &str) -> Vec<ErrorKind> {
+        setup_generic_err(input)
+            .into_iter()
+            .map(|e| e.kind)
+            .collect()
+    }
+
     #[test]
     fn basic_single_and_double_tokens() {
-        let source = "!= = > == \n\n    ;";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => v,
-            Err(e) => panic!("test"),
-        };
+        let actual = setup_generic("!= = > == \n\n    ;");
         let expected = vec![
             Token::new(TokenType::BangEqual, 1, 1, "!= = > == ".to_string()),
             Token::new(TokenType::Equal, 1, 4, "!= = > == ".to_string()),
@@ -370,16 +388,11 @@ mod tests {
             Token::new(TokenType::EqualEqual, 1, 8, "!= = > == ".to_string()),
             Token::new(TokenType::Semicolon, 3, 5, "    ;".to_string()),
         ];
-        assert_eq!(result, expected);
+        assert_eq!(actual, expected);
     }
     #[test]
     fn ignores_comments() {
-        let source = "// this is a    comment\n\n!this";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => v,
-            Err(e) => panic!("test"),
-        };
+        let actual = setup_generic("// this is a    comment\n\n!this");
         let expected = vec![
             Token::new(TokenType::Bang, 3, 1, "!this".to_string()),
             Token::new(
@@ -389,103 +402,53 @@ mod tests {
                 "!this".to_string(),
             ),
         ];
-        assert_eq!(result, expected);
+        assert_eq!(actual, expected);
     }
     #[test]
     fn token_basic_math_expression() {
-        let source = "3 + 1 / 4";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => v,
-            Err(e) => panic!("test"),
-        };
+        let actual = setup("3 + 1 / 4");
         let expected = vec![
-            Token::new(TokenType::Number(3), 1, 1, "3 + 1 / 4".to_string()),
-            Token::new(TokenType::Plus, 1, 3, "3 + 1 / 4".to_string()),
-            Token::new(TokenType::Number(1), 1, 5, "3 + 1 / 4".to_string()),
-            Token::new(TokenType::Slash, 1, 7, "3 + 1 / 4".to_string()),
-            Token::new(TokenType::Number(4), 1, 9, "3 + 1 / 4".to_string()),
+            TokenType::Number(3),
+            TokenType::Plus,
+            TokenType::Number(1),
+            TokenType::Slash,
+            TokenType::Number(4),
         ];
-        assert_eq!(result, expected);
+        assert_eq!(actual, expected);
     }
     #[test]
     fn basic_math_double_digit_nums() {
-        let source = "300 - 11 * 41";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => v,
-            Err(e) => panic!("test"),
-        };
+        let actual = setup("300 - 11 * 41");
         let expected = vec![
-            Token::new(TokenType::Number(300), 1, 1, "300 - 11 * 41".to_string()),
-            Token::new(TokenType::Minus, 1, 5, "300 - 11 * 41".to_string()),
-            Token::new(TokenType::Number(11), 1, 7, "300 - 11 * 41".to_string()),
-            Token::new(TokenType::Star, 1, 10, "300 - 11 * 41".to_string()),
-            Token::new(TokenType::Number(41), 1, 12, "300 - 11 * 41".to_string()),
+            TokenType::Number(300),
+            TokenType::Minus,
+            TokenType::Number(11),
+            TokenType::Star,
+            TokenType::Number(41),
         ];
-        assert_eq!(result, expected);
+        assert_eq!(actual, expected);
     }
     #[test]
     fn matches_keywords_and_strings() {
-        let source = "int some = \"this is a string\"";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => v,
-            Err(e) => panic!("test"),
-        };
+        let actual = setup("int some = \"this is a string\"");
         let expected = vec![
-            Token::new(
-                TokenType::Int,
-                1,
-                1,
-                "int some = \"this is a string\"".to_string(),
-            ),
-            Token::new(
-                TokenType::Ident("some".to_string(), 0),
-                1,
-                5,
-                "int some = \"this is a string\"".to_string(),
-            ),
-            Token::new(
-                TokenType::Equal,
-                1,
-                10,
-                "int some = \"this is a string\"".to_string(),
-            ),
-            Token::new(
-                TokenType::String("this is a string".to_string()),
-                1,
-                12,
-                "int some = \"this is a string\"".to_string(),
-            ),
+            TokenType::Int,
+            TokenType::Ident("some".to_string(), 0),
+            TokenType::Equal,
+            TokenType::String("this is a string".to_string()),
         ];
-        assert_eq!(result, expected);
+        assert_eq!(actual, expected);
     }
     #[test]
     fn errors_on_unterminated_string() {
-        let source = "int some = \"this is a string";
-        let mut scanner = Scanner::new(source);
+        let actual = setup_err("int some = \"this is a string");
+        let expected = vec![ErrorKind::UnterminatedString];
 
-        let result = match scanner.scan_token() {
-            Ok(v) => panic!(),
-            Err(e) => e,
-        };
-        let expected = vec![Error::Regular(ErrorData {
-            line_index: 1,
-            line_string: "int some = \"this is a string".to_string(),
-            column: 12,
-            msg: "Unterminated string".to_string(),
-        })];
-        assert_eq!(result, expected);
+        assert_eq!(actual, expected);
     }
     #[test]
     fn matches_complex_keywords() {
-        let source = "int some_long;\nwhile (val >= 12) {*p = val}";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => v,
-            Err(e) => panic!("test"),
-        };
+        let actual = setup_generic("int some_long;\nwhile (val >= 12) {*p = val}");
         let expected = vec![
             Token::new(TokenType::Int, 1, 1, "int some_long;".to_string()),
             Token::new(
@@ -568,62 +531,43 @@ mod tests {
                 "while (val >= 12) {*p = val}".to_string(),
             ),
         ];
-        assert_eq!(result, expected);
+        assert_eq!(actual, expected);
     }
     #[test]
     fn detects_single_on_invalid_char() {
-        let source = "int c = 0$";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(_v) => panic!(),
-            Err(e) => e,
-        };
-        let expected = vec![Error::Regular(ErrorData {
-            line_index: 1,
-            column: 10,
-            line_string: "int c = 0$".to_string(),
-            msg: "Unexpected character: $".to_string(),
-        })];
-        assert_eq!(result, expected);
+        let actual = setup_err("int c = 0$");
+        let expected = vec![ErrorKind::UnexpectedChar('$')];
+
+        assert_eq!(actual, expected);
     }
     #[test]
     fn detects_mutliple_on_invalid_chars() {
-        let source = "int c = 0$\n\n‘ ∞";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => panic!(),
-            Err(e) => e,
-        };
+        let actual = setup_generic_err("int c = 0$\n\n‘ ∞");
         let expected = vec![
-            Error::Regular(ErrorData {
+            Error {
                 line_index: 1,
                 column: 10,
                 line_string: "int c = 0$".to_string(),
-                msg: "Unexpected character: $".to_string(),
-            }),
-            Error::Regular(ErrorData {
+                kind: ErrorKind::UnexpectedChar('$'),
+            },
+            Error {
                 line_index: 3,
                 column: 1,
                 line_string: "‘ ∞".to_string(),
-                msg: "Unexpected character: ‘".to_string(),
-            }),
-            Error::Regular(ErrorData {
+                kind: ErrorKind::UnexpectedChar('‘'),
+            },
+            Error {
                 line_index: 3,
                 column: 3,
                 line_string: "‘ ∞".to_string(),
-                msg: "Unexpected character: ∞".to_string(),
-            }),
+                kind: ErrorKind::UnexpectedChar('∞'),
+            },
         ];
-        assert_eq!(result, expected);
+        assert_eq!(actual, expected);
     }
     #[test]
     fn can_handle_non_ascii_alphabet() {
-        let source = "\nint ä = 123";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => v,
-            Err(e) => panic!(),
-        };
+        let actual = setup_generic("\nint ä = 123");
         let expected = vec![
             Token::new(TokenType::Int, 2, 1, "int ä = 123".to_string()),
             Token::new(
@@ -635,82 +579,52 @@ mod tests {
             Token::new(TokenType::Equal, 2, 8, "int ä = 123".to_string()), // ä len is 2 but thats fine because its the same when indexing
             Token::new(TokenType::Number(123), 2, 10, "int ä = 123".to_string()),
         ];
-        assert_eq!(result, expected);
+        assert_eq!(actual, expected);
     }
     #[test]
     fn errors_on_non_ascii_non_letters() {
-        let source = "\nint ä @ = 123";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => panic!(),
-            Err(e) => e,
-        };
-        let expected = vec![Error::Regular(ErrorData {
+        let actual = setup_generic_err("\nint ä @ = 123");
+        let expected = vec![Error {
             line_index: 2,
             column: 8,
             line_string: "int ä @ = 123".to_string(),
-            msg: "Unexpected character: @".to_string(),
-        })];
-        assert_eq!(result, expected);
+            kind: ErrorKind::UnexpectedChar('@'),
+        }];
+        assert_eq!(actual, expected);
     }
     #[test]
     fn char_literal() {
-        let source = "char some = '1'";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => v,
-            Err(e) => panic!(),
-        };
+        let actual = setup("char some = '1'");
         let expected = vec![
-            Token::new(TokenType::Char, 1, 1, "char some = '1'".to_string()),
-            Token::new(
-                TokenType::Ident("some".to_string(), 0),
-                1,
-                6,
-                "char some = '1'".to_string(),
-            ),
-            Token::new(TokenType::Equal, 1, 11, "char some = '1'".to_string()),
-            Token::new(
-                TokenType::CharLit('1' as i8),
-                1,
-                13,
-                "char some = '1'".to_string(),
-            ),
+            TokenType::Char,
+            TokenType::Ident("some".to_string(), 0),
+            TokenType::Equal,
+            TokenType::CharLit('1' as i8),
         ];
-        assert_eq!(result, expected);
+        assert_eq!(actual, expected);
     }
     #[test]
     fn char_literal_len_greater_1() {
-        let source = "char some = '12'";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => panic!(),
-            Err(e) => e,
-        };
-        let expected = vec![Error::Regular(ErrorData {
-            line_index: 1,
-            column: 13,
-            line_string: "char some = '12'".to_string(),
-            msg: "Character literal must contain single character enclosed by single quotes ('')"
-                .to_string(),
-        })];
-        assert_eq!(result, expected);
+        let actual = setup_err("char some = '12'; ''");
+        let expected = vec![ErrorKind::CharLiteralQuotes, ErrorKind::CharLiteralQuotes];
+
+        assert_eq!(actual, expected);
     }
-    #[test]
-    fn char_literal_empty() {
-        let source = "char some = ''";
-        let mut scanner = Scanner::new(source);
-        let result = match scanner.scan_token() {
-            Ok(v) => panic!(),
-            Err(e) => e,
-        };
-        let expected = vec![Error::Regular(ErrorData {
-            line_index: 1,
-            column: 13,
-            line_string: "char some = ''".to_string(),
-            msg: "Character literal must contain single character enclosed by single quotes ('')"
-                .to_string(),
-        })];
-        assert_eq!(result, expected);
-    }
+    // #[test]
+    // fn char_literal_empty() {
+    //     let source = "char some = ''";
+    //     let mut scanner = Scanner::new(source);
+    //     let result = match scanner.scan_token() {
+    //         Ok(v) => panic!(),
+    //         Err(e) => e,
+    //     };
+    //     let expected = vec![Error::Regular(ErrorData {
+    //         line_index: 1,
+    //         column: 13,
+    //         line_string: "char some = ''".to_string(),
+    //         msg: "Character literal must contain single character enclosed by single quotes ('')"
+    //             .to_string(),
+    //     })];
+    //     assert_eq!(result, expected);
+    // }
 }

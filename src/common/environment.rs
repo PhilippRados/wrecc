@@ -42,26 +42,23 @@ impl Function {
         if self.return_type != other.return_type {
             Err(Error::new(
                 token,
-                &format!(
-                    "Conflicting return-types in function-declarations: expected {}, found {}",
-                    self.return_type, other.return_type
+                ErrorKind::MismatchedFuncDeclReturn(
+                    self.return_type.clone(),
+                    other.return_type.clone(),
                 ),
             ))
         } else if self.arity() != other.arity() {
             Err(Error::new(
                 token,
-                &format!(
-                "Mismatched number of parameters in function-declarations: expected {}, found {}",
-                self.arity(),
-                other.arity()
-            ),
+                ErrorKind::MismatchedFuncDeclArity(self.arity(), other.arity()),
             ))
         } else {
             for (i, (types, token)) in self.params.iter().enumerate() {
                 if *types != other.params[i].0 {
-                    return Err(Error::new(token,
-                        &format!("Mismatched parameter-types in function-declarations: expected '{}', found '{}'",
-                            other.params[i].0,types)));
+                    return Err(Error::new(
+                        token,
+                        ErrorKind::TypeMismatchFuncDecl(other.params[i].0.clone(), types.clone()),
+                    ));
                 }
             }
             Ok(())
@@ -201,10 +198,7 @@ impl<T: Clone + std::fmt::Debug> NameSpace<T> {
             }
         }
         // can only be symbol because type throws a special error
-        Err(Error::new(
-            var_name,
-            &format!("Undeclared symbol '{}'", name),
-        ))
+        Err(Error::new(var_name, ErrorKind::UndeclaredSymbol(name)))
     }
 }
 
@@ -251,7 +245,7 @@ impl Scope {
         {
             return Err(Error::new(
                 var_name,
-                &format!("Redefinition of symbol '{}'", name),
+                ErrorKind::Redefinition("symbol", name),
             ));
         }
         self.symbols.declare(name, self.current_depth, symbol)
@@ -266,10 +260,7 @@ impl Scope {
         let name = var_name.unwrap_string();
         match self.tags.contains_key(&name, self.current_depth) {
             Some((.., tag)) if tag.is_complete() => {
-                return Err(Error::new(
-                    var_name,
-                    &format!("Redefinition of type '{}'", name),
-                ))
+                return Err(Error::new(var_name, ErrorKind::Redefinition("type", name)))
             }
             Some((.., index, _)) => return Ok(*index),
             _ => (),
@@ -286,7 +277,10 @@ impl Scope {
         // TODO: convert this better
         match self.tags.get(var_name, self.current_depth) {
             Ok(t) => Ok(t),
-            Err(_) => Err(Error::UndeclaredType(var_name.clone())),
+            Err(_) => Err(Error::new(
+                var_name,
+                ErrorKind::UndeclaredType(var_name.unwrap_string()),
+            )),
         }
     }
     pub fn get_mut_symbol(&mut self, index: usize) -> &mut Symbols {

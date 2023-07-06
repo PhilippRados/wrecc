@@ -53,7 +53,7 @@ impl ScopeLevel {
         if func_symbol.unwrap_func().labels.contains_key(&name) {
             return Err(Error::new(
                 name_token,
-                &format!("Redefinition of label {}", name),
+                ErrorKind::Redefinition("Label", name_token.unwrap_string()),
             ));
         }
         let len = func_symbol.unwrap_func().labels.len();
@@ -77,11 +77,7 @@ impl ScopeLevel {
             if !func_symbol.unwrap_func().labels.contains_key(&label) {
                 return Err(Error::new(
                     g,
-                    &format!(
-                        "No label '{}' in function '{}'",
-                        label,
-                        func_name.unwrap_string()
-                    ),
+                    ErrorKind::MissingLabel(label, func_name.unwrap_string()),
                 ));
             }
         }
@@ -138,9 +134,13 @@ impl TypeChecker {
     fn check_statements(&mut self, statements: &mut Vec<Stmt>) -> Result<(), Error> {
         let mut result = Ok(());
         for s in statements {
-            if let Err(e) = self.visit(s) {
-                e.print_error();
-                result = Err(Error::Indicator);
+            match self.visit(s) {
+                Err(e) if e.is_indicator() => result = Err(e),
+                Err(e) => {
+                    e.print_error();
+                    result = Err(Error::indicator());
+                }
+                _ => (),
             }
         }
 
@@ -192,10 +192,7 @@ impl TypeChecker {
         if !cond_type.is_integer() {
             return Err(Error::new(
                 token,
-                &format!(
-                    "Switch conditional must be integer type, found '{}'",
-                    cond_type,
-                ),
+                ErrorKind::NotInteger("Switch conditional", cond_type),
             ));
         }
         self.scope.0.push(ScopeKind::Switch(vec![]));
@@ -225,17 +222,11 @@ impl TypeChecker {
                 if !labels.contains(&Some(*value)) {
                     labels.push(Some(*value))
                 } else {
-                    return Err(Error::new(
-                        token,
-                        &format!("Duplicate 'case'-statement with value {}", *value),
-                    ));
+                    return Err(Error::new(token, ErrorKind::DuplicateCase(*value)));
                 }
             }
             _ => {
-                return Err(Error::new(
-                    token,
-                    "'case'-statements have to be inside a 'switch'-statement",
-                ));
+                return Err(Error::new(token, ErrorKind::NotIn("case", "switch")));
             }
         }
 
@@ -248,17 +239,11 @@ impl TypeChecker {
                 if !labels.contains(&None) {
                     labels.push(None)
                 } else {
-                    return Err(Error::new(
-                        token,
-                        "Can't have multiple 'default'-statements inside a 'switch'-statement",
-                    ));
+                    return Err(Error::new(token, ErrorKind::MultipleDefaults));
                 }
             }
             _ => {
-                return Err(Error::new(
-                    token,
-                    "'default'-statements have to be inside a 'switch'-statement",
-                ));
+                return Err(Error::new(token, ErrorKind::NotIn("default", "switch")));
             }
         }
         self.visit(body)?;
@@ -278,7 +263,7 @@ impl TypeChecker {
         if !cond_type.is_scalar() {
             return Err(Error::new(
                 token,
-                &format!("Conditional expected scalar type found '{}'", cond_type),
+                ErrorKind::NotScalar("Conditional", cond_type),
             ));
         }
 
@@ -302,7 +287,7 @@ impl TypeChecker {
             if !cond_type.is_scalar() {
                 return Err(Error::new(
                     left_paren,
-                    &format!("Conditional expected scalar type found '{}'", cond_type),
+                    ErrorKind::NotScalar("Conditional", cond_type),
                 ));
             }
         }
@@ -323,7 +308,7 @@ impl TypeChecker {
         if find_scope!(&mut self.scope, ScopeKind::Loop | ScopeKind::Switch(..)).is_none() {
             Err(Error::new(
                 token,
-                "'break' must be inside loop/switch-statement",
+                ErrorKind::NotIn("break", "loop/switch-statement"),
             ))
         } else {
             Ok(())
@@ -331,10 +316,7 @@ impl TypeChecker {
     }
     fn continue_statement(&mut self, token: &Token) -> Result<(), Error> {
         if find_scope!(&mut self.scope, ScopeKind::Loop).is_none() {
-            Err(Error::new(
-                token,
-                "'continue' statement must be inside loop",
-            ))
+            Err(Error::new(token, ErrorKind::NotIn("continue", "loop")))
         } else {
             Ok(())
         }
@@ -350,7 +332,7 @@ impl TypeChecker {
         if !cond_type.is_scalar() {
             return Err(Error::new(
                 left_paren,
-                &format!("Conditional expected scalar type found '{}'", cond_type),
+                ErrorKind::NotScalar("Conditional", cond_type),
             ));
         }
 
@@ -381,7 +363,7 @@ impl TypeChecker {
         if type_decl.is_void() {
             return Err(Error::new(
                 var_name,
-                &format!("Can't assign to 'void' {}", var_name.unwrap_string()),
+                ErrorKind::IllegalVoidDecl(var_name.unwrap_string()),
             ));
         }
 
@@ -405,7 +387,7 @@ impl TypeChecker {
         if left.is_void() || right.is_void() || !left.type_compatible(right) {
             Err(Error::new(
                 token,
-                &format!("Can't assign to type '{}' with type '{}'", left, right),
+                ErrorKind::IllegalAssign(left.clone(), right.clone()),
             ))
         } else {
             Ok(())
@@ -434,7 +416,7 @@ impl TypeChecker {
                     if !is_constant(r_expr) {
                         return Err(Error::new(
                             var_name,
-                            "Global variables can only be initialized to compile-time constants",
+                            ErrorKind::NotConstantInit("Global variables"),
                         ));
                     }
                 } else {
@@ -468,7 +450,7 @@ impl TypeChecker {
             if !is_constant(expr) {
                 return Err(Error::new(
                     var_name,
-                    "Global variables can only be initialized to compile-time constants",
+                    ErrorKind::NotConstantInit("Global variables"),
                 ));
             }
         } else {
@@ -492,16 +474,7 @@ impl TypeChecker {
         if !old_type.is_scalar() || !new_type.is_scalar() {
             return Err(Error::new(
                 token,
-                &format!(
-                    "Invalid cast from '{}' to '{}'. '{}' is not a scalar type",
-                    old_type,
-                    new_type,
-                    if !old_type.is_scalar() {
-                        &old_type
-                    } else {
-                        new_type
-                    }
-                ),
+                ErrorKind::InvalidExplicitCast(old_type, new_type.clone()),
             ));
         }
 
@@ -530,10 +503,7 @@ impl TypeChecker {
         if !cond_type.is_scalar() {
             return Err(Error::new(
                 keyword,
-                &format!(
-                    "Expected scalar type inside of condition, found '{}'",
-                    cond_type
-                ),
+                ErrorKind::NotScalar("Conditional", cond_type),
             ));
         }
 
@@ -595,7 +565,7 @@ impl TypeChecker {
         if !return_type.is_void() && !self.returns_all_paths {
             Err(Error::new(
                 name_token,
-                "Non-void function doesn't return in all code paths",
+                ErrorKind::NoReturnAllPaths(name_token.unwrap_string()),
             ))
         } else {
             self.returns_all_paths = false;
@@ -606,10 +576,7 @@ impl TypeChecker {
         if name_token.unwrap_string() == "main" && *return_type != NEWTypes::Primitive(Types::Int) {
             Err(Error::new(
                 name_token,
-                &format!(
-                    "Expected 'main' return type 'int', found: '{}'",
-                    *return_type
-                ),
+                ErrorKind::InvalidMainReturn(return_type.clone()),
             ))
         } else {
             Ok(())
@@ -736,7 +703,7 @@ impl TypeChecker {
         if !cond_type.is_scalar() {
             return Err(Error::new(
                 token,
-                &format!("Conditional expected scalar type found '{}'", cond_type),
+                ErrorKind::NotScalar("Conditional", cond_type),
             ));
         }
         let mut true_type = self.expr_type(true_expr)?;
@@ -745,10 +712,7 @@ impl TypeChecker {
         if !true_type.type_compatible(&false_type) {
             return Err(Error::new(
                 token,
-                &format!(
-                    "Mismatched operand types in ternary-expression. '{}' and '{}'",
-                    true_type, false_type
-                ),
+                ErrorKind::TypeMismatch(true_type, false_type),
             ));
         }
 
@@ -772,10 +736,7 @@ impl TypeChecker {
             Symbols::Variable(v) => Ok(v.get_type()),
             Symbols::TypeDef(..) | Symbols::Func(..) => Err(Error::new(
                 token,
-                &format!(
-                    "Symbol '{}' doesn't exist as variable",
-                    token.unwrap_string()
-                ),
+                ErrorKind::InvalidSymbol(token.unwrap_string(), "variable"),
             )),
         }
     }
@@ -800,17 +761,11 @@ impl TypeChecker {
                 } else {
                     Err(Error::new(
                         token,
-                        &format!("No member '{}' in '{}'", member, expr_type),
+                        ErrorKind::NonExistantMember(member, expr_type),
                     ))
                 }
             }
-            _ => Err(Error::new(
-                token,
-                &format!(
-                    "Can only access members of structs/unions, not '{}'",
-                    expr_type
-                ),
-            )),
+            _ => Err(Error::new(token, ErrorKind::InvalidMemberAccess(expr_type))),
         }
     }
     fn evaluate_postunary(
@@ -822,12 +777,9 @@ impl TypeChecker {
         let operand = self.expr_type(expr)?;
 
         if matches!(operand, NEWTypes::Array { .. } | NEWTypes::Struct(..)) {
-            return Err(Error::new(
-                token,
-                &format!("Can't increment value of type '{}'", operand),
-            ));
+            return Err(Error::new(token, ErrorKind::InvalidIncrementType(operand)));
         } else if expr.value_kind == ValueKind::Rvalue {
-            return Err(Error::new(token, "Can't increment Rvalues"));
+            return Err(Error::new(token, ErrorKind::InvalidRvalueIncrement));
         }
 
         // scale depending on type-size
@@ -883,14 +835,11 @@ impl TypeChecker {
         mut r_type: NEWTypes,
     ) -> Result<NEWTypes, Error> {
         if matches!(l_type, NEWTypes::Array { .. }) {
-            return Err(Error::new(
-                token,
-                &format!("Array {} is not assignable", l_type),
-            ));
+            return Err(Error::new(token, ErrorKind::NotAssignable(l_type)));
         }
 
         if l_expr.value_kind != ValueKind::Lvalue {
-            return Err(Error::new(token, "Expect Lvalue left of assignment"));
+            return Err(Error::new(token, ErrorKind::NotLvalue));
         }
 
         crate::arr_decay!(r_type, r_expr, token, self.is_global());
@@ -919,10 +868,7 @@ impl TypeChecker {
         match self.env.get(func_name.token.get_index()).unwrap() {
             Symbols::Variable(_) | Symbols::TypeDef(..) => Err(Error::new(
                 left_paren,
-                &format!(
-                    "Symbol '{}' already exists but not as function",
-                    func_name.unwrap_string()
-                ),
+                ErrorKind::InvalidSymbol(func_name.unwrap_string(), "function"),
             )),
             Symbols::Func(function) => {
                 if function.arity() == arg_types.len() {
@@ -931,11 +877,10 @@ impl TypeChecker {
                 } else {
                     Err(Error::new(
                         left_paren,
-                        &format!(
-                            "At '{}': expected {} argument(s) found {}",
+                        ErrorKind::MismatchedArity(
                             func_name.unwrap_string(),
                             function.arity(),
-                            args.len()
+                            args.len(),
                         ),
                     ))
                 }
@@ -1013,10 +958,7 @@ impl TypeChecker {
         if !left_type.is_scalar() || !right_type.is_scalar() {
             return Err(Error::new(
                 token,
-                &format!(
-                    "invalid logical expression: '{}' {} '{}'. Both types need to be scalar",
-                    left_type, token.token, right_type
-                ),
+                ErrorKind::InvalidLogical(token.token.clone(), left_type, right_type),
             ));
         }
 
@@ -1047,10 +989,7 @@ impl TypeChecker {
         if !Self::is_valid_bin(token, &left_type, &right_type) {
             return Err(Error::new(
                 token,
-                &format!(
-                    "invalid binary expression: '{}' {} '{}'",
-                    left_type, token.token, right_type
-                ),
+                ErrorKind::InvalidBinary(token.token.clone(), left_type, right_type),
             ));
         }
 
@@ -1109,10 +1048,7 @@ impl TypeChecker {
                     if !right_type.is_scalar() {
                         return Err(Error::new(
                             token,
-                            &format!(
-                                "Invalid unary-expression {} with type '{}'. Must be scalar-type",
-                                token.token, right_type
-                            ),
+                            ErrorKind::InvalidUnary(token.token.clone(), right_type, "scalar"),
                         ));
                     }
 
@@ -1125,10 +1061,7 @@ impl TypeChecker {
                     if !right_type.is_integer() {
                         return Err(Error::new(
                             token,
-                            &format!(
-                                "Invalid unary-expression {} with type '{}'. Must be integer-type",
-                                token.token, right_type
-                            ),
+                            ErrorKind::InvalidUnary(token.token.clone(), right_type, "integer"),
                         ));
                     }
 
@@ -1148,7 +1081,10 @@ impl TypeChecker {
             Self::lval_to_rval(expr);
             Ok(NEWTypes::Pointer(Box::new(type_decl)))
         } else {
-            Err(Error::new(token, "can't call '&' on r-value"))
+            Err(Error::new(
+                token,
+                ErrorKind::Regular("Can't call '&' on r-value"),
+            ))
         }
     }
     fn check_deref(
@@ -1161,13 +1097,7 @@ impl TypeChecker {
             Self::rval_to_lval(expr);
             Ok(inner)
         } else {
-            Err(Error::new(
-                token,
-                &format!(
-                    "can't dereference value-type '{}', expected type 'pointer'",
-                    type_decl,
-                ),
-            ))
+            Err(Error::new(token, ErrorKind::InvalidDerefType(type_decl)))
         }
     }
     fn evaluate_grouping(&mut self, expr: &mut Expr) -> Result<NEWTypes, Error> {
@@ -1180,17 +1110,11 @@ impl TypeChecker {
         body_return: &NEWTypes,
     ) -> Result<(), Error> {
         if matches!(function_type, NEWTypes::Array { .. }) {
-            Err(Error::new(
-                keyword,
-                "Can't return stack-array from function",
-            ))
+            Err(Error::new(keyword, ErrorKind::InvalidArrayReturn))
         } else if !function_type.type_compatible(body_return) {
             Err(Error::new(
                 keyword,
-                &format!(
-                    "Mismatched function return type: '{}', found: '{}'",
-                    function_type, body_return
-                ),
+                ErrorKind::MismatchedFunctionReturn(function_type.clone(), body_return.clone()),
             ))
         } else {
             Ok(())

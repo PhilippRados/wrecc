@@ -1,4 +1,4 @@
-Error: Non-void function doesn't return in all code paths
+Error: Non-void function 'some' doesn't return in all code paths
 |
 3 int some(char a){
 |     ^

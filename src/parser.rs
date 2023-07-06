@@ -68,10 +68,7 @@ impl Parser {
         match self.matches_type() {
             Ok(t) => {
                 if let Some(left) = self.matches(vec![TokenKind::LeftBracket]) {
-                    return Err(Error::new(
-                        &left,
-                        "Brackets not allowed here; Put them after the Identifier",
-                    ));
+                    return Err(Error::new(&left, ErrorKind::BracketsNotAllowed));
                 }
                 if self.matches(vec![TokenKind::Semicolon]).is_some() {
                     Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue)))
@@ -150,12 +147,12 @@ impl Parser {
         Ok(Stmt::Switch(token, cond, Box::new(body)))
     }
     fn case_statement(&mut self, token: Token) -> Result<Stmt, Error> {
-        let value = match self.var_assignment()?.integer_const_fold().kind {
+        let value = match self.var_assignment()?.integer_const_fold()?.kind {
             ExprKind::Literal(n) => n,
             _ => {
                 return Err(Error::new(
                     &token,
-                    "Case value has to be integer constant expression",
+                    ErrorKind::NotIntegerConstant("Case value"),
                 ))
             }
         };
@@ -208,14 +205,6 @@ impl Parser {
     fn for_statement(&mut self) -> Result<Stmt, Error> {
         let left_paren = self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
 
-        // emulate:
-        // {
-        //     init
-        //     cond {
-        //         body
-        //     }
-        //     inc
-        // }
         self.env.enter();
 
         let init = match self.matches_specifier() {
@@ -265,8 +254,8 @@ impl Parser {
                 break;
             }
             let s = match self.external_declaration() {
-                Err(e @ Error::UndeclaredType(..)) => {
-                    let token = self.tokens.next().ok_or(Error::Eof)?;
+                Err(e @ Error { kind: ErrorKind::UndeclaredType(..), .. }) => {
+                    let token = self.tokens.next().ok_or(Error::eof())?;
                     if let TokenType::Ident(..) = self.peek()?.token {
                         return Err(e);
                     } else {
@@ -274,7 +263,7 @@ impl Parser {
                         self.statement()?
                     }
                 }
-                Err(Error::NotType(..)) => self.statement()?,
+                Err(Error { kind: ErrorKind::NotType(..), .. }) => self.statement()?,
                 Err(e) => return Err(e),
                 Ok(s) => s,
             };
@@ -318,12 +307,12 @@ impl Parser {
     }
     fn parse_arr(&mut self, type_decl: NEWTypes) -> Result<NEWTypes, Error> {
         if let Some(token) = self.matches(vec![TokenKind::LeftBracket]) {
-            let size = match self.var_assignment()?.integer_const_fold().kind {
+            let size = match self.var_assignment()?.integer_const_fold()?.kind {
                 ExprKind::Literal(n) => n,
                 _ => {
                     return Err(Error::new(
                         &token,
-                        "Array size has to be integer constant expression",
+                        ErrorKind::NotIntegerConstant("Array size specifier"),
                     ))
                 }
             };
@@ -335,7 +324,7 @@ impl Parser {
             if size > 0 {
                 Ok(array_of(self.parse_arr(type_decl)?, size))
             } else {
-                Err(Error::new(&token, "Can't initialize array with size <= 0"))
+                Err(Error::new(&token, ErrorKind::NegativeArraySize))
             }
         } else {
             Ok(type_decl)
@@ -345,20 +334,17 @@ impl Parser {
         let mut members = Vec::new();
         let mut index: i32 = 0;
         if self.check(TokenKind::RightBrace) {
-            return Err(Error::new(
-                token,
-                &format!("Can't have empty {}", token.token),
-            ));
+            return Err(Error::new(token, ErrorKind::IsEmpty(token.token.clone())));
         }
         while self.matches(vec![TokenKind::RightBrace]).is_none() {
             let ident = self.consume(TokenKind::Ident, "Expect identifier in enum definition")?;
             if let Some(t) = self.matches(vec![TokenKind::Equal]) {
-                index = match self.var_assignment()?.integer_const_fold().kind {
+                index = match self.var_assignment()?.integer_const_fold()?.kind {
                     ExprKind::Literal(n) => n as i32,
                     _ => {
                         return Err(Error::new(
                             &t,
-                            "Enum constant has to be integer constant expression",
+                            ErrorKind::NotIntegerConstant("Enum constant"),
                         ))
                     }
                 };
@@ -381,10 +367,7 @@ impl Parser {
             if let Some(inc) = index.checked_add(1) {
                 index = inc;
             } else {
-                return Err(Error::new(
-                    &ident,
-                    "Enum constant overflow. Value has to be in range -2147483648 and 2147483647",
-                ));
+                return Err(Error::new(&ident, ErrorKind::EnumOverflow));
             }
             if !self.check(TokenKind::RightBrace) {
                 self.consume(
@@ -398,10 +381,7 @@ impl Parser {
     fn parse_members(&mut self, token: &Token) -> Result<Vec<(NEWTypes, Token)>, Error> {
         let mut members = Vec::new();
         if self.check(TokenKind::RightBrace) {
-            return Err(Error::new(
-                token,
-                &format!("Can't have empty {}", token.token),
-            ));
+            return Err(Error::new(token, ErrorKind::IsEmpty(token.token.clone())));
         }
         while self.matches(vec![TokenKind::RightBrace]).is_none() {
             let member_type = self.matches_type()?;
@@ -413,13 +393,13 @@ impl Parser {
                     NEWTypes::Struct(ref s) | NEWTypes::Union(ref s) if !s.is_complete() => {
                         return Err(Error::new(
                             &name,
-                            &format!("'{}' contains incomplete type", member_specifier),
+                            ErrorKind::IncompleteType(member_specifier),
                         ));
                     }
                     _ if member_specifier.is_void() => {
                         return Err(Error::new(
                             &name,
-                            &format!("'{}' contains incomplete type", member_specifier),
+                            ErrorKind::IncompleteType(member_specifier),
                         ));
                     }
                     _ => (),
@@ -480,10 +460,9 @@ impl Parser {
                         if token.token != *t.get_kind() {
                             return Err(Error::new(
                                 name,
-                                &format!(
-                                    "Type '{}' already exists but not as {}",
+                                ErrorKind::TypeAlreadyExists(
                                     name.unwrap_string(),
-                                    token.token
+                                    token.token.clone(),
                                 ),
                             ));
                         }
@@ -497,7 +476,7 @@ impl Parser {
                                     Tags::Aggregate(StructRef::new(token.clone().token))
                                 }
                                 TokenType::Enum => {
-                                    return Err(Error::new(token, "Can't forward declare enums"))
+                                    return Err(Error::new(token, ErrorKind::EnumForwardDecl));
                                 }
                                 _ => unreachable!(),
                             },
@@ -519,7 +498,7 @@ impl Parser {
             }),
             (None, None) => Err(Error::new(
                 token,
-                &format!("Can't declare anonymous {} without members", token.token),
+                ErrorKind::EmptyAggregate(token.token.clone()),
             )),
         }
     }
@@ -618,7 +597,7 @@ impl Parser {
                 if is_def && other.kind == FunctionKind::Definition {
                     return Err(Error::new(
                         name,
-                        &format!("Redefinition of function '{}'", name.unwrap_string()),
+                        ErrorKind::Redefinition("function", name.unwrap_string()),
                     ));
                 }
 
@@ -635,7 +614,10 @@ impl Parser {
                 }
             }
             Some(..) => {
-                return Err(Error::new(name, "Redefinition of symbol with same name"));
+                return Err(Error::new(
+                    name,
+                    ErrorKind::Redefinition("symbol", name.unwrap_string()),
+                ));
             }
             None => {}
         }
@@ -662,7 +644,7 @@ impl Parser {
                     } else {
                         return Err(Error::new(
                             &ident,
-                            &format!("No member '{}' in '{}'", member, type_decl),
+                            ErrorKind::NonExistantMember(member, type_decl.clone()),
                         ));
                     };
                     result.0 = s
@@ -680,23 +662,28 @@ impl Parser {
                     result.0 += index_inc;
                     result.1 += depth_inc;
                 } else {
-                    return Err(Error::new(&t, "Expect identifier as member designator"));
+                    return Err(Error::new(
+                        &t,
+                        ErrorKind::Regular("Expect identifier as member designator"),
+                    ));
                 }
             } else {
                 return Err(Error::new(
                     &t,
-                    "Can only use member designator on type 'struct' and 'union' not 'array'",
+                    ErrorKind::Regular(
+                        "Can only use member designator on type 'struct' and 'union' not 'array'",
+                    ),
                 ));
             }
         } else if let Some(t) = self.matches(vec![TokenKind::LeftBracket]) {
             // parse array-designator {[3] = value}
             if let NEWTypes::Array { of, .. } = type_decl {
-                result.0 = match self.var_assignment()?.integer_const_fold().kind {
+                result.0 = match self.var_assignment()?.integer_const_fold()?.kind {
                     ExprKind::Literal(n) => n as usize * type_element_count(of),
                     _ => {
                         return Err(Error::new(
                             &t,
-                            "Array designator has to be integer constant expression",
+                            ErrorKind::NotIntegerConstant("Array designator"),
                         ))
                     }
                 };
@@ -717,10 +704,7 @@ impl Parser {
             } else {
                 return Err(Error::new(
                     &t,
-                    &format!(
-                        "Can only use array designator on type 'array' not '{}'",
-                        type_decl
-                    ),
+                    ErrorKind::InvalidArrayDesignator(type_decl.clone()),
                 ));
             }
         }
@@ -745,11 +729,7 @@ impl Parser {
                 if amount < s.len() {
                     return Some(Err(Error::new(
                         &token,
-                        &format!(
-                            "Initializer-string is too long. Expected: {}, Actual: {}",
-                            amount,
-                            s.len()
-                        ),
+                        ErrorKind::TooLong("Initializer-string", amount, s.len()),
                     )));
                 }
                 let mut diff = amount - s.len();
@@ -780,10 +760,7 @@ impl Parser {
             ElementType::Single(s) => {
                 return Err(Error::new(
                     &token,
-                    &format!(
-                        "Can't initialize non-aggregate type '{}' with '{}'",
-                        type_decl, s
-                    ),
+                    ErrorKind::NonAggregateInitializer(type_decl.clone(), s),
                 ))
             }
         };
@@ -807,10 +784,7 @@ impl Parser {
             {
                 return Err(Error::new(
                     &token,
-                    &format!(
-                        "Initializer overflow. Expected size: {}, Actual size: {}",
-                        expected, actual
-                    ),
+                    ErrorKind::InitializerOverflow(expected, actual),
                 ));
             }
             // this is really verbose but i have to check for a valid index beforehand
@@ -891,15 +865,18 @@ impl Parser {
         return_type: NEWTypes,
         mut name: Token,
     ) -> Result<DeclarationKind, Error> {
-        if matches!(return_type, NEWTypes::Array { .. }) {
-            return Err(Error::new(&name, "Functions can't return array-type"));
-        }
+        // if matches!(return_type, NEWTypes::Array { .. }) {
+        //     return Err(Error::new(
+        //         &name,
+        //         ErrorKind::Regular("Functions can't return array-type"),
+        //     ));
+        // }
 
         // TODO: function declarations CAN be declared in non-global scope
         if !self.env.is_global() {
             return Err(Error::new(
                 &name,
-                "Can only define functions in global scope",
+                ErrorKind::Regular("Can only define functions in global scope"),
             ));
         }
         let existing = self.env.get_symbol(&name).ok();
@@ -1207,7 +1184,10 @@ impl Parser {
                 // have to check whether expression or type inside of parentheses
                 TokenType::LeftParen => match self.matches_specifier() {
                     Ok(type_decl) => self.typecast(token, type_decl)?,
-                    Err(Error::NotType(_) | Error::UndeclaredType(..)) => {
+                    Err(Error {
+                        kind: ErrorKind::NotType(_) | ErrorKind::UndeclaredType(..),
+                        ..
+                    }) => {
                         self.insert_token(token);
 
                         return self.postfix();
@@ -1229,7 +1209,10 @@ impl Parser {
                                     ValueKind::Rvalue,
                                 )
                             }
-                            Err(Error::NotType(_) | Error::UndeclaredType(..)) => {
+                            Err(Error {
+                                kind: ErrorKind::NotType(_) | ErrorKind::UndeclaredType(..),
+                                ..
+                            }) => {
                                 self.insert_token(t);
                                 let right = self.unary()?;
                                 Expr::new(
@@ -1320,7 +1303,7 @@ impl Parser {
                     } else {
                         return Err(Error::new(
                             &token,
-                            "A member access must be followed by an identifer",
+                            ErrorKind::Regular("A member access must be followed by an identifer"),
                         ));
                     }
                 }
@@ -1352,7 +1335,7 @@ impl Parser {
             if !type_decl.is_complete() {
                 return Err(Error::new(
                     token,
-                    &format!("Can't access members of incomplete type '{}'", type_decl),
+                    ErrorKind::IncompleteMemberAccess(type_decl),
                 ));
             }
         }
@@ -1377,7 +1360,7 @@ impl Parser {
         } else {
             Err(Error::new(
                 &left_paren,
-                "Function-name has to be identifier",
+                ErrorKind::Regular("Function-name has to be identifier"),
             ))
         }
     }
@@ -1420,19 +1403,19 @@ impl Parser {
         let t = self.peek()?;
         Err(Error::new(
             t,
-            &format!("Expected expression found: {}", t.token),
+            ErrorKind::ExpectedExpression(t.token.clone()),
         ))
     }
-    fn consume(&mut self, token: TokenKind, msg: &str) -> Result<Token, Error> {
+    fn consume(&mut self, token: TokenKind, msg: &'static str) -> Result<Token, Error> {
         match self.tokens.next() {
             Some(v) => {
                 if TokenKind::from(&v.token) != token {
-                    Err(Error::new(&v, msg))
+                    Err(Error::new(&v, ErrorKind::Regular(msg)))
                 } else {
                     Ok(v)
                 }
             }
-            None => Err(Error::Eof),
+            None => Err(Error::eof()),
         }
     }
     fn check(&mut self, expected: TokenKind) -> bool {
@@ -1445,7 +1428,7 @@ impl Parser {
     fn peek(&mut self) -> Result<&Token, Error> {
         match self.tokens.peek() {
             Some(t) => Ok(t),
-            None => Err(Error::Eof),
+            None => Err(Error::eof()),
         }
     }
     fn matches(&mut self, expected: Vec<TokenKind>) -> Option<Token> {
@@ -1463,7 +1446,7 @@ impl Parser {
         match self.peek() {
             Ok(v) => {
                 if !v.is_type() && !matches!(v.token, TokenType::Ident(..)) {
-                    return Err(Error::NotType(v.clone()));
+                    return Err(Error::new(v, ErrorKind::NotType(v.token.clone())));
                 }
                 let v = v.clone();
                 let type_decl = match v.token {
@@ -1480,7 +1463,7 @@ impl Parser {
                             self.tokens.next();
                             t
                         } else {
-                            return Err(Error::NotType(v.clone()));
+                            return Err(Error::new(&v, ErrorKind::NotType(v.token.clone())));
                         }
                     }
                     // otherwise parse primitive
@@ -1532,7 +1515,7 @@ fn check_duplicate(vec: &Vec<(NEWTypes, Token)>) -> Result<(), Error> {
         if !set.insert(token.unwrap_string()) {
             return Err(Error::new(
                 token,
-                &format!("Duplicate member '{}'", token.unwrap_string()),
+                ErrorKind::DuplicateMember(token.unwrap_string()),
             ));
         }
     }

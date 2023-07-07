@@ -610,21 +610,4 @@ mod tests {
 
         assert_eq!(actual, expected);
     }
-    // #[test]
-    // fn char_literal_empty() {
-    //     let source = "char some = ''";
-    //     let mut scanner = Scanner::new(source);
-    //     let result = match scanner.scan_token() {
-    //         Ok(v) => panic!(),
-    //         Err(e) => e,
-    //     };
-    //     let expected = vec![Error::Regular(ErrorData {
-    //         line_index: 1,
-    //         column: 13,
-    //         line_string: "char some = ''".to_string(),
-    //         msg: "Character literal must contain single character enclosed by single quotes ('')"
-    //             .to_string(),
-    //     })];
-    //     assert_eq!(result, expected);
-    // }
 }

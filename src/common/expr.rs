@@ -269,6 +269,11 @@ impl Expr {
         right: i64,
         token: Token,
     ) -> Result<Expr, Error> {
+        let left_type = if left_type.size() < Types::Int.size() {
+            NEWTypes::Primitive(Types::Int)
+        } else {
+            left_type
+        };
         if right < 0 {
             return Err(Error::new(&token, ErrorKind::NegativeShift));
         } else if (left_type.size() as i64 * 8i64) <= right {
@@ -279,8 +284,12 @@ impl Expr {
             TokenType::LessLess => left << right,
             _ => unreachable!("not shift operation"),
         };
-        // result type should be that of left operand
-        Ok(Self::literal_type(left_type, right_type, operation))
+        // result type is only dependant on left operand
+        Ok(Expr {
+            kind: ExprKind::Literal(operation),
+            type_decl: Some(left_type),
+            value_kind: ValueKind::Rvalue,
+        })
     }
     fn div_fold(
         left_type: NEWTypes,
@@ -655,10 +664,10 @@ mod tests {
         assert_fold("'1' >> 2", "12");
 
         assert_fold_type("1 << (long)12", "4096", Types::Int);
-        assert_fold_type("(long)1 << (char)12", "4096", Types::Long);
-        assert_fold_type("'1' << 12", "4096", Types::Int);
+        assert_fold_type("(long)1 << (char)12", "(long)4096", Types::Long);
+        assert_fold_type("'1' << 12", "200704", Types::Int);
 
-        assert_fold_type("(long)-5 >> 42", "-1", Types::Long);
+        assert_fold_type("(long)-5 >> 42", "(long)-1", Types::Long);
         assert_fold_type("(long)-5 << 42", "-21990232555520", Types::Long);
     }
     #[test]

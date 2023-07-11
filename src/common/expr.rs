@@ -233,7 +233,7 @@ impl Expr {
                     return Self::div_fold(left_type, right_type, *left, *right, token);
                 }
                 TokenType::GreaterGreater | TokenType::LessLess => {
-                    return Self::shift_fold(left_type, right_type, *left, *right, token);
+                    return Self::shift_fold(left_type, *left, *right, token);
                 }
 
                 TokenType::Pipe => Self::literal_type(left_type, right_type, left | right),
@@ -262,13 +262,7 @@ impl Expr {
             })
         }
     }
-    fn shift_fold(
-        left_type: NEWTypes,
-        right_type: NEWTypes,
-        left: i64,
-        right: i64,
-        token: Token,
-    ) -> Result<Expr, Error> {
+    fn shift_fold(left_type: NEWTypes, left: i64, right: i64, token: Token) -> Result<Expr, Error> {
         let left_type = if left_type.size() < Types::Int.size() {
             NEWTypes::Primitive(Types::Int)
         } else {
@@ -604,8 +598,12 @@ mod tests {
                                                             panic!("should error on error test");
                                                         };
 
-            let result = matches!(actual_fold.kind, $expected_err);
-            assert!(result);
+            assert!(
+                matches!(actual_fold.kind, $expected_err),
+                "expected: {}, found: {:?}",
+                stringify!($expected_err),
+                actual_fold
+            );
         };
     }
 

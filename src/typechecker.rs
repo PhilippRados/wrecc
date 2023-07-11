@@ -619,6 +619,7 @@ impl TypeChecker {
     pub fn expr_type(&mut self, ast: &mut Expr) -> Result<NEWTypes, Error> {
         ast.type_decl = Some(match &mut ast.kind {
             ExprKind::Binary { left, token, right } => {
+                // TODO: clean this up
                 match self.evaluate_binary(left, token, right)? {
                     (result_type, None) => result_type,
                     // if pointer 'op' primitive, scale primitive before operation
@@ -999,21 +1000,39 @@ impl TypeChecker {
         // scale index when pointer arithmetic
         Self::maybe_scale(&left_type, &right_type, left, right);
 
-        // type promote to bigger type
+        Ok(Self::binary_type_promotion(
+            &token.token,
+            left_type,
+            right_type,
+            left,
+            right,
+        ))
+    }
+    fn binary_type_promotion(
+        token: &TokenType,
+        left_type: NEWTypes,
+        right_type: NEWTypes,
+        left: &mut Expr,
+        right: &mut Expr,
+    ) -> (NEWTypes, Option<usize>) {
+        // resulting type of a shift operation is only dependant on left type
+        if matches!(token, TokenType::GreaterGreater | TokenType::LessLess) {
+            return (left_type, None);
+        }
         match left_type.size().cmp(&right_type.size()) {
             Ordering::Greater => {
                 cast!(right, left_type.clone(), CastDirection::Up);
-                Ok((left_type, None))
+                (left_type, None)
             }
             Ordering::Less => {
                 cast!(left, right_type.clone(), CastDirection::Up);
-                Ok((right_type, None))
+                (right_type, None)
             }
             Ordering::Equal => match (&left_type, &right_type) {
                 (NEWTypes::Pointer(inner), NEWTypes::Pointer(_)) => {
-                    Ok((NEWTypes::Primitive(Types::Long), Some(inner.size())))
+                    (NEWTypes::Primitive(Types::Long), Some(inner.size()))
                 }
-                _ => Ok((left_type, None)),
+                _ => (left_type, None),
             },
         }
     }
@@ -1164,6 +1183,60 @@ fn log_2(x: i32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::Parser;
+    use crate::scanner::Scanner;
+
+    macro_rules! assert_type {
+        ($input:expr,$expected_type:pat) => {
+            let mut scanner = Scanner::new($input);
+            let tokens = scanner.scan_token().unwrap();
+
+            let mut parser = Parser::new(tokens);
+            let mut expr = parser.expression().unwrap();
+
+            let mut typechecker = TypeChecker::new(vec![]);
+            let actual = typechecker.expr_type(&mut expr).unwrap();
+
+            assert!(
+                matches!(actual, $expected_type),
+                "actual: {:?}, expected: {}",
+                actual,
+                stringify!($expected_type),
+            );
+        };
+    }
+
+    macro_rules! assert_type_err {
+        ($input:expr,$expected_err:pat) => {
+            let mut scanner = Scanner::new($input);
+            let tokens = scanner.scan_token().unwrap();
+
+            let mut parser = Parser::new(tokens);
+            let mut expr = parser.expression().unwrap();
+
+            let mut typechecker = TypeChecker::new(vec![]);
+            let actual = typechecker.expr_type(&mut expr).unwrap_err();
+
+            assert!(
+                matches!(actual, $expected_err),
+                "actual: {:?}, expected: {}",
+                actual,
+                stringify!($expected_err),
+            );
+        };
+    }
+
+    #[test]
+    fn binary_integer_promotion() {
+        assert_type!("'1' + '2'", NEWTypes::Primitive(Types::Int));
+    }
+
+    #[test]
+    fn shift_type() {
+        assert_type!("1 << (long)2", NEWTypes::Primitive(Types::Int));
+        assert_type!("(long)1 << (char)2", NEWTypes::Primitive(Types::Long));
+        assert_type!("'1' << (char)2", NEWTypes::Primitive(Types::Int));
+    }
 
     #[test]
     fn alignes_stack1() {

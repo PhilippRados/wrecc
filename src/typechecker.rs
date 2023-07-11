@@ -619,18 +619,9 @@ impl TypeChecker {
     pub fn expr_type(&mut self, ast: &mut Expr) -> Result<NEWTypes, Error> {
         ast.type_decl = Some(match &mut ast.kind {
             ExprKind::Binary { left, token, right } => {
-                // TODO: clean this up
-                match self.evaluate_binary(left, token, right)? {
-                    (result_type, None) => result_type,
-                    // if pointer 'op' primitive, scale primitive before operation
-                    (result_type, Some(scale_size)) => {
-                        ast.kind = ExprKind::ScaleDown {
-                            shift_amount: log_2(scale_size as i32),
-                            expr: Box::new(ast.clone()),
-                        };
-                        result_type
-                    }
-                }
+                let (type_decl, scale_factor) = self.evaluate_binary(left, token, right)?;
+                Self::maybe_scale_result(scale_factor, ast);
+                type_decl
             }
             ExprKind::Unary { token, right, is_global } => {
                 *is_global = self.is_global();
@@ -1028,12 +1019,21 @@ impl TypeChecker {
                 cast!(left, right_type.clone(), CastDirection::Up);
                 (right_type, None)
             }
+            // if pointer 'op' pointer, scale result before operation to match left-pointers type
             Ordering::Equal => match (&left_type, &right_type) {
                 (NEWTypes::Pointer(inner), NEWTypes::Pointer(_)) => {
                     (NEWTypes::Primitive(Types::Long), Some(inner.size()))
                 }
                 _ => (left_type, None),
             },
+        }
+    }
+    fn maybe_scale_result(scale_factor: Option<usize>, ast: &mut Expr) {
+        if let Some(scale_factor) = scale_factor {
+            ast.kind = ExprKind::ScaleDown {
+                shift_amount: log_2(scale_factor as i32),
+                expr: Box::new(ast.clone()),
+            };
         }
     }
     fn maybe_int_promote(&self, expr: &mut Expr, type_decl: &mut NEWTypes) {

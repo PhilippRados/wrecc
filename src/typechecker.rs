@@ -1010,22 +1010,20 @@ impl TypeChecker {
         if matches!(token, TokenType::GreaterGreater | TokenType::LessLess) {
             return (left_type, None);
         }
-        match left_type.size().cmp(&right_type.size()) {
-            Ordering::Greater => {
+        match (&left_type, &right_type) {
+            (l, r) if l.size() > r.size() => {
                 cast!(right, left_type.clone(), CastDirection::Up);
                 (left_type, None)
             }
-            Ordering::Less => {
+            (l, r) if l.size() < r.size() => {
                 cast!(left, right_type.clone(), CastDirection::Up);
                 (right_type, None)
             }
             // if pointer 'op' pointer, scale result before operation to match left-pointers type
-            Ordering::Equal => match (&left_type, &right_type) {
-                (NEWTypes::Pointer(inner), NEWTypes::Pointer(_)) => {
-                    (NEWTypes::Primitive(Types::Long), Some(inner.size()))
-                }
-                _ => (left_type, None),
-            },
+            (NEWTypes::Pointer(inner), NEWTypes::Pointer(_)) => {
+                (NEWTypes::Primitive(Types::Long), Some(inner.size()))
+            }
+            _ => (left_type, None),
         }
     }
     fn maybe_scale_result(scale_factor: Option<usize>, ast: &mut Expr) {

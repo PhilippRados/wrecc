@@ -225,31 +225,54 @@ impl Expr {
             let (left_type, right_type) =
                 (left_fold.type_decl.unwrap(), right_fold.type_decl.unwrap());
 
-            Ok(match token.token {
-                TokenType::Plus => Self::literal_type(left_type, right_type, left + right),
-                TokenType::Minus => Self::literal_type(left_type, right_type, left - right),
-                TokenType::Star => Self::literal_type(left_type, right_type, left * right),
+            match token.token {
+                TokenType::Plus => Self::literal_type(
+                    token,
+                    left_type,
+                    right_type,
+                    i64::overflowing_add(*left, *right),
+                ),
+                TokenType::Minus => Self::literal_type(
+                    token,
+                    left_type,
+                    right_type,
+                    i64::overflowing_sub(*left, *right),
+                ),
+                TokenType::Star => Self::literal_type(
+                    token,
+                    left_type,
+                    right_type,
+                    i64::overflowing_mul(*left, *right),
+                ),
                 TokenType::Slash | TokenType::Mod => {
-                    return Self::div_fold(left_type, right_type, *left, *right, token);
+                    Self::div_fold(token, left_type, right_type, *left, *right)
                 }
                 TokenType::GreaterGreater | TokenType::LessLess => {
-                    return Self::shift_fold(left_type, *left, *right, token);
+                    Self::shift_fold(token, left_type, *left, *right)
                 }
 
-                TokenType::Pipe => Self::literal_type(left_type, right_type, left | right),
-                TokenType::Xor => Self::literal_type(left_type, right_type, left ^ right),
-                TokenType::Amp => Self::literal_type(left_type, right_type, left & right),
+                TokenType::Pipe => {
+                    Self::literal_type(token, left_type, right_type, (left | right, false))
+                }
+                TokenType::Xor => {
+                    Self::literal_type(token, left_type, right_type, (left ^ right, false))
+                }
+                TokenType::Amp => {
+                    Self::literal_type(token, left_type, right_type, (left & right, false))
+                }
 
-                TokenType::BangEqual => Expr::new_literal((left != right).into(), Types::Int),
-                TokenType::EqualEqual => Expr::new_literal((left == right).into(), Types::Int),
+                TokenType::BangEqual => Ok(Expr::new_literal((left != right).into(), Types::Int)),
+                TokenType::EqualEqual => Ok(Expr::new_literal((left == right).into(), Types::Int)),
 
-                TokenType::Greater => Expr::new_literal((left > right).into(), Types::Int),
-                TokenType::GreaterEqual => Expr::new_literal((left >= right).into(), Types::Int),
-                TokenType::Less => Expr::new_literal((left < right).into(), Types::Int),
-                TokenType::LessEqual => Expr::new_literal((left <= right).into(), Types::Int),
+                TokenType::Greater => Ok(Expr::new_literal((left > right).into(), Types::Int)),
+                TokenType::GreaterEqual => {
+                    Ok(Expr::new_literal((left >= right).into(), Types::Int))
+                }
+                TokenType::Less => Ok(Expr::new_literal((left < right).into(), Types::Int)),
+                TokenType::LessEqual => Ok(Expr::new_literal((left <= right).into(), Types::Int)),
 
                 _ => unreachable!("not binary token"),
-            })
+            }
         } else {
             Ok(Expr {
                 kind: ExprKind::Binary {
@@ -262,7 +285,8 @@ impl Expr {
             })
         }
     }
-    fn shift_fold(left_type: NEWTypes, left: i64, right: i64, token: Token) -> Result<Expr, Error> {
+    fn shift_fold(token: Token, left_type: NEWTypes, left: i64, right: i64) -> Result<Expr, Error> {
+        // result type is only dependant on left operand
         let left_type = if left_type.size() < Types::Int.size() {
             NEWTypes::Primitive(Types::Int)
         } else {
@@ -270,40 +294,48 @@ impl Expr {
         };
         if right < 0 {
             return Err(Error::new(&token, ErrorKind::NegativeShift));
-        } else if (left_type.size() as i64 * 8i64) <= right {
-            return Err(Error::new(&token, ErrorKind::ShiftTooBig(left_type, right)));
         }
-        let operation = match token.token {
-            TokenType::GreaterGreater => left >> right,
-            TokenType::LessLess => left << right,
+
+        let (value, overflow) = match token.token {
+            TokenType::GreaterGreater => i64::overflowing_shr(left, right as u32),
+            TokenType::LessLess => i64::overflowing_shl(left, right as u32),
             _ => unreachable!("not shift operation"),
         };
-        // result type is only dependant on left operand
-        Ok(Expr {
-            kind: ExprKind::Literal(operation),
-            type_decl: Some(left_type),
-            value_kind: ValueKind::Rvalue,
-        })
+
+        if overflow || Self::type_overflow(value, &left_type) {
+            Err(Error::new(&token, ErrorKind::IntegerOverflow(left_type)))
+        } else {
+            Ok(Expr {
+                kind: ExprKind::Literal(value),
+                type_decl: Some(left_type),
+                value_kind: ValueKind::Rvalue,
+            })
+        }
     }
     fn div_fold(
+        token: Token,
         left_type: NEWTypes,
         right_type: NEWTypes,
         left: i64,
         right: i64,
-        token: Token,
     ) -> Result<Expr, Error> {
         if right == 0 {
             return Err(Error::new(&token, ErrorKind::DivideByZero));
         }
 
         let operation = match token.token {
-            TokenType::Slash => left / right,
-            TokenType::Mod => left % right,
+            TokenType::Slash => i64::overflowing_div(left, right),
+            TokenType::Mod => i64::overflowing_rem(left, right),
             _ => unreachable!("not shift operation"),
         };
-        Ok(Self::literal_type(left_type, right_type, operation))
+        Self::literal_type(token, left_type, right_type, operation)
     }
-    fn literal_type(left_type: NEWTypes, right_type: NEWTypes, value: i64) -> Expr {
+    fn literal_type(
+        token: Token,
+        left_type: NEWTypes,
+        right_type: NEWTypes,
+        value: (i64, bool),
+    ) -> Result<Expr, Error> {
         let result_type = if left_type.size() > right_type.size() {
             left_type
         } else {
@@ -315,15 +347,20 @@ impl Expr {
             result_type
         };
 
-        // if result > result_type.max() || result < result_type.min() {
-        //     Err(Error::new(&token, "Result is bigger than type-size"))
-        // } else {
-        Expr {
-            kind: ExprKind::Literal(value),
-            type_decl: Some(result_type),
-            value_kind: ValueKind::Rvalue,
+        // calculation can overflow or type from literal can overflow
+        if value.1 || Self::type_overflow(value.0, &result_type) {
+            Err(Error::new(&token, ErrorKind::IntegerOverflow(result_type)))
+        } else {
+            Ok(Expr {
+                kind: ExprKind::Literal(value.0),
+                type_decl: Some(result_type),
+                value_kind: ValueKind::Rvalue,
+            })
         }
-        // }
+    }
+    fn type_overflow(value: i64, type_decl: &NEWTypes) -> bool {
+        let primitive_type = type_decl.get_primitive().unwrap();
+        (value > primitive_type.max()) || ((value) < primitive_type.min())
     }
 
     fn unary_fold(
@@ -334,18 +371,28 @@ impl Expr {
         type_decl: Option<NEWTypes>,
     ) -> Result<Expr, Error> {
         let right_fold = right.integer_const_fold()?;
+        let right_type = right_fold.type_decl.clone().unwrap();
 
         Ok(match (&right_fold.kind, &token.token) {
             (ExprKind::Literal(right_fold), TokenType::Bang) => {
                 Expr::new_literal(if *right_fold == 0 { 1 } else { 0 }, Types::Int)
             }
             (ExprKind::Literal(right_fold), TokenType::Tilde) => {
-                let right_fold: i64 = (!right_fold).into();
-                Expr::new_literal(right_fold, integer_type(right_fold))
+                // TODO: since unary only has one type => fix passing same type twice
+                return Self::literal_type(
+                    token,
+                    right_type.clone(),
+                    right_type,
+                    (!right_fold, false),
+                );
             }
             (ExprKind::Literal(right_fold), TokenType::Minus) => {
-                let right_fold: i64 = -right_fold;
-                Expr::new_literal(right_fold, integer_type(right_fold))
+                return Self::literal_type(
+                    token,
+                    right_type.clone(),
+                    right_type,
+                    right_fold.overflowing_neg(),
+                );
             }
             (..) => Expr {
                 kind: ExprKind::Unary {
@@ -617,6 +664,8 @@ mod tests {
 
         assert_fold("-8 | -8", "-8");
         assert_fold("1 | 1", "1");
+
+        assert_fold_type("~0", "-1", Types::Int);
     }
     #[test]
     fn advanced_bit_fold() {
@@ -672,11 +721,11 @@ mod tests {
     fn shift_fold_error() {
         assert_fold_error!(
             "-16 << 33",
-            ErrorKind::ShiftTooBig(NEWTypes::Primitive(Types::Int), 33)
+            ErrorKind::IntegerOverflow(NEWTypes::Primitive(Types::Int))
         );
         assert_fold_error!(
             "(long)-5 >> 64",
-            ErrorKind::ShiftTooBig(NEWTypes::Primitive(Types::Long), 64)
+            ErrorKind::IntegerOverflow(NEWTypes::Primitive(Types::Long))
         );
 
         // negative shift count is UB
@@ -685,6 +734,11 @@ mod tests {
 
         assert_fold_error!("-16 << -2", ErrorKind::NegativeShift);
         assert_fold_error!("-5 >> -1", ErrorKind::NegativeShift);
+
+        assert_fold_error!(
+            "2147483647 << 2",
+            ErrorKind::IntegerOverflow(NEWTypes::Primitive(Types::Int))
+        );
     }
 
     #[test]
@@ -718,6 +772,7 @@ mod tests {
     #[test]
     fn type_conversions() {
         assert_fold_type("4294967296 + 1", "4294967297", Types::Long);
+        assert_fold_type("2147483648 - 10", "(long)2147483638", Types::Long);
         assert_fold_type("'1' * 2147483648", "105226698752", Types::Long);
 
         assert_fold_type("'a'", "'a'", Types::Char);
@@ -726,20 +781,42 @@ mod tests {
         assert_fold_type("2147483648", "2147483648", Types::Long);
 
         assert_fold_type("-2147483649", "-2147483649", Types::Long);
-        assert_fold_type("-2147483648", "-2147483648", Types::Int);
+        assert_fold_type("(int)-2147483648", "(int)-2147483648", Types::Int);
     }
 
     #[test]
-    fn overflow_fold_error() {
-        // TODO: should overflow error
-        assert_fold_type("2147483647 + 1", "4294967297", Types::Int);
+    fn overflow_fold() {
+        assert_fold_error!(
+            "2147483647 + 1",
+            ErrorKind::IntegerOverflow(NEWTypes::Primitive(Types::Int))
+        );
+        assert_fold_error!(
+            "9223372036854775807 * 2",
+            ErrorKind::IntegerOverflow(NEWTypes::Primitive(Types::Long))
+        );
+
+        assert_fold_error!(
+            "(int)-2147483648 - 1",
+            ErrorKind::IntegerOverflow(NEWTypes::Primitive(Types::Int))
+        );
+        assert_fold_error!(
+            "(int)-2147483648 * -1",
+            ErrorKind::IntegerOverflow(NEWTypes::Primitive(Types::Int))
+        );
+        assert_fold_error!(
+            "-((int)-2147483648)",
+            ErrorKind::IntegerOverflow(NEWTypes::Primitive(Types::Int))
+        );
+
+        assert_fold_type("(char)127 + 2", "129", Types::Int);
+        assert_fold_type("2147483648 + 1", "2147483649", Types::Long);
     }
 
     #[test]
     fn const_cast() {
         assert_fold_type("(long)'1' + '1'", "(long)98", Types::Long);
         assert_fold_type("(char)2147483648", "(char)0", Types::Char);
-        assert_fold_type("(int)2147483648", "-2147483648", Types::Int);
+        assert_fold_type("(int)2147483648", "(int)-2147483648", Types::Int);
 
         assert_fold_type("!((long)'1' + '1')", "0", Types::Int);
 

@@ -305,6 +305,13 @@ impl NEWTypes {
             _ => true,
         }
     }
+    pub fn get_primitive(&self) -> Option<&Types> {
+        if let NEWTypes::Primitive(type_decl) = self {
+            Some(type_decl)
+        } else {
+            None
+        }
+    }
 }
 
 // converts token of aggregate type into its corresponding type
@@ -390,6 +397,23 @@ impl Types {
             Types::Char => "char",
             Types::Int => "int",
             Types::Long => "long",
+        }
+    }
+
+    pub fn max(&self) -> i64 {
+        match self {
+            Types::Void => unreachable!(),
+            Types::Char => i8::MAX as i64,
+            Types::Int => i32::MAX as i64,
+            Types::Long => i64::MAX,
+        }
+    }
+    pub fn min(&self) -> i64 {
+        match self {
+            Types::Void => unreachable!(),
+            Types::Char => i8::MIN as i64,
+            Types::Int => i32::MIN as i64,
+            Types::Long => i64::MIN,
         }
     }
 }

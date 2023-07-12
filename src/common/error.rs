@@ -36,7 +36,6 @@ pub enum ErrorKind {
     // folding errors
     DivideByZero,
     NegativeShift,
-    ShiftTooBig(NEWTypes, i64),
     InvalidConstCast(NEWTypes, NEWTypes),
 
     // typechecker errors
@@ -72,6 +71,7 @@ pub enum ErrorKind {
     MismatchedFuncDeclArity(usize, usize),
     TypeMismatchFuncDecl(NEWTypes, NEWTypes),
     UndeclaredSymbol(String),
+    IntegerOverflow(NEWTypes),
 
     Regular(&'static str), // generic error message when message only used once
     Indicator,             // just to signal an error occured
@@ -152,13 +152,10 @@ impl ErrorKind {
                 "Invalid constant-cast from '{}' to '{}'",
                 old_type, new_type,
             ),
-            ErrorKind::ShiftTooBig(left_type, shift_amount) => format!(
-                "Shift amount is greater than size of type '{}'. {}bit vs {}bit",
-                left_type,
-                left_type.size() * 8,
-                shift_amount
-            ),
             ErrorKind::NegativeShift => "Shift amount has to positive".to_string(),
+            ErrorKind::IntegerOverflow(type_decl) => {
+                format!("Integer overflow with type: '{}'", type_decl)
+            }
 
             ErrorKind::MissingLabel(label, func_name) => {
                 format!("No label '{}' in function '{}'", label, func_name)

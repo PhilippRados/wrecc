@@ -147,7 +147,7 @@ impl Parser {
         Ok(Stmt::Switch(token, cond, Box::new(body)))
     }
     fn case_statement(&mut self, token: Token) -> Result<Stmt, Error> {
-        let value = match self.var_assignment()?.integer_const_fold()?.kind {
+        let value = match self.var_assignment()?.integer_const_fold(&self.env)?.kind {
             ExprKind::Literal(n) => n,
             _ => {
                 return Err(Error::new(
@@ -307,7 +307,7 @@ impl Parser {
     }
     fn parse_arr(&mut self, type_decl: NEWTypes) -> Result<NEWTypes, Error> {
         if let Some(token) = self.matches(vec![TokenKind::LeftBracket]) {
-            let size = match self.var_assignment()?.integer_const_fold()?.kind {
+            let size = match self.var_assignment()?.integer_const_fold(&self.env)?.kind {
                 ExprKind::Literal(n) => n,
                 _ => {
                     return Err(Error::new(
@@ -339,7 +339,7 @@ impl Parser {
         while self.matches(vec![TokenKind::RightBrace]).is_none() {
             let ident = self.consume(TokenKind::Ident, "Expect identifier in enum definition")?;
             if let Some(t) = self.matches(vec![TokenKind::Equal]) {
-                index = match self.var_assignment()?.integer_const_fold()?.kind {
+                index = match self.var_assignment()?.integer_const_fold(&self.env)?.kind {
                     ExprKind::Literal(n) => n as i32,
                     _ => {
                         return Err(Error::new(
@@ -678,7 +678,7 @@ impl Parser {
         } else if let Some(t) = self.matches(vec![TokenKind::LeftBracket]) {
             // parse array-designator {[3] = value}
             if let NEWTypes::Array { of, .. } = type_decl {
-                result.0 = match self.var_assignment()?.integer_const_fold()?.kind {
+                result.0 = match self.var_assignment()?.integer_const_fold(&self.env)?.kind {
                     ExprKind::Literal(n) => n as usize * type_element_count(of),
                     _ => {
                         return Err(Error::new(
@@ -865,13 +865,6 @@ impl Parser {
         return_type: NEWTypes,
         mut name: Token,
     ) -> Result<DeclarationKind, Error> {
-        // if matches!(return_type, NEWTypes::Array { .. }) {
-        //     return Err(Error::new(
-        //         &name,
-        //         ErrorKind::Regular("Functions can't return array-type"),
-        //     ));
-        // }
-
         // TODO: function declarations CAN be declared in non-global scope
         if !self.env.is_global() {
             return Err(Error::new(

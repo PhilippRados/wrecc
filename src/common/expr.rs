@@ -1,4 +1,5 @@
-use crate::common::{error::*, token::*, types::*};
+use crate::codegen::register::*;
+use crate::common::{environment::*, error::*, token::*, types::*};
 use std::fmt;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -113,38 +114,65 @@ impl Expr {
         }
     }
     // https://en.cppreference.com/w/c/language/constant_expression
-    pub fn integer_const_fold(self) -> Result<Expr, Error> {
+    pub fn integer_const_fold(self, env: &Scope) -> Result<Expr, Error> {
         match self.kind {
             ExprKind::Literal(_) => Ok(self),
-            ExprKind::Ident(_) => {
-                // if let Some(Enum) = self.type_decl {}
-                Ok(self)
+            ExprKind::Ident(token) => {
+                // if variable is known at compile time then foldable
+                // is only enum-constant
+                if let Ok((
+                    Symbols::Variable(SymbolInfo {
+                        reg: Some(Register::Literal(n, _)),
+                        type_decl,
+                        ..
+                    }),
+                    _,
+                )) = env.get_symbol(&token)
+                {
+                    Ok(Expr {
+                        kind: ExprKind::Literal(n),
+                        type_decl: Some(type_decl),
+                        value_kind: self.value_kind,
+                    })
+                } else {
+                    Ok(Expr {
+                        kind: ExprKind::Ident(token),
+                        type_decl: self.type_decl,
+                        value_kind: self.value_kind,
+                    })
+                }
             }
             ExprKind::Binary { left, token, right } => {
                 // TODO: fix passing value_kind and type_decl
-                Self::binary_fold(left, token, right, self.value_kind, self.type_decl)
+                Self::binary_fold(left, token, right, env, self.value_kind, self.type_decl)
             }
-            ExprKind::Unary { token, right, is_global } => {
-                Self::unary_fold(token, right, is_global, self.value_kind, self.type_decl)
-            }
+            ExprKind::Unary { token, right, is_global } => Self::unary_fold(
+                token,
+                right,
+                is_global,
+                env,
+                self.value_kind,
+                self.type_decl,
+            ),
 
             ExprKind::Logical { left, token, right } => {
-                Self::logical_fold(token, left, right, self.value_kind, self.type_decl)
+                Self::logical_fold(token, left, right, env, self.value_kind, self.type_decl)
             }
             ExprKind::Cast { new_type, direction, token, expr } => Self::const_cast(
                 token,
                 new_type,
                 direction,
                 expr,
+                env,
                 self.value_kind,
                 self.type_decl,
             ),
-            ExprKind::Grouping { expr } => expr.integer_const_fold(),
+            ExprKind::Grouping { expr } => expr.integer_const_fold(env),
             ExprKind::Ternary { token, cond, true_expr, false_expr } => {
                 let (cond_fold, true_fold, false_fold) = (
-                    cond.integer_const_fold()?,
-                    true_expr.integer_const_fold()?,
-                    false_expr.integer_const_fold()?,
+                    cond.integer_const_fold(env)?,
+                    true_expr.integer_const_fold(env)?,
+                    false_expr.integer_const_fold(env)?,
                 );
                 Ok(match (&cond_fold.kind, &true_fold.kind, &false_fold.kind) {
                     (ExprKind::Literal(0), _, ExprKind::Literal(_)) => false_fold,
@@ -166,7 +194,7 @@ impl Expr {
                 Ok(Expr::new_literal(value as i64, integer_type(value as i64)))
             }
             ExprKind::Assign { token, l_expr, r_expr } => {
-                let right_fold = r_expr.integer_const_fold()?;
+                let right_fold = r_expr.integer_const_fold(env)?;
                 Ok(Expr {
                     kind: ExprKind::Assign {
                         r_expr: Box::new(right_fold),
@@ -177,7 +205,7 @@ impl Expr {
                 })
             }
             ExprKind::CompoundAssign { token, l_expr, r_expr } => {
-                let right_fold = r_expr.integer_const_fold()?;
+                let right_fold = r_expr.integer_const_fold(env)?;
                 Ok(Expr {
                     kind: ExprKind::CompoundAssign {
                         r_expr: Box::new(right_fold),
@@ -188,8 +216,8 @@ impl Expr {
                 })
             }
             ExprKind::Comma { left, right } => {
-                let left_fold = left.integer_const_fold()?;
-                let right_fold = right.integer_const_fold()?;
+                let left_fold = left.integer_const_fold(env)?;
+                let right_fold = right.integer_const_fold(env)?;
 
                 Ok(Expr {
                     kind: ExprKind::Comma {
@@ -214,10 +242,14 @@ impl Expr {
         left: Box<Expr>,
         token: Token,
         right: Box<Expr>,
+        env: &Scope,
         value_kind: ValueKind,
         type_decl: Option<NEWTypes>,
     ) -> Result<Expr, Error> {
-        let (left_fold, right_fold) = (left.integer_const_fold()?, right.integer_const_fold()?);
+        let (left_fold, right_fold) = (
+            left.integer_const_fold(env)?,
+            right.integer_const_fold(env)?,
+        );
 
         if let (ExprKind::Literal(left), ExprKind::Literal(right)) =
             (&left_fold.kind, &right_fold.kind)
@@ -367,10 +399,11 @@ impl Expr {
         token: Token,
         right: Box<Expr>,
         is_global: bool,
+        env: &Scope,
         value_kind: ValueKind,
         type_decl: Option<NEWTypes>,
     ) -> Result<Expr, Error> {
-        let right_fold = right.integer_const_fold()?;
+        let right_fold = right.integer_const_fold(env)?;
         let right_type = right_fold.type_decl.clone().unwrap();
 
         Ok(match (&right_fold.kind, &token.token) {
@@ -409,11 +442,12 @@ impl Expr {
         token: Token,
         left: Box<Expr>,
         right: Box<Expr>,
+        env: &Scope,
         value_kind: ValueKind,
         type_decl: Option<NEWTypes>,
     ) -> Result<Expr, Error> {
-        let left_fold = left.integer_const_fold()?;
-        let right_fold = right.integer_const_fold()?;
+        let left_fold = left.integer_const_fold(env)?;
+        let right_fold = right.integer_const_fold(env)?;
 
         Ok(match token.token {
             TokenType::AmpAmp => match (&left_fold.kind, &right_fold.kind) {
@@ -463,10 +497,11 @@ impl Expr {
         new_type: NEWTypes,
         direction: Option<CastDirection>,
         expr: Box<Expr>,
+        env: &Scope,
         value_kind: ValueKind,
         type_decl: Option<NEWTypes>,
     ) -> Result<Expr, Error> {
-        let right_fold = expr.integer_const_fold()?;
+        let right_fold = expr.integer_const_fold(env)?;
 
         if let ExprKind::Literal(right) = right_fold.kind {
             let (n, new_type) =
@@ -619,13 +654,19 @@ mod tests {
         let tokens = scanner.scan_token().unwrap();
 
         let mut parser = Parser::new(tokens);
-        let actual_fold = parser.expression().unwrap().integer_const_fold();
+        let actual_fold = parser
+            .expression()
+            .unwrap()
+            .integer_const_fold(&Scope::new());
 
         let mut scanner = Scanner::new(expected);
         let tokens = scanner.scan_token().unwrap();
 
         let mut parser = Parser::new(tokens);
-        let expected_fold = parser.expression().unwrap().integer_const_fold();
+        let expected_fold = parser
+            .expression()
+            .unwrap()
+            .integer_const_fold(&Scope::new());
 
         assert_eq!(actual_fold, expected_fold);
 
@@ -641,7 +682,7 @@ mod tests {
             let tokens = scanner.scan_token().unwrap();
 
             let mut parser = Parser::new(tokens);
-            let Err(actual_fold) = parser.expression().unwrap().integer_const_fold() else {
+            let Err(actual_fold) = parser.expression().unwrap().integer_const_fold(&Scope::new()) else {
                                                             panic!("should error on error test");
                                                         };
 

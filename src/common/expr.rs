@@ -135,11 +135,7 @@ impl Expr {
                         value_kind: self.value_kind,
                     })
                 } else {
-                    Ok(Expr {
-                        kind: ExprKind::Ident(token),
-                        type_decl: self.type_decl,
-                        value_kind: self.value_kind,
-                    })
+                    Ok(Expr { kind: ExprKind::Ident(token), ..self })
                 }
             }
             ExprKind::Binary { left, token, right } => {

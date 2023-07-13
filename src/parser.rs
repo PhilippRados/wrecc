@@ -939,7 +939,7 @@ impl Parser {
             TokenKind::GreaterGreaterEqual,
             TokenKind::LessLessEqual,
         ]) {
-            let value = self.expression()?;
+            let value = self.var_assignment()?;
 
             return Ok(Expr::new(
                 ExprKind::CompoundAssign {

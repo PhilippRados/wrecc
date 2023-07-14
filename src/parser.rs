@@ -536,7 +536,7 @@ impl Parser {
             if self.matches(vec![TokenKind::Equal]).is_some() {
                 self.var_initialization(name, type_decl)
             } else {
-                Ok(DeclarationKind::Decl(type_decl, name))
+                Ok(DeclarationKind::Decl(type_decl, name, self.env.is_global()))
             }
         }
     }
@@ -555,12 +555,22 @@ impl Parser {
                     Expr::new(ExprKind::Ident(name.clone()), ValueKind::Lvalue),
                 );
 
-                Ok(DeclarationKind::InitList(type_decl, name, assign_sugar))
+                Ok(DeclarationKind::InitList(
+                    type_decl,
+                    name,
+                    assign_sugar,
+                    self.env.is_global(),
+                ))
             }
             None => {
                 let r_value = self.var_assignment()?;
 
-                Ok(DeclarationKind::Init(type_decl, name, r_value))
+                Ok(DeclarationKind::Init(
+                    type_decl,
+                    name,
+                    r_value,
+                    self.env.is_global(),
+                ))
             }
         }
     }

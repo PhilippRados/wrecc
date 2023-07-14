@@ -119,12 +119,6 @@ impl Symbols {
             _ => unreachable!(),
         }
     }
-    pub fn is_global(&self) -> bool {
-        match self {
-            Symbols::Variable(SymbolInfo { is_global, .. }) => *is_global,
-            _ => unreachable!(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

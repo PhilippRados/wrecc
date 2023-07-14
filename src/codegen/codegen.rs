@@ -224,43 +224,6 @@ impl Compiler {
     fn jump_statement(&mut self, label: usize) {
         self.write_out(Ir::Jmp(label));
     }
-    fn init_list(&mut self, type_decl: &NEWTypes, name: &Token, exprs: &[Expr]) {
-        let is_global = self.env.get(name.token.get_index()).unwrap().is_global();
-        match is_global {
-            true => {
-                self.write_out(Ir::GlobalDeclaration(name.unwrap_string()));
-
-                self.env
-                    .get_mut(name.token.get_index())
-                    .unwrap()
-                    .unwrap_var_mut()
-                    .set_reg(Register::Label(LabelRegister::Var(
-                        name.unwrap_string(),
-                        type_decl.clone(),
-                    )));
-            }
-            false => {
-                self.declare_var(type_decl, name);
-            }
-        }
-        for e in exprs.iter() {
-            match (is_global, &e.kind) {
-                // init-list is assignment syntax sugar
-                (true, ExprKind::Assign { r_expr, .. }) => {
-                    let r_value = self.execute_expr(r_expr);
-
-                    self.write_out(Ir::GlobalInit(r_value.get_type(), r_value.clone()));
-                    self.free(r_value);
-                }
-                (false, _) => {
-                    let reg = self.execute_expr(e);
-                    self.free(reg)
-                }
-                _ => unreachable!(),
-            };
-        }
-    }
-
     fn for_statement(
         &mut self,
         init: &Option<Box<Stmt>>,
@@ -390,73 +353,109 @@ impl Compiler {
     fn declaration(&mut self, decls: &Vec<DeclarationKind>) {
         for d in decls {
             match d {
-                DeclarationKind::Decl(type_decl, name) => self.declare_var(type_decl, name),
-                DeclarationKind::Init(type_decl, name, expr) => {
+                DeclarationKind::Decl(type_decl, name, true) => {
+                    self.declare_global_var(type_decl, name)
+                }
+                DeclarationKind::Decl(type_decl, name, false) => self.declare_var(type_decl, name),
+                DeclarationKind::Init(type_decl, name, expr, true) => {
+                    let value_reg = self.execute_expr(expr);
+                    self.init_global_var(type_decl, name, value_reg)
+                }
+                DeclarationKind::Init(type_decl, name, expr, false) => {
                     let value_reg = self.execute_expr(expr);
                     self.init_var(type_decl, name, value_reg)
                 }
-                DeclarationKind::InitList(type_decl, name, exprs) => {
+                DeclarationKind::InitList(type_decl, name, exprs, true) => {
+                    self.init_global_list(type_decl, name, exprs)
+                }
+                DeclarationKind::InitList(type_decl, name, exprs, false) => {
                     self.init_list(type_decl, name, exprs)
                 }
                 DeclarationKind::FuncDecl(..) => (),
             }
         }
     }
-    fn declare_var(&mut self, type_decl: &NEWTypes, name: &Token) {
-        let reg = match self.env.get(name.token.get_index()).unwrap().is_global() {
-            true => {
-                self.write_out(Ir::GlobalDeclaration(name.unwrap_string()));
-                self.write_out(Ir::GlobalInit(
-                    NEWTypes::Primitive(Types::Void),
-                    Register::Literal(type_decl.size() as i64, NEWTypes::default()),
-                ));
-                Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl.clone()))
-            }
-            false => Register::Stack(StackRegister::new(
-                &mut self.current_bp_offset,
-                type_decl.clone(),
-            )),
-        };
+    fn declare_global_var(&mut self, type_decl: &NEWTypes, name: &Token) {
+        self.write_out(Ir::GlobalDeclaration(name.unwrap_string()));
+        self.write_out(Ir::GlobalInit(
+            NEWTypes::Primitive(Types::Void),
+            Register::Literal(type_decl.size() as i64, NEWTypes::default()),
+        ));
+        let reg = Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl.clone()));
+
         self.env
             .get_mut(name.token.get_index())
             .unwrap()
             .unwrap_var_mut()
             .set_reg(reg);
     }
-    fn init_var(&mut self, type_decl: &NEWTypes, var_name: &Token, value_reg: Register) {
+    fn declare_var(&mut self, type_decl: &NEWTypes, name: &Token) {
+        let reg = Register::Stack(StackRegister::new(
+            &mut self.current_bp_offset,
+            type_decl.clone(),
+        ));
+        self.env
+            .get_mut(name.token.get_index())
+            .unwrap()
+            .unwrap_var_mut()
+            .set_reg(reg);
+    }
+    fn init_global_var(&mut self, type_decl: &NEWTypes, var_name: &Token, value_reg: Register) {
         let name = var_name.unwrap_string();
 
-        match self
-            .env
-            .get(var_name.token.get_index())
+        self.write_out(Ir::GlobalDeclaration(name.clone()));
+        self.write_out(Ir::GlobalInit(type_decl.clone(), value_reg));
+
+        self.env
+            .get_mut(var_name.token.get_index())
             .unwrap()
-            .is_global()
-        {
-            true => {
-                self.write_out(Ir::GlobalDeclaration(name.clone()));
-                self.write_out(Ir::GlobalInit(type_decl.clone(), value_reg));
+            .unwrap_var_mut()
+            .set_reg(Register::Label(LabelRegister::Var(name, type_decl.clone())));
+    }
+    fn init_var(&mut self, type_decl: &NEWTypes, var_name: &Token, value_reg: Register) {
+        self.declare_var(type_decl, var_name);
 
-                self.env
-                    .get_mut(var_name.token.get_index())
-                    .unwrap()
-                    .unwrap_var_mut()
-                    .set_reg(Register::Label(LabelRegister::Var(name, type_decl.clone())));
-            }
-            false => {
-                self.declare_var(type_decl, var_name);
+        let reg = self.cg_assign(
+            self.env
+                .get(var_name.token.get_index())
+                .unwrap()
+                .unwrap_var()
+                .get_reg(),
+            value_reg,
+        );
+        self.free(reg);
+    }
 
-                let reg = self.cg_assign(
-                    self.env
-                        .get(var_name.token.get_index())
-                        .unwrap()
-                        .unwrap_var()
-                        .get_reg(),
-                    value_reg,
-                );
-                self.free(reg);
+    fn init_global_list(&mut self, type_decl: &NEWTypes, name: &Token, exprs: &[Expr]) {
+        self.write_out(Ir::GlobalDeclaration(name.unwrap_string()));
+
+        self.env
+            .get_mut(name.token.get_index())
+            .unwrap()
+            .unwrap_var_mut()
+            .set_reg(Register::Label(LabelRegister::Var(
+                name.unwrap_string(),
+                type_decl.clone(),
+            )));
+
+        for expr in exprs {
+            if let ExprKind::Assign { r_expr, .. } = &expr.kind {
+                let r_value = self.execute_expr(&r_expr);
+
+                self.write_out(Ir::GlobalInit(r_value.get_type(), r_value.clone()));
+                self.free(r_value);
             }
         }
     }
+    fn init_list(&mut self, type_decl: &NEWTypes, name: &Token, exprs: &[Expr]) {
+        self.declare_var(type_decl, name);
+
+        for e in exprs.iter() {
+            let reg = self.execute_expr(e);
+            self.free(reg);
+        }
+    }
+
     fn function_definition(&mut self, name: &Token, body: &Vec<Stmt>) {
         let func_symbol = self.env.get_mut(name.token.get_index()).unwrap();
         let params = func_symbol.unwrap_func().params.clone();

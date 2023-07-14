@@ -347,19 +347,26 @@ impl TypeChecker {
     fn declaration(&mut self, decls: &mut Vec<DeclarationKind>) -> Result<(), Error> {
         for d in decls {
             match d {
-                DeclarationKind::Decl(type_decl, name) => self.declare_var(type_decl, name)?,
-                DeclarationKind::Init(type_decl, name, expr) => {
-                    self.init_var(type_decl, name, expr)?
+                DeclarationKind::Decl(type_decl, name, is_global) => {
+                    self.declare_var(type_decl, name, *is_global)?
                 }
-                DeclarationKind::InitList(type_decl, name, exprs) => {
-                    self.init_list(type_decl, name, exprs)?
+                DeclarationKind::Init(type_decl, name, expr, is_global) => {
+                    self.init_var(type_decl, name, expr, *is_global)?
+                }
+                DeclarationKind::InitList(type_decl, name, exprs, is_global) => {
+                    self.init_list(type_decl, name, exprs, *is_global)?
                 }
                 DeclarationKind::FuncDecl(..) => (),
             }
         }
         Ok(())
     }
-    fn declare_var(&mut self, type_decl: &mut NEWTypes, var_name: &Token) -> Result<(), Error> {
+    fn declare_var(
+        &mut self,
+        type_decl: &mut NEWTypes,
+        var_name: &Token,
+        is_global: bool,
+    ) -> Result<(), Error> {
         if type_decl.is_void() {
             return Err(Error::new(
                 var_name,
@@ -367,80 +374,21 @@ impl TypeChecker {
             ));
         }
 
-        if !self
-            .env
-            .get(var_name.token.get_index())
-            .unwrap()
-            .is_global()
-        {
+        if !is_global {
             self.scope.increment_stack_size(type_decl, &mut self.env);
         }
 
         Ok(())
     }
-    fn check_type_compatibility(
-        &self,
-        token: &Token,
-        left: &NEWTypes,
-        right: &NEWTypes,
-    ) -> Result<(), Error> {
-        if left.is_void() || right.is_void() || !left.type_compatible(right) {
-            Err(Error::new(
-                token,
-                ErrorKind::IllegalAssign(left.clone(), right.clone()),
-            ))
-        } else {
-            Ok(())
-        }
-    }
-    fn init_list(
-        &mut self,
-        type_decl: &mut NEWTypes,
-        var_name: &Token,
-        exprs: &mut [Expr],
-    ) -> Result<(), Error> {
-        // type-check all assigns
-        let mut types = vec![];
-        for e in exprs.iter_mut() {
-            types.push(self.expr_type(e)?);
-        }
-        // check if every expression is constant if global
-        if self
-            .env
-            .get(var_name.token.get_index())
-            .unwrap()
-            .is_global()
-        {
-            for e in exprs.iter().by_ref() {
-                if let ExprKind::Assign { r_expr, .. } = &e.kind {
-                    if !is_constant(r_expr) {
-                        return Err(Error::new(
-                            var_name,
-                            ErrorKind::NotConstantInit("Global variables"),
-                        ));
-                    }
-                } else {
-                    unreachable!()
-                }
-            }
-        } else {
-            self.scope.increment_stack_size(type_decl, &mut self.env);
-        }
 
-        Ok(())
-    }
     fn init_var(
         &mut self,
         type_decl: &mut NEWTypes,
         var_name: &Token,
         expr: &mut Expr,
+        is_global: bool,
     ) -> Result<(), Error> {
         let mut value_type = self.expr_type(expr)?;
-        let is_global = self
-            .env
-            .get(var_name.token.get_index())
-            .unwrap()
-            .is_global();
 
         crate::arr_decay!(value_type, expr, var_name, is_global);
         self.check_type_compatibility(var_name, type_decl, &value_type)?;
@@ -458,6 +406,54 @@ impl TypeChecker {
         }
 
         Ok(())
+    }
+
+    fn init_list(
+        &mut self,
+        type_decl: &mut NEWTypes,
+        var_name: &Token,
+        assign_exprs: &mut [Expr],
+        is_global: bool,
+    ) -> Result<(), Error> {
+        // type-check all assigns
+        for e in assign_exprs.iter_mut() {
+            self.expr_type(e)?;
+        }
+        // check if every expression is constant if global
+        if is_global {
+            for e in assign_exprs.iter().by_ref() {
+                if let ExprKind::Assign { r_expr, .. } = &e.kind {
+                    if !is_constant(r_expr) {
+                        return Err(Error::new(
+                            var_name,
+                            ErrorKind::NotConstantInit("Global variables"),
+                        ));
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+        } else {
+            self.scope.increment_stack_size(type_decl, &mut self.env);
+        }
+
+        Ok(())
+    }
+
+    fn check_type_compatibility(
+        &self,
+        token: &Token,
+        left: &NEWTypes,
+        right: &NEWTypes,
+    ) -> Result<(), Error> {
+        if left.is_void() || right.is_void() || !left.type_compatible(right) {
+            Err(Error::new(
+                token,
+                ErrorKind::IllegalAssign(left.clone(), right.clone()),
+            ))
+        } else {
+            Ok(())
+        }
     }
     // TODO: display warning when casting down
     fn explicit_cast(

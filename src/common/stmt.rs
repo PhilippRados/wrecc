@@ -28,8 +28,8 @@ pub enum Stmt {
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum DeclarationKind {
-    Decl(NEWTypes, Token),
+    Decl(NEWTypes, Token, bool),
     FuncDecl(Token),
-    Init(NEWTypes, Token, Expr),
-    InitList(NEWTypes, Token, Vec<Expr>),
+    Init(NEWTypes, Token, Expr, bool),
+    InitList(NEWTypes, Token, Vec<Expr>, bool),
 }

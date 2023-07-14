@@ -617,6 +617,8 @@ impl TypeChecker {
     }
 
     pub fn expr_type(&mut self, ast: &mut Expr) -> Result<NEWTypes, Error> {
+        ast.integer_const_fold(&self.env.iter().map(|s| s).collect())?;
+
         ast.type_decl = Some(match &mut ast.kind {
             ExprKind::Binary { left, token, right } => {
                 let (type_decl, scale_factor) = self.evaluate_binary(left, token, right)?;

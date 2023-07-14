@@ -119,7 +119,8 @@ impl Expr {
         env: &Scope,
         msg: &'static str,
     ) -> Result<i64, Error> {
-        self.integer_const_fold(env)?;
+        let symbols = env.get_symbols_ref();
+        self.integer_const_fold(&symbols)?;
 
         if let ExprKind::Literal(n) = self.kind {
             Ok(n)
@@ -128,23 +129,20 @@ impl Expr {
         }
     }
     // https://en.cppreference.com/w/c/language/constant_expression
-    pub fn integer_const_fold(&mut self, env: &Scope) -> Result<(), Error> {
+    pub fn integer_const_fold(&mut self, env: &Vec<&Symbols>) -> Result<(), Error> {
         let folded: Option<Expr> = match &mut self.kind {
             ExprKind::Literal(_) => None,
             ExprKind::Ident(token) => {
                 // if variable is known at compile time then foldable
                 // is only enum-constant
-                if let Ok((
-                    Symbols::Variable(SymbolInfo {
-                        reg: Some(Register::Literal(n, _)),
-                        type_decl,
-                        ..
-                    }),
-                    _,
-                )) = env.get_symbol(&token)
+                if let Some(Symbols::Variable(SymbolInfo {
+                    reg: Some(Register::Literal(n, _)),
+                    type_decl,
+                    ..
+                })) = env.get(token.token.get_index())
                 {
                     Some(Expr::new_literal(
-                        n,
+                        *n,
                         type_decl.get_primitive().unwrap().clone(),
                     ))
                 } else {
@@ -210,11 +208,14 @@ impl Expr {
                 left.integer_const_fold(env)?;
                 None
             }
-            ExprKind::Call { .. } | ExprKind::String(..) | ExprKind::SizeofExpr { .. } => None,
-
-            ExprKind::ScaleUp { .. } | ExprKind::ScaleDown { .. } | ExprKind::Nop { .. } => {
-                unreachable!("not found during parsing")
+            ExprKind::ScaleUp { expr, .. } | ExprKind::ScaleDown { expr, .. } => {
+                expr.integer_const_fold(env)?;
+                None
             }
+            ExprKind::Call { .. }
+            | ExprKind::String(..)
+            | ExprKind::SizeofExpr { .. }
+            | ExprKind::Nop { .. } => None,
         };
 
         if let Some(folded_expr) = folded {
@@ -226,7 +227,7 @@ impl Expr {
         left: &mut Box<Expr>,
         token: Token,
         right: &mut Box<Expr>,
-        env: &Scope,
+        env: &Vec<&Symbols>,
     ) -> Result<Option<Expr>, Error> {
         left.integer_const_fold(env)?;
         right.integer_const_fold(env)?;
@@ -367,7 +368,11 @@ impl Expr {
         (value > primitive_type.max()) || ((value) < primitive_type.min())
     }
 
-    fn unary_fold(token: Token, right: &mut Box<Expr>, env: &Scope) -> Result<Option<Expr>, Error> {
+    fn unary_fold(
+        token: Token,
+        right: &mut Box<Expr>,
+        env: &Vec<&Symbols>,
+    ) -> Result<Option<Expr>, Error> {
         right.integer_const_fold(env)?;
 
         Ok(match (&right.kind, &token.token) {
@@ -400,13 +405,14 @@ impl Expr {
         token: Token,
         left: &mut Box<Expr>,
         right: &mut Box<Expr>,
-        env: &Scope,
+        env: &Vec<&Symbols>,
     ) -> Result<Option<Expr>, Error> {
         left.integer_const_fold(env)?;
         right.integer_const_fold(env)?;
 
         Ok(match token.token {
             TokenType::AmpAmp => match (&left.kind, &right.kind) {
+                (ExprKind::Literal(0), _) => Some(Expr::new_literal(0, Types::Int)),
                 (ExprKind::Literal(left_n), ExprKind::Literal(right_n))
                     if *left_n != 0 && *right_n != 0 =>
                 {
@@ -419,6 +425,7 @@ impl Expr {
             },
 
             TokenType::PipePipe => match (&left.kind, &right.kind) {
+                (ExprKind::Literal(1), _) => Some(Expr::new_literal(1, Types::Int)),
                 (ExprKind::Literal(left), ExprKind::Literal(right))
                     if *left == 0 && *right == 0 =>
                 {
@@ -436,17 +443,18 @@ impl Expr {
         token: Token,
         new_type: NEWTypes,
         expr: &mut Box<Expr>,
-        env: &Scope,
+        env: &Vec<&Symbols>,
     ) -> Result<Option<Expr>, Error> {
         expr.integer_const_fold(env)?;
 
         if let ExprKind::Literal(right) = expr.kind {
             let (n, new_type) =
                 Self::valid_cast(token, expr.type_decl.clone().unwrap(), new_type, right)?;
-            Ok(Some(Expr::new_literal(
-                n,
-                new_type.get_primitive().unwrap().clone(),
-            )))
+            Ok(Some(Expr {
+                kind: ExprKind::Literal(n),
+                type_decl: Some(new_type),
+                value_kind: ValueKind::Rvalue,
+            }))
         } else {
             Ok(None)
         }
@@ -576,27 +584,29 @@ mod tests {
     use crate::parser::Parser;
     use crate::scanner::Scanner;
 
-    fn assert_fold(input: &str, expected: &str) -> NEWTypes {
+    fn assert_fold(input: &str, expected: &str) -> Option<NEWTypes> {
         let mut scanner = Scanner::new(input);
         let tokens = scanner.scan_token().unwrap();
 
         let mut parser = Parser::new(tokens);
         let mut actual = parser.expression().unwrap();
-        actual.integer_const_fold(&Scope::new()).unwrap();
+        actual.integer_const_fold(&Vec::new()).unwrap();
 
         let mut scanner = Scanner::new(expected);
         let tokens = scanner.scan_token().unwrap();
 
         let mut parser = Parser::new(tokens);
         let mut expected = parser.expression().unwrap();
-        expected.integer_const_fold(&Scope::new()).unwrap();
+        expected.integer_const_fold(&Vec::new()).unwrap();
 
         assert_eq!(actual, expected);
 
-        return actual.type_decl.unwrap();
+        return actual.type_decl;
     }
     fn assert_fold_type(input: &str, expected: &str, expected_type: Types) {
-        let actual_type = assert_fold(input, expected);
+        let Some(actual_type) = assert_fold(input, expected) else {
+            unreachable!("can only assert type of foldable expression");
+        };
         assert_eq!(actual_type, NEWTypes::Primitive(expected_type));
     }
     macro_rules! assert_fold_error {
@@ -605,7 +615,7 @@ mod tests {
             let tokens = scanner.scan_token().unwrap();
 
             let mut parser = Parser::new(tokens);
-            let Err(actual_fold) = parser.expression().unwrap().integer_const_fold(&Scope::new()) else {
+            let Err(actual_fold) = parser.expression().unwrap().integer_const_fold(&Vec::new()) else {
                                                             panic!("should error on error test");
                                                         };
 
@@ -774,6 +784,11 @@ mod tests {
 
         assert_fold_type("(char)127 + 2", "129", Types::Int);
         assert_fold_type("2147483648 + 1", "2147483649", Types::Long);
+    }
+
+    #[test]
+    fn sub_fold_expressions() {
+        assert_fold("1 + 2, 4 * 2", "3,8");
     }
 
     #[test]

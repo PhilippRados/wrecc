@@ -290,7 +290,15 @@ impl Scope {
         &mut self.tags.elems.get_mut(index).unwrap().3
     }
 
-    pub fn get_symbol_table(self) -> Vec<Symbols> {
+    pub fn get_symbols_ref(&self) -> Vec<&Symbols> {
+        self.symbols
+            .elems
+            .iter()
+            .map(|(.., symbol)| symbol)
+            .collect()
+    }
+
+    pub fn get_symbols(self) -> Vec<Symbols> {
         self.symbols
             .elems
             .into_iter()

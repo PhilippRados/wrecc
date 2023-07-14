@@ -35,7 +35,7 @@ impl Parser {
         if had_error {
             None
         } else {
-            Some((statements, self.env.get_symbol_table()))
+            Some((statements, self.env.get_symbols()))
         }
     }
     fn synchronize(&mut self) {
@@ -147,15 +147,8 @@ impl Parser {
         Ok(Stmt::Switch(token, cond, Box::new(body)))
     }
     fn case_statement(&mut self, token: Token) -> Result<Stmt, Error> {
-        let value = match self.var_assignment()?.integer_const_fold(&self.env)?.kind {
-            ExprKind::Literal(n) => n,
-            _ => {
-                return Err(Error::new(
-                    &token,
-                    ErrorKind::NotIntegerConstant("Case value"),
-                ))
-            }
-        };
+        let mut value = self.var_assignment()?;
+        let value = value.get_literal_constant(&token, &self.env, "Case value")?;
 
         self.consume(TokenKind::Colon, "Expect ':' following case-statement")?;
 
@@ -307,15 +300,9 @@ impl Parser {
     }
     fn parse_arr(&mut self, type_decl: NEWTypes) -> Result<NEWTypes, Error> {
         if let Some(token) = self.matches(vec![TokenKind::LeftBracket]) {
-            let size = match self.var_assignment()?.integer_const_fold(&self.env)?.kind {
-                ExprKind::Literal(n) => n,
-                _ => {
-                    return Err(Error::new(
-                        &token,
-                        ErrorKind::NotIntegerConstant("Array size specifier"),
-                    ))
-                }
-            };
+            let mut size = self.var_assignment()?;
+            let size = size.get_literal_constant(&token, &self.env, "Array size specifier")?;
+
             self.consume(
                 TokenKind::RightBracket,
                 "Expect closing ']' after array initialization",
@@ -339,15 +326,8 @@ impl Parser {
         while self.matches(vec![TokenKind::RightBrace]).is_none() {
             let ident = self.consume(TokenKind::Ident, "Expect identifier in enum definition")?;
             if let Some(t) = self.matches(vec![TokenKind::Equal]) {
-                index = match self.var_assignment()?.integer_const_fold(&self.env)?.kind {
-                    ExprKind::Literal(n) => n as i32,
-                    _ => {
-                        return Err(Error::new(
-                            &t,
-                            ErrorKind::NotIntegerConstant("Enum constant"),
-                        ))
-                    }
-                };
+                let mut index_expr = self.var_assignment()?;
+                index = index_expr.get_literal_constant(&t, &self.env, "Enum Constant")? as i32;
             }
             members.push((ident.clone(), index));
 
@@ -678,15 +658,11 @@ impl Parser {
         } else if let Some(t) = self.matches(vec![TokenKind::LeftBracket]) {
             // parse array-designator {[3] = value}
             if let NEWTypes::Array { of, .. } = type_decl {
-                result.0 = match self.var_assignment()?.integer_const_fold(&self.env)?.kind {
-                    ExprKind::Literal(n) => n as usize * type_element_count(of),
-                    _ => {
-                        return Err(Error::new(
-                            &t,
-                            ErrorKind::NotIntegerConstant("Array designator"),
-                        ))
-                    }
-                };
+                let mut designator_expr = self.var_assignment()?;
+                let designator_constant =
+                    designator_expr.get_literal_constant(&t, &self.env, "Array designator")?;
+
+                result.0 = designator_constant as usize * type_element_count(of);
 
                 self.consume(
                     TokenKind::RightBracket,
@@ -1983,7 +1959,9 @@ mod tests {
         let tokens = scanner.scan_token().unwrap();
 
         let mut parser = Parser::new(tokens);
-        let actual = parser.expression().unwrap();
+        // using ternary_conditional as expression evaluator because assignment() and expression()
+        // get folded and we don't test for assign or comma in these unit tests anyways
+        let actual = parser.ternary_conditional().unwrap();
 
         assert_eq!(actual.kind.to_string(), expected);
     }

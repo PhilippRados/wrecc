@@ -891,42 +891,6 @@ impl TypeChecker {
         self.check_statements(body)
     }
 
-    fn is_valid_bin(token: &Token, left_type: &NEWTypes, right_type: &NEWTypes) -> bool {
-        match (&left_type, &right_type) {
-            (NEWTypes::Primitive(Types::Void), _) | (_, NEWTypes::Primitive(Types::Void)) => false,
-            (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => {
-                if left_type.type_compatible(right_type) {
-                    token.token == TokenType::Minus
-                        || token.token == TokenType::EqualEqual
-                        || token.token == TokenType::BangEqual
-                } else {
-                    false
-                }
-            }
-            (_, NEWTypes::Pointer(_)) => token.token == TokenType::Plus,
-            (NEWTypes::Pointer(_), _) => {
-                token.token == TokenType::Plus || token.token == TokenType::Minus
-            }
-            (NEWTypes::Struct(..), _)
-            | (_, NEWTypes::Struct(..))
-            | (NEWTypes::Union(..), _)
-            | (_, NEWTypes::Union(..)) => false,
-            _ => true,
-        }
-    }
-    fn maybe_scale(left: &NEWTypes, right: &NEWTypes, left_expr: &mut Expr, right_expr: &mut Expr) {
-        let (expr, amount) = match (left, right) {
-            (t, NEWTypes::Pointer(inner)) if !t.is_ptr() && inner.size() > 1 => {
-                (left_expr, inner.size())
-            }
-            (NEWTypes::Pointer(inner), t) if !t.is_ptr() && inner.size() > 1 => {
-                (right_expr, inner.size())
-            }
-            _ => return,
-        };
-
-        expr.kind = ExprKind::ScaleUp { by: amount, expr: Box::new(expr.clone()) };
-    }
     fn evaluate_logical(
         &mut self,
         left: &mut Expr,
@@ -970,7 +934,7 @@ impl TypeChecker {
         crate::arr_decay!(right_type, right, token);
 
         // check valid operations
-        if !Self::is_valid_bin(token, &left_type, &right_type) {
+        if !is_valid_bin(token, &left_type, &right_type) {
             return Err(Error::new(
                 token,
                 ErrorKind::InvalidBinary(token.token.clone(), left_type, right_type),
@@ -981,7 +945,9 @@ impl TypeChecker {
         self.maybe_int_promote(right, &mut right_type);
 
         // scale index when pointer arithmetic
-        Self::maybe_scale(&left_type, &right_type, left, right);
+        if let Some((expr, amount)) = maybe_scale(&left_type, &right_type, left, right) {
+            expr.kind = ExprKind::ScaleUp { by: amount, expr: Box::new(expr.clone()) };
+        }
 
         Ok(Self::binary_type_promotion(
             &token.token,
@@ -1138,6 +1104,46 @@ pub fn create_label(index: &mut usize) -> usize {
     prev
 }
 
+pub fn is_valid_bin(token: &Token, left_type: &NEWTypes, right_type: &NEWTypes) -> bool {
+    match (&left_type, &right_type) {
+        (NEWTypes::Primitive(Types::Void), _) | (_, NEWTypes::Primitive(Types::Void)) => false,
+        (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => {
+            if left_type.type_compatible(right_type) {
+                token.token == TokenType::Minus
+                    || token.token == TokenType::EqualEqual
+                    || token.token == TokenType::BangEqual
+            } else {
+                false
+            }
+        }
+        (_, NEWTypes::Pointer(_)) => token.token == TokenType::Plus,
+        (NEWTypes::Pointer(_), _) => {
+            token.token == TokenType::Plus || token.token == TokenType::Minus
+        }
+        (NEWTypes::Struct(..), _)
+        | (_, NEWTypes::Struct(..))
+        | (NEWTypes::Union(..), _)
+        | (_, NEWTypes::Union(..)) => false,
+        _ => true,
+    }
+}
+pub fn maybe_scale<'a, T>(
+    left_type: &NEWTypes,
+    right_type: &NEWTypes,
+    left_expr: &'a mut T,
+    right_expr: &'a mut T,
+) -> Option<(&'a mut T, usize)> {
+    match (left_type, right_type) {
+        (t, NEWTypes::Pointer(inner)) if !t.is_ptr() && inner.size() > 1 => {
+            Some((left_expr, inner.size()))
+        }
+        (NEWTypes::Pointer(inner), t) if !t.is_ptr() && inner.size() > 1 => {
+            Some((right_expr, inner.size()))
+        }
+        _ => None,
+    }
+}
+
 // returns true if expression is known at compile-time
 fn is_constant(expr: &Expr) -> bool {
     // 6.6 Constant Expressions
@@ -1223,7 +1229,7 @@ mod tests {
             let actual = typechecker.expr_type(&mut expr).unwrap_err();
 
             assert!(
-                matches!(actual, $expected_err),
+                matches!(actual.kind, $expected_err),
                 "actual: {:?}, expected: {}",
                 actual,
                 stringify!($expected_err),
@@ -1265,6 +1271,15 @@ mod tests {
         assert_type!("1 << (long)2", NEWTypes::Primitive(Types::Int));
         assert_type!("(long)1 << (char)2", NEWTypes::Primitive(Types::Long));
         assert_type!("'1' << (char)2", NEWTypes::Primitive(Types::Int));
+    }
+
+    #[test]
+    fn logical_type() {
+        assert_type!("1 == (long)2", NEWTypes::Primitive(Types::Int));
+        assert_type!("(char*)1 == (char*)2", NEWTypes::Primitive(Types::Int));
+
+        assert_type_err!("1 == (long*)2", ErrorKind::InvalidBinary(..));
+        assert_type_err!("(int*)1 == (long*)2", ErrorKind::InvalidBinary(..));
     }
 
     #[test]

@@ -163,20 +163,28 @@ impl Expr {
                 expr.integer_const_fold(env)?;
                 Some(expr.as_ref().clone())
             }
-            ExprKind::Ternary { cond, true_expr, false_expr, .. } => {
+            ExprKind::Ternary { cond, true_expr, false_expr, token } => {
                 cond.integer_const_fold(env)?;
                 true_expr.integer_const_fold(env)?;
                 false_expr.integer_const_fold(env)?;
 
-                match (&cond.kind, &true_expr.kind, &false_expr.kind) {
-                    (ExprKind::Literal(0), _, ExprKind::Literal(_)) => {
-                        Some(false_expr.as_ref().clone())
+                if let (ExprKind::Literal(_), ExprKind::Literal(_)) =
+                    (&true_expr.kind, &false_expr.kind)
+                {
+                    let true_type = true_expr.type_decl.clone().unwrap();
+                    let false_type = false_expr.type_decl.clone().unwrap();
+
+                    if !true_type.type_compatible(&false_type) {
+                        return Err(Error::new(
+                            token,
+                            ErrorKind::TypeMismatch(true_type, false_type),
+                        ));
                     }
-                    (ExprKind::Literal(0), ..) => Some(false_expr.as_ref().clone()),
-                    (ExprKind::Literal(_), ExprKind::Literal(_), _) => {
-                        Some(true_expr.as_ref().clone())
-                    }
-                    (ExprKind::Literal(_), ..) => Some(true_expr.as_ref().clone()),
+                }
+
+                match &cond.kind {
+                    ExprKind::Literal(0) => Some(false_expr.as_ref().clone()),
+                    ExprKind::Literal(_) => Some(true_expr.as_ref().clone()),
                     _ => None,
                 }
             }
@@ -231,36 +239,50 @@ impl Expr {
         left.integer_const_fold(env)?;
         right.integer_const_fold(env)?;
 
-        if let (ExprKind::Literal(left_n), ExprKind::Literal(right_n)) = (&left.kind, &right.kind) {
+        if let (ExprKind::Literal(mut left_n), ExprKind::Literal(mut right_n)) =
+            (&mut left.kind, &mut right.kind)
+        {
             let (left_type, right_type) = (
                 left.type_decl.clone().unwrap(),
                 right.type_decl.clone().unwrap(),
             );
+            if !crate::typechecker::is_valid_bin(&token, &left_type, &right_type) {
+                return Err(Error::new(
+                    &token,
+                    ErrorKind::InvalidBinary(token.token.clone(), left_type, right_type),
+                ));
+            }
+
+            if let Some((literal, amount)) =
+                crate::typechecker::maybe_scale(&left_type, &right_type, &mut left_n, &mut right_n)
+            {
+                *literal *= amount as i64;
+            }
 
             Ok(Some(match token.token {
                 TokenType::Plus => Self::literal_type(
                     token,
                     left_type,
                     right_type,
-                    i64::overflowing_add(*left_n, *right_n),
+                    i64::overflowing_add(left_n, right_n),
                 )?,
                 TokenType::Minus => Self::literal_type(
                     token,
                     left_type,
                     right_type,
-                    i64::overflowing_sub(*left_n, *right_n),
+                    i64::overflowing_sub(left_n, right_n),
                 )?,
                 TokenType::Star => Self::literal_type(
                     token,
                     left_type,
                     right_type,
-                    i64::overflowing_mul(*left_n, *right_n),
+                    i64::overflowing_mul(left_n, right_n),
                 )?,
                 TokenType::Slash | TokenType::Mod => {
-                    Self::div_fold(token, left_type, right_type, *left_n, *right_n)?
+                    Self::div_fold(token, left_type, right_type, left_n, right_n)?
                 }
                 TokenType::GreaterGreater | TokenType::LessLess => {
-                    Self::shift_fold(token, left_type, *left_n, *right_n)?
+                    Self::shift_fold(token, left_type, left_n, right_n)?
                 }
 
                 TokenType::Pipe => {
@@ -380,6 +402,13 @@ impl Expr {
             (ExprKind::Literal(n), TokenType::Tilde) => {
                 // TODO: since unary only has one type => fix passing same type twice
                 let right_type = right.type_decl.clone().unwrap();
+
+                if !right_type.is_integer() {
+                    return Err(Error::new(
+                        &token,
+                        ErrorKind::InvalidUnary(token.token.clone(), right_type, "integer"),
+                    ));
+                }
                 Some(Self::literal_type(
                     token,
                     right_type.clone(),
@@ -389,6 +418,14 @@ impl Expr {
             }
             (ExprKind::Literal(n), TokenType::Minus) => {
                 let right_type = right.type_decl.clone().unwrap();
+
+                if !right_type.is_integer() {
+                    return Err(Error::new(
+                        &token,
+                        ErrorKind::InvalidUnary(token.token.clone(), right_type, "integer"),
+                    ));
+                }
+
                 Some(Self::literal_type(
                     token,
                     right_type.clone(),
@@ -681,6 +718,9 @@ mod tests {
 
         assert_fold("'c' <= -2", "0");
         assert_fold("3 <= -2", "0");
+
+        assert_fold("(long*)4 == (long*)1", "0");
+        assert_fold_error!("(long*)4 > (char*)1", ErrorKind::InvalidBinary(..));
     }
 
     #[test]
@@ -751,8 +791,48 @@ mod tests {
     fn ptr_fold() {
         assert_fold_type(
             "(long *)1 + 3",
-            "25",
+            "(long*)25",
             NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Long))),
+        );
+        assert_fold_type(
+            "2 + (char *)1 + 3",
+            "(char*)6",
+            NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
+        );
+
+        assert_fold_error!(
+            "6 / (int *)1",
+            ErrorKind::InvalidBinary(_, NEWTypes::Primitive(Types::Int), NEWTypes::Pointer(_))
+        );
+
+        assert_fold_error!(
+            "-(long *)1",
+            ErrorKind::InvalidUnary(_, NEWTypes::Pointer(_), "integer")
+        );
+        assert_fold_error!(
+            "~(char *)1",
+            ErrorKind::InvalidUnary(_, NEWTypes::Pointer(_), "integer")
+        );
+    }
+    #[test]
+    fn ternary_fold() {
+        assert_fold("1 == 2 ? 4 : 9", "9");
+        assert_fold("(char*)1 ? 4 : 9", "4");
+
+        assert_fold_type(
+            "1 - 2 ? (void*)4 : (long*)9 - 3",
+            "(void*)4",
+            NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Void))),
+        );
+
+        assert_fold_error!(
+            "1 == 2 ? 4 : (long*)9",
+            ErrorKind::TypeMismatch(NEWTypes::Primitive(Types::Int), NEWTypes::Pointer(_))
+        );
+
+        assert_fold_error!(
+            "1 == 2 ? (int*)4 : (long*)9",
+            ErrorKind::TypeMismatch(NEWTypes::Pointer(_), NEWTypes::Pointer(_),)
         );
     }
     #[test]

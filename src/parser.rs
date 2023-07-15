@@ -1482,7 +1482,7 @@ fn get_ident(expr: &Expr) -> Option<&Token> {
     }
 }
 
-fn check_duplicate(vec: &Vec<(NEWTypes, Token)>) -> Result<(), Error> {
+fn check_duplicate(vec: &[(NEWTypes, Token)]) -> Result<(), Error> {
     use std::collections::HashSet;
     let mut set = HashSet::new();
     for token in vec.iter().map(|(_, name)| name) {

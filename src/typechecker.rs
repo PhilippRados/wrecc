@@ -31,7 +31,7 @@ macro_rules! find_scope {
 #[derive(PartialEq, Debug)]
 struct ScopeLevel(Vec<ScopeKind>);
 impl ScopeLevel {
-    fn increment_stack_size(&mut self, type_decl: &NEWTypes, env: &mut Vec<Symbols>) {
+    fn increment_stack_size(&mut self, type_decl: &NEWTypes, env: &mut [Symbols]) {
         let ScopeKind::Function(func_name, ..) = find_scope!(self, ScopeKind::Function(..))
             .expect("can only be called inside a function") else {unreachable!()};
         let func_symbol = env
@@ -43,7 +43,7 @@ impl ScopeLevel {
 
         func_symbol.unwrap_func().stack_size = size;
     }
-    fn insert_label(&mut self, name_token: &Token, env: &mut Vec<Symbols>) -> Result<(), Error> {
+    fn insert_label(&mut self, name_token: &Token, env: &mut [Symbols]) -> Result<(), Error> {
         let name = name_token.unwrap_string();
         let ScopeKind::Function(func_name, ..) = find_scope!(self,ScopeKind::Function(..))
             .expect("ensured by parser that label is always inside function") else {unreachable!()};
@@ -67,7 +67,7 @@ impl ScopeLevel {
         gotos.push(name_token);
         Ok(())
     }
-    fn compare_gotos(&mut self, env: &mut Vec<Symbols>) -> Result<(), Error> {
+    fn compare_gotos(&mut self, env: &mut [Symbols]) -> Result<(), Error> {
         let ScopeKind::Function(func_name, _,gotos) = find_scope!(self,ScopeKind::Function(..))
             .expect("ensured by parser that label is always inside function") else {unreachable!()};
 
@@ -611,7 +611,7 @@ impl TypeChecker {
     }
 
     pub fn expr_type(&mut self, ast: &mut Expr) -> Result<NEWTypes, Error> {
-        ast.integer_const_fold(&self.env.iter().map(|s| s).collect())?;
+        ast.integer_const_fold(&self.env.iter().collect())?;
 
         ast.type_decl = Some(match &mut ast.kind {
             ExprKind::Binary { left, token, right } => {

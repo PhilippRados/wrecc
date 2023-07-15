@@ -433,7 +433,7 @@ impl RegisterAllocation {
         }
     }
     // backtrack trough result and update allocated stack-space
-    fn update_func_setup(&self, result: &mut Vec<Ir>) {
+    fn update_func_setup(&self, result: &mut [Ir]) {
         let setup_size = result
             .iter_mut()
             .rev()
@@ -452,17 +452,18 @@ impl RegisterAllocation {
 }
 struct ScratchRegisters([Box<dyn ScratchRegister>; 8]);
 impl ScratchRegisters {
-    fn alloc(&mut self, interfering_regs: &Vec<usize>) -> Option<usize> {
-        for (i, r) in self
+    fn alloc(&mut self, interfering_regs: &[usize]) -> Option<usize> {
+        if let Some((i, r)) = self
             .0
             .iter_mut()
             .enumerate()
-            .filter(|(i, r)| !r.is_used() && !interfering_regs.contains(i))
+            .find(|(i, r)| !r.is_used() && !interfering_regs.contains(i))
         {
             r.in_use();
-            return Some(i);
+            Some(i)
+        } else {
+            None
         }
-        None
     }
     fn activate_reg(&mut self, scratch: Box<dyn ScratchRegister>) {
         if let Some(scratch) = self

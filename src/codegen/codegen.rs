@@ -445,7 +445,7 @@ impl Compiler {
 
         for expr in exprs {
             if let ExprKind::Assign { r_expr, .. } = &expr.kind {
-                let r_value = self.execute_global_expr(&r_expr);
+                let r_value = self.execute_global_expr(r_expr);
 
                 self.write_out(Ir::GlobalInit(r_expr.type_decl.clone().unwrap(), r_value));
             }

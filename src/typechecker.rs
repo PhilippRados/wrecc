@@ -390,7 +390,7 @@ impl TypeChecker {
     ) -> Result<(), Error> {
         let mut value_type = self.expr_type(expr)?;
 
-        crate::arr_decay!(value_type, expr, var_name, is_global);
+        crate::arr_decay!(value_type, expr, var_name);
         self.check_type_compatibility(var_name, type_decl, &value_type)?;
         self.maybe_cast(type_decl, &value_type, expr);
 
@@ -422,15 +422,13 @@ impl TypeChecker {
         // check if every expression is constant if global
         if is_global {
             for e in assign_exprs.iter().by_ref() {
-                if let ExprKind::Assign { r_expr, .. } = &e.kind {
-                    if !is_constant(r_expr) {
-                        return Err(Error::new(
-                            var_name,
-                            ErrorKind::NotConstantInit("Global variables"),
-                        ));
-                    }
-                } else {
-                    unreachable!()
+                let ExprKind::Assign { r_expr, .. } = &e.kind else {unreachable!()};
+
+                if !is_constant(r_expr) {
+                    return Err(Error::new(
+                        var_name,
+                        ErrorKind::NotConstantInit("Global variables"),
+                    ));
                 }
             }
         } else {
@@ -465,7 +463,7 @@ impl TypeChecker {
     ) -> Result<NEWTypes, Error> {
         let mut old_type = self.expr_type(expr)?;
 
-        crate::arr_decay!(old_type, expr, token, self.is_global());
+        crate::arr_decay!(old_type, expr, token);
 
         if !old_type.is_scalar() || !new_type.is_scalar() {
             return Err(Error::new(
@@ -599,7 +597,7 @@ impl TypeChecker {
         if let Some(expr) = expr {
             let mut body_return = self.expr_type(expr)?;
 
-            crate::arr_decay!(body_return, expr, keyword, false);
+            crate::arr_decay!(body_return, expr, keyword);
             self.check_return_compatibility(keyword, &function_type, &body_return)?;
             self.maybe_cast(&function_type, &body_return, expr);
         } else {
@@ -621,11 +619,7 @@ impl TypeChecker {
                 Self::maybe_scale_result(scale_factor, ast);
                 type_decl
             }
-            ExprKind::Unary { token, right, is_global } => {
-                *is_global = self.is_global();
-
-                self.evaluate_unary(token, right, *is_global)?
-            }
+            ExprKind::Unary { token, right } => self.evaluate_unary(token, right)?,
             ExprKind::Grouping { expr } => self.evaluate_grouping(expr)?,
             ExprKind::Literal(_) => ast.type_decl.clone().unwrap(),
             ExprKind::String(token) => self.string(token.unwrap_string())?,
@@ -832,7 +826,7 @@ impl TypeChecker {
             return Err(Error::new(token, ErrorKind::NotLvalue));
         }
 
-        crate::arr_decay!(r_type, r_expr, token, self.is_global());
+        crate::arr_decay!(r_type, r_expr, token);
 
         self.check_type_compatibility(token, &l_type, &r_type)?;
         self.maybe_cast(&l_type, &r_type, r_expr);
@@ -850,7 +844,7 @@ impl TypeChecker {
         for expr in args.iter_mut() {
             let mut t = self.expr_type(expr)?;
 
-            crate::arr_decay!(t, expr, left_paren, false);
+            crate::arr_decay!(t, expr, left_paren);
             self.maybe_int_promote(expr, &mut t);
             arg_types.push((expr, t));
         }
@@ -972,8 +966,8 @@ impl TypeChecker {
         Self::lval_to_rval(left);
         Self::lval_to_rval(right);
 
-        crate::arr_decay!(left_type, left, token, false);
-        crate::arr_decay!(right_type, right, token, false);
+        crate::arr_decay!(left_type, left, token);
+        crate::arr_decay!(right_type, right, token);
 
         // check valid operations
         if !Self::is_valid_bin(token, &left_type, &right_type) {
@@ -1041,19 +1035,14 @@ impl TypeChecker {
             *type_decl = NEWTypes::Primitive(Types::Int);
         }
     }
-    fn evaluate_unary(
-        &mut self,
-        token: &Token,
-        right: &mut Expr,
-        is_global: bool,
-    ) -> Result<NEWTypes, Error> {
+    fn evaluate_unary(&mut self, token: &Token, right: &mut Expr) -> Result<NEWTypes, Error> {
         let mut right_type = self.expr_type(right)?;
 
         if matches!(token.token, TokenType::Amp) {
             // array doesn't decay during '&' expression
             Ok(self.check_address(token, right_type, right)?)
         } else {
-            crate::arr_decay!(right_type, right, token, is_global);
+            crate::arr_decay!(right_type, right, token);
             Ok(match token.token {
                 TokenType::Star => self.check_deref(token, right_type, right)?,
                 TokenType::Bang => {
@@ -1135,11 +1124,7 @@ impl TypeChecker {
             Ok(())
         }
     }
-    fn is_global(&self) -> bool {
-        self.scope.0.len() == 1
-    }
 }
-
 pub fn align_by(mut offset: usize, type_size: usize) -> usize {
     let remainder = offset % type_size;
     if remainder != 0 {
@@ -1157,11 +1142,35 @@ pub fn create_label(index: &mut usize) -> usize {
 fn is_constant(expr: &Expr) -> bool {
     // 6.6 Constant Expressions
     match &expr.kind {
-        ExprKind::String(_) | ExprKind::Literal(_) | ExprKind::Cast { .. } => true,
-        // don't have to specify matching array-type because it decays into '&' anyway
-        ExprKind::Unary { token, right, .. } if matches!(token.token, TokenType::Amp) => {
-            matches!(&right.kind, ExprKind::Ident(_) | ExprKind::String(_))
+        ExprKind::String(_) | ExprKind::Literal(_) => true,
+        ExprKind::Cast { expr, .. } | ExprKind::ScaleUp { expr, .. } => is_constant(expr),
+        ExprKind::Binary { left, token, right }
+            if matches!(token.token, TokenType::Plus | TokenType::Minus) =>
+        {
+            match (&left, &right) {
+                (expr, n) | (n, expr) if is_const_literal(n) => {
+                    is_address_constant(expr) || expr.type_decl.clone().unwrap().is_ptr()
+                }
+                _ => false,
+            }
         }
+        _ => is_address_constant(expr),
+    }
+}
+fn is_address_constant(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Unary { token, right, .. } if matches!(token.token, TokenType::Amp) => {
+            matches!(right.kind, ExprKind::Ident(_) | ExprKind::String(_))
+        }
+        ExprKind::Cast { expr, .. } | ExprKind::ScaleUp { expr, .. } => is_address_constant(expr),
+        ExprKind::String(_) => true,
+        _ => false,
+    }
+}
+fn is_const_literal(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Cast { expr, .. } | ExprKind::ScaleUp { expr, .. } => is_const_literal(expr),
+        ExprKind::Literal(_) => true,
         _ => false,
     }
 }
@@ -1222,6 +1231,30 @@ mod tests {
         };
     }
 
+    fn assert_constant_expr(input: &str, expected: bool, symbols: Vec<(&str, NEWTypes)>) {
+        let mut scanner = Scanner::new(input);
+        let tokens = scanner.scan_token().unwrap();
+
+        let mut parser = Parser::new(tokens);
+        for (name, type_decl) in symbols {
+            parser
+                .env
+                .declare_symbol(
+                    &Token::default(TokenType::Ident(name.to_string(), 0)),
+                    Symbols::Variable(SymbolInfo::new(type_decl)),
+                )
+                .unwrap();
+        }
+        let mut expr = parser.expression().unwrap();
+
+        let mut typechecker = TypeChecker::new(parser.env.get_symbols());
+        typechecker.expr_type(&mut expr).unwrap();
+
+        let actual = is_constant(&expr);
+
+        assert_eq!(actual, expected);
+    }
+
     #[test]
     fn binary_integer_promotion() {
         assert_type!("'1' + '2'", NEWTypes::Primitive(Types::Int));
@@ -1232,6 +1265,26 @@ mod tests {
         assert_type!("1 << (long)2", NEWTypes::Primitive(Types::Int));
         assert_type!("(long)1 << (char)2", NEWTypes::Primitive(Types::Long));
         assert_type!("'1' << (char)2", NEWTypes::Primitive(Types::Int));
+    }
+
+    #[test]
+    fn static_constant_test() {
+        assert_constant_expr(
+            "&a + (int)(3 * 1)",
+            true,
+            vec![("a", NEWTypes::Primitive(Types::Int))],
+        );
+        assert_constant_expr("\"hi\" + (int)(3 * 1)", true, vec![]);
+
+        assert_constant_expr(
+            "(long*)&a",
+            true,
+            vec![("a", NEWTypes::Primitive(Types::Int))],
+        );
+
+        assert_constant_expr("(long*)1 + 3", true, vec![]);
+
+        assert_constant_expr("a", false, vec![("a", NEWTypes::Primitive(Types::Int))]);
     }
 
     #[test]

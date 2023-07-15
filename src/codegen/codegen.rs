@@ -358,7 +358,7 @@ impl Compiler {
                 }
                 DeclarationKind::Decl(type_decl, name, false) => self.declare_var(type_decl, name),
                 DeclarationKind::Init(type_decl, name, expr, true) => {
-                    let value_reg = self.execute_expr(expr);
+                    let value_reg = self.execute_global_expr(expr);
                     self.init_global_var(type_decl, name, value_reg)
                 }
                 DeclarationKind::Init(type_decl, name, expr, false) => {
@@ -379,7 +379,7 @@ impl Compiler {
         self.write_out(Ir::GlobalDeclaration(name.unwrap_string()));
         self.write_out(Ir::GlobalInit(
             NEWTypes::Primitive(Types::Void),
-            Register::Literal(type_decl.size() as i64, NEWTypes::default()),
+            StaticRegister::Literal(type_decl.size() as i64),
         ));
         let reg = Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl.clone()));
 
@@ -400,7 +400,12 @@ impl Compiler {
             .unwrap_var_mut()
             .set_reg(reg);
     }
-    fn init_global_var(&mut self, type_decl: &NEWTypes, var_name: &Token, value_reg: Register) {
+    fn init_global_var(
+        &mut self,
+        type_decl: &NEWTypes,
+        var_name: &Token,
+        value_reg: StaticRegister,
+    ) {
         let name = var_name.unwrap_string();
 
         self.write_out(Ir::GlobalDeclaration(name.clone()));
@@ -440,10 +445,9 @@ impl Compiler {
 
         for expr in exprs {
             if let ExprKind::Assign { r_expr, .. } = &expr.kind {
-                let r_value = self.execute_expr(&r_expr);
+                let r_value = self.execute_global_expr(&r_expr);
 
-                self.write_out(Ir::GlobalInit(r_value.get_type(), r_value.clone()));
-                self.free(r_value);
+                self.write_out(Ir::GlobalInit(r_expr.type_decl.clone().unwrap(), r_value));
             }
         }
     }
@@ -543,6 +547,56 @@ impl Compiler {
             literal_reg
         }
     }
+    fn execute_global_expr(&mut self, ast: &Expr) -> StaticRegister {
+        match &ast.kind {
+            ExprKind::String(token) => {
+                let name = token.unwrap_string();
+                StaticRegister::Label(LabelRegister::String(self.const_labels[&name]))
+            }
+            ExprKind::Literal(n) => StaticRegister::Literal(*n),
+            ExprKind::Cast { new_type, expr, .. } => {
+                let mut reg = self.execute_global_expr(expr);
+                reg.set_type(new_type.clone());
+                reg
+            }
+            ExprKind::ScaleUp { by, expr } => {
+                if let StaticRegister::Literal(n) = self.execute_global_expr(expr) {
+                    StaticRegister::Literal(n * *by as i64)
+                } else {
+                    unreachable!("can only scale literal value")
+                }
+            }
+            ExprKind::Unary { right, .. } => self.execute_global_expr(right),
+            ExprKind::Binary { left, token, right } => {
+                let left = self.execute_global_expr(left);
+                let right = self.execute_global_expr(right);
+
+                match (left, right) {
+                    (StaticRegister::Label(reg), StaticRegister::Literal(n))
+                    | (StaticRegister::Literal(n), StaticRegister::Label(reg)) => {
+                        StaticRegister::LabelOffset(reg, n, token.token.clone())
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            ExprKind::Ident(name) => {
+                // plain ident isn't compile-time-constant (this gets caught in typechecker)
+                // but is needed to evaluate address-constants
+                if let Register::Label(reg) = self
+                    .env
+                    .get(name.token.get_index())
+                    .unwrap()
+                    .unwrap_var()
+                    .get_reg()
+                {
+                    StaticRegister::Label(reg)
+                } else {
+                    unreachable!()
+                }
+            }
+            _ => unreachable!("non global-constant expr {}", ast.kind),
+        }
+    }
     pub fn execute_expr(&mut self, ast: &Expr) -> Register {
         match &ast.kind {
             ExprKind::Binary { left, token, right } => {
@@ -553,8 +607,8 @@ impl Compiler {
             }
             ExprKind::Literal(n) => self.cg_literal(*n, ast.type_decl.clone().unwrap()),
             ExprKind::Grouping { expr } => self.execute_expr(expr),
-            ExprKind::Unary { token, right, is_global } => {
-                self.cg_unary(token, right, *is_global, ast.type_decl.clone().unwrap())
+            ExprKind::Unary { token, right } => {
+                self.cg_unary(token, right, ast.type_decl.clone().unwrap())
             }
             ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
             ExprKind::Assign { l_expr, r_expr, .. } => {
@@ -575,12 +629,8 @@ impl Compiler {
             ExprKind::Call { name, args, .. } => {
                 self.cg_call(name, args, ast.type_decl.clone().unwrap())
             }
-            ExprKind::Cast { expr, direction, .. } => {
-                match direction.clone().expect("typechecker should fill this") {
-                    CastDirection::Up => self.cg_cast_up(expr, ast.type_decl.clone().unwrap()),
-                    CastDirection::Down => self.cg_cast_down(expr, ast.type_decl.clone().unwrap()),
-                    CastDirection::Equal => self.execute_expr(expr),
-                }
+            ExprKind::Cast { expr, direction, new_type, .. } => {
+                self.cg_cast(new_type.clone(), expr, direction.clone().unwrap())
             }
             ExprKind::ScaleUp { expr, by } => self.cg_scale_up(expr, by),
             ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(expr, shift_amount),
@@ -662,7 +712,7 @@ impl Compiler {
                 .find(|(_, name)| name.unwrap_string() == member)
                 .unwrap();
 
-            let address = self.cg_address_at(reg, false, free);
+            let address = self.cg_address_at(reg, free);
             let mut result = if offset != 0 {
                 self.cg_add(
                     Register::Literal(offset as i64, NEWTypes::Primitive(Types::Int)),
@@ -681,7 +731,7 @@ impl Compiler {
                 .find(|(_, name)| name.unwrap_string() == member)
                 .unwrap();
 
-            let mut result = self.cg_address_at(reg, false, free);
+            let mut result = self.cg_address_at(reg, free);
 
             result.set_type(member_type.clone());
             result.set_value_kind(ValueKind::Lvalue);
@@ -766,6 +816,13 @@ impl Compiler {
             Register::Literal(*by_amount as i64, NEWTypes::Primitive(Types::Int)),
             value_reg,
         )
+    }
+    fn cg_cast(&mut self, new_type: NEWTypes, expr: &Expr, direction: CastDirection) -> Register {
+        match direction {
+            CastDirection::Up => self.cg_cast_up(expr, new_type),
+            CastDirection::Down => self.cg_cast_down(expr, new_type),
+            CastDirection::Equal => self.execute_expr(expr),
+        }
     }
     fn cg_cast_down(&mut self, expr: &Expr, new_type: NEWTypes) -> Register {
         let mut value_reg = self.execute_expr(expr);
@@ -986,13 +1043,7 @@ impl Compiler {
 
         result
     }
-    fn cg_unary(
-        &mut self,
-        token: &Token,
-        right: &Expr,
-        is_global: bool,
-        new_type: NEWTypes,
-    ) -> Register {
+    fn cg_unary(&mut self, token: &Token, right: &Expr, new_type: NEWTypes) -> Register {
         let mut reg = self.execute_expr(right);
         // can't have literal as only operand to unary expression
         reg = convert_reg!(self, reg, Register::Literal(..));
@@ -1000,7 +1051,7 @@ impl Compiler {
         match token.token {
             TokenType::Bang => self.cg_bang(reg),
             TokenType::Minus => self.cg_negate(reg),
-            TokenType::Amp => self.cg_address_at(reg, is_global, true),
+            TokenType::Amp => self.cg_address_at(reg, true),
             TokenType::Star => self.cg_deref(reg, new_type),
             TokenType::Tilde => self.cg_bit_not(reg),
             _ => unreachable!(),
@@ -1049,10 +1100,7 @@ impl Compiler {
         self.write_out(Ir::Neg(reg.clone()));
         reg
     }
-    fn cg_address_at(&mut self, reg: Register, is_global: bool, free: bool) -> Register {
-        if is_global && matches!(reg, Register::Label(..)) {
-            return reg;
-        }
+    fn cg_address_at(&mut self, reg: Register, free: bool) -> Register {
         let dest = Register::Temp(TempRegister::new(
             NEWTypes::Pointer(Box::new(reg.get_type())),
             &mut self.interval_counter,

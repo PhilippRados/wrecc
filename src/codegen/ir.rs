@@ -9,7 +9,7 @@ pub enum Ir {
     // name
     GlobalDeclaration(String),
     // type, value
-    GlobalInit(NEWTypes, Register),
+    GlobalInit(NEWTypes, StaticRegister),
     // label index, value
     StringDeclaration(usize, String),
     // label index
@@ -65,7 +65,6 @@ pub enum Ir {
 impl Ir {
     pub fn get_regs(&mut self) -> (Option<&mut Register>, Option<&mut Register>) {
         match self {
-            Ir::GlobalInit(_, reg) => (None, Some(reg)),
             Ir::Push(reg) => (None, Some(reg)),
             Ir::Pop(reg) => (None, Some(reg)),
             Ir::Mov(left, right)
@@ -81,6 +80,8 @@ impl Ir {
             | Ir::Load(left, right)
             | Ir::Shift(_, left, right) => (Some(left), Some(right)),
             Ir::Neg(reg) | Ir::Not(reg) | Ir::Idiv(reg) => (None, Some(reg)),
+            // global initializer can only have statci-registers and no temporaries
+            Ir::GlobalInit(..) => (None, None),
             _ => (None, None),
         }
     }
@@ -94,7 +95,7 @@ impl Display for Ir {
             match self {
                 Ir::GlobalDeclaration(name) => format!("\n\t.data\n_{}:", name),
                 Ir::GlobalInit(type_decl, reg) =>
-                    format!("\t.{} {}", type_decl.complete_suffix(), reg.base_name()),
+                    format!("\t.{} {}", type_decl.complete_suffix(), reg.name()),
                 Ir::StringDeclaration(label_index, s) =>
                     format!("LS{}:\n\t.string \"{}\"", label_index, s),
                 Ir::LabelDefinition(label_index) => format!("L{}:", label_index),

@@ -184,7 +184,7 @@ impl Display for NEWTypes {
 }
 #[macro_export]
 macro_rules! arr_decay {
-    ($arr:expr,$ast:expr,$token:expr,$is_global:expr) => {
+    ($arr:expr,$ast:expr,$token:expr) => {
         if let NEWTypes::Array { of, .. } = $arr {
             $arr = NEWTypes::Pointer(of);
 
@@ -196,7 +196,6 @@ macro_rules! arr_decay {
                     $token.line_string.clone(),
                 ),
                 right: Box::new($ast.clone()),
-                is_global: $is_global,
             };
         }
     };
@@ -305,6 +304,22 @@ impl NEWTypes {
             _ => true,
         }
     }
+
+    pub fn max(&self) -> i64 {
+        match self {
+            NEWTypes::Primitive(t) => t.max(),
+            NEWTypes::Pointer(_) => i64::MAX,
+            _ => unreachable!(),
+        }
+    }
+    pub fn min(&self) -> i64 {
+        match self {
+            NEWTypes::Primitive(t) => t.min(),
+            NEWTypes::Pointer(_) => i64::MIN,
+            _ => unreachable!(),
+        }
+    }
+
     pub fn get_primitive(&self) -> Option<&Types> {
         if let NEWTypes::Primitive(type_decl) = self {
             Some(type_decl)
@@ -400,7 +415,7 @@ impl Types {
         }
     }
 
-    pub fn max(&self) -> i64 {
+    fn max(&self) -> i64 {
         match self {
             Types::Void => unreachable!(),
             Types::Char => i8::MAX as i64,
@@ -408,7 +423,7 @@ impl Types {
             Types::Long => i64::MAX,
         }
     }
-    pub fn min(&self) -> i64 {
+    fn min(&self) -> i64 {
         match self {
             Types::Void => unreachable!(),
             Types::Char => i8::MIN as i64,

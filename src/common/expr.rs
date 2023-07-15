@@ -12,7 +12,6 @@ pub enum ExprKind {
     Unary {
         token: Token,
         right: Box<Expr>,
-        is_global: bool,
     },
     Grouping {
         expr: Box<Expr>,
@@ -364,8 +363,7 @@ impl Expr {
         }
     }
     fn type_overflow(value: i64, type_decl: &NEWTypes) -> bool {
-        let primitive_type = type_decl.get_primitive().unwrap();
-        (value > primitive_type.max()) || ((value) < primitive_type.min())
+        (value > type_decl.max()) || ((value) < type_decl.min())
     }
 
     fn unary_fold(
@@ -519,7 +517,7 @@ impl fmt::Display for ExprKind {
                     }
                     ExprKind::Literal(n) => format!("Literal: {}", n),
                     ExprKind::Ident(name) => format!("Ident: {}", name.unwrap_string()),
-                    ExprKind::String(token) => token.unwrap_string(),
+                    ExprKind::String(token) => format!("String: {}", token.unwrap_string()),
                     ExprKind::Logical { token, left, right } => format!(
                         "Logical: {}\n{}\n{}",
                         token.token,
@@ -603,11 +601,17 @@ mod tests {
 
         return actual.type_decl;
     }
-    fn assert_fold_type(input: &str, expected: &str, expected_type: Types) {
+    fn assert_fold_type_prim(input: &str, expected: &str, expected_type: Types) {
         let Some(actual_type) = assert_fold(input, expected) else {
             unreachable!("can only assert type of foldable expression");
         };
         assert_eq!(actual_type, NEWTypes::Primitive(expected_type));
+    }
+    fn assert_fold_type(input: &str, expected: &str, expected_type: NEWTypes) {
+        let Some(actual_type) = assert_fold(input, expected) else {
+            unreachable!("can only assert type of foldable expression");
+        };
+        assert_eq!(actual_type, expected_type);
     }
     macro_rules! assert_fold_error {
         ($input:expr,$expected_err:pat) => {
@@ -639,7 +643,7 @@ mod tests {
         assert_fold("-8 | -8", "-8");
         assert_fold("1 | 1", "1");
 
-        assert_fold_type("~0", "-1", Types::Int);
+        assert_fold_type_prim("~0", "-1", Types::Int);
     }
     #[test]
     fn advanced_bit_fold() {
@@ -684,12 +688,12 @@ mod tests {
         assert_fold("'1' << 5", "1568");
         assert_fold("'1' >> 2", "12");
 
-        assert_fold_type("1 << (long)12", "4096", Types::Int);
-        assert_fold_type("(long)1 << (char)12", "(long)4096", Types::Long);
-        assert_fold_type("'1' << 12", "200704", Types::Int);
+        assert_fold_type_prim("1 << (long)12", "4096", Types::Int);
+        assert_fold_type_prim("(long)1 << (char)12", "(long)4096", Types::Long);
+        assert_fold_type_prim("'1' << 12", "200704", Types::Int);
 
-        assert_fold_type("(long)-5 >> 42", "(long)-1", Types::Long);
-        assert_fold_type("(long)-5 << 42", "-21990232555520", Types::Long);
+        assert_fold_type_prim("(long)-5 >> 42", "(long)-1", Types::Long);
+        assert_fold_type_prim("(long)-5 << 42", "-21990232555520", Types::Long);
     }
     #[test]
     fn shift_fold_error() {
@@ -739,23 +743,31 @@ mod tests {
 
     #[test]
     fn char_fold() {
-        assert_fold_type("'1' + '1'", "98", Types::Int);
+        assert_fold_type_prim("'1' + '1'", "98", Types::Int);
         assert_fold("-'1'", "-49");
         assert_fold("!-'1'", "0");
     }
     #[test]
+    fn ptr_fold() {
+        assert_fold_type(
+            "(long *)1 + 3",
+            "25",
+            NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Long))),
+        );
+    }
+    #[test]
     fn type_conversions() {
-        assert_fold_type("4294967296 + 1", "4294967297", Types::Long);
-        assert_fold_type("2147483648 - 10", "(long)2147483638", Types::Long);
-        assert_fold_type("'1' * 2147483648", "105226698752", Types::Long);
+        assert_fold_type_prim("4294967296 + 1", "4294967297", Types::Long);
+        assert_fold_type_prim("2147483648 - 10", "(long)2147483638", Types::Long);
+        assert_fold_type_prim("'1' * 2147483648", "105226698752", Types::Long);
 
-        assert_fold_type("'a'", "'a'", Types::Char);
-        assert_fold_type("-'a'", "-'a'", Types::Int);
+        assert_fold_type_prim("'a'", "'a'", Types::Char);
+        assert_fold_type_prim("-'a'", "-'a'", Types::Int);
 
-        assert_fold_type("2147483648", "2147483648", Types::Long);
+        assert_fold_type_prim("2147483648", "2147483648", Types::Long);
 
-        assert_fold_type("-2147483649", "-2147483649", Types::Long);
-        assert_fold_type("(int)-2147483648", "(int)-2147483648", Types::Int);
+        assert_fold_type_prim("-2147483649", "-2147483649", Types::Long);
+        assert_fold_type_prim("(int)-2147483648", "(int)-2147483648", Types::Int);
     }
 
     #[test]
@@ -782,8 +794,8 @@ mod tests {
             ErrorKind::IntegerOverflow(NEWTypes::Primitive(Types::Int))
         );
 
-        assert_fold_type("(char)127 + 2", "129", Types::Int);
-        assert_fold_type("2147483648 + 1", "2147483649", Types::Long);
+        assert_fold_type_prim("(char)127 + 2", "129", Types::Int);
+        assert_fold_type_prim("2147483648 + 1", "2147483649", Types::Long);
     }
 
     #[test]
@@ -793,11 +805,11 @@ mod tests {
 
     #[test]
     fn const_cast() {
-        assert_fold_type("(long)'1' + '1'", "(long)98", Types::Long);
-        assert_fold_type("(char)2147483648", "(char)0", Types::Char);
-        assert_fold_type("(int)2147483648", "(int)-2147483648", Types::Int);
+        assert_fold_type_prim("(long)'1' + '1'", "(long)98", Types::Long);
+        assert_fold_type_prim("(char)2147483648", "(char)0", Types::Char);
+        assert_fold_type_prim("(int)2147483648", "(int)-2147483648", Types::Int);
 
-        assert_fold_type("!((long)'1' + '1')", "0", Types::Int);
+        assert_fold_type_prim("!((long)'1' + '1')", "0", Types::Int);
 
         assert_fold_error!(
             "(struct {int age;})2",

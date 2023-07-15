@@ -7,7 +7,8 @@ use std::vec::IntoIter;
 
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
-    env: Scope,
+    // public so I can set it up in unit-tests
+    pub env: Scope,
 }
 
 impl Parser {
@@ -340,7 +341,6 @@ impl Parser {
                         index as i64,
                         NEWTypes::Primitive(Types::Int),
                     )),
-                    is_global: self.env.is_global(),
                 }),
             )?;
 
@@ -525,18 +525,18 @@ impl Parser {
         if self.matches(vec![TokenKind::LeftParen]).is_some() {
             self.function_decl(type_decl, name)
         } else {
+            let is_global = self.env.is_global();
             type_decl = self.parse_arr(type_decl)?;
 
-            let index = self.env.declare_symbol(
-                &name,
-                Symbols::Variable(SymbolInfo::new(type_decl.clone(), self.env.is_global())),
-            )?;
+            let index = self
+                .env
+                .declare_symbol(&name, Symbols::Variable(SymbolInfo::new(type_decl.clone())))?;
             name.token.update_index(index);
 
             if self.matches(vec![TokenKind::Equal]).is_some() {
-                self.var_initialization(name, type_decl)
+                self.var_initialization(name, type_decl, is_global)
             } else {
-                Ok(DeclarationKind::Decl(type_decl, name, self.env.is_global()))
+                Ok(DeclarationKind::Decl(type_decl, name, is_global))
             }
         }
     }
@@ -544,6 +544,7 @@ impl Parser {
         &mut self,
         name: Token,
         type_decl: NEWTypes,
+        is_global: bool,
     ) -> Result<DeclarationKind, Error> {
         match self.initializers(&type_decl) {
             Some(elements) => {
@@ -559,18 +560,13 @@ impl Parser {
                     type_decl,
                     name,
                     assign_sugar,
-                    self.env.is_global(),
+                    is_global,
                 ))
             }
             None => {
                 let r_value = self.var_assignment()?;
 
-                Ok(DeclarationKind::Init(
-                    type_decl,
-                    name,
-                    r_value,
-                    self.env.is_global(),
-                ))
+                Ok(DeclarationKind::Init(type_decl, name, r_value, is_global))
             }
         }
     }
@@ -830,7 +826,7 @@ impl Parser {
             // insert parameters into symbol table
             let index = self.env.declare_symbol(
                 &name,
-                Symbols::Variable(SymbolInfo::new(param_type.clone(), false)),
+                Symbols::Variable(SymbolInfo::new(param_type.clone())),
             )?;
             name.token.update_index(index);
 
@@ -1215,7 +1211,6 @@ impl Parser {
                         ExprKind::Unary {
                             right: Box::new(right),
                             token: token.clone(),
-                            is_global: false,
                         },
                         match token.token {
                             TokenType::Star => ValueKind::Lvalue,
@@ -1557,7 +1552,6 @@ fn arrow_sugar(left: Expr, member: Token, arrow_token: Token) -> Expr {
                                 member.column,
                                 member.line_string,
                             ),
-                            is_global: false,
                             right: Box::new(left),
                         },
                         ValueKind::Lvalue,
@@ -1729,7 +1723,6 @@ fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
                 },
                 ValueKind::Lvalue,
             )),
-            is_global: false,
         },
         ValueKind::Lvalue,
     )

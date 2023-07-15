@@ -21,6 +21,7 @@ pub struct Function {
     // all the goto-labels that are unique to that function
     pub labels: HashMap<String, usize>,
 
+    // index of epilogue label in function
     pub epilogue_index: usize,
 }
 impl Function {
@@ -74,14 +75,11 @@ pub struct SymbolInfo {
     // optional because info isn't known at moment of insertion
     // stack-register that identifier resides in
     pub reg: Option<Register>,
-
-    // wether or not symbol was declared in global scope
-    pub is_global: bool,
 }
 
 impl SymbolInfo {
-    pub fn new(type_decl: NEWTypes, is_global: bool) -> Self {
-        SymbolInfo { type_decl, is_global, reg: None }
+    pub fn new(type_decl: NEWTypes) -> Self {
+        SymbolInfo { type_decl, reg: None }
     }
     pub fn get_type(&self) -> NEWTypes {
         self.type_decl.clone()
@@ -308,9 +306,7 @@ mod tests {
     impl PartialEq for Symbols {
         fn eq(&self, other: &Self) -> bool {
             match (self, other) {
-                (Symbols::Variable(v1), Symbols::Variable(v2)) => {
-                    v1.type_decl == v2.type_decl && v1.is_global == v2.is_global
-                }
+                (Symbols::Variable(v1), Symbols::Variable(v2)) => v1.type_decl == v2.type_decl,
                 (Symbols::TypeDef(t1), Symbols::TypeDef(t2)) => t1 == t2,
                 (Symbols::Func(t1), Symbols::Func(t2)) => t1 == t2,
                 _ => false,
@@ -329,7 +325,6 @@ mod tests {
                     Symbols::Variable(SymbolInfo {
                         type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
                         reg: None,
-                        is_global: false,
                     }),
                 ),
                 (
@@ -339,7 +334,6 @@ mod tests {
                     Symbols::Variable(SymbolInfo {
                         type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
                         reg: None,
-                        is_global: false,
                     }),
                 ),
                 (
@@ -349,7 +343,6 @@ mod tests {
                     Symbols::Variable(SymbolInfo {
                         type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
                         reg: None,
-                        is_global: false,
                     }),
                 ),
             ],
@@ -368,7 +361,6 @@ mod tests {
                 Symbols::Variable(SymbolInfo {
                     type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
                     reg: None,
-                    is_global: false,
                 }),
             ),
             (
@@ -378,7 +370,6 @@ mod tests {
                 Symbols::Variable(SymbolInfo {
                     type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
                     reg: None,
-                    is_global: false,
                 }),
             ),
         ];

@@ -1,4 +1,5 @@
 use crate::common::expr::ValueKind;
+use crate::common::token::TokenType;
 use crate::common::types::*;
 
 pub static ARG_REGS: &[[&str; 3]; 6] = &[
@@ -109,6 +110,38 @@ impl LabelRegister {
         match self {
             LabelRegister::String(index) => format!("LS{index}"),
             LabelRegister::Var(name, _) => format!("_{name}"),
+        }
+    }
+}
+
+// operands that are allowed in data/bss sections
+#[derive(Debug)]
+pub enum StaticRegister {
+    Label(LabelRegister),
+    LabelOffset(LabelRegister, i64, TokenType),
+    Literal(i64),
+}
+impl StaticRegister {
+    pub fn set_type(&mut self, new: NEWTypes) {
+        match self {
+            StaticRegister::Label(reg) | StaticRegister::LabelOffset(reg, ..) => reg.set_type(new),
+            StaticRegister::Literal(_) => (),
+        }
+    }
+    pub fn name(&self) -> String {
+        match self {
+            StaticRegister::Label(reg) => reg.base_name(),
+            StaticRegister::LabelOffset(reg, offset, term) => format!(
+                "{}{}{}",
+                reg.base_name(),
+                match term {
+                    TokenType::Plus => '+',
+                    TokenType::Minus => '-',
+                    _ => unreachable!(),
+                },
+                offset
+            ),
+            StaticRegister::Literal(n) => format!("{n}"),
         }
     }
 }

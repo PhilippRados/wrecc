@@ -1275,6 +1275,7 @@ mod tests {
             vec![("a", NEWTypes::Primitive(Types::Int))],
         );
         assert_constant_expr("\"hi\" + (int)(3 * 1)", true, vec![]);
+        assert_constant_expr("&\"hi\" + (int)(3 * 1)", true, vec![]);
 
         assert_constant_expr(
             "(long*)&a",
@@ -1283,6 +1284,30 @@ mod tests {
         );
 
         assert_constant_expr("(long*)1 + 3", true, vec![]);
+
+        assert_constant_expr(
+            "&a[4]",
+            true,
+            vec![(
+                "a",
+                NEWTypes::Array {
+                    amount: 4,
+                    of: Box::new(NEWTypes::Primitive(Types::Int)),
+                },
+            )],
+        );
+
+        assert_constant_expr(
+            "*&a[4]",
+            true,
+            vec![(
+                "a",
+                NEWTypes::Array {
+                    amount: 4,
+                    of: Box::new(NEWTypes::Primitive(Types::Int)),
+                },
+            )],
+        );
 
         assert_constant_expr("a", false, vec![("a", NEWTypes::Primitive(Types::Int))]);
     }

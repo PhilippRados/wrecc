@@ -1363,7 +1363,7 @@ impl Parser {
             });
         }
         if let Some(s) = self.matches(vec![TokenKind::String]) {
-            return Ok(Expr::new(ExprKind::String(s), ValueKind::Rvalue));
+            return Ok(Expr::new(ExprKind::String(s), ValueKind::Lvalue));
         }
 
         if self.matches(vec![TokenKind::LeftParen]).is_some() {

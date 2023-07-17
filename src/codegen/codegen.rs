@@ -76,7 +76,7 @@ impl Compiler {
 
     pub fn translate(
         mut self,
-        statements: &Vec<Stmt>,
+        statements: Vec<Stmt>,
     ) -> (Vec<Ir>, HashMap<usize, IntervalEntry>, Vec<Symbols>) {
         self.cg_const_labels();
         self.cg_stmts(statements);
@@ -92,12 +92,12 @@ impl Compiler {
             self.write_out(Ir::StringDeclaration(label_index, data));
         }
     }
-    fn cg_stmts(&mut self, statements: &Vec<Stmt>) {
+    fn cg_stmts(&mut self, statements: Vec<Stmt>) {
         for s in statements {
             self.visit(s)
         }
     }
-    fn visit(&mut self, statement: &Stmt) {
+    fn visit(&mut self, statement: Stmt) {
         match statement {
             Stmt::Expr(expr) => {
                 let reg = self.execute_expr(expr);
@@ -108,22 +108,22 @@ impl Compiler {
             Stmt::Function(name, body) => self.function_definition(name, body),
             Stmt::Return(_, expr) => self.return_statement(expr),
             Stmt::If(_, cond, then_branch, else_branch) => {
-                self.if_statement(cond, then_branch, else_branch)
+                self.if_statement(cond, *then_branch, *else_branch)
             }
-            Stmt::While(_, cond, body) => self.while_statement(cond, body),
-            Stmt::Do(_, body, cond) => self.do_statement(body, cond),
-            Stmt::For(_, init, cond, inc, body) => self.for_statement(init, cond, inc, body),
+            Stmt::While(_, cond, body) => self.while_statement(cond, *body),
+            Stmt::Do(_, body, cond) => self.do_statement(*body, cond),
+            Stmt::For(_, init, cond, inc, body) => self.for_statement(init, cond, inc, *body),
             Stmt::Break(..) => self.jump_statement(self.jump_labels.last().expect("typechecker").0),
             Stmt::Continue(..) => {
                 self.jump_statement(self.jump_labels.last().expect("typechecker").1)
             }
-            Stmt::Switch(_, cond, body) => self.switch_statement(cond, body),
-            Stmt::Case(_, _, body) | Stmt::Default(_, body) => self.case_statement(body),
+            Stmt::Switch(_, cond, body) => self.switch_statement(cond, *body),
+            Stmt::Case(_, _, body) | Stmt::Default(_, body) => self.case_statement(*body),
             Stmt::Goto(label) => self.goto_statement(label),
-            Stmt::Label(name, body) => self.label_statement(name, body),
+            Stmt::Label(name, body) => self.label_statement(name, *body),
         }
     }
-    fn goto_statement(&mut self, label: &Token) {
+    fn goto_statement(&mut self, label: Token) {
         let function_index = self.function_name.clone().unwrap().token.get_index();
         let label_index = self
             .env
@@ -134,7 +134,7 @@ impl Compiler {
 
         self.write_out(Ir::Jmp(label_index));
     }
-    fn label_statement(&mut self, name: &Token, body: &Stmt) {
+    fn label_statement(&mut self, name: Token, body: Stmt) {
         let function_index = self.function_name.clone().unwrap().token.get_index();
         let label_index = self
             .env
@@ -147,7 +147,7 @@ impl Compiler {
         self.visit(body);
     }
 
-    fn switch_statement(&mut self, cond: &Expr, body: &Stmt) {
+    fn switch_statement(&mut self, cond: Expr, body: Stmt) {
         let switch_labels = self.switches.pop_front().unwrap();
 
         let jump_labels: Vec<usize> = (0..switch_labels.len())
@@ -187,14 +187,14 @@ impl Compiler {
 
         self.jump_labels.pop();
     }
-    fn case_statement(&mut self, body: &Stmt) {
+    fn case_statement(&mut self, body: Stmt) {
         let label = self.switch_labels.pop_front().unwrap();
 
         self.write_out(Ir::LabelDefinition(label));
 
         self.visit(body);
     }
-    fn do_statement(&mut self, body: &Stmt, cond: &Expr) {
+    fn do_statement(&mut self, body: Stmt, cond: Expr) {
         let body_label = create_label(&mut self.label_index);
         let cond_label = create_label(&mut self.label_index);
         let end_label = create_label(&mut self.label_index);
@@ -226,10 +226,10 @@ impl Compiler {
     }
     fn for_statement(
         &mut self,
-        init: &Option<Box<Stmt>>,
-        cond: &Option<Expr>,
-        inc: &Option<Expr>,
-        body: &Stmt,
+        init: Option<Box<Stmt>>,
+        cond: Option<Expr>,
+        inc: Option<Expr>,
+        body: Stmt,
     ) {
         let body_label = create_label(&mut self.label_index);
         let cond_label = create_label(&mut self.label_index);
@@ -239,7 +239,7 @@ impl Compiler {
 
         self.jump_labels.push((end_label, inc_label));
         if let Some(init) = init {
-            self.visit(init);
+            self.visit(*init);
         }
         self.write_out(Ir::Jmp(cond_label));
         self.write_out(Ir::LabelDefinition(body_label));
@@ -274,7 +274,7 @@ impl Compiler {
 
         self.jump_labels.pop();
     }
-    fn while_statement(&mut self, cond: &Expr, body: &Stmt) {
+    fn while_statement(&mut self, cond: Expr, body: Stmt) {
         let body_label = create_label(&mut self.label_index);
         let cond_label = create_label(&mut self.label_index);
         let end_label = create_label(&mut self.label_index);
@@ -303,7 +303,7 @@ impl Compiler {
         self.jump_labels.pop();
     }
 
-    fn if_statement(&mut self, cond: &Expr, then_branch: &Stmt, else_branch: &Option<Stmt>) {
+    fn if_statement(&mut self, cond: Expr, then_branch: Stmt, else_branch: Option<Stmt>) {
         let cond_reg = self.execute_expr(cond);
         let cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
@@ -316,7 +316,7 @@ impl Compiler {
         ));
         self.free(cond_reg);
 
-        if !else_branch.is_none() {
+        if else_branch.is_some() {
             else_label = create_label(&mut self.label_index);
         }
         self.write_out(Ir::JmpCond("e", else_label));
@@ -330,7 +330,7 @@ impl Compiler {
         }
         self.write_out(Ir::LabelDefinition(done_label));
     }
-    fn return_statement(&mut self, value: &Option<Expr>) {
+    fn return_statement(&mut self, value: Option<Expr>) {
         let function_epilogue = self
             .env
             .get_mut(self.function_name.clone().unwrap().token.get_index())
@@ -350,13 +350,13 @@ impl Compiler {
             None => self.write_out(Ir::Jmp(function_epilogue)),
         }
     }
-    fn declaration(&mut self, decls: &Vec<DeclarationKind>) {
+    fn declaration(&mut self, decls: Vec<DeclarationKind>) {
         for d in decls {
             match d {
                 DeclarationKind::Decl(type_decl, name, true) => {
                     self.declare_global_var(type_decl, name)
                 }
-                DeclarationKind::Decl(type_decl, name, false) => self.declare_var(type_decl, name),
+                DeclarationKind::Decl(type_decl, name, false) => self.declare_var(type_decl, &name),
                 DeclarationKind::Init(type_decl, name, expr, true) => {
                     let value_reg = self.execute_global_expr(expr);
                     self.init_global_var(type_decl, name, value_reg)
@@ -375,13 +375,13 @@ impl Compiler {
             }
         }
     }
-    fn declare_global_var(&mut self, type_decl: &NEWTypes, name: &Token) {
+    fn declare_global_var(&mut self, type_decl: NEWTypes, name: Token) {
         self.write_out(Ir::GlobalDeclaration(name.unwrap_string()));
         self.write_out(Ir::GlobalInit(
             NEWTypes::Primitive(Types::Void),
             StaticRegister::Literal(type_decl.size() as i64),
         ));
-        let reg = Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl.clone()));
+        let reg = Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl));
 
         self.env
             .get_mut(name.token.get_index())
@@ -389,23 +389,15 @@ impl Compiler {
             .unwrap_var_mut()
             .set_reg(reg);
     }
-    fn declare_var(&mut self, type_decl: &NEWTypes, name: &Token) {
-        let reg = Register::Stack(StackRegister::new(
-            &mut self.current_bp_offset,
-            type_decl.clone(),
-        ));
+    fn declare_var(&mut self, type_decl: NEWTypes, name: &Token) {
+        let reg = Register::Stack(StackRegister::new(&mut self.current_bp_offset, type_decl));
         self.env
             .get_mut(name.token.get_index())
             .unwrap()
             .unwrap_var_mut()
             .set_reg(reg);
     }
-    fn init_global_var(
-        &mut self,
-        type_decl: &NEWTypes,
-        var_name: &Token,
-        value_reg: StaticRegister,
-    ) {
+    fn init_global_var(&mut self, type_decl: NEWTypes, var_name: Token, value_reg: StaticRegister) {
         let name = var_name.unwrap_string();
 
         self.write_out(Ir::GlobalDeclaration(name.clone()));
@@ -415,10 +407,10 @@ impl Compiler {
             .get_mut(var_name.token.get_index())
             .unwrap()
             .unwrap_var_mut()
-            .set_reg(Register::Label(LabelRegister::Var(name, type_decl.clone())));
+            .set_reg(Register::Label(LabelRegister::Var(name, type_decl)));
     }
-    fn init_var(&mut self, type_decl: &NEWTypes, var_name: &Token, value_reg: Register) {
-        self.declare_var(type_decl, var_name);
+    fn init_var(&mut self, type_decl: NEWTypes, var_name: Token, value_reg: Register) {
+        self.declare_var(type_decl, &var_name);
 
         let reg = self.cg_assign(
             self.env
@@ -431,7 +423,7 @@ impl Compiler {
         self.free(reg);
     }
 
-    fn init_global_list(&mut self, type_decl: &NEWTypes, name: &Token, exprs: &[Expr]) {
+    fn init_global_list(&mut self, type_decl: NEWTypes, name: Token, exprs: Vec<Expr>) {
         self.write_out(Ir::GlobalDeclaration(name.unwrap_string()));
 
         self.env
@@ -440,27 +432,28 @@ impl Compiler {
             .unwrap_var_mut()
             .set_reg(Register::Label(LabelRegister::Var(
                 name.unwrap_string(),
-                type_decl.clone(),
+                type_decl,
             )));
 
         for expr in exprs {
-            if let ExprKind::Assign { r_expr, .. } = &expr.kind {
-                let r_value = self.execute_global_expr(r_expr);
+            if let ExprKind::Assign { r_expr, .. } = expr.kind {
+                let type_decl = r_expr.type_decl.clone().unwrap();
+                let r_value = self.execute_global_expr(*r_expr);
 
-                self.write_out(Ir::GlobalInit(r_expr.type_decl.clone().unwrap(), r_value));
+                self.write_out(Ir::GlobalInit(type_decl, r_value));
             }
         }
     }
-    fn init_list(&mut self, type_decl: &NEWTypes, name: &Token, exprs: &[Expr]) {
-        self.declare_var(type_decl, name);
+    fn init_list(&mut self, type_decl: NEWTypes, name: Token, exprs: Vec<Expr>) {
+        self.declare_var(type_decl, &name);
 
-        for e in exprs.iter() {
+        for e in exprs.into_iter() {
             let reg = self.execute_expr(e);
             self.free(reg);
         }
     }
 
-    fn function_definition(&mut self, name: &Token, body: &Vec<Stmt>) {
+    fn function_definition(&mut self, name: Token, body: Vec<Stmt>) {
         let func_symbol = self.env.get_mut(name.token.get_index()).unwrap();
         let params = func_symbol.unwrap_func().params.clone();
 
@@ -476,13 +469,13 @@ impl Compiler {
         self.current_bp_offset = 0;
 
         // generate function code
-        self.cg_func_preamble(name, &params);
+        self.cg_func_preamble(&name, params);
         self.cg_stmts(body);
         self.cg_func_postamble(name, function_epilogue);
 
         self.function_name = None;
     }
-    fn cg_func_preamble(&mut self, name: &Token, params: &[(NEWTypes, Token)]) {
+    fn cg_func_preamble(&mut self, name: &Token, params: Vec<(NEWTypes, Token)>) {
         let stack_size = self
             .env
             .get_mut(name.token.get_index())
@@ -492,7 +485,7 @@ impl Compiler {
         self.write_out(Ir::FuncSetup(name.clone(), stack_size));
 
         // initialize parameters
-        for (i, (type_decl, param_name)) in params.iter().enumerate() {
+        for (i, (type_decl, param_name)) in params.into_iter().enumerate() {
             if i < ARG_REGS.len() {
                 let arg = Register::Arg(ArgRegister::new(
                     i,
@@ -515,7 +508,7 @@ impl Compiler {
             }
         }
     }
-    fn cg_func_postamble(&mut self, name: &Token, epilogue_index: usize) {
+    fn cg_func_postamble(&mut self, name: Token, epilogue_index: usize) {
         self.write_out(Ir::LabelDefinition(epilogue_index));
 
         let stack_size = self
@@ -527,7 +520,7 @@ impl Compiler {
         self.write_out(Ir::FuncTeardown(stack_size))
     }
 
-    pub fn block(&mut self, statements: &Vec<Stmt>) {
+    pub fn block(&mut self, statements: Vec<Stmt>) {
         self.cg_stmts(statements)
     }
 
@@ -547,34 +540,34 @@ impl Compiler {
             literal_reg
         }
     }
-    fn execute_global_expr(&mut self, ast: &Expr) -> StaticRegister {
-        match &ast.kind {
+    fn execute_global_expr(&mut self, ast: Expr) -> StaticRegister {
+        match ast.kind {
             ExprKind::String(token) => {
                 let name = token.unwrap_string();
                 StaticRegister::Label(LabelRegister::String(self.const_labels[&name]))
             }
-            ExprKind::Literal(n) => StaticRegister::Literal(*n),
+            ExprKind::Literal(n) => StaticRegister::Literal(n),
             ExprKind::Cast { new_type, expr, .. } => {
-                let mut reg = self.execute_global_expr(expr);
-                reg.set_type(new_type.clone());
+                let mut reg = self.execute_global_expr(*expr);
+                reg.set_type(new_type);
                 reg
             }
             ExprKind::ScaleUp { by, expr } => {
-                if let StaticRegister::Literal(n) = self.execute_global_expr(expr) {
-                    StaticRegister::Literal(n * *by as i64)
+                if let StaticRegister::Literal(n) = self.execute_global_expr(*expr) {
+                    StaticRegister::Literal(n * by as i64)
                 } else {
                     unreachable!("can only scale literal value")
                 }
             }
-            ExprKind::Unary { right, .. } => self.execute_global_expr(right),
+            ExprKind::Unary { right, .. } => self.execute_global_expr(*right),
             ExprKind::Binary { left, token, right } => {
-                let left = self.execute_global_expr(left);
-                let right = self.execute_global_expr(right);
+                let left = self.execute_global_expr(*left);
+                let right = self.execute_global_expr(*right);
 
                 match (left, right) {
                     (StaticRegister::Label(reg), StaticRegister::Literal(n))
                     | (StaticRegister::Literal(n), StaticRegister::Label(reg)) => {
-                        StaticRegister::LabelOffset(reg, n, token.token.clone())
+                        StaticRegister::LabelOffset(reg, n, token.token)
                     }
                     _ => unreachable!(),
                 }
@@ -597,28 +590,28 @@ impl Compiler {
             _ => unreachable!("non global-constant expr {}", ast.kind),
         }
     }
-    pub fn execute_expr(&mut self, ast: &Expr) -> Register {
-        match &ast.kind {
+    pub fn execute_expr(&mut self, ast: Expr) -> Register {
+        match ast.kind {
             ExprKind::Binary { left, token, right } => {
-                let left_reg = self.execute_expr(left);
-                let right_reg = self.execute_expr(right);
+                let left_reg = self.execute_expr(*left);
+                let right_reg = self.execute_expr(*right);
 
                 self.cg_binary(left_reg, &token.token, right_reg)
             }
-            ExprKind::Literal(n) => self.cg_literal(*n, ast.type_decl.clone().unwrap()),
-            ExprKind::Grouping { expr } => self.execute_expr(expr),
+            ExprKind::Literal(n) => self.cg_literal(n, ast.type_decl.unwrap()),
+            ExprKind::Grouping { expr } => self.execute_expr(*expr),
             ExprKind::Unary { token, right } => {
-                self.cg_unary(token, right, ast.type_decl.clone().unwrap())
+                self.cg_unary(token, *right, ast.type_decl.unwrap())
             }
-            ExprKind::Logical { left, token, right } => self.cg_logical(left, token, right),
+            ExprKind::Logical { left, token, right } => self.cg_logical(*left, token, *right),
             ExprKind::Assign { l_expr, r_expr, .. } => {
-                let left_reg = self.execute_expr(l_expr);
-                let right_reg = self.execute_expr(r_expr);
+                let left_reg = self.execute_expr(*l_expr);
+                let right_reg = self.execute_expr(*r_expr);
 
                 self.cg_assign(left_reg, right_reg)
             }
             ExprKind::CompoundAssign { l_expr, r_expr, token } => {
-                self.cg_comp_assign(l_expr, token, r_expr)
+                self.cg_comp_assign(*l_expr, token, *r_expr)
             }
             ExprKind::Ident(name) => self
                 .env
@@ -626,41 +619,39 @@ impl Compiler {
                 .unwrap()
                 .unwrap_var()
                 .get_reg(),
-            ExprKind::Call { name, args, .. } => {
-                self.cg_call(name, args, ast.type_decl.clone().unwrap())
-            }
+            ExprKind::Call { name, args, .. } => self.cg_call(name, args, ast.type_decl.unwrap()),
             ExprKind::Cast { expr, direction, new_type, .. } => {
-                self.cg_cast(new_type.clone(), expr, direction.clone().unwrap())
+                self.cg_cast(new_type, *expr, direction.unwrap())
             }
-            ExprKind::ScaleUp { expr, by } => self.cg_scale_up(expr, by),
-            ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(expr, shift_amount),
+            ExprKind::ScaleUp { expr, by } => self.cg_scale_up(*expr, by),
+            ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(*expr, shift_amount),
             ExprKind::String(token) => self.cg_string(token.unwrap_string()),
             ExprKind::PostUnary { token, left, by_amount } => {
-                self.cg_postunary(token, left, by_amount)
+                self.cg_postunary(token, *left, by_amount)
             }
             ExprKind::MemberAccess { expr, member, .. } => {
-                let expr = self.execute_expr(expr);
-                self.cg_member_access(expr, member, true)
+                let expr = self.execute_expr(*expr);
+                self.cg_member_access(expr, &member, true)
             }
             ExprKind::Ternary { cond, true_expr, false_expr, .. } => {
-                self.cg_ternary(cond, true_expr, false_expr)
+                self.cg_ternary(*cond, *true_expr, *false_expr)
             }
-            ExprKind::Comma { left, right } => self.cg_comma(left, right),
+            ExprKind::Comma { left, right } => self.cg_comma(*left, *right),
             ExprKind::SizeofExpr { value: Some(value), .. } | ExprKind::SizeofType { value } => {
-                Register::Literal(*value as i64, NEWTypes::Primitive(Types::Long))
+                Register::Literal(value as i64, NEWTypes::Primitive(Types::Long))
             }
             ExprKind::Nop => Register::Void,
             _ => unreachable!("can only be sizeof but all cases covered"),
         }
     }
-    fn cg_comma(&mut self, left: &Expr, right: &Expr) -> Register {
+    fn cg_comma(&mut self, left: Expr, right: Expr) -> Register {
         let reg = self.execute_expr(left);
         self.free(reg);
 
         self.execute_expr(right)
     }
 
-    fn cg_ternary(&mut self, cond: &Expr, true_expr: &Expr, false_expr: &Expr) -> Register {
+    fn cg_ternary(&mut self, cond: Expr, true_expr: Expr, false_expr: Expr) -> Register {
         let mut cond_reg = self.execute_expr(cond);
         cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
@@ -740,7 +731,7 @@ impl Compiler {
             unreachable!("{:?}", reg.get_type())
         }
     }
-    fn cg_comp_assign(&mut self, l_expr: &Expr, token: &Token, r_expr: &Expr) -> Register {
+    fn cg_comp_assign(&mut self, l_expr: Expr, token: Token, r_expr: Expr) -> Register {
         let l_reg = self.execute_expr(l_expr);
         let r_reg = self.execute_expr(r_expr);
 
@@ -766,10 +757,12 @@ impl Compiler {
 
         self.cg_assign(l_reg, bin_reg)
     }
-    fn cg_postunary(&mut self, token: &Token, expr: &Expr, by_amount: &usize) -> Register {
+    fn cg_postunary(&mut self, token: Token, expr: Expr, by_amount: usize) -> Register {
+        let type_decl = expr.type_decl.clone().unwrap();
         let reg = self.execute_expr(expr);
+
         let mut return_reg = Register::Temp(TempRegister::new(
-            expr.type_decl.clone().unwrap(),
+            type_decl,
             &mut self.interval_counter,
             self.instr_counter,
         ));
@@ -783,7 +776,7 @@ impl Compiler {
             self.write_out(Ir::Mov(reg.clone(), return_reg.clone()));
         }
 
-        let by_amount = Register::Literal(*by_amount as i64, NEWTypes::default());
+        let by_amount = Register::Literal(by_amount as i64, NEWTypes::default());
         match token.token {
             TokenType::PlusPlus => self.write_out(Ir::Add(by_amount, reg.clone())),
             TokenType::MinusMinus => self.write_out(Ir::Sub(by_amount, reg.clone())),
@@ -796,41 +789,41 @@ impl Compiler {
     fn cg_string(&mut self, name: String) -> Register {
         Register::Label(LabelRegister::String(self.const_labels[&name]))
     }
-    fn cg_scale_down(&mut self, expr: &Expr, by_amount: &usize) -> Register {
+    fn cg_scale_down(&mut self, expr: Expr, by_amount: usize) -> Register {
         let value_reg = self.execute_expr(expr);
         let value_reg = convert_reg!(self, value_reg, Register::Literal(..));
 
         // right shift number, equivalent to division (works bc type-size is 2^n)
         self.write_out(Ir::Shift(
             "r",
-            Register::Literal(*by_amount as i64, NEWTypes::default()),
+            Register::Literal(by_amount as i64, NEWTypes::default()),
             value_reg.clone(),
         ));
 
         value_reg
     }
-    fn cg_scale_up(&mut self, expr: &Expr, by_amount: &usize) -> Register {
+    fn cg_scale_up(&mut self, expr: Expr, by_amount: usize) -> Register {
         let value_reg = self.execute_expr(expr);
 
         self.cg_mult(
-            Register::Literal(*by_amount as i64, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(by_amount as i64, NEWTypes::Primitive(Types::Int)),
             value_reg,
         )
     }
-    fn cg_cast(&mut self, new_type: NEWTypes, expr: &Expr, direction: CastDirection) -> Register {
+    fn cg_cast(&mut self, new_type: NEWTypes, expr: Expr, direction: CastDirection) -> Register {
         match direction {
             CastDirection::Up => self.cg_cast_up(expr, new_type),
             CastDirection::Down => self.cg_cast_down(expr, new_type),
             CastDirection::Equal => self.execute_expr(expr),
         }
     }
-    fn cg_cast_down(&mut self, expr: &Expr, new_type: NEWTypes) -> Register {
+    fn cg_cast_down(&mut self, expr: Expr, new_type: NEWTypes) -> Register {
         let mut value_reg = self.execute_expr(expr);
         value_reg.set_type(new_type);
 
         value_reg
     }
-    fn cg_cast_up(&mut self, expr: &Expr, new_type: NEWTypes) -> Register {
+    fn cg_cast_up(&mut self, expr: Expr, new_type: NEWTypes) -> Register {
         let mut value_reg = self.execute_expr(expr);
 
         if matches!(
@@ -875,24 +868,27 @@ impl Compiler {
             l_value
         }
     }
-    fn cg_call(&mut self, func_name: &Token, args: &Vec<Expr>, return_type: NEWTypes) -> Register {
+    fn cg_call(&mut self, func_name: Token, args: Vec<Expr>, return_type: NEWTypes) -> Register {
         self.write_out(Ir::SaveRegs);
 
+        let args_len = args.len();
+
         // align stack if pushes args
-        if args.len() >= ARG_REGS.len() && args.len() % 2 != 0 {
+        if args_len >= ARG_REGS.len() && args_len % 2 != 0 {
             self.write_out(Ir::SubSp(8));
         }
         let mut arg_regs = Vec::new();
 
         // moving the arguments into their designated registers
-        for (i, expr) in args.iter().enumerate().rev() {
+        for (i, expr) in args.into_iter().enumerate().rev() {
+            let type_decl = expr.type_decl.clone().unwrap();
             let mut reg = self.execute_expr(expr);
 
             // push first six registers into designated argument-registers; others onto stack
             if i < ARG_REGS.len() {
                 let arg = Register::Arg(ArgRegister::new(
                     i,
-                    expr.type_decl.clone().unwrap(),
+                    type_decl,
                     &mut self.interval_counter,
                     self.instr_counter,
                 ));
@@ -909,7 +905,7 @@ impl Compiler {
 
         self.write_out(Ir::Call(func_name.unwrap_string()));
 
-        self.remove_spilled_args(args.len());
+        self.remove_spilled_args(args_len);
         for reg in arg_regs {
             self.free(reg);
         }
@@ -936,14 +932,14 @@ impl Compiler {
         }
     }
 
-    fn cg_logical(&mut self, left: &Expr, token: &Token, right: &Expr) -> Register {
+    fn cg_logical(&mut self, left: Expr, token: Token, right: Expr) -> Register {
         match token.token {
             TokenType::AmpAmp => self.cg_and(left, right),
             TokenType::PipePipe => self.cg_or(left, right),
             _ => unreachable!(),
         }
     }
-    fn cg_or(&mut self, left: &Expr, right: &Expr) -> Register {
+    fn cg_or(&mut self, left: Expr, right: Expr) -> Register {
         let mut left = self.execute_expr(left);
         left = convert_reg!(self, left, Register::Literal(..));
 
@@ -995,7 +991,7 @@ impl Compiler {
 
         result
     }
-    fn cg_and(&mut self, left: &Expr, right: &Expr) -> Register {
+    fn cg_and(&mut self, left: Expr, right: Expr) -> Register {
         let left = self.execute_expr(left);
         let left = convert_reg!(self, left, Register::Literal(..));
 
@@ -1043,7 +1039,7 @@ impl Compiler {
 
         result
     }
-    fn cg_unary(&mut self, token: &Token, right: &Expr, new_type: NEWTypes) -> Register {
+    fn cg_unary(&mut self, token: Token, right: Expr, new_type: NEWTypes) -> Register {
         let mut reg = self.execute_expr(right);
         // can't have literal as only operand to unary expression
         reg = convert_reg!(self, reg, Register::Literal(..));

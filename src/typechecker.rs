@@ -1237,28 +1237,30 @@ mod tests {
         };
     }
 
-    fn assert_constant_expr(input: &str, expected: bool, symbols: Vec<(&str, NEWTypes)>) {
-        let mut scanner = Scanner::new(input);
-        let tokens = scanner.scan_token().unwrap();
+    macro_rules! assert_constant_expr {
+        ($input: expr, $expected: expr, $symbols: expr) => {
+            let mut scanner = Scanner::new($input);
+            let tokens = scanner.scan_token().unwrap();
 
-        let mut parser = Parser::new(tokens);
-        for (name, type_decl) in symbols {
-            parser
-                .env
-                .declare_symbol(
-                    &Token::default(TokenType::Ident(name.to_string(), 0)),
-                    Symbols::Variable(SymbolInfo::new(type_decl)),
-                )
-                .unwrap();
-        }
-        let mut expr = parser.expression().unwrap();
+            let mut parser = Parser::new(tokens);
+            for (name, type_decl) in $symbols {
+                parser
+                    .env
+                    .declare_symbol(
+                        &Token::default(TokenType::Ident(name.to_string(), 0)),
+                        Symbols::Variable(SymbolInfo::new(type_decl)),
+                    )
+                    .unwrap();
+            }
+            let mut expr = parser.expression().unwrap();
 
-        let mut typechecker = TypeChecker::new(parser.env.get_symbols());
-        typechecker.expr_type(&mut expr).unwrap();
+            let mut typechecker = TypeChecker::new(parser.env.get_symbols());
+            typechecker.expr_type(&mut expr).unwrap();
 
-        let actual = is_constant(&expr);
+            let actual = is_constant(&expr);
 
-        assert_eq!(actual, expected);
+            assert_eq!(actual, $expected);
+        };
     }
 
     #[test]
@@ -1284,23 +1286,31 @@ mod tests {
 
     #[test]
     fn static_constant_test() {
-        assert_constant_expr(
+        assert_constant_expr!(
             "&a + (int)(3 * 1)",
             true,
-            vec![("a", NEWTypes::Primitive(Types::Int))],
+            vec![("a", NEWTypes::Primitive(Types::Int))]
         );
-        assert_constant_expr("\"hi\" + (int)(3 * 1)", true, vec![]);
-        assert_constant_expr("&\"hi\" + (int)(3 * 1)", true, vec![]);
+        assert_constant_expr!(
+            "\"hi\" + (int)(3 * 1)",
+            true,
+            Vec::<(&str, NEWTypes)>::new()
+        );
+        assert_constant_expr!(
+            "&\"hi\" + (int)(3 * 1)",
+            true,
+            Vec::<(&str, NEWTypes)>::new()
+        );
 
-        assert_constant_expr(
+        assert_constant_expr!(
             "(long*)&a",
             true,
-            vec![("a", NEWTypes::Primitive(Types::Int))],
+            vec![("a", NEWTypes::Primitive(Types::Int))]
         );
 
-        assert_constant_expr("(long*)1 + 3", true, vec![]);
+        assert_constant_expr!("(long*)1 + 3", true, Vec::<(&str, NEWTypes)>::new());
 
-        assert_constant_expr(
+        assert_constant_expr!(
             "&a[4]",
             true,
             vec![(
@@ -1309,10 +1319,10 @@ mod tests {
                     amount: 4,
                     of: Box::new(NEWTypes::Primitive(Types::Int)),
                 },
-            )],
+            )]
         );
 
-        assert_constant_expr(
+        assert_constant_expr!(
             "*&a[4]",
             true,
             vec![(
@@ -1321,10 +1331,10 @@ mod tests {
                     amount: 4,
                     of: Box::new(NEWTypes::Primitive(Types::Int)),
                 },
-            )],
+            )]
         );
 
-        assert_constant_expr("a", false, vec![("a", NEWTypes::Primitive(Types::Int))]);
+        assert_constant_expr!("a", false, vec![("a", NEWTypes::Primitive(Types::Int))]);
     }
 
     #[test]

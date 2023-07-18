@@ -1159,26 +1159,32 @@ fn is_constant(expr: &Expr) -> bool {
         | ExprKind::Grouping { expr } => is_constant(expr),
 
         ExprKind::SizeofType { .. } | ExprKind::SizeofExpr { .. } => todo!(),
-        _ => is_address_constant(expr),
+        _ => is_address_constant(expr, true),
     }
 }
-fn is_address_constant(expr: &Expr) -> bool {
+fn is_address_constant(expr: &Expr, is_outer: bool) -> bool {
     match &expr.kind {
         ExprKind::Unary { token, right, .. } if matches!(token.token, TokenType::Amp) => {
             matches!(right.kind, ExprKind::Ident(_) | ExprKind::String(_))
-                || matches!(right.value_kind, ValueKind::Lvalue)
+                || is_address_constant(right, false)
         }
+        ExprKind::Unary { token, right, .. }
+            if matches!(token.token, TokenType::Star) && !is_outer =>
+        {
+            is_address_constant(right, is_outer)
+        }
+        ExprKind::MemberAccess { .. } if !is_outer => true,
         ExprKind::Binary { left, token, right }
             if matches!(token.token, TokenType::Plus | TokenType::Minus) =>
         {
             match (&left, &right) {
-                (expr, n) | (n, expr) if is_const_literal(n) => is_address_constant(expr),
+                (expr, n) | (n, expr) if is_const_literal(n) => is_address_constant(expr, is_outer),
                 _ => false,
             }
         }
         ExprKind::Cast { expr, .. }
         | ExprKind::ScaleUp { expr, .. }
-        | ExprKind::Grouping { expr } => is_address_constant(expr),
+        | ExprKind::Grouping { expr } => is_address_constant(expr, is_outer),
         ExprKind::String(_) => true,
         _ => false,
     }
@@ -1308,6 +1314,15 @@ mod tests {
             "&a + (int)(3 * 1)",
             true,
             vec![("a", NEWTypes::Primitive(Types::Int))]
+        );
+
+        assert_const_expr!(
+            "a + (int)(3 * 1)",
+            false,
+            vec![(
+                "a",
+                NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Int)))
+            )]
         );
         assert_const_expr!(
             "\"hi\" + (int)(3 * 1)",

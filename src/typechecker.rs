@@ -619,7 +619,9 @@ impl TypeChecker {
                 Self::maybe_scale_result(scale_factor, ast);
                 type_decl
             }
-            ExprKind::Unary { token, right } => self.evaluate_unary(token, right)?,
+            ExprKind::Unary { token, right } => {
+                self.evaluate_unary(token, right, &mut ast.value_kind)?
+            }
             ExprKind::Grouping { expr } => self.evaluate_grouping(expr)?,
             ExprKind::Literal(_) => ast.type_decl.clone().unwrap(),
             ExprKind::String(token) => self.string(token.unwrap_string())?,
@@ -915,9 +917,6 @@ impl TypeChecker {
     fn lval_to_rval(expr: &mut Expr) {
         expr.value_kind = ValueKind::Rvalue;
     }
-    fn rval_to_lval(expr: &mut Expr) {
-        expr.value_kind = ValueKind::Lvalue;
-    }
     fn evaluate_binary(
         &mut self,
         left: &mut Expr,
@@ -1001,16 +1000,21 @@ impl TypeChecker {
             *type_decl = NEWTypes::Primitive(Types::Int);
         }
     }
-    fn evaluate_unary(&mut self, token: &Token, right: &mut Expr) -> Result<NEWTypes, Error> {
+    fn evaluate_unary(
+        &mut self,
+        token: &Token,
+        right: &mut Expr,
+        ast_valuekind: &mut ValueKind,
+    ) -> Result<NEWTypes, Error> {
         let mut right_type = self.expr_type(right)?;
 
         if matches!(token.token, TokenType::Amp) {
             // array doesn't decay during '&' expression
-            Ok(self.check_address(token, right_type, right)?)
+            Ok(self.check_address(token, right_type, right, ast_valuekind)?)
         } else {
             crate::arr_decay!(right_type, right, token);
             Ok(match token.token {
-                TokenType::Star => self.check_deref(token, right_type, right)?,
+                TokenType::Star => self.check_deref(token, right_type, ast_valuekind)?,
                 TokenType::Bang => {
                     Self::lval_to_rval(right);
                     self.maybe_cast(&NEWTypes::Primitive(Types::Int), &right_type, right);
@@ -1046,9 +1050,10 @@ impl TypeChecker {
         token: &Token,
         type_decl: NEWTypes,
         expr: &mut Expr,
+        ast_valuekind: &mut ValueKind,
     ) -> Result<NEWTypes, Error> {
         if expr.value_kind == ValueKind::Lvalue {
-            Self::lval_to_rval(expr);
+            *ast_valuekind = ValueKind::Rvalue;
             Ok(NEWTypes::Pointer(Box::new(type_decl)))
         } else {
             Err(Error::new(
@@ -1061,10 +1066,10 @@ impl TypeChecker {
         &self,
         token: &Token,
         type_decl: NEWTypes,
-        expr: &mut Expr,
+        ast_valuekind: &mut ValueKind,
     ) -> Result<NEWTypes, Error> {
         if let Some(inner) = type_decl.deref_at() {
-            Self::rval_to_lval(expr);
+            *ast_valuekind = ValueKind::Lvalue;
             Ok(inner)
         } else {
             Err(Error::new(token, ErrorKind::InvalidDerefType(type_decl)))
@@ -1144,22 +1149,16 @@ pub fn maybe_scale<'a, T>(
     }
 }
 
+// 6.6 Constant Expressions
 // returns true if expression is known at compile-time
 fn is_constant(expr: &Expr) -> bool {
-    // 6.6 Constant Expressions
     match &expr.kind {
         ExprKind::String(_) | ExprKind::Literal(_) => true,
-        ExprKind::Cast { expr, .. } | ExprKind::ScaleUp { expr, .. } => is_constant(expr),
-        ExprKind::Binary { left, token, right }
-            if matches!(token.token, TokenType::Plus | TokenType::Minus) =>
-        {
-            match (&left, &right) {
-                (expr, n) | (n, expr) if is_const_literal(n) => {
-                    is_address_constant(expr) || expr.type_decl.clone().unwrap().is_ptr()
-                }
-                _ => false,
-            }
-        }
+        ExprKind::Cast { expr, .. }
+        | ExprKind::ScaleUp { expr, .. }
+        | ExprKind::Grouping { expr } => is_constant(expr),
+
+        ExprKind::SizeofType { .. } | ExprKind::SizeofExpr { .. } => todo!(),
         _ => is_address_constant(expr),
     }
 }
@@ -1167,8 +1166,19 @@ fn is_address_constant(expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::Unary { token, right, .. } if matches!(token.token, TokenType::Amp) => {
             matches!(right.kind, ExprKind::Ident(_) | ExprKind::String(_))
+                || matches!(right.value_kind, ValueKind::Lvalue)
         }
-        ExprKind::Cast { expr, .. } | ExprKind::ScaleUp { expr, .. } => is_address_constant(expr),
+        ExprKind::Binary { left, token, right }
+            if matches!(token.token, TokenType::Plus | TokenType::Minus) =>
+        {
+            match (&left, &right) {
+                (expr, n) | (n, expr) if is_const_literal(n) => is_address_constant(expr),
+                _ => false,
+            }
+        }
+        ExprKind::Cast { expr, .. }
+        | ExprKind::ScaleUp { expr, .. }
+        | ExprKind::Grouping { expr } => is_address_constant(expr),
         ExprKind::String(_) => true,
         _ => false,
     }
@@ -1237,7 +1247,7 @@ mod tests {
         };
     }
 
-    macro_rules! assert_constant_expr {
+    macro_rules! assert_const_expr {
         ($input: expr, $expected: expr, $symbols: expr) => {
             let mut scanner = Scanner::new($input);
             let tokens = scanner.scan_token().unwrap();
@@ -1255,7 +1265,15 @@ mod tests {
             let mut expr = parser.expression().unwrap();
 
             let mut typechecker = TypeChecker::new(parser.env.get_symbols());
-            typechecker.expr_type(&mut expr).unwrap();
+            let value_type = typechecker.expr_type(&mut expr).unwrap();
+
+            // have to do manual array decay because is constant expects array to be decayed already
+            if let NEWTypes::Array { .. } = value_type {
+                expr.kind = ExprKind::Unary {
+                    token: Token::default(TokenType::Amp),
+                    right: Box::new(expr.clone()),
+                };
+            }
 
             let actual = is_constant(&expr);
 
@@ -1286,32 +1304,32 @@ mod tests {
 
     #[test]
     fn static_constant_test() {
-        assert_constant_expr!(
+        assert_const_expr!(
             "&a + (int)(3 * 1)",
             true,
             vec![("a", NEWTypes::Primitive(Types::Int))]
         );
-        assert_constant_expr!(
+        assert_const_expr!(
             "\"hi\" + (int)(3 * 1)",
             true,
             Vec::<(&str, NEWTypes)>::new()
         );
-        assert_constant_expr!(
+        assert_const_expr!(
             "&\"hi\" + (int)(3 * 1)",
             true,
             Vec::<(&str, NEWTypes)>::new()
         );
 
-        assert_constant_expr!(
+        assert_const_expr!(
             "(long*)&a",
             true,
             vec![("a", NEWTypes::Primitive(Types::Int))]
         );
 
-        assert_constant_expr!("(long*)1 + 3", true, Vec::<(&str, NEWTypes)>::new());
+        assert_const_expr!("(long*)1 + 3", true, Vec::<(&str, NEWTypes)>::new());
 
-        assert_constant_expr!(
-            "&a[4]",
+        assert_const_expr!(
+            "&a[3]",
             true,
             vec![(
                 "a",
@@ -1322,9 +1340,9 @@ mod tests {
             )]
         );
 
-        assert_constant_expr!(
-            "*&a[4]",
-            true,
+        assert_const_expr!(
+            "*&a[3]",
+            false,
             vec![(
                 "a",
                 NEWTypes::Array {
@@ -1334,7 +1352,92 @@ mod tests {
             )]
         );
 
-        assert_constant_expr!("a", false, vec![("a", NEWTypes::Primitive(Types::Int))]);
+        assert_const_expr!(
+            "&a.age",
+            true,
+            vec![(
+                "a",
+                NEWTypes::Struct(StructInfo::Anonymous(vec![(
+                    NEWTypes::default(),
+                    Token::default(TokenType::Ident("age".to_string(), 0))
+                )]))
+            )]
+        );
+
+        assert_const_expr!(
+            "a.age",
+            false,
+            vec![(
+                "a",
+                NEWTypes::Struct(StructInfo::Anonymous(vec![(
+                    NEWTypes::default(),
+                    Token::default(TokenType::Ident("age".to_string(), 0))
+                )]))
+            )]
+        );
+        assert_const_expr!(
+            "*a",
+            false,
+            vec![(
+                "a",
+                NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Int)))
+            )]
+        );
+
+        assert_const_expr!(
+            "(int *)*a",
+            false,
+            vec![(
+                "a",
+                NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Int)))
+            )]
+        );
+
+        assert_const_expr!(
+            "*a",
+            true,
+            vec![(
+                "a",
+                NEWTypes::Array {
+                    amount: 4,
+                    of: Box::new(NEWTypes::Array {
+                        amount: 4,
+                        of: Box::new(NEWTypes::Primitive(Types::Int))
+                    },),
+                },
+            )]
+        );
+        assert_const_expr!(
+            "*&a[3]",
+            true,
+            vec![(
+                "a",
+                NEWTypes::Array {
+                    amount: 4,
+                    of: Box::new(NEWTypes::Array {
+                        amount: 4,
+                        of: Box::new(NEWTypes::Primitive(Types::Int))
+                    },),
+                },
+            )]
+        );
+
+        assert_const_expr!(
+            "&a->age",
+            true,
+            vec![(
+                "a",
+                NEWTypes::Array {
+                    amount: 4,
+                    of: Box::new(NEWTypes::Struct(StructInfo::Anonymous(vec![(
+                        NEWTypes::default(),
+                        Token::default(TokenType::Ident("age".to_string(), 0))
+                    )]))),
+                },
+            )]
+        );
+
+        assert_const_expr!("a", false, vec![("a", NEWTypes::Primitive(Types::Int))]);
     }
 
     #[test]

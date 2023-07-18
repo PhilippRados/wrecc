@@ -88,7 +88,7 @@ pub enum LabelRegister {
     Var(String, NEWTypes),
 }
 impl LabelRegister {
-    fn get_type(&self) -> NEWTypes {
+    pub fn get_type(&self) -> NEWTypes {
         match self {
             LabelRegister::String(_) => {
                 NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char)))
@@ -126,6 +126,13 @@ impl StaticRegister {
         match self {
             StaticRegister::Label(reg) | StaticRegister::LabelOffset(reg, ..) => reg.set_type(new),
             StaticRegister::Literal(_) => (),
+        }
+    }
+
+    pub fn get_type(&self) -> NEWTypes {
+        match self {
+            StaticRegister::Label(reg) | StaticRegister::LabelOffset(reg, ..) => reg.get_type(),
+            StaticRegister::Literal(n) => NEWTypes::Primitive(integer_type(*n)),
         }
     }
     pub fn name(&self) -> String {

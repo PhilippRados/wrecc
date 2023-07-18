@@ -559,7 +559,43 @@ impl Compiler {
                     unreachable!("can only scale literal value")
                 }
             }
-            ExprKind::Unary { right, .. } => self.execute_global_expr(*right),
+            ExprKind::Unary { right, token, .. } => {
+                let mut reg = self.execute_global_expr(*right);
+                match token.token {
+                    TokenType::Amp => reg.set_type(NEWTypes::Pointer(Box::new(reg.get_type()))),
+                    TokenType::Star => reg.set_type(ast.type_decl.unwrap()),
+                    _ => unreachable!("non-constant unary expression"),
+                }
+                reg
+            }
+            ExprKind::MemberAccess { expr, member, .. } => {
+                let reg = self.execute_global_expr(*expr);
+
+                match reg.get_type() {
+                    NEWTypes::Struct(s) => {
+                        let offset = s.member_offset(&member.unwrap_string());
+
+                        match reg {
+                            StaticRegister::Label(label_reg) => StaticRegister::LabelOffset(
+                                label_reg,
+                                offset as i64,
+                                TokenType::Plus,
+                            ),
+                            StaticRegister::LabelOffset(reg, existant_offset, _) => {
+                                let offset = existant_offset + offset as i64;
+                                if offset < 0 {
+                                    StaticRegister::LabelOffset(reg, offset.abs(), TokenType::Minus)
+                                } else {
+                                    StaticRegister::LabelOffset(reg, offset, TokenType::Plus)
+                                }
+                            }
+                            _ => unreachable!("Literal can't be struct address"),
+                        }
+                    }
+                    NEWTypes::Union(_) => reg,
+                    _ => unreachable!("{:?}", reg.get_type()),
+                }
+            }
             ExprKind::Binary { left, token, right } => {
                 let left = self.execute_global_expr(*left);
                 let right = self.execute_global_expr(*right);
@@ -568,6 +604,16 @@ impl Compiler {
                     (StaticRegister::Label(reg), StaticRegister::Literal(n))
                     | (StaticRegister::Literal(n), StaticRegister::Label(reg)) => {
                         StaticRegister::LabelOffset(reg, n, token.token)
+                    }
+
+                    (StaticRegister::LabelOffset(reg, offset, _), StaticRegister::Literal(n))
+                    | (StaticRegister::Literal(n), StaticRegister::LabelOffset(reg, offset, _)) => {
+                        let offset = n + offset;
+                        if offset < 0 {
+                            StaticRegister::LabelOffset(reg, offset.abs(), TokenType::Minus)
+                        } else {
+                            StaticRegister::LabelOffset(reg, offset, TokenType::Plus)
+                        }
                     }
                     _ => unreachable!(),
                 }
@@ -630,8 +676,8 @@ impl Compiler {
                 self.cg_postunary(token, *left, by_amount)
             }
             ExprKind::MemberAccess { expr, member, .. } => {
-                let expr = self.execute_expr(*expr);
-                self.cg_member_access(expr, &member, true)
+                let reg = self.execute_expr(*expr);
+                self.cg_member_access(reg, &member, true)
             }
             ExprKind::Ternary { cond, true_expr, false_expr, .. } => {
                 self.cg_ternary(*cond, *true_expr, *false_expr)
@@ -692,16 +738,8 @@ impl Compiler {
         let member = member.unwrap_string();
 
         if let NEWTypes::Struct(s) = reg.get_type() {
-            let offset = s
-                .members()
-                .iter()
-                .take_while(|(_, name)| name.unwrap_string() != member)
-                .fold(0, |acc, (t, _)| acc + t.size());
-            let members_iter = s.members();
-            let (member_type, _) = members_iter
-                .iter()
-                .find(|(_, name)| name.unwrap_string() == member)
-                .unwrap();
+            let offset = s.member_offset(&member);
+            let member_type = s.member_type(&member);
 
             let address = self.cg_address_at(reg, free);
             let mut result = if offset != 0 {
@@ -712,15 +750,12 @@ impl Compiler {
             } else {
                 address
             };
+
             result.set_type(member_type.clone());
             result.set_value_kind(ValueKind::Lvalue);
             result
         } else if let NEWTypes::Union(s) = reg.get_type() {
-            let members_iter = s.members();
-            let (member_type, _) = members_iter
-                .iter()
-                .find(|(_, name)| name.unwrap_string() == member)
-                .unwrap();
+            let member_type = s.member_type(&member);
 
             let mut result = self.cg_address_at(reg, free);
 

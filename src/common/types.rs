@@ -98,6 +98,20 @@ impl StructInfo {
             StructInfo::Anonymous(m) => Rc::new(m.clone()),
         }
     }
+    pub fn member_offset(&self, member_to_find: &str) -> usize {
+        self.members()
+            .iter()
+            .take_while(|(_, name)| name.unwrap_string() != member_to_find)
+            .fold(0, |acc, (t, _)| acc + t.size())
+    }
+    pub fn member_type(&self, member_to_find: &str) -> NEWTypes {
+        self.members()
+            .iter()
+            .find(|(_, name)| name.unwrap_string() == member_to_find)
+            .unwrap()
+            .0
+            .clone()
+    }
     fn name(&self) -> &str {
         match self {
             StructInfo::Named(name, _) => name,

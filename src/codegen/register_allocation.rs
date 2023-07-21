@@ -305,13 +305,13 @@ impl RegisterAllocation {
     }
     // chooses which register to spill besides other
     fn choose_spill_reg(&mut self, interfering_regs: Vec<usize>) -> usize {
-        self.spill_index = (self.spill_index + 1) % self.registers.0.len();
-
         while interfering_regs.contains(&self.spill_index) {
             self.spill_index = (self.spill_index + 1) % self.registers.0.len();
         }
+        let index = self.spill_index;
+        self.spill_index = (self.spill_index + 1) % self.registers.0.len();
 
-        self.spill_index
+        index
     }
     // marks freed interval-registers as available again and removes interval from live_intervals
     fn expire_old_intervals(&mut self, instr_idx: usize, result: &mut Vec<Ir>) {
@@ -662,7 +662,80 @@ mod tests {
     }
 
     #[test]
-    fn spilling() {}
+    fn spilling() {
+        let occupied_regs = vec![4, 5, 6, 7];
+        let (intervals, regs, filled_regs) = process_intervals(vec![
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(0, 7, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r11"))),
+                IntervalEntry::new(0, 4, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(ArgRegisterKind::new(5))),
+                IntervalEntry::new(1, 6, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(ArgRegisterKind::new(4))),
+                IntervalEntry::new(2, 4, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(3, 5, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r11"))),
+                IntervalEntry::new(4, 6, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(5, 7, None, NEWTypes::default()),
+            ),
+        ]);
+
+        let reg_alloc = setup(intervals, occupied_regs, vec![]);
+
+        let input = vec![
+            Ir::Add(regs[0].clone(), regs[1].clone()),
+            Ir::Imul(regs[1].clone(), regs[2].clone()),
+            Ir::Mov(regs[3].clone(), regs[1].clone()),
+            Ir::Or(regs[1].clone(), regs[4].clone()),
+            Ir::Neg(regs[5].clone()),
+            Ir::Mov(regs[6].clone(), regs[5].clone()),
+            Ir::Mov(regs[0].clone(), regs[6].clone()),
+        ];
+
+        // Reg0 is spilled because is Ir::Or there are no regs left.
+        let spilled_reg = Register::Stack(StackRegister::new(&mut 0, NEWTypes::default()));
+
+        // When it is unspilled again because it is needed in instruction 6, %r10 is not available
+        // because when Reg4 was freed %r10 was marked as available again and was assigned to Reg6.
+        // So now Reg0 is contained in a new register %r11 which is free at the point of unspilling.
+        let unspilled_reg_0 = if let Register::Temp(filled) = filled_regs[0].clone() {
+            Register::Temp(TempRegister {
+                reg: Some(TempKind::Scratch(Box::new(RegularRegister::new("%r11")))),
+                ..filled
+            })
+        } else {
+            unreachable!()
+        };
+
+        let expected = vec![
+            Ir::Add(filled_regs[0].clone(), filled_regs[1].clone()),
+            Ir::Imul(filled_regs[1].clone(), filled_regs[2].clone()),
+            Ir::Mov(filled_regs[3].clone(), filled_regs[1].clone()),
+            Ir::Mov(filled_regs[0].clone(), spilled_reg.clone()),
+            Ir::Or(filled_regs[1].clone(), filled_regs[4].clone()),
+            Ir::Neg(filled_regs[5].clone()),
+            Ir::Mov(filled_regs[6].clone(), filled_regs[5].clone()),
+            Ir::Mov(spilled_reg, unspilled_reg_0.clone()),
+            Ir::Mov(unspilled_reg_0.clone(), filled_regs[6].clone()),
+        ];
+
+        assert_regalloc(input, expected, reg_alloc);
+    }
 
     #[test]
     fn more_than_6_args() {}

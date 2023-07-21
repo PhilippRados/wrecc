@@ -63,7 +63,7 @@ pub enum Ir {
     DBG(String),
 }
 impl Ir {
-    pub fn get_regs(&mut self) -> (Option<&mut Register>, Option<&mut Register>) {
+    pub fn get_regs_mut(&mut self) -> (Option<&mut Register>, Option<&mut Register>) {
         match self {
             Ir::Push(reg) => (None, Some(reg)),
             Ir::Pop(reg) => (None, Some(reg)),
@@ -80,7 +80,29 @@ impl Ir {
             | Ir::Load(left, right)
             | Ir::Shift(_, left, right) => (Some(left), Some(right)),
             Ir::Neg(reg) | Ir::Not(reg) | Ir::Idiv(reg) => (None, Some(reg)),
-            // global initializer can only have statci-registers and no temporaries
+            // global initializer can only have static-registers and no temporaries
+            Ir::GlobalInit(..) => (None, None),
+            _ => (None, None),
+        }
+    }
+    pub fn get_regs(&self) -> (Option<&Register>, Option<&Register>) {
+        match self {
+            Ir::Push(reg) => (None, Some(reg)),
+            Ir::Pop(reg) => (None, Some(reg)),
+            Ir::Mov(left, right)
+            | Ir::Movs(left, right)
+            | Ir::Movz(left, right)
+            | Ir::Cmp(left, right)
+            | Ir::Sub(left, right)
+            | Ir::Add(left, right)
+            | Ir::Imul(left, right)
+            | Ir::Xor(left, right)
+            | Ir::Or(left, right)
+            | Ir::And(left, right)
+            | Ir::Load(left, right)
+            | Ir::Shift(_, left, right) => (Some(left), Some(right)),
+            Ir::Neg(reg) | Ir::Not(reg) | Ir::Idiv(reg) => (None, Some(reg)),
+            // global initializer can only have static-registers and no temporaries
             Ir::GlobalInit(..) => (None, None),
             _ => (None, None),
         }

@@ -1,5 +1,5 @@
 use crate::codegen::{ir::*, register::*};
-use crate::common::{environment::*, expr::*, types::NEWTypes};
+use crate::common::{environment::*, expr::*, types::*};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -76,7 +76,7 @@ impl RegisterAllocation {
 
             self.alloc_arg(&mut result);
 
-            match instr.get_regs() {
+            match instr.get_regs_mut() {
                 (Some(Register::Temp(left)), Some(Register::Temp(right))) => {
                     let left_interferences = self.interfering_intervals(left.id, Some(right.id));
                     self.alloc(left, left_interferences, &mut result);
@@ -374,7 +374,8 @@ impl RegisterAllocation {
     }
     // occurs when scratch-register is already correct arg register
     fn is_redundant_instr(&mut self, instr: &mut Ir) -> bool {
-        if let (true, (Some(left), Some(right))) = (matches!(instr, Ir::Mov(..)), instr.get_regs())
+        if let (true, (Some(left), Some(right))) =
+            (matches!(instr, Ir::Mov(..)), instr.get_regs_mut())
         {
             if let (Register::Temp(left), Register::Arg(right)) = (left, right) {
                 let scratch_idx = self.get_reg(left.id);
@@ -497,4 +498,175 @@ impl ScratchRegisters {
             Box::new(ArgRegisterKind::new(0)),
         ])
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem;
+
+    fn setup(
+        intervals: HashMap<usize, IntervalEntry>,
+        occupied_regs: Vec<usize>,
+        env: Vec<Symbols>,
+    ) -> RegisterAllocation {
+        let mut reg_alloc = RegisterAllocation::new(env, intervals);
+
+        for i in occupied_regs {
+            reg_alloc.registers.0.get_mut(i).unwrap().in_use();
+        }
+
+        reg_alloc
+    }
+    impl IntervalEntry {
+        fn as_reg(&self, id: usize) -> Register {
+            match &self.arg {
+                Some(reg) => Register::Arg(ArgRegister {
+                    id,
+                    reg: reg.clone(),
+                    start_idx: self.start,
+                    type_decl: self.type_decl.clone(),
+                }),
+                None => Register::Temp(TempRegister {
+                    id,
+                    reg: None,
+                    start_idx: self.start,
+                    type_decl: self.type_decl.clone(),
+                    value_kind: ValueKind::Rvalue,
+                }),
+            }
+        }
+    }
+    fn process_intervals(
+        temps: Vec<(Option<Box<dyn ScratchRegister>>, IntervalEntry)>,
+    ) -> (HashMap<usize, IntervalEntry>, Vec<Register>, Vec<Register>) {
+        let intervals: HashMap<usize, IntervalEntry> = temps
+            .iter()
+            .enumerate()
+            .map(|(k, (_, v))| (k, v.clone()))
+            .collect();
+
+        let regs: Vec<Register> = temps
+            .iter()
+            .enumerate()
+            .map(|(k, (_, v))| v.as_reg(k))
+            .collect();
+
+        let filled_regs = regs
+            .clone()
+            .iter_mut()
+            .zip(temps.iter().map(|(scratch, _)| scratch))
+            .map(|(mut r, scratch)| {
+                if let (Register::Temp(reg), Some(scratch)) = (&mut r, scratch) {
+                    reg.reg = Some(TempKind::Scratch(scratch.clone()));
+                }
+                r.clone()
+            })
+            .collect();
+
+        (intervals, regs, filled_regs)
+    }
+    fn assert_regalloc(input: Vec<Ir>, expected: Vec<Ir>, reg_alloc: RegisterAllocation) {
+        let actual = reg_alloc.generate(input);
+
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            let actual_ir = mem::discriminant(actual) == mem::discriminant(&expected);
+            assert!(actual_ir);
+
+            assert!(
+                match (actual.get_regs(), expected.get_regs()) {
+                    (
+                        (Some(actual_left), Some(actual_right)),
+                        (Some(expected_left), Some(expected_right)),
+                    ) => {
+                        actual_left.name() == expected_left.name()
+                            && actual_right.name() == expected_right.name()
+                    }
+                    ((None, Some(actual_right)), (None, Some(expected_right))) => {
+                        actual_right.name() == expected_right.name()
+                    }
+                    ((None, None), (None, None)) => true,
+                    _ => false,
+                },
+                "Mismatched ir-instruction:\nactual: {}\nexpected: {}",
+                actual,
+                expected
+            )
+        }
+    }
+
+    #[test]
+    fn arg_op_collision() {
+        let occupied_regs = vec![1, 3];
+        let (intervals, regs, filled_regs) = process_intervals(vec![
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(0, 4, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(ArgRegisterKind::new(5))),
+                IntervalEntry::new(0, 4, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(ArgRegisterKind::new(3))),
+                IntervalEntry::new(0, 3, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(5, 7, None, NEWTypes::default()),
+            ),
+            (
+                // INFO: Has to be arg1 since arg2 and arg3 are reserved as required arg-regs in shift and div operation
+                // during same interval (3-5 collides with: 4-6,1-4)
+                Some(Box::new(ArgRegisterKind::new(1))),
+                IntervalEntry::new(3, 5, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(ArgRegisterKind::new(5))),
+                IntervalEntry::new(6, 7, None, NEWTypes::default()),
+            ),
+            (
+                None,
+                IntervalEntry::new(4, 6, Some(ArgRegisterKind::new(3)), NEWTypes::default()),
+            ),
+            (
+                None,
+                IntervalEntry::new(1, 4, Some(ArgRegisterKind::new(2)), NEWTypes::default()),
+            ),
+        ]);
+
+        let reg_alloc = setup(intervals, occupied_regs, vec![]);
+
+        let input = vec![
+            Ir::Mov(regs[0].clone(), regs[1].clone()),
+            Ir::Add(regs[2].clone(), regs[1].clone()),
+            Ir::Idiv(regs[1].clone()),
+            Ir::Mov(regs[1].clone(), regs[4].clone()),
+            Ir::Mov(regs[4].clone(), regs[6].clone()),
+            Ir::Shift("l", regs[6].clone(), regs[3].clone()),
+            Ir::Xor(regs[3].clone(), regs[5].clone()),
+        ];
+
+        let expected = vec![
+            Ir::Mov(filled_regs[0].clone(), filled_regs[1].clone()),
+            Ir::Add(filled_regs[2].clone(), filled_regs[1].clone()),
+            Ir::Idiv(filled_regs[1].clone()),
+            Ir::Mov(filled_regs[1].clone(), filled_regs[4].clone()),
+            Ir::Mov(filled_regs[4].clone(), filled_regs[6].clone()),
+            Ir::Shift("l", filled_regs[6].clone(), filled_regs[3].clone()),
+            Ir::Xor(filled_regs[3].clone(), filled_regs[5].clone()),
+        ];
+
+        assert_regalloc(input, expected, reg_alloc);
+    }
+
+    #[test]
+    fn spilling() {}
+
+    #[test]
+    fn more_than_6_args() {}
+
+    #[test]
+    fn call_with_occupied_arg_regs() {}
 }

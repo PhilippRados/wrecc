@@ -1185,7 +1185,6 @@ fn is_address_constant(expr: &Expr, is_outer: bool) -> bool {
         ExprKind::Cast { expr, .. }
         | ExprKind::ScaleUp { expr, .. }
         | ExprKind::Grouping { expr } => is_address_constant(expr, is_outer),
-        ExprKind::String(_) => true,
         _ => false,
     }
 }

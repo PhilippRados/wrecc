@@ -58,9 +58,6 @@ pub enum Ir {
 
     // unary
     Neg(Register),
-
-    // helper instruction to indicate the a register is occupied
-    DBG(String),
 }
 impl Ir {
     pub fn get_regs_mut(&mut self) -> (Option<&mut Register>, Option<&mut Register>) {
@@ -240,7 +237,6 @@ impl Display for Ir {
                 ),
                 Ir::Not(reg) => format!("\tnot{}    {}", reg.get_type().suffix(), reg.name()),
                 Ir::Neg(reg) => format!("\tneg{}    {}", reg.get_type().suffix(), reg.name()),
-                Ir::DBG(info) => format!("#{}", info),
                 Ir::SaveRegs | Ir::RestoreRegs =>
                     unreachable!("will be replaced in register-allocation"),
             }

@@ -122,8 +122,9 @@ impl RegisterAllocation {
         }
         result
     }
-    // when explictily allocating arg-register then when arg-register is occupied the occupant gets pushed
-    // exlicit arg-registers always have priority
+    // When explictily allocating arg-register then when arg-register is occupied the occupant gets pushed
+    // exlicit arg-registers always have priority. This covers cases when a specific arg-register is needed
+    // by an operation but is occpied as an argument.
     fn alloc_arg(&mut self, result: &mut Vec<Ir>) {
         // get the interval if a new arg-register has been declared
         let new_arg_interval = self.live_intervals.iter_mut().find(|(_, v)| {
@@ -569,11 +570,15 @@ mod tests {
     fn assert_regalloc(input: Vec<Ir>, expected: Vec<Ir>, reg_alloc: RegisterAllocation) {
         let actual = reg_alloc.generate(input);
 
+        dbg!(&actual);
+        dbg!(&expected);
+
         assert_eq!(actual.len(), expected.len());
         for (actual, expected) in actual.iter().zip(expected) {
             let actual_ir = mem::discriminant(actual) == mem::discriminant(&expected);
             assert!(actual_ir);
 
+            // TODO: also compare ids
             assert!(
                 match (actual.get_regs(), expected.get_regs()) {
                     (
@@ -738,8 +743,170 @@ mod tests {
     }
 
     #[test]
-    fn more_than_6_args() {}
+    fn call_with_spilling_arg_regs() {
+        let occupied_regs = vec![];
+        let (intervals, regs, filled_regs) = process_intervals(vec![
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(1, 4, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r11"))),
+                IntervalEntry::new(1, 3, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(ArgRegisterKind::new(4))),
+                IntervalEntry::new(2, 4, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r11"))),
+                IntervalEntry::new(3, 4, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(4, 7, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r11"))),
+                IntervalEntry::new(4, 7, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(ArgRegisterKind::new(2))),
+                IntervalEntry::new(5, 7, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(7, 8, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(8, 10, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r11"))),
+                IntervalEntry::new(8, 10, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(10, 15, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r11"))),
+                IntervalEntry::new(10, 15, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(12, 15, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r11"))),
+                IntervalEntry::new(13, 15, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(13, 15, None, NEWTypes::default()),
+            ),
+            (
+                Some(Box::new(RegularRegister::new("%r10"))),
+                IntervalEntry::new(15, 16, None, NEWTypes::default()),
+            ),
+            (
+                None,
+                IntervalEntry::new(3, 16, Some(ArgRegisterKind::new(5)), NEWTypes::default()),
+            ),
+            (
+                None,
+                IntervalEntry::new(6, 16, Some(ArgRegisterKind::new(4)), NEWTypes::default()),
+            ),
+            (
+                None,
+                IntervalEntry::new(7, 16, Some(ArgRegisterKind::new(3)), NEWTypes::default()),
+            ),
+            (
+                None,
+                IntervalEntry::new(9, 16, Some(ArgRegisterKind::new(2)), NEWTypes::default()),
+            ),
+            (
+                None,
+                IntervalEntry::new(14, 16, Some(ArgRegisterKind::new(1)), NEWTypes::default()),
+            ),
+            (
+                None,
+                IntervalEntry::new(15, 16, Some(ArgRegisterKind::new(0)), NEWTypes::default()),
+            ),
+            // register that is occupied for div instruction
+            (
+                None,
+                IntervalEntry::new(10, 13, Some(ArgRegisterKind::new(2)), NEWTypes::default()),
+            ),
+        ]);
+
+        let reg_alloc = setup(intervals, occupied_regs, vec![]);
+
+        let input = vec![
+            Ir::SaveRegs,
+            Ir::Add(regs[0].clone(), regs[1].clone()),
+            Ir::Imul(regs[1].clone(), regs[2].clone()),
+            Ir::Mov(regs[3].clone(), regs[16].clone()),
+            Ir::Add(regs[4].clone(), regs[5].clone()),
+            Ir::Imul(regs[5].clone(), regs[6].clone()),
+            Ir::Mov(regs[6].clone(), regs[17].clone()),
+            Ir::Mov(regs[7].clone(), regs[18].clone()),
+            Ir::And(regs[8].clone(), regs[9].clone()),
+            Ir::Mov(regs[9].clone(), regs[19].clone()),
+            Ir::And(regs[10].clone(), regs[11].clone()),
+            Ir::Idiv(regs[11].clone()),
+            Ir::And(regs[11].clone(), regs[12].clone()),
+            Ir::Add(regs[13].clone(), regs[14].clone()),
+            Ir::Mov(regs[10].clone(), regs[20].clone()),
+            Ir::Mov(regs[15].clone(), regs[21].clone()),
+            Ir::Call("foo".to_string()),
+            Ir::RestoreRegs,
+        ];
+
+        let mut bp = 0;
+        let spilled_reg1 = Register::Stack(StackRegister::new(&mut bp, NEWTypes::default()));
+        let spilled_reg2 = Register::Stack(StackRegister::new(&mut bp, NEWTypes::default()));
+        let spilled_reg3 = Register::Stack(StackRegister::new(&mut bp, NEWTypes::default()));
+        let spilled_reg4 = Register::Stack(StackRegister::new(&mut bp, NEWTypes::default()));
+
+        let unspilled_reg_1 = if let Register::Temp(filled) = filled_regs[10].clone() {
+            Register::Temp(TempRegister {
+                reg: Some(TempKind::Scratch(Box::new(RegularRegister::new("%r11")))),
+                ..filled
+            })
+        } else {
+            unreachable!()
+        };
+        let expected = vec![
+            Ir::Add(filled_regs[0].clone(), filled_regs[1].clone()),
+            Ir::Imul(filled_regs[1].clone(), filled_regs[2].clone()),
+            Ir::Mov(filled_regs[3].clone(), filled_regs[16].clone()),
+            Ir::Add(filled_regs[4].clone(), filled_regs[5].clone()),
+            Ir::Imul(filled_regs[5].clone(), filled_regs[6].clone()),
+            Ir::Mov(filled_regs[6].clone(), filled_regs[17].clone()),
+            Ir::Mov(filled_regs[7].clone(), filled_regs[18].clone()),
+            Ir::And(filled_regs[8].clone(), filled_regs[9].clone()),
+            Ir::Mov(filled_regs[9].clone(), filled_regs[19].clone()),
+            Ir::Push(filled_regs[22].clone()),
+            Ir::And(filled_regs[10].clone(), filled_regs[11].clone()),
+            Ir::Idiv(filled_regs[11].clone()),
+            Ir::Mov(filled_regs[10].clone(), spilled_reg1.clone()), // spill %r10
+            Ir::And(filled_regs[11].clone(), filled_regs[12].clone()),
+            Ir::Pop(filled_regs[22].clone()),
+            Ir::Mov(filled_regs[11].clone(), spilled_reg2), // spill %r11
+            Ir::Mov(filled_regs[12].clone(), spilled_reg3), // spill %r10
+            Ir::Add(filled_regs[13].clone(), filled_regs[14].clone()),
+            Ir::Mov(filled_regs[13].clone(), spilled_reg4), // spill %r11
+            Ir::Mov(spilled_reg1, unspilled_reg_1.clone()), // unspill filled_reg[10]
+            Ir::Mov(unspilled_reg_1, filled_regs[20].clone()),
+            Ir::Mov(filled_regs[15].clone(), filled_regs[21].clone()),
+            Ir::Call("foo".to_string()),
+        ];
+
+        assert_regalloc(input, expected, reg_alloc);
+    }
 
     #[test]
-    fn call_with_occupied_arg_regs() {}
+    fn more_than_6_args() {}
 }

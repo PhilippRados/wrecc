@@ -11,7 +11,7 @@ int some(int a, int b, int c,int d,int e) {
 
 int main() {
     int e = 29;
-    int result = some(3 << 2, 10 % 3, 32, 40, 2);
+    int result = some(e << 2, e % 3, 32, 40, 2);
 
     printf("%d\n", result);
 

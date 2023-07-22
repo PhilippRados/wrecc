@@ -919,7 +919,7 @@ impl Compiler {
             let type_decl = expr.type_decl.clone().unwrap();
             let mut reg = self.execute_expr(expr);
 
-            // push first six registers into designated argument-registers; others onto stack
+            // put first six registers into designated argument-registers; others pushed onto stack
             if i < ARG_REGS.len() {
                 let arg = Register::Arg(ArgRegister::new(
                     i,

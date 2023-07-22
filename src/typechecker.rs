@@ -799,9 +799,7 @@ impl TypeChecker {
         // convert compound token into valid binary token
         let bin_token = &Token {
             token: token.comp_to_binary(),
-            line_string: token.line_string.clone(),
-            line_index: token.line_index,
-            column: token.column,
+            ..token.clone()
         };
 
         // can ignore scale-down because ptr -= ptr is a type-error

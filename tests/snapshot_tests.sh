@@ -3,6 +3,8 @@
 PASSED=0
 FAILED=0
 
+$(RUSTFLAGS="-A warnings" cargo b -q --release)
+
 function assert_eq {
   if [ $# -eq 3 ]; then
     local snapshot=$1
@@ -13,7 +15,8 @@ function assert_eq {
     exit 1
   fi
 
-  $(RUSTFLAGS="-A warnings" cargo r -q --release "$fixture" 2> static_err)
+$(RUSTFLAGS="-A warnings" ./target/release/rucc "$fixture" 2> static_err)
+  
   found_error=$(cat static_err)
   if [[ "$found_error" = "" ]]; then
     $(gcc generated.s -o tmp1)

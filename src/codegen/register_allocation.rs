@@ -600,45 +600,37 @@ mod tests {
             )
         }
     }
+    macro_rules! temp_entry {
+        ($reg:expr,$start:expr,$end:expr) => {
+            (
+                Some(Box::new($reg)),
+                IntervalEntry::new($start, $end, None, NEWTypes::default()),
+            )
+        };
+    }
+    macro_rules! arg_entry {
+        ($reg:expr,$start:expr,$end:expr) => {
+            (
+                None,
+                IntervalEntry::new($start, $end, Some($reg), NEWTypes::default()),
+            )
+        };
+    }
 
     #[test]
     fn arg_op_collision() {
         let occupied_regs = vec![1, 3];
         let (intervals, regs, filled_regs) = process_intervals(vec![
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(0, 4, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(ArgRegisterKind::new(5))),
-                IntervalEntry::new(0, 4, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(ArgRegisterKind::new(3))),
-                IntervalEntry::new(0, 3, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(5, 7, None, NEWTypes::default()),
-            ),
-            (
-                // INFO: Has to be arg1 since arg2 and arg3 are reserved as required arg-regs in shift and div operation
-                // during same interval (3-5 collides with: 4-6,1-4)
-                Some(Box::new(ArgRegisterKind::new(1))),
-                IntervalEntry::new(3, 5, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(ArgRegisterKind::new(5))),
-                IntervalEntry::new(6, 7, None, NEWTypes::default()),
-            ),
-            (
-                None,
-                IntervalEntry::new(4, 6, Some(ArgRegisterKind::new(3)), NEWTypes::default()),
-            ),
-            (
-                None,
-                IntervalEntry::new(1, 4, Some(ArgRegisterKind::new(2)), NEWTypes::default()),
-            ),
+            temp_entry!(RegularRegister::new("%r10"), 0, 4),
+            temp_entry!(ArgRegisterKind::new(5), 0, 4),
+            temp_entry!(ArgRegisterKind::new(3), 0, 3),
+            temp_entry!(RegularRegister::new("%r10"), 5, 7),
+            // INFO: Has to be arg1 since arg2 and arg3 are reserved as required arg-regs in shift and div operation
+            // during same interval (3-5 collides with: 4-6,1-4)
+            temp_entry!(ArgRegisterKind::new(1), 3, 5),
+            temp_entry!(ArgRegisterKind::new(5), 6, 7),
+            arg_entry!(ArgRegisterKind::new(3), 4, 6),
+            arg_entry!(ArgRegisterKind::new(2), 1, 4),
         ]);
 
         let reg_alloc = setup(intervals, occupied_regs, vec![]);
@@ -670,34 +662,13 @@ mod tests {
     fn spilling() {
         let occupied_regs = vec![4, 5, 6, 7];
         let (intervals, regs, filled_regs) = process_intervals(vec![
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(0, 7, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r11"))),
-                IntervalEntry::new(0, 4, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(ArgRegisterKind::new(5))),
-                IntervalEntry::new(1, 6, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(ArgRegisterKind::new(4))),
-                IntervalEntry::new(2, 4, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(3, 5, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r11"))),
-                IntervalEntry::new(4, 6, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(5, 7, None, NEWTypes::default()),
-            ),
+            temp_entry!(RegularRegister::new("%r10"), 0, 7),
+            temp_entry!(RegularRegister::new("%r11"), 0, 4),
+            temp_entry!(ArgRegisterKind::new(5), 1, 6),
+            temp_entry!(ArgRegisterKind::new(4), 2, 4),
+            temp_entry!(RegularRegister::new("%r10"), 3, 5),
+            temp_entry!(RegularRegister::new("%r11"), 4, 6),
+            temp_entry!(RegularRegister::new("%r10"), 5, 7),
         ]);
 
         let reg_alloc = setup(intervals, occupied_regs, vec![]);
@@ -746,99 +717,30 @@ mod tests {
     fn call_with_spilling_arg_regs() {
         let occupied_regs = vec![];
         let (intervals, regs, filled_regs) = process_intervals(vec![
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(1, 4, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r11"))),
-                IntervalEntry::new(1, 3, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(ArgRegisterKind::new(4))),
-                IntervalEntry::new(2, 4, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r11"))),
-                IntervalEntry::new(3, 4, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(4, 7, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r11"))),
-                IntervalEntry::new(4, 7, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(ArgRegisterKind::new(2))),
-                IntervalEntry::new(5, 7, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(7, 8, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(8, 10, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r11"))),
-                IntervalEntry::new(8, 10, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(10, 15, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r11"))),
-                IntervalEntry::new(10, 15, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(12, 15, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r11"))),
-                IntervalEntry::new(13, 15, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(13, 15, None, NEWTypes::default()),
-            ),
-            (
-                Some(Box::new(RegularRegister::new("%r10"))),
-                IntervalEntry::new(15, 16, None, NEWTypes::default()),
-            ),
-            (
-                None,
-                IntervalEntry::new(3, 16, Some(ArgRegisterKind::new(5)), NEWTypes::default()),
-            ),
-            (
-                None,
-                IntervalEntry::new(6, 16, Some(ArgRegisterKind::new(4)), NEWTypes::default()),
-            ),
-            (
-                None,
-                IntervalEntry::new(7, 16, Some(ArgRegisterKind::new(3)), NEWTypes::default()),
-            ),
-            (
-                None,
-                IntervalEntry::new(9, 16, Some(ArgRegisterKind::new(2)), NEWTypes::default()),
-            ),
-            (
-                None,
-                IntervalEntry::new(14, 16, Some(ArgRegisterKind::new(1)), NEWTypes::default()),
-            ),
-            (
-                None,
-                IntervalEntry::new(15, 16, Some(ArgRegisterKind::new(0)), NEWTypes::default()),
-            ),
+            temp_entry!(RegularRegister::new("%r10"), 1, 4),
+            temp_entry!(RegularRegister::new("%r11"), 1, 3),
+            temp_entry!(ArgRegisterKind::new(4), 2, 4),
+            temp_entry!(RegularRegister::new("%r11"), 3, 4),
+            temp_entry!(RegularRegister::new("%r10"), 4, 7),
+            temp_entry!(RegularRegister::new("%r11"), 4, 7),
+            temp_entry!(ArgRegisterKind::new(2), 5, 7),
+            temp_entry!(RegularRegister::new("%r10"), 7, 8),
+            temp_entry!(RegularRegister::new("%r10"), 8, 10),
+            temp_entry!(RegularRegister::new("%r11"), 8, 10),
+            temp_entry!(RegularRegister::new("%r10"), 10, 15),
+            temp_entry!(RegularRegister::new("%r11"), 10, 15),
+            temp_entry!(RegularRegister::new("%r10"), 12, 15),
+            temp_entry!(RegularRegister::new("%r11"), 13, 15),
+            temp_entry!(RegularRegister::new("%r10"), 13, 15),
+            temp_entry!(RegularRegister::new("%r10"), 15, 16),
+            arg_entry!(ArgRegisterKind::new(5), 3, 16),
+            arg_entry!(ArgRegisterKind::new(4), 6, 16),
+            arg_entry!(ArgRegisterKind::new(3), 7, 16),
+            arg_entry!(ArgRegisterKind::new(2), 9, 16),
+            arg_entry!(ArgRegisterKind::new(1), 14, 16),
+            arg_entry!(ArgRegisterKind::new(0), 15, 16),
             // register that is occupied for div instruction
-            (
-                None,
-                IntervalEntry::new(10, 13, Some(ArgRegisterKind::new(2)), NEWTypes::default()),
-            ),
+            arg_entry!(ArgRegisterKind::new(2), 10, 13),
         ]);
 
         let reg_alloc = setup(intervals, occupied_regs, vec![]);
@@ -906,7 +808,4 @@ mod tests {
 
         assert_regalloc(input, expected, reg_alloc);
     }
-
-    #[test]
-    fn more_than_6_args() {}
 }

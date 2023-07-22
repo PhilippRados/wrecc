@@ -82,6 +82,8 @@ impl Ir {
             _ => (None, None),
         }
     }
+    // only used in unit-tests
+    #[allow(unused)]
     pub fn get_regs(&self) -> (Option<&Register>, Option<&Register>) {
         match self {
             Ir::Push(reg) => (None, Some(reg)),
@@ -99,7 +101,6 @@ impl Ir {
             | Ir::Load(left, right)
             | Ir::Shift(_, left, right) => (Some(left), Some(right)),
             Ir::Neg(reg) | Ir::Not(reg) | Ir::Idiv(reg) => (None, Some(reg)),
-            // global initializer can only have static-registers and no temporaries
             Ir::GlobalInit(..) => (None, None),
             _ => (None, None),
         }

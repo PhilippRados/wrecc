@@ -1,5 +1,5 @@
 use crate::codegen::{ir::*, register::*};
-use crate::common::{environment::*, expr::*, types::*};
+use crate::common::{environment::*, types::*};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -68,11 +68,6 @@ impl RegisterAllocation {
         for (i, mut instr) in ir.drain(..).enumerate() {
             self.expire_old_intervals(i, &mut result);
             self.counter = i;
-
-            // TODO: move all peephole optimizations to extra pass
-            if self.is_redundant_instr(&mut instr) {
-                continue;
-            }
 
             self.alloc_arg(&mut result);
 
@@ -373,23 +368,6 @@ impl RegisterAllocation {
         active_intervals.sort_by(|(_, a), (_, b)| a.base_name().cmp(b.base_name()));
         active_intervals
     }
-    // occurs when scratch-register is already correct arg register
-    fn is_redundant_instr(&mut self, instr: &mut Ir) -> bool {
-        if let (true, (Some(left), Some(right))) =
-            (matches!(instr, Ir::Mov(..)), instr.get_regs_mut())
-        {
-            if let (Register::Temp(left), Register::Arg(right)) = (left, right) {
-                let scratch_idx = self.get_reg(left.id);
-                if let Some(scratch_idx) = scratch_idx {
-                    let left_name = self.registers.0.get(scratch_idx).unwrap().base_name();
-
-                    return left_name == right.reg.base_name()
-                        && left.value_kind == ValueKind::Rvalue;
-                }
-            }
-        }
-        false
-    }
     fn save_regs(&mut self, ir: &mut Vec<Ir>) {
         let active_intervals: Vec<_> = self
             .get_active_intervals()
@@ -504,6 +482,7 @@ impl ScratchRegisters {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::expr::ValueKind;
     use std::mem;
 
     fn setup(

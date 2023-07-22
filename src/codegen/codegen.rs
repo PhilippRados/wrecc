@@ -777,14 +777,26 @@ impl Compiler {
         ));
 
         // have to do integer-promotion in codegen
-        if (temp_scratch.get_type().size() < Types::Int.size())
-            && matches!(l_reg, Register::Temp(..) | Register::Stack(..))
-        {
-            temp_scratch.set_type(NEWTypes::Primitive(Types::Int));
-            self.write_out(Ir::Movs(l_reg.clone(), temp_scratch.clone()));
-        } else {
-            self.write_out(Ir::Mov(l_reg.clone(), temp_scratch.clone()));
+        match (l_reg.get_type().size(), r_reg.get_type().size()) {
+            (l_size, r_size)
+                if (l_size < r_size)
+                    && matches!(l_reg, Register::Temp(..) | Register::Stack(..)) =>
+            {
+                temp_scratch.set_type(r_reg.get_type());
+                self.write_out(Ir::Movs(l_reg.clone(), temp_scratch.clone()));
+            }
+            (size, _)
+                if (size < Types::Int.size())
+                    && matches!(l_reg, Register::Temp(..) | Register::Stack(..)) =>
+            {
+                temp_scratch.set_type(NEWTypes::Primitive(Types::Int));
+                self.write_out(Ir::Movs(l_reg.clone(), temp_scratch.clone()));
+            }
+            _ => {
+                self.write_out(Ir::Mov(l_reg.clone(), temp_scratch.clone()));
+            }
         }
+
         let mut bin_reg = self.cg_binary(temp_scratch, &token.comp_to_binary(), r_reg);
 
         // we can do this because typechecker would catch any type-errors

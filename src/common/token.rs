@@ -51,6 +51,7 @@ pub enum TokenKind {
     Arrow,
     Question,
     Colon,
+    Ellipsis,
 
     // Literals.
     Ident,
@@ -155,6 +156,7 @@ impl From<&TokenType> for TokenKind {
             TokenType::Do => TokenKind::Do,
             TokenType::Sizeof => TokenKind::Sizeof,
             TokenType::Goto => TokenKind::Goto,
+            TokenType::Ellipsis => TokenKind::Ellipsis,
         }
     }
 }
@@ -209,6 +211,7 @@ pub enum TokenType {
     Arrow,
     Question,
     Colon,
+    Ellipsis,
 
     // Literals.
     Ident(String, usize), // idx to specify symbol table position
@@ -370,6 +373,7 @@ impl Display for TokenType {
                 TokenType::Do => "'do'",
                 TokenType::Sizeof => "'sizeof'",
                 TokenType::Goto => "'goto'",
+                TokenType::Ellipsis => "'...'",
             }
         )
     }
@@ -384,12 +388,7 @@ pub struct Token {
 }
 impl Token {
     pub fn new(token: TokenType, line_index: i32, column: i32, line_string: String) -> Self {
-        Token {
-            token,
-            line_index,
-            column,
-            line_string,
-        }
+        Token { token, line_index, column, line_string }
     }
     pub fn default(kind: TokenType) -> Self {
         Token {

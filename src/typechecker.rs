@@ -858,8 +858,16 @@ impl TypeChecker {
                 ErrorKind::InvalidSymbol(func_name.unwrap_string(), "function"),
             )),
             Symbols::Func(function) => {
-                if function.arity() == arg_types.len() {
-                    self.args_and_params_match(left_paren, &function.clone().params, arg_types)?;
+                if (function.variadic && function.arity() <= arg_types.len())
+                    || (!function.variadic && function.arity() == arg_types.len())
+                {
+                    self.args_and_params_match(
+                        left_paren,
+                        func_name.unwrap_string(),
+                        &function.clone().params,
+                        arg_types,
+                    )?;
+
                     Ok(function.clone().return_type)
                 } else {
                     Err(Error::new(
@@ -877,15 +885,25 @@ impl TypeChecker {
     fn args_and_params_match(
         &self,
         left_paren: &Token,
+        func_name: String,
         params: &[(NEWTypes, Token)],
         args: Vec<(&mut Expr, NEWTypes)>,
     ) -> Result<(), Error> {
-        for (i, (expr, type_decl)) in args.into_iter().enumerate() {
-            self.check_type_compatibility(left_paren, &params[i].0, &type_decl)?;
+        for ((expr, arg_type), (param_type, param_token)) in args.into_iter().zip(params) {
+            self.check_type_compatibility(left_paren, param_type, &arg_type)
+                .or(Err(Error::new(
+                    left_paren,
+                    ErrorKind::MismatchedArgs(
+                        func_name.clone(),
+                        param_token.unwrap_string(),
+                        param_type.clone(),
+                        arg_type.clone(),
+                    ),
+                )))?;
 
             // since char is integer promoted don't cast it back down
-            if params[i].0.size() > NEWTypes::Primitive(Types::Char).size() {
-                self.maybe_cast(&params[i].0, &type_decl, expr);
+            if param_type.size() > NEWTypes::Primitive(Types::Char).size() {
+                self.maybe_cast(param_type, &arg_type, expr);
             }
         }
         Ok(())

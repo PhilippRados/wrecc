@@ -76,11 +76,23 @@ impl<'a> Scanner<'a> {
                 '{' => self.add_token(&mut tokens, TokenType::LeftBrace),
                 '}' => self.add_token(&mut tokens, TokenType::RightBrace),
                 ',' => self.add_token(&mut tokens, TokenType::Comma),
-                '.' => self.add_token(&mut tokens, TokenType::Dot),
                 ';' => self.add_token(&mut tokens, TokenType::Semicolon),
                 '~' => self.add_token(&mut tokens, TokenType::Tilde),
                 '?' => self.add_token(&mut tokens, TokenType::Question),
                 ':' => self.add_token(&mut tokens, TokenType::Colon),
+                '.' => {
+                    if self.matches('.') {
+                        if self.matches('.') {
+                            self.add_token(&mut tokens, TokenType::Ellipsis);
+                        } else {
+                            // since only single lookahead have to add two seperate dots
+                            self.add_token(&mut tokens, TokenType::Dot);
+                            self.add_token(&mut tokens, TokenType::Dot);
+                        }
+                    } else {
+                        self.add_token(&mut tokens, TokenType::Dot)
+                    }
+                }
                 '-' => {
                     let mut token = TokenType::Minus;
                     if self.matches('-') {
@@ -608,6 +620,19 @@ mod tests {
         let actual = setup_err("char some = '12'; ''");
         let expected = vec![ErrorKind::CharLiteralQuotes, ErrorKind::CharLiteralQuotes];
 
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn ellipsis_dot_distinction() {
+        let actual = setup(".....;...");
+        let expected = vec![
+            TokenType::Ellipsis,
+            TokenType::Dot,
+            TokenType::Dot,
+            TokenType::Semicolon,
+            TokenType::Ellipsis,
+        ];
         assert_eq!(actual, expected);
     }
 }

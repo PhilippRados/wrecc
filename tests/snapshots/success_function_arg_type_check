@@ -1,4 +1,4 @@
-Error: Can't assign to type 'int*' with type 'int'
+Error: Mismatched arguments in function 'some': expected parameter 'c' to be of type 'int*', found 'int'
 |
 8   a = *some(a);
 |            ^

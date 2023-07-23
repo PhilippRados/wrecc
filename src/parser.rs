@@ -810,12 +810,23 @@ impl Parser {
 
         Ok(elements)
     }
-    fn parse_params(&mut self) -> Result<Vec<(NEWTypes, Token)>, Error> {
+    fn parse_params(&mut self) -> Result<(Vec<(NEWTypes, Token)>, bool), Error> {
         let mut params = Vec::new();
+        let mut variadic = false;
+
         if self.matches(vec![TokenKind::RightParen]).is_some() {
-            return Ok(params);
+            return Ok((params, variadic));
         }
         loop {
+            match (self.matches(vec![TokenKind::Ellipsis]), params.len()) {
+                (Some(t), 0) => return Err(Error::new(&t, ErrorKind::InvalidVariadic)),
+                (Some(_), _) => {
+                    variadic = true;
+                    break;
+                }
+                _ => (),
+            }
+
             let mut param_type = self.matches_specifier()?;
             let mut name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
 
@@ -840,7 +851,8 @@ impl Parser {
             TokenKind::RightParen,
             "Expect ')' after function parameters",
         )?;
-        Ok(params)
+
+        Ok((params, variadic))
     }
     fn function_decl(
         &mut self,
@@ -863,9 +875,10 @@ impl Parser {
         // params can't be in same scope as function-name so
         // they get added after they have been parsed
         self.env.enter();
-        let params = self.parse_params()?;
+        let (params, variadic) = self.parse_params()?;
 
         self.env.get_mut_symbol(index).unwrap_func().params = params;
+        self.env.get_mut_symbol(index).unwrap_func().variadic = variadic;
 
         self.compare_existing(&name, index, existing)?;
 

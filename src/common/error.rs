@@ -32,6 +32,7 @@ pub enum ErrorKind {
     ExpectedExpression(TokenType),
     NotType(TokenType),
     UndeclaredType(String),
+    InvalidVariadic,
 
     // folding errors
     DivideByZero,
@@ -59,6 +60,7 @@ pub enum ErrorKind {
     NotAssignable(NEWTypes),
     NotLvalue,
     MismatchedArity(String, usize, usize),
+    MismatchedArgs(String, String, NEWTypes, NEWTypes),
     InvalidLogical(TokenType, NEWTypes, NEWTypes),
     InvalidBinary(TokenType, NEWTypes, NEWTypes),
     InvalidDerefType(NEWTypes),
@@ -70,6 +72,7 @@ pub enum ErrorKind {
     MismatchedFuncDeclReturn(NEWTypes, NEWTypes),
     MismatchedFuncDeclArity(usize, usize),
     TypeMismatchFuncDecl(NEWTypes, NEWTypes),
+    MismatchedVariadic(bool, bool),
     UndeclaredSymbol(String),
     IntegerOverflow(NEWTypes),
 
@@ -110,6 +113,9 @@ impl ErrorKind {
             ErrorKind::IncompleteType(t) => format!("'{}' contains incomplete type", t),
             ErrorKind::NotType(token) => format!("Expected type-declaration, found {}", token),
             ErrorKind::UndeclaredType(s) => format!("Undeclared type '{}'", s),
+            ErrorKind::InvalidVariadic => {
+                "Expected at least one named parameter before variadic arguments".to_string()
+            }
             ErrorKind::IncompleteMemberAccess(type_decl) => {
                 format!("Can't access members of incomplete type '{}'", type_decl)
             }
@@ -120,10 +126,6 @@ impl ErrorKind {
             ErrorKind::EmptyAggregate(token) => {
                 format!("Can't declare anonymous {} without members", token)
             }
-            // ErrorKind::FunctionRedefinition(name) => {
-            //
-            // }
-            // ErrorKind::SymbolRedefinition => "Redefinition of symbol with same name".to_string(),
             ErrorKind::Redefinition(kind, name) => format!("Redefinition of {} '{}'", kind, name),
             ErrorKind::NonExistantMember(member, type_decl) => {
                 format!("No member '{}' in '{}'", member, type_decl)
@@ -228,8 +230,14 @@ impl ErrorKind {
             ErrorKind::NotLvalue => "Expect Lvalue left of assignment".to_string(),
             ErrorKind::MismatchedArity(name, expected, actual) => {
                 format!(
-                    "At '{}': expected {} argument(s) found {}",
+                    "Function '{}' expected {} argument(s) found {}",
                     name, expected, actual
+                )
+            }
+            ErrorKind::MismatchedArgs(func_name, param_name, expected, actual) => {
+                format!(
+                    "Mismatched arguments in function '{}': expected parameter '{}' to be of type '{}', found '{}'",
+                    func_name, param_name, expected, actual
                 )
             }
             ErrorKind::InvalidLogical(token, left_type, right_type) => {
@@ -266,9 +274,24 @@ impl ErrorKind {
             }
             ErrorKind::MismatchedFuncDeclArity(expected, actual) => {
                 format!(
-                "Mismatched number of parameters in function-declarations: expected {}, found {}",
-    expected,actual
-            )
+                    "Mismatched number of parameters in function-declarations: expected {}, found {}",
+                    expected,actual
+                )
+            }
+
+            ErrorKind::MismatchedVariadic(expected, actual) => {
+                let bool_to_msg = |val| {
+                    if val {
+                        "variadic args"
+                    } else {
+                        "no variadic args"
+                    }
+                };
+                format!(
+                    "Mismatched function-declarations: expected {}, found {}",
+                    bool_to_msg(*expected),
+                    bool_to_msg(*actual),
+                )
             }
             ErrorKind::TypeMismatchFuncDecl(expected, actual) => {
                 format!("Mismatched parameter-types in function-declarations: expected '{}', found '{}'",

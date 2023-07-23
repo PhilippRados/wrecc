@@ -12,6 +12,9 @@ pub struct Function {
     pub params: Vec<(NEWTypes, Token)>,
     pub return_type: NEWTypes,
 
+    // if function contains var-args
+    pub variadic: bool,
+
     // how much stack space a function needs to allocate info given in typechecker
     pub stack_size: usize,
 
@@ -30,6 +33,7 @@ impl Function {
         Function {
             stack_size: 0,
             epilogue_index: 0,
+            variadic: false,
             return_type,
             kind: FunctionKind::Declaration,
             params: vec![],
@@ -52,6 +56,11 @@ impl Function {
             Err(Error::new(
                 token,
                 ErrorKind::MismatchedFuncDeclArity(self.arity(), other.arity()),
+            ))
+        } else if self.variadic != other.variadic {
+            Err(Error::new(
+                token,
+                ErrorKind::MismatchedVariadic(self.variadic, other.variadic),
             ))
         } else {
             for (i, (types, token)) in self.params.iter().enumerate() {

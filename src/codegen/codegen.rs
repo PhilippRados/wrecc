@@ -776,7 +776,8 @@ impl Compiler {
             self.instr_counter,
         ));
 
-        // have to do integer-promotion in codegen
+        // INFO: have to do integer-promotion in codegen
+        // would like it to be in typechecker but doesn't work because expressions would be overwritten
         match (l_reg.get_type().size(), r_reg.get_type().size()) {
             (l_size, r_size)
                 if (l_size < r_size)
@@ -806,7 +807,7 @@ impl Compiler {
     }
     fn cg_postunary(&mut self, token: Token, expr: Expr, by_amount: usize) -> Register {
         let type_decl = expr.type_decl.clone().unwrap();
-        let reg = self.execute_expr(expr);
+        let mut reg = self.execute_expr(expr);
 
         let mut return_reg = Register::Temp(TempRegister::new(
             type_decl,
@@ -814,11 +815,15 @@ impl Compiler {
             self.instr_counter,
         ));
 
-        // assign value to return-register before binary operation
-        // have to do integer-promotion in codegen
+        // Assign value to return-register before binary operation
+        // INFO: Have to do integer-promotion in codegen because if integer promotion in typechecker
+        // wouldn't have access to stack-reg because cast frees it
         if return_reg.get_type().size() < Types::Int.size() {
             return_reg.set_type(NEWTypes::Primitive(Types::Int));
             self.write_out(Ir::Movs(reg.clone(), return_reg.clone()));
+
+            // have to also set reg type so that ++/-- operations use at least 32bit
+            reg.set_type(NEWTypes::Primitive(Types::Int));
         } else {
             self.write_out(Ir::Mov(reg.clone(), return_reg.clone()));
         }

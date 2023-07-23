@@ -760,20 +760,23 @@ impl TypeChecker {
         expr: &mut Expr,
         by_amount: &mut usize,
     ) -> Result<NEWTypes, Error> {
-        let operand = self.expr_type(expr)?;
+        let expr_type = self.expr_type(expr)?;
 
-        if matches!(operand, NEWTypes::Array { .. } | NEWTypes::Struct(..)) {
-            return Err(Error::new(token, ErrorKind::InvalidIncrementType(operand)));
+        if matches!(expr_type, NEWTypes::Array { .. } | NEWTypes::Struct(..)) {
+            return Err(Error::new(
+                token,
+                ErrorKind::InvalidIncrementType(expr_type),
+            ));
         } else if expr.value_kind == ValueKind::Rvalue {
             return Err(Error::new(token, ErrorKind::InvalidRvalueIncrement));
         }
 
         // scale depending on type-size
-        if let NEWTypes::Pointer(inner) = &operand {
+        if let NEWTypes::Pointer(inner) = &expr_type {
             *by_amount *= inner.size()
         }
 
-        Ok(operand)
+        Ok(expr_type)
     }
     fn string(&mut self, data: String) -> Result<NEWTypes, Error> {
         let len = data.len() + 1; // extra byte for \0-Terminator

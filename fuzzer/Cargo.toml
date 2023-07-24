@@ -1,16 +1,12 @@
 [package]
-name = "rucc"
+name = "fuzz_target"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+afl = "*"
 
-[lib]
-name = "rucc_lib"
-path = "src/lib.rs"
-
-[[bin]]
-name = "rucc"
-path = "src/main.rs"
+[dependencies.rucc]
+path = ".."

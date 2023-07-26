@@ -19,24 +19,23 @@ impl Parser {
         }
     }
     // return identifier namespace table
-    pub fn parse(mut self) -> Option<(Vec<Stmt>, Vec<Symbols>)> {
+    pub fn parse(mut self) -> Result<(Vec<Stmt>, Vec<Symbols>), Vec<Error>> {
         let mut statements: Vec<Stmt> = Vec::new();
-        let mut had_error = false;
+        let mut errors = vec![];
 
         while self.tokens.peek().is_some() {
             match self.external_declaration() {
                 Ok(v) => statements.push(v),
                 Err(e) => {
-                    e.print_error();
+                    errors.push(e);
                     self.synchronize();
-                    had_error = true;
                 }
             }
         }
-        if had_error {
-            None
+        if errors.is_empty() {
+            Ok((statements, self.env.get_symbols()))
         } else {
-            Some((statements, self.env.get_symbols()))
+            Err(errors)
         }
     }
     fn synchronize(&mut self) {

@@ -77,7 +77,7 @@ pub enum ErrorKind {
     IntegerOverflow(NEWTypes),
 
     Regular(&'static str), // generic error message when message only used once
-    Indicator,             // just to signal an error occured
+    Multiple(Vec<Error>),
 }
 
 impl ErrorKind {
@@ -308,7 +308,9 @@ impl ErrorKind {
             }
 
             ErrorKind::Regular(s) => s.to_string(),
-            ErrorKind::Indicator => unreachable!(),
+            ErrorKind::Multiple(_) => {
+                unreachable!("should be turned into vec<error> and print seperate errors")
+            }
         }
     }
 }
@@ -329,6 +331,28 @@ impl Error {
             kind,
         }
     }
+
+    pub fn flatten_multiple(self) -> Vec<Error> {
+        match self.kind {
+            ErrorKind::Multiple(errors) => {
+                let mut flatten = vec![];
+                for e in errors {
+                    flatten.append(&mut e.flatten_multiple())
+                }
+                flatten
+            }
+            _ => vec![self],
+        }
+    }
+
+    pub fn new_multiple(errors: Vec<Error>) -> Self {
+        Error {
+            line_index: -1,
+            line_string: String::from(""),
+            column: -1,
+            kind: ErrorKind::Multiple(errors),
+        }
+    }
     pub fn new_scan_error(scanner: &Scanner, kind: ErrorKind) -> Self {
         Error {
             line_index: scanner.line,
@@ -344,17 +368,6 @@ impl Error {
             column: -1,
             kind: ErrorKind::Regular("Expected expression found end of file"),
         }
-    }
-    pub fn indicator() -> Self {
-        Error {
-            line_index: -1,
-            line_string: String::from(""),
-            column: -1,
-            kind: ErrorKind::Indicator,
-        }
-    }
-    pub fn is_indicator(&self) -> bool {
-        matches!(self.kind, ErrorKind::Indicator)
     }
     pub fn print_error(&self) {
         eprintln!("Error: {}", self.kind.message());

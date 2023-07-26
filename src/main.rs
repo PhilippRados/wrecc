@@ -47,7 +47,12 @@ fn main() {
 
     let output = match compile(source) {
         Ok(output) => output,
-        Err(_) => return,
+        Err(errors) => {
+            for e in errors {
+                e.print_error();
+            }
+            return;
+        }
     };
 
     generate_output_file(output);

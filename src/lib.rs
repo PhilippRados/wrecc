@@ -10,30 +10,16 @@ use parser::*;
 use scanner::*;
 use typechecker::*;
 
-pub fn compile(source: String) -> Result<String, ()> {
+pub fn compile(source: String) -> Result<String, Vec<Error>> {
     // Scan input
-    let tokens = match Scanner::new(&source).scan_token() {
-        Ok(v) => v,
-        Err(e) => {
-            for err in e {
-                err.print_error();
-            }
-            return Err(());
-        }
-    };
+    let tokens = Scanner::new(&source).scan_token()?;
 
     // Parse statements
-    let (mut statements, env) = match Parser::new(tokens).parse() {
-        Some(s) => s,
-        None => return Err(()),
-    };
+    let (mut statements, env) = Parser::new(tokens).parse()?;
 
     // Check for errors
     let typechecker = TypeChecker::new(env);
-    let (const_labels, env, switches) = match typechecker.check(&mut statements) {
-        Some(result) => result,
-        None => return Err(()),
-    };
+    let (const_labels, env, switches) = typechecker.check(&mut statements)?;
 
     // Turn AST into IR
     let (ir, live_intervals, env) =

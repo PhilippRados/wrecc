@@ -125,26 +125,26 @@ impl TypeChecker {
     pub fn check(
         mut self,
         statements: &mut Vec<Stmt>,
-    ) -> Option<(HashMap<String, usize>, Vec<Symbols>, Vec<Vec<Option<i64>>>)> {
+    ) -> Result<(HashMap<String, usize>, Vec<Symbols>, Vec<Vec<Option<i64>>>), Vec<Error>> {
         match self.check_statements(statements) {
-            Ok(_) => Some((self.const_labels, self.env, self.switches)),
-            Err(_) => None,
+            Ok(_) => Ok((self.const_labels, self.env, self.switches)),
+            Err(e) => Err(e.flatten_multiple()),
         }
     }
     fn check_statements(&mut self, statements: &mut Vec<Stmt>) -> Result<(), Error> {
-        let mut result = Ok(());
+        let mut errors = vec![];
+
         for s in statements {
-            match self.visit(s) {
-                Err(e) if e.is_indicator() => result = Err(e),
-                Err(e) => {
-                    e.print_error();
-                    result = Err(Error::indicator());
-                }
-                _ => (),
+            if let Err(e) = self.visit(s) {
+                errors.push(e);
             }
         }
 
-        result
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::new_multiple(errors))
+        }
     }
     fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
         match statement {

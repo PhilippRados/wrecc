@@ -2,7 +2,15 @@ Error: Expected type-declaration, found '{'
 |
 2 {
 | ^
+Error: Expected type-declaration, found '{'
+|
+3   int main(){
+|             ^
 Error: Expected type-declaration, found 'return'
 |
 5     return 0;
 |     ^
+Error: Expected type-declaration, found '}'
+|
+6   }
+|   ^

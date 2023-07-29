@@ -332,6 +332,7 @@ impl Error {
         }
     }
 
+    // Recursive helper-function chaining all found errors into single vector
     pub fn flatten_multiple(self) -> Vec<Error> {
         match self.kind {
             ErrorKind::Multiple(errors) => {

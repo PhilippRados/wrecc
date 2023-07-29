@@ -6,3 +6,7 @@ Error: Undeclared symbol 'B'
 |
 8   printf("%d\n",B);
 |                 ^
+Error: Undeclared symbol 'C'
+|
+9   printf("%d\n",C);
+|                 ^

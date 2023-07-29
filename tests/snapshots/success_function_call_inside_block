@@ -2,3 +2,7 @@ Error: Can only define functions in global scope
 |
 5     int some() {
 |         ^
+Error: Undeclared symbol 'some'
+|
+8     some();
+|     ^

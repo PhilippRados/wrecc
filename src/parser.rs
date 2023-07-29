@@ -26,23 +26,31 @@ impl Parser {
         while self.tokens.peek().is_some() {
             match self.external_declaration() {
                 Ok(v) => statements.push(v),
+                Err(e @ Error { kind: ErrorKind::Multiple(..), .. }) => {
+                    errors.append(&mut e.flatten_multiple());
+                }
                 Err(e) => {
                     errors.push(e);
                     self.synchronize();
                 }
             }
         }
+
         if errors.is_empty() {
             Ok((statements, self.env.get_symbols()))
         } else {
             Err(errors)
         }
     }
+
+    // If error is found inside of expression or stmt skip to end and start with parsing after
     fn synchronize(&mut self) {
         let mut prev = self.tokens.next();
 
         while let Some(v) = self.tokens.peek() {
-            if prev.unwrap().token == TokenType::Semicolon {
+            if v.token == TokenType::LeftBrace {
+                return;
+            } else if prev.unwrap().token == TokenType::Semicolon {
                 match v.token {
                     TokenType::If
                     | TokenType::Return
@@ -54,7 +62,9 @@ impl Parser {
                     | TokenType::Void
                     | TokenType::Struct
                     | TokenType::Union
-                    | TokenType::Enum => return,
+                    | TokenType::Enum
+                    | TokenType::RightBrace
+                    | TokenType::Ident(..) => return,
                     _ => (),
                 }
             }
@@ -198,8 +208,14 @@ impl Parser {
     fn for_statement(&mut self) -> Result<Stmt, Error> {
         let left_paren = self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
 
+        // Wrapper guarantees that even if error occurs exit() is always called
         self.env.enter();
+        let for_stmt = self.parse_for(left_paren);
+        self.env.exit();
 
+        for_stmt
+    }
+    fn parse_for(&mut self, left_paren: Token) -> Result<Stmt, Error> {
         let init = match self.matches_specifier() {
             Ok(type_decl) => Some(Box::new(self.declaration(type_decl)?)),
             _ if !self.check(TokenKind::Semicolon) => Some(Box::new(self.expression_statement()?)),
@@ -223,8 +239,6 @@ impl Parser {
 
         let body = Box::new(self.statement()?);
 
-        self.env.exit();
-
         Ok(Stmt::For(left_paren, init, cond, inc, body))
     }
     fn while_statement(&mut self) -> Result<Stmt, Error> {
@@ -241,31 +255,54 @@ impl Parser {
     }
     fn block(&mut self) -> Result<Vec<Stmt>, Error> {
         let mut statements = Vec::new();
+        let mut errors = Vec::new();
 
         while let Some(token) = self.tokens.peek() {
             if token.token == TokenType::RightBrace {
                 break;
             }
-            let s = match self.external_declaration() {
+            let stmt = match self.external_declaration() {
                 Err(e @ Error { kind: ErrorKind::UndeclaredType(..), .. }) => {
                     let token = self.tokens.next().ok_or(Error::eof())?;
+
                     if let TokenType::Ident(..) = self.peek()?.token {
-                        return Err(e);
+                        Err(e)
                     } else {
                         self.insert_token(token);
-                        self.statement()?
+                        self.statement()
                     }
                 }
-                Err(Error { kind: ErrorKind::NotType(..), .. }) => self.statement()?,
-                Err(e) => return Err(e),
-                Ok(s) => s,
+                Err(Error { kind: ErrorKind::NotType(..), .. }) => self.statement(),
+                stmt => stmt,
             };
-            statements.push(s);
+
+            match stmt {
+                Ok(s) => statements.push(s),
+                Err(e) => {
+                    errors.push(e);
+                    self.synchronize();
+                }
+            }
         }
-        self.consume(TokenKind::RightBrace, "Expect '}' after Block")?;
+
+        // INFO: have to do manual consume() because otherwise token would always be consumed
+        if let Ok(t) = self.peek() {
+            if t.token != TokenType::RightBrace {
+                errors.push(Error::new(
+                    &t,
+                    ErrorKind::Regular("Expect closing '}' after Block"),
+                ));
+            } else {
+                self.tokens.next().unwrap();
+            }
+        }
         self.env.exit();
 
-        Ok(statements)
+        if errors.is_empty() {
+            Ok(statements)
+        } else {
+            Err(Error::new_multiple(errors))
+        }
     }
     fn expression_statement(&mut self) -> Result<Stmt, Error> {
         let expr = self.expression()?;
@@ -1381,11 +1418,13 @@ impl Parser {
         if self.matches(vec![TokenKind::LeftParen]).is_some() {
             let expr = self.expression()?;
             self.consume(TokenKind::RightParen, "missing closing ')'")?;
+
             return Ok(Expr::new(
                 ExprKind::Grouping { expr: Box::new(expr.clone()) },
                 expr.value_kind,
             ));
         }
+
         let t = self.peek()?;
         Err(Error::new(
             t,

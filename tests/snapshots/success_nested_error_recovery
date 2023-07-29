@@ -1,0 +1,28 @@
+Error: Undeclared symbol 'foo'
+|
+4   foo;
+|   ^
+Error: Undeclared symbol 'k'
+|
+8   int a = k;
+|           ^
+Error: Undeclared symbol 'k'
+|
+9   int b = 4 + k++ - 45 * 3;
+|               ^
+Error: Undeclared symbol 'foo'
+|
+11   for (;;foo-{) {
+|           ^
+Error: Expected expression found: ')'
+|
+11   for (;;foo-{) {
+|                ^
+Error: Undeclared symbol 'bar'
+|
+12     bar();
+|      ^
+Error: Undeclared symbol 'foo'
+|
+14   for (;;foo-);
+|           ^

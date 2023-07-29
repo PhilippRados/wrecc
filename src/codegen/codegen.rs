@@ -358,12 +358,10 @@ impl Compiler {
                 }
                 DeclarationKind::Decl(type_decl, name, false) => self.declare_var(type_decl, &name),
                 DeclarationKind::Init(type_decl, name, expr, true) => {
-                    let value_reg = self.execute_global_expr(expr);
-                    self.init_global_var(type_decl, name, value_reg)
+                    self.init_global_var(type_decl, name, expr)
                 }
                 DeclarationKind::Init(type_decl, name, expr, false) => {
-                    let value_reg = self.execute_expr(expr);
-                    self.init_var(type_decl, name, value_reg)
+                    self.init_var(type_decl, name, expr)
                 }
                 DeclarationKind::InitList(type_decl, name, exprs, true) => {
                     self.init_global_list(type_decl, name, exprs)
@@ -397,20 +395,36 @@ impl Compiler {
             .unwrap_var_mut()
             .set_reg(reg);
     }
-    fn init_global_var(&mut self, type_decl: NEWTypes, var_name: Token, value_reg: StaticRegister) {
+    fn init_global_var(&mut self, type_decl: NEWTypes, var_name: Token, expr: Expr) {
         let name = var_name.unwrap_string();
-
         self.write_out(Ir::GlobalDeclaration(name.clone()));
-        self.write_out(Ir::GlobalInit(type_decl.clone(), value_reg));
 
         self.env
             .get_mut(var_name.token.get_index())
             .unwrap()
             .unwrap_var_mut()
-            .set_reg(Register::Label(LabelRegister::Var(name, type_decl)));
+            .set_reg(Register::Label(LabelRegister::Var(name, type_decl.clone())));
+
+        let value_reg = self.execute_global_expr(expr);
+        self.write_out(Ir::GlobalInit(type_decl, value_reg));
     }
-    fn init_var(&mut self, type_decl: NEWTypes, var_name: Token, value_reg: Register) {
+    fn init_arg(&mut self, type_decl: NEWTypes, var_name: Token, arg_reg: Register) {
         self.declare_var(type_decl, &var_name);
+
+        let reg = self.cg_assign(
+            self.env
+                .get(var_name.token.get_index())
+                .unwrap()
+                .unwrap_var()
+                .get_reg(),
+            arg_reg,
+        );
+        self.free(reg);
+    }
+
+    fn init_var(&mut self, type_decl: NEWTypes, var_name: Token, expr: Expr) {
+        self.declare_var(type_decl, &var_name);
+        let value_reg = self.execute_expr(expr);
 
         let reg = self.cg_assign(
             self.env
@@ -493,7 +507,7 @@ impl Compiler {
                     &mut self.interval_counter,
                     self.instr_counter,
                 ));
-                self.init_var(type_decl, param_name, arg);
+                self.init_arg(type_decl, param_name, arg);
             } else {
                 // if not in designated arg-register get from stack
                 let reg = Register::Temp(TempRegister::new(
@@ -504,7 +518,7 @@ impl Compiler {
                 let pushed = Register::Stack(StackRegister::new_pushed(i));
 
                 self.write_out(Ir::Mov(pushed, reg.clone()));
-                self.init_var(type_decl, param_name, reg);
+                self.init_arg(type_decl, param_name, reg);
             }
         }
     }

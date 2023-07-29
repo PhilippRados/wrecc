@@ -26,3 +26,4 @@ Error: Undeclared symbol 'foo'
 |
 14   for (;;foo-);
 |           ^
+Error: Expected closing '}' after Block, found end of file

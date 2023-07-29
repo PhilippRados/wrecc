@@ -84,7 +84,7 @@ impl ErrorKind {
     fn message(&self) -> String {
         match self {
             ErrorKind::UnexpectedChar(c) => format!("Unexpected character: {}", c),
-            ErrorKind::Eof(s) => format!("Expected {}, found end of file", s),
+            ErrorKind::Eof(s) => format!("{}, found end of file", s),
             ErrorKind::CharLiteralQuotes => {
                 "Character literal must contain single character enclosed by single quotes ('')"
                     .to_string()
@@ -362,12 +362,12 @@ impl Error {
             kind,
         }
     }
-    pub fn eof() -> Self {
+    pub fn eof(expected: &'static str) -> Self {
         Error {
             line_index: -1,
             line_string: String::from(""),
             column: -1,
-            kind: ErrorKind::Regular("Expected expression found end of file"),
+            kind: ErrorKind::Eof(expected),
         }
     }
     pub fn print_error(&self) {

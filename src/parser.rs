@@ -263,7 +263,10 @@ impl Parser {
             }
             let stmt = match self.external_declaration() {
                 Err(e @ Error { kind: ErrorKind::UndeclaredType(..), .. }) => {
-                    let token = self.tokens.next().ok_or(Error::eof())?;
+                    let token = self
+                        .tokens
+                        .next()
+                        .ok_or(Error::eof("Expected expression"))?;
 
                     if let TokenType::Ident(..) = self.peek()?.token {
                         Err(e)
@@ -278,6 +281,10 @@ impl Parser {
 
             match stmt {
                 Ok(s) => statements.push(s),
+                Err(e) if matches!(e.kind, ErrorKind::Multiple(_)) => {
+                    // if error is multiple then stmt has already been synchronized
+                    errors.push(e);
+                }
                 Err(e) => {
                     errors.push(e);
                     self.synchronize();
@@ -285,16 +292,8 @@ impl Parser {
             }
         }
 
-        // INFO: have to do manual consume() because otherwise token would always be consumed
-        if let Ok(t) = self.peek() {
-            if t.token != TokenType::RightBrace {
-                errors.push(Error::new(
-                    &t,
-                    ErrorKind::Regular("Expect closing '}' after Block"),
-                ));
-            } else {
-                self.tokens.next().unwrap();
-            }
+        if let Err(e) = self.consume(TokenKind::RightBrace, "Expected closing '}' after Block") {
+            errors.push(e);
         }
         self.env.exit();
 
@@ -1432,15 +1431,15 @@ impl Parser {
         ))
     }
     fn consume(&mut self, token: TokenKind, msg: &'static str) -> Result<Token, Error> {
-        match self.tokens.next() {
+        match self.tokens.peek() {
             Some(v) => {
                 if TokenKind::from(&v.token) != token {
                     Err(Error::new(&v, ErrorKind::Regular(msg)))
                 } else {
-                    Ok(v)
+                    Ok(self.tokens.next().unwrap())
                 }
             }
-            None => Err(Error::eof()),
+            None => Err(Error::eof(msg)),
         }
     }
     fn check(&mut self, expected: TokenKind) -> bool {
@@ -1453,7 +1452,7 @@ impl Parser {
     fn peek(&mut self) -> Result<&Token, Error> {
         match self.tokens.peek() {
             Some(t) => Ok(t),
-            None => Err(Error::eof()),
+            None => Err(Error::eof("Expected expression")),
         }
     }
     fn matches(&mut self, expected: Vec<TokenKind>) -> Option<Token> {

@@ -9,7 +9,6 @@ pub struct Scanner<'a> {
     pub line: i32,
     pub column: i32,
     keywords: HashMap<&'a str, TokenType>,
-    err: bool,
 }
 impl<'a> Scanner<'a> {
     pub fn new(source: &'a str) -> Self {
@@ -21,7 +20,6 @@ impl<'a> Scanner<'a> {
                 .collect::<Vec<String>>(),
             line: 1,
             column: 1,
-            err: false,
             keywords: HashMap::from([
                 ("void", TokenType::Void),
                 ("int", TokenType::Int),
@@ -213,31 +211,35 @@ impl<'a> Scanner<'a> {
 
                 '"' => match self.string() {
                     Ok(string) => self.add_token(&mut tokens, TokenType::String(string.clone())),
-                    Err(e) => {
-                        self.err = true;
-                        errors.push(e)
-                    }
+                    Err(e) => errors.push(e),
                 },
                 '\'' => match self.char_lit() {
                     Ok(char) => self.add_token(&mut tokens, TokenType::CharLit(char as i8)),
-                    Err(e) => {
-                        self.err = true;
-                        errors.push(e)
-                    }
+                    Err(e) => errors.push(e),
                 },
 
                 _ => {
                     if c.is_ascii_digit() {
                         // Number
                         let mut num = String::new();
-                        // have to prepend already consumned char
+                        // have to prepend already consumed char
                         num.push(c);
 
                         while let Some(digit) = self.source.by_ref().next_if(|c| c.is_ascii_digit())
                         {
                             num.push(digit);
                         }
-                        self.add_token(&mut tokens, TokenType::Number(num.parse::<i64>().unwrap()));
+                        match num.parse::<i64>() {
+                            Ok(n) => self.add_token(&mut tokens, TokenType::Number(n)),
+                            Err(e) => {
+                                errors.push(Error::new_scan_error(
+                                    self,
+                                    ErrorKind::InvalidNumber(e.kind().clone()),
+                                ));
+                                self.column += num.len() as i32;
+                                continue;
+                            }
+                        }
                     } else if c.is_alphabetic() || c == '_' {
                         // Identifier
                         let mut value = String::new();
@@ -249,26 +251,31 @@ impl<'a> Scanner<'a> {
                         {
                             value.push(v);
                         }
-                        if self.keywords.contains_key(&value as &str) {
-                            self.add_token(
-                                &mut tokens,
-                                self.keywords.get(&value as &str).unwrap().clone(),
-                            );
+                        if let Some(kw) = self.keywords.get(&value as &str) {
+                            self.add_token(&mut tokens, kw.clone());
                         } else {
-                            // use 0 as default value for symbol table index
+                            // use 0 as placeholder value for symbol table index
                             self.add_token(&mut tokens, TokenType::Ident(value.to_string(), 0))
                         }
                     } else {
-                        self.err = true;
                         errors.push(Error::new_scan_error(self, ErrorKind::UnexpectedChar(c)));
-                        self.column += 1;
+
+                        let c = format!("{}", c);
+                        let raw_c = format!("{:?}", c);
+                        let raw_c = &raw_c[1..raw_c.len() - 1];
+
+                        // If character printable then length is 1, if not it's 0
+                        let len: i32 = (c == raw_c).into();
+
+                        self.column += len;
                     }
                 }
             }
         }
-        match self.err {
-            true => Err(errors),
-            false => Ok(tokens),
+        if errors.is_empty() {
+            Ok(tokens)
+        } else {
+            Err(errors)
         }
     }
 

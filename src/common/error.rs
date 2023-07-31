@@ -1,3 +1,5 @@
+use std::num::IntErrorKind;
+
 use crate::common::{token::*, types::*};
 use crate::scanner::Scanner;
 
@@ -9,6 +11,7 @@ pub enum ErrorKind {
     CharLiteralAscii(char),
     InvalidEscape(char),
     UnterminatedString,
+    InvalidNumber(IntErrorKind),
     Eof(&'static str),
 
     // parsing errors
@@ -83,11 +86,21 @@ pub enum ErrorKind {
 impl ErrorKind {
     fn message(&self) -> String {
         match self {
-            ErrorKind::UnexpectedChar(c) => format!("Unexpected character: {}", c),
+            ErrorKind::UnexpectedChar(c) => format!("Unexpected character: {:?}", c),
             ErrorKind::Eof(s) => format!("{}, found end of file", s),
             ErrorKind::CharLiteralQuotes => {
                 "Character literal must contain single character enclosed by single quotes ('')"
                     .to_string()
+            }
+            ErrorKind::InvalidNumber(kind) => {
+                format!(
+                    "Can't parse number literal. {}",
+                    match kind {
+                        IntErrorKind::InvalidDigit => "Invalid digit found in string",
+                        IntErrorKind::PosOverflow => "Number is too large to fit in 64bits",
+                        _ => "",
+                    }
+                )
             }
             ErrorKind::CharLiteralAscii(c) => {
                 format!(

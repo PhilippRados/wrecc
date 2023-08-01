@@ -445,7 +445,7 @@ impl Parser {
                     TokenType::Struct | TokenType::Union => {
                         let index = self.env.declare_type(
                             name,
-                            Tags::Aggregate(StructRef::new(token.clone().token)),
+                            Tags::Aggregate(StructRef::new(token.clone().token, true)),
                         )?;
 
                         let members = self.parse_members(token)?;
@@ -488,7 +488,7 @@ impl Parser {
                             name,
                             match token.token {
                                 TokenType::Union | TokenType::Struct => {
-                                    Tags::Aggregate(StructRef::new(token.clone().token))
+                                    Tags::Aggregate(StructRef::new(token.clone().token, false))
                                 }
                                 TokenType::Enum => {
                                     return Err(Error::new(token, ErrorKind::EnumForwardDecl));
@@ -581,6 +581,10 @@ impl Parser {
         type_decl: NEWTypes,
         is_global: bool,
     ) -> Result<DeclarationKind, Error> {
+        if !type_decl.is_complete() {
+            return Err(Error::new(&name, ErrorKind::IncompleteType(type_decl)));
+        }
+
         match self.initializers(&type_decl) {
             Some(elements) => {
                 let assign_sugar = list_sugar_assign(

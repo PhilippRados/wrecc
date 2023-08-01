@@ -159,6 +159,15 @@ impl Tags {
             Tags::Enum(_) => true, // can't forward declare enums according to ISO C
         }
     }
+
+    pub fn in_definition(&self) -> bool {
+        match self {
+            Tags::Aggregate(s) => s.in_definition(),
+            Tags::Enum(_) => {
+                unreachable!("enums are always complete so declare_type() short circuits")
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -260,8 +269,17 @@ impl Scope {
     pub fn declare_type(&mut self, var_name: &Token, tag: Tags) -> Result<usize, Error> {
         let name = var_name.unwrap_string();
         match self.tags.contains_key(&name, self.current_depth) {
-            Some((.., tag)) if tag.is_complete() => {
-                return Err(Error::new(var_name, ErrorKind::Redefinition("type", name)))
+            Some((.., other_tag)) if other_tag.is_complete() || other_tag.in_definition() => {
+                return Err(Error::new(var_name, ErrorKind::Redefinition("type", name)));
+            }
+            Some((.., index, Tags::Aggregate(other_s))) => {
+                // if tag is being defined then set other_tag to being defined
+                if let Tags::Aggregate(s) = tag {
+                    if s.in_definition() {
+                        other_s.being_defined();
+                    }
+                }
+                return Ok(*index);
             }
             Some((.., index, _)) => return Ok(*index),
             _ => (),
@@ -275,14 +293,12 @@ impl Scope {
         self.symbols.elems.remove(index);
     }
     pub fn get_type(&self, var_name: &Token) -> Result<(Tags, usize), Error> {
-        // TODO: convert this better
-        match self.tags.get(var_name, self.current_depth) {
-            Ok(t) => Ok(t),
-            Err(_) => Err(Error::new(
+        self.tags
+            .get(var_name, self.current_depth)
+            .or(Err(Error::new(
                 var_name,
                 ErrorKind::UndeclaredType(var_name.unwrap_string()),
-            )),
-        }
+            )))
     }
     pub fn get_mut_symbol(&mut self, index: usize) -> &mut Symbols {
         &mut self.symbols.elems.get_mut(index).unwrap().3

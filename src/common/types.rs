@@ -40,9 +40,12 @@ mod struct_ref {
     use std::cell::RefCell;
     use std::rc::Rc;
 
+    type IsComplete = bool;
+    type InDefinition = bool;
+
     thread_local! {
         static CUSTOMS: RefCell<Vec<Rc<Vec<(NEWTypes, Token)>>>> = Default::default();
-        static IS_COMPLETE: RefCell<Vec<bool>> = Default::default();
+        static CUSTOMS_INFO: RefCell<Vec<(IsComplete,InDefinition)>> = Default::default();
     }
 
     #[derive(Clone, PartialEq, Debug)]
@@ -52,9 +55,9 @@ mod struct_ref {
     }
 
     impl StructRef {
-        pub fn new(kind: TokenType) -> StructRef {
-            IS_COMPLETE.with(|list| {
-                list.borrow_mut().push(false);
+        pub fn new(kind: TokenType, is_definition: bool) -> StructRef {
+            CUSTOMS_INFO.with(|list| {
+                list.borrow_mut().push((false, is_definition));
             });
             CUSTOMS.with(|list| {
                 let mut types = list.borrow_mut();
@@ -72,9 +75,13 @@ mod struct_ref {
             CUSTOMS.with(|list| list.borrow()[self.index].clone())
         }
         pub(crate) fn update(&self, members: Vec<(NEWTypes, Token)>) {
-            IS_COMPLETE.with(|list| {
+            CUSTOMS_INFO.with(|list| {
                 let mut types = list.borrow_mut();
-                types[self.index] = true;
+                types[self.index].0 = true;
+            });
+            CUSTOMS_INFO.with(|list| {
+                let mut types = list.borrow_mut();
+                types[self.index].1 = false;
             });
             CUSTOMS.with(|list| {
                 let mut types = list.borrow_mut();
@@ -82,7 +89,14 @@ mod struct_ref {
             });
         }
         pub fn is_complete(&self) -> bool {
-            IS_COMPLETE.with(|list| list.borrow()[self.index])
+            CUSTOMS_INFO.with(|list| list.borrow()[self.index].0)
+        }
+        pub fn in_definition(&self) -> bool {
+            CUSTOMS_INFO.with(|list| list.borrow()[self.index].1)
+        }
+
+        pub fn being_defined(&self) {
+            CUSTOMS_INFO.with(|list| list.borrow_mut()[self.index].1 = true)
         }
     }
 }

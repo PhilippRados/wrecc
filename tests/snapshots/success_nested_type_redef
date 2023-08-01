@@ -1,0 +1,16 @@
+Error: Redefinition of type 'Other'
+|
+11     union Other {
+|            ^
+Error: Expected type-declaration, found identifier
+|
+13     } a;
+|        ^
+Error: Expected type-declaration, found '}'
+|
+15   };
+|    ^
+Error: Expected type-declaration, found '}'
+|
+16 }
+|  ^

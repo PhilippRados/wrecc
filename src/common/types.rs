@@ -311,6 +311,12 @@ impl NEWTypes {
             _ => false,
         }
     }
+    pub fn is_aggregate(&self) -> bool {
+        match self {
+            NEWTypes::Struct(_) | NEWTypes::Union(_) => true,
+            _ => false,
+        }
+    }
     fn union_biggest(&self) -> NEWTypes {
         match self {
             NEWTypes::Union(s) => s
@@ -328,7 +334,8 @@ impl NEWTypes {
     pub fn is_complete(&self) -> bool {
         match self {
             NEWTypes::Struct(s) | NEWTypes::Union(s) => s.is_complete(),
-            NEWTypes::Pointer(to) | NEWTypes::Array { of: to, .. } => to.is_complete(),
+            NEWTypes::Array { of: to, .. } => to.is_complete(),
+            _ if self.is_void() => false,
             _ => true,
         }
     }

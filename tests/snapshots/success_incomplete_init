@@ -1,0 +1,8 @@
+Error: 'struct Some' contains incomplete type
+|
+3 s l = {.age};
+|   ^
+Error: 'union Oxjfp' contains incomplete type
+|
+13   other_un consazmprlpivzzzzzzzzzzz;
+|             ^

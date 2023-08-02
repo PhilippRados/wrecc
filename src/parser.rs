@@ -403,24 +403,14 @@ impl Parser {
             loop {
                 let member_specifier = self.parse_ptr(member_type.clone());
                 let name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
-
-                match member_specifier {
-                    NEWTypes::Struct(ref s) | NEWTypes::Union(ref s) if !s.is_complete() => {
-                        return Err(Error::new(
-                            &name,
-                            ErrorKind::IncompleteType(member_specifier),
-                        ));
-                    }
-                    _ if member_specifier.is_void() => {
-                        return Err(Error::new(
-                            &name,
-                            ErrorKind::IncompleteType(member_specifier),
-                        ));
-                    }
-                    _ => (),
-                }
-
                 let member_specifier = self.parse_arr(member_specifier)?;
+
+                if !member_specifier.is_complete() {
+                    return Err(Error::new(
+                        &name,
+                        ErrorKind::IncompleteType(member_specifier),
+                    ));
+                }
 
                 members.push((member_specifier, name));
                 if self.matches(vec![TokenKind::Comma]).is_none() {
@@ -526,8 +516,7 @@ impl Parser {
             .declare_symbol(&name, Symbols::TypeDef(type_decl))?;
         self.consume(TokenKind::Semicolon, "Expect ';' after typedef-declaration")?;
 
-        // doesnt need to generate any statements for later stages
-        // because types get resolved in the parser
+        // Doesn't need to generate any statements for later stages because types get resolved in the parser
         Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue)))
     }
     fn declaration(&mut self, type_decl: NEWTypes) -> Result<Stmt, Error> {
@@ -569,8 +558,17 @@ impl Parser {
             name.token.update_index(index);
 
             if self.matches(vec![TokenKind::Equal]).is_some() {
+                if !type_decl.is_complete() {
+                    return Err(Error::new(&name, ErrorKind::IncompleteType(type_decl)));
+                }
+
                 self.var_initialization(name, type_decl, is_global)
             } else {
+                let tentative_decl = self.env.is_global() && type_decl.is_aggregate();
+                if !type_decl.is_complete() && !tentative_decl {
+                    return Err(Error::new(&name, ErrorKind::IncompleteType(type_decl)));
+                }
+
                 Ok(DeclarationKind::Decl(type_decl, name, is_global))
             }
         }
@@ -581,10 +579,6 @@ impl Parser {
         type_decl: NEWTypes,
         is_global: bool,
     ) -> Result<DeclarationKind, Error> {
-        if !type_decl.is_complete() {
-            return Err(Error::new(&name, ErrorKind::IncompleteType(type_decl)));
-        }
-
         match self.initializers(&type_decl) {
             Some(elements) => {
                 let assign_sugar = list_sugar_assign(
@@ -925,6 +919,19 @@ impl Parser {
     }
     fn function_definition(&mut self, name: Token) -> Result<Stmt, Error> {
         let index = name.token.get_index();
+        let return_type = self
+            .env
+            .get_mut_symbol(index)
+            .unwrap_func()
+            .return_type
+            .clone();
+        if !return_type.is_complete() && !return_type.is_void() {
+            return Err(Error::new(
+                &name,
+                ErrorKind::IncompleteReturnType(name.unwrap_string(), return_type),
+            ));
+        }
+
         self.env.get_mut_symbol(index).unwrap_func().kind = FunctionKind::Definition;
         let body = self.block()?;
 
@@ -1352,20 +1359,34 @@ impl Parser {
     // has to happen in parser otherwise type could be defined after member-access
     fn has_complete_ident(&self, expr: &Expr, token: &Token) -> Result<(), Error> {
         let Some(ident) = get_ident(expr) else {return Ok(())};
+
         if let Ok((
             Symbols::Variable(SymbolInfo { type_decl, .. })
             | Symbols::Func(Function { return_type: type_decl, .. }),
             _,
         )) = self.env.get_symbol(ident)
         {
-            if !type_decl.is_complete() {
-                return Err(Error::new(
-                    token,
-                    ErrorKind::IncompleteMemberAccess(type_decl),
-                ));
-            }
+            self.complete_access(token, &type_decl)?
         }
         Ok(())
+    }
+    fn complete_access(&self, token: &Token, type_decl: &NEWTypes) -> Result<(), Error> {
+        let is_complete = match type_decl {
+            NEWTypes::Struct(s) | NEWTypes::Union(s) => s.is_complete(),
+            NEWTypes::Pointer(to) | NEWTypes::Array { of: to, .. } => {
+                self.complete_access(token, to).and(Ok(true))?
+            }
+            _ => true,
+        };
+
+        if !is_complete {
+            Err(Error::new(
+                token,
+                ErrorKind::IncompleteMemberAccess(type_decl.clone()),
+            ))
+        } else {
+            Ok(())
+        }
     }
     fn call(&mut self, left_paren: Token, callee: Expr) -> Result<Expr, Error> {
         let mut args = Vec::new();

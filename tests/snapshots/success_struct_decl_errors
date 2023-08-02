@@ -6,7 +6,7 @@ Error: Expected type-declaration, found '}'
 |
 14 };
 |  ^
-Error: 'struct Another' contains incomplete type
+Error: 'struct Another[6]' contains incomplete type
 |
 18     struct Another some[6];
 |                     ^

@@ -347,8 +347,8 @@ impl TypeChecker {
     fn declaration(&mut self, decls: &mut Vec<DeclarationKind>) -> Result<(), Error> {
         for d in decls {
             match d {
-                DeclarationKind::Decl(type_decl, name, is_global) => {
-                    self.declare_var(type_decl, name, *is_global)?
+                DeclarationKind::Decl(type_decl, _, is_global) => {
+                    self.declare_var(type_decl, *is_global)?
                 }
                 DeclarationKind::Init(type_decl, name, expr, is_global) => {
                     self.init_var(type_decl, name, expr, *is_global)?
@@ -361,19 +361,7 @@ impl TypeChecker {
         }
         Ok(())
     }
-    fn declare_var(
-        &mut self,
-        type_decl: &mut NEWTypes,
-        var_name: &Token,
-        is_global: bool,
-    ) -> Result<(), Error> {
-        if type_decl.is_void() {
-            return Err(Error::new(
-                var_name,
-                ErrorKind::IllegalVoidDecl(var_name.unwrap_string()),
-            ));
-        }
-
+    fn declare_var(&mut self, type_decl: &mut NEWTypes, is_global: bool) -> Result<(), Error> {
         if !is_global {
             self.scope.increment_stack_size(type_decl, &mut self.env);
         }

@@ -21,6 +21,7 @@ pub enum ErrorKind {
     IsEmpty(TokenType),
     EnumOverflow,
     IncompleteType(NEWTypes),
+    IncompleteReturnType(String, NEWTypes),
     IncompleteMemberAccess(NEWTypes),
     TypeAlreadyExists(String, TokenType),
     EnumForwardDecl,
@@ -49,7 +50,6 @@ pub enum ErrorKind {
     DuplicateCase(i64),
     NotIn(&'static str, &'static str),
     MultipleDefaults,
-    IllegalVoidDecl(String),
     IllegalAssign(NEWTypes, NEWTypes),
     NotConstantInit(&'static str),
     InvalidExplicitCast(NEWTypes, NEWTypes),
@@ -124,13 +124,19 @@ impl ErrorKind {
                     .to_string()
             }
             ErrorKind::IncompleteType(t) => format!("'{}' contains incomplete type", t),
+            ErrorKind::IncompleteReturnType(name, t) => {
+                format!("Function '{}' has incomplete return type '{}'", name, t)
+            }
             ErrorKind::NotType(token) => format!("Expected type-declaration, found {}", token),
             ErrorKind::UndeclaredType(s) => format!("Undeclared type '{}'", s),
             ErrorKind::InvalidVariadic => {
                 "Expected at least one named parameter before variadic arguments".to_string()
             }
             ErrorKind::IncompleteMemberAccess(type_decl) => {
-                format!("Can't access members of incomplete type '{}'", type_decl)
+                format!(
+                    "Can't access members of type that contains incomplete type '{}'",
+                    type_decl
+                )
             }
             ErrorKind::TypeAlreadyExists(name, token) => {
                 format!("Type '{}' already exists but not as {}", name, token)
@@ -190,9 +196,6 @@ impl ErrorKind {
             }
             ErrorKind::MultipleDefaults => {
                 "Can't have multiple 'default'-statements inside a 'switch'-statement".to_string()
-            }
-            ErrorKind::IllegalVoidDecl(name) => {
-                format!("Can't declare variable '{}' as 'void'", name)
             }
             ErrorKind::IllegalAssign(left, right) => {
                 format!("Can't assign to type '{}' with type '{}'", left, right)

@@ -1035,7 +1035,7 @@ impl TypeChecker {
 
                     NEWTypes::Primitive(Types::Int)
                 }
-                TokenType::Minus | TokenType::Tilde => {
+                TokenType::Minus | TokenType::Tilde | TokenType::Plus => {
                     Self::lval_to_rval(right);
                     self.maybe_int_promote(right, &mut right_type);
 

@@ -360,7 +360,7 @@ impl Expr {
         token: Token,
         left_type: NEWTypes,
         right_type: NEWTypes,
-        value: (i64, bool),
+        (value, overflow): (i64, bool),
     ) -> Result<Expr, Error> {
         let result_type = if left_type.size() > right_type.size() {
             left_type
@@ -374,11 +374,11 @@ impl Expr {
         };
 
         // calculation can overflow or type from literal can overflow
-        if value.1 || Self::type_overflow(value.0, &result_type) {
+        if overflow || Self::type_overflow(value, &result_type) {
             Err(Error::new(&token, ErrorKind::IntegerOverflow(result_type)))
         } else {
             Ok(Expr {
-                kind: ExprKind::Literal(value.0),
+                kind: ExprKind::Literal(value),
                 type_decl: Some(result_type),
                 value_kind: ValueKind::Rvalue,
             })
@@ -400,7 +400,6 @@ impl Expr {
                 Some(Expr::new_literal(if *n == 0 { 1 } else { 0 }, Types::Int))
             }
             (ExprKind::Literal(n), TokenType::Tilde) => {
-                // TODO: since unary only has one type => fix passing same type twice
                 let right_type = right.type_decl.clone().unwrap();
 
                 if !right_type.is_integer() {
@@ -409,6 +408,7 @@ impl Expr {
                         ErrorKind::InvalidUnary(token.token.clone(), right_type, "integer"),
                     ));
                 }
+                // TODO: since unary only has one type => fix passing same type twice
                 Some(Self::literal_type(
                     token,
                     right_type.clone(),
@@ -416,7 +416,7 @@ impl Expr {
                     (!n, false),
                 )?)
             }
-            (ExprKind::Literal(n), TokenType::Minus) => {
+            (ExprKind::Literal(n), TokenType::Minus | TokenType::Plus) => {
                 let right_type = right.type_decl.clone().unwrap();
 
                 if !right_type.is_integer() {
@@ -427,10 +427,14 @@ impl Expr {
                 }
 
                 Some(Self::literal_type(
-                    token,
+                    token.clone(),
                     right_type.clone(),
                     right_type,
-                    n.overflowing_neg(),
+                    if token.token == TokenType::Plus {
+                        (*n, false)
+                    } else {
+                        n.overflowing_neg()
+                    },
                 )?)
             }
             (..) => None,
@@ -843,6 +847,7 @@ mod tests {
 
         assert_fold_type_prim("'a'", "'a'", Types::Char);
         assert_fold_type_prim("-'a'", "-'a'", Types::Int);
+        assert_fold_type_prim("+'a'", "(int)'a'", Types::Int);
 
         assert_fold_type_prim("2147483648", "2147483648", Types::Long);
 

@@ -63,6 +63,7 @@ impl Parser {
                     | TokenType::Struct
                     | TokenType::Union
                     | TokenType::Enum
+                    | TokenType::TypeDef
                     | TokenType::RightBrace
                     | TokenType::Ident(..) => return,
                     _ => (),
@@ -1196,6 +1197,7 @@ impl Parser {
             TokenKind::Bang,
             TokenKind::Tilde,
             TokenKind::Minus,
+            TokenKind::Plus,
             TokenKind::PlusPlus,
             TokenKind::MinusMinus,
             TokenKind::LeftParen,

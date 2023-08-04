@@ -1113,6 +1113,7 @@ impl Compiler {
         match token.token {
             TokenType::Bang => self.cg_bang(reg),
             TokenType::Minus => self.cg_negate(reg),
+            TokenType::Plus => reg,
             TokenType::Amp => self.cg_address_at(reg, true),
             TokenType::Star => self.cg_deref(reg, new_type),
             TokenType::Tilde => self.cg_bit_not(reg),

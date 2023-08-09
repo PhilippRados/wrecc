@@ -1,5 +1,6 @@
-use rucc_lib::Error;
-use rucc_lib::*;
+use compiler::*;
+use preprocessor::*;
+
 use std::fs;
 
 struct CliOptions {
@@ -24,7 +25,7 @@ fn process_cmd_arguments() -> CliOptions {
 }
 
 // Reads in string from file passed from user
-fn read_input_file(file: String) -> String {
+fn read_input_file(file: &str) -> String {
     let source = fs::read_to_string(&file)
         .unwrap_or_else(|_| Error::sys_exit(&format!("Couldn't find file: '{}'", file), 2));
 
@@ -43,9 +44,11 @@ fn generate_output_file(output: String) {
 
 fn main() {
     let cli_options = process_cmd_arguments();
-    let source = read_input_file(cli_options.file_path);
 
-    let output = match compile(source) {
+    let source = read_input_file(&cli_options.file_path);
+    let source = Preprocessor::new(&source).preprocess().unwrap();
+
+    let output = match compile(&source) {
         Ok(output) => output,
         Err(errors) => {
             for e in errors {

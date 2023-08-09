@@ -1,6 +1,7 @@
 use std::num::IntErrorKind;
 
 use crate::common::{token::*, types::*};
+// use crate::preprocessor::*;
 use crate::scanner::Scanner;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -78,6 +79,10 @@ pub enum ErrorKind {
     MismatchedVariadic(bool, bool),
     UndeclaredSymbol(String),
     IntegerOverflow(NEWTypes),
+
+    // preprocessor errors
+    InvalidDirective(String),
+    InvalidHeader(String),
 
     Regular(&'static str), // generic error message when message only used once
     Multiple(Vec<Error>),
@@ -323,6 +328,11 @@ impl ErrorKind {
                 )
             }
 
+            ErrorKind::InvalidHeader(s) => format!("{} is not a valid header file", s),
+            ErrorKind::InvalidDirective(s) => {
+                format!("{} is not a valid preprocessor directive", s)
+            }
+
             ErrorKind::Regular(s) => s.to_string(),
             ErrorKind::Multiple(_) => {
                 unreachable!("should be turned into vec<error> and print seperate errors")
@@ -372,9 +382,17 @@ impl Error {
     }
     pub fn new_scan_error(scanner: &Scanner, kind: ErrorKind) -> Self {
         Error {
-            line_index: scanner.line,
-            line_string: scanner.raw_source[(scanner.line - 1) as usize].clone(),
+            line_index: scanner.actual_line,
+            line_string: scanner.raw_source[(scanner.original_line - 1) as usize].clone(),
             column: scanner.column,
+            kind,
+        }
+    }
+    pub fn new_pp_error(pp: &impl Location, kind: ErrorKind) -> Self {
+        Error {
+            line_index: pp.line_index(),
+            line_string: pp.line_string(),
+            column: pp.column(),
             kind,
         }
     }
@@ -406,4 +424,9 @@ impl Error {
         eprintln!("rucc: {msg}");
         std::process::exit(exit_code);
     }
+}
+pub trait Location {
+    fn line_index(&self) -> i32;
+    fn column(&self) -> i32;
+    fn line_string(&self) -> String;
 }

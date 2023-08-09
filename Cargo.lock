@@ -3,5 +3,20 @@
 version = 3
 
 [[package]]
+name = "compiler"
+version = "0.1.0"
+
+[[package]]
+name = "preprocessor"
+version = "0.1.0"
+dependencies = [
+ "compiler",
+]
+
+[[package]]
 name = "rucc"
 version = "0.1.0"
+dependencies = [
+ "compiler",
+ "preprocessor",
+]

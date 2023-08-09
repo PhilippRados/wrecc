@@ -6,11 +6,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
-[lib]
-name = "rucc_lib"
-path = "src/lib.rs"
+preprocessor = { path = "./preprocessor/" }
+compiler = { path = "./compiler/" }
 
 [[bin]]
 name = "rucc"
 path = "src/main.rs"
+
+[workspace]
+members = [
+  "preprocessor",
+  "compiler"
+]

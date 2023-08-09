@@ -10,16 +10,15 @@ use parser::*;
 use scanner::*;
 use typechecker::*;
 
-pub fn compile(source: String) -> Result<String, Vec<Error>> {
+pub fn compile(source: &str) -> Result<String, Vec<Error>> {
     // Scan input
-    let tokens = Scanner::new(&source).scan_token()?;
+    let tokens = Scanner::new(source).scan_token()?;
 
-    // Parse statements
+    // Parse statements and return Abstract Syntax Tree
     let (mut statements, env) = Parser::new(tokens).parse()?;
 
-    // Check for errors
-    let typechecker = TypeChecker::new(env);
-    let (const_labels, env, switches) = typechecker.check(&mut statements)?;
+    // Check for semantic errors
+    let (const_labels, env, switches) = TypeChecker::new(env).check(&mut statements)?;
 
     // Turn AST into IR
     let (ir, live_intervals, env) =

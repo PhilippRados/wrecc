@@ -44,7 +44,8 @@ $(RUSTFLAGS="-A warnings" ./target/release/rucc "$fixture" 2> static_err)
 for file in tests/fixtures/*; do 
   if [ -f "$file" ]; then
     filename=$(echo "$file" | cut -d/ -f3)
-    assert_eq "success_$filename" "$file" "$filename"
+    snapshot="success_${filename::${#filename}-2}"
+    assert_eq $snapshot "$file" "$filename"
   fi
 done
 

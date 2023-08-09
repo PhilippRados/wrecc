@@ -6,7 +6,10 @@ use std::str::Chars;
 pub struct Scanner<'a> {
     source: Peekable<Chars<'a>>,
     pub raw_source: Vec<String>,
-    pub line: i32,
+    // line number of source after preprocessor
+    pub actual_line: i32,
+    // line number of unpreprocessed source
+    pub original_line: i32,
     pub column: i32,
     keywords: HashMap<&'a str, TokenType>,
 }
@@ -18,7 +21,8 @@ impl<'a> Scanner<'a> {
                 .split('\n')
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
-            line: 1,
+            actual_line: 1,
+            original_line: 1,
             column: 1,
             keywords: HashMap::from([
                 ("void", TokenType::Void),
@@ -55,9 +59,9 @@ impl<'a> Scanner<'a> {
     fn add_token(&mut self, tokens: &mut Vec<Token>, current_token: TokenType) {
         tokens.push(Token {
             token: current_token.clone(),
-            line_index: self.line,
+            line_index: self.original_line,
             column: self.column,
-            line_string: self.raw_source[(self.line - 1) as usize].clone(),
+            line_string: self.raw_source[(self.actual_line - 1) as usize].clone(),
         });
         self.column += current_token.len() as i32;
     }
@@ -188,7 +192,8 @@ impl<'a> Scanner<'a> {
                         while let Some(c) = self.source.next() {
                             match c {
                                 '\n' => {
-                                    self.line += 1;
+                                    self.actual_line += 1;
+                                    self.original_line += 1;
                                     self.column = 1
                                 }
                                 '*' if self.matches('/') => {
@@ -205,7 +210,8 @@ impl<'a> Scanner<'a> {
                 }
                 ' ' | '\r' | '\t' => self.column += 1,
                 '\n' => {
-                    self.line += 1;
+                    self.actual_line += 1;
+                    self.original_line += 1;
                     self.column = 1
                 }
 
@@ -217,6 +223,32 @@ impl<'a> Scanner<'a> {
                     Ok(char) => self.add_token(&mut tokens, TokenType::CharLit(char as i8)),
                     Err(e) => errors.push(e),
                 },
+                '#' => {
+                    // TODO: add error handling when user inputs # and not pp
+                    self.source.next(); // skip whitespace
+
+                    while let Some(_) = self.source.by_ref().next_if(|c| c.is_ascii_digit()) {}
+                    self.source.next(); // skip whitespace
+                    self.source.next(); // skip whitespace
+
+                    while let Some(_) = self.source.by_ref().next_if(|c| *c != '"') {}
+                    self.source.next(); // skip whitespace
+
+                    if !self.matches('\n') {
+                        self.source.next(); // skip whitespace
+                        let mut num = String::new();
+                        while let Some(digit) = self.source.by_ref().next_if(|c| c.is_ascii_digit())
+                        {
+                            num.push(digit)
+                        }
+
+                        self.source.next();
+
+                        self.original_line = num.parse::<i32>().unwrap();
+                    }
+                    self.actual_line += 1;
+                    self.column = 1;
+                }
 
                 _ => {
                     if c.is_ascii_digit() {

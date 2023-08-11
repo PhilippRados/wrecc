@@ -1,8 +1,5 @@
-use std::num::IntErrorKind;
-
 use crate::common::{token::*, types::*};
-// use crate::preprocessor::*;
-use crate::scanner::Scanner;
+use std::num::IntErrorKind;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ErrorKind {
@@ -349,11 +346,11 @@ pub struct Error {
     pub kind: ErrorKind,
 }
 impl Error {
-    pub fn new(t: &Token, kind: ErrorKind) -> Self {
+    pub fn new(object: &impl Location, kind: ErrorKind) -> Self {
         Error {
-            line_index: t.line_index,
-            line_string: t.line_string.clone(),
-            column: t.column,
+            line_index: object.line_index(),
+            line_string: object.line_string(),
+            column: object.column(),
             kind,
         }
     }
@@ -378,22 +375,6 @@ impl Error {
             line_string: String::from(""),
             column: -1,
             kind: ErrorKind::Multiple(errors),
-        }
-    }
-    pub fn new_scan_error(scanner: &Scanner, kind: ErrorKind) -> Self {
-        Error {
-            line_index: scanner.actual_line,
-            line_string: scanner.raw_source[(scanner.original_line - 1) as usize].clone(),
-            column: scanner.column,
-            kind,
-        }
-    }
-    pub fn new_pp_error(pp: &impl Location, kind: ErrorKind) -> Self {
-        Error {
-            line_index: pp.line_index(),
-            line_string: pp.line_string(),
-            column: pp.column(),
-            kind,
         }
     }
     pub fn eof(expected: &'static str) -> Self {

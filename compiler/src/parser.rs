@@ -1461,7 +1461,7 @@ impl Parser {
         match self.tokens.peek() {
             Some(v) => {
                 if TokenKind::from(&v.token) != token {
-                    Err(Error::new(&v, ErrorKind::Regular(msg)))
+                    Err(Error::new(v, ErrorKind::Regular(msg)))
                 } else {
                     Ok(self.tokens.next().unwrap())
                 }

@@ -1,3 +1,4 @@
+use crate::common::error::Location;
 use crate::common::types::*;
 use std::fmt::Display;
 
@@ -448,5 +449,16 @@ impl Token {
             TokenType::PlusEqual | TokenType::PlusPlus => TokenType::Plus,
             _ => unreachable!("not compound token"),
         }
+    }
+}
+impl Location for Token {
+    fn line_index(&self) -> i32 {
+        self.line_index
+    }
+    fn column(&self) -> i32 {
+        self.column
+    }
+    fn line_string(&self) -> String {
+        self.line_string.clone()
     }
 }

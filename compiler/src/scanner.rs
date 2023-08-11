@@ -264,7 +264,7 @@ impl<'a> Scanner<'a> {
                         match num.parse::<i64>() {
                             Ok(n) => self.add_token(&mut tokens, TokenType::Number(n)),
                             Err(e) => {
-                                errors.push(Error::new_scan_error(
+                                errors.push(Error::new(
                                     self,
                                     ErrorKind::InvalidNumber(e.kind().clone()),
                                 ));
@@ -290,7 +290,7 @@ impl<'a> Scanner<'a> {
                             self.add_token(&mut tokens, TokenType::Ident(value.to_string(), 0))
                         }
                     } else {
-                        errors.push(Error::new_scan_error(self, ErrorKind::UnexpectedChar(c)));
+                        errors.push(Error::new(self, ErrorKind::UnexpectedChar(c)));
 
                         let c = format!("{}", c);
                         let raw_c = format!("{:?}", c);
@@ -324,15 +324,15 @@ impl<'a> Scanner<'a> {
         true
     }
     fn char_lit(&mut self) -> Result<char, Error> {
-        let mut char = self.source.next().ok_or(Error::new_scan_error(
-            self,
-            ErrorKind::Eof("character literal"),
-        ))?;
+        let mut char = self
+            .source
+            .next()
+            .ok_or(Error::new(self, ErrorKind::Eof("character literal")))?;
         if char == '\\' {
-            let char_to_escape = self.source.next().ok_or(Error::new_scan_error(
-                self,
-                ErrorKind::Eof("character literal"),
-            ))?;
+            let char_to_escape = self
+                .source
+                .next()
+                .ok_or(Error::new(self, ErrorKind::Eof("character literal")))?;
             char = match self.escape_char(char_to_escape) {
                 Ok(c) => c,
                 Err(e) => {
@@ -344,13 +344,10 @@ impl<'a> Scanner<'a> {
         if !self.matches('\'') {
             // finish parsing the char so that scanner synchronizes
             self.consume_until('\'');
-            return Err(Error::new_scan_error(self, ErrorKind::CharLiteralQuotes));
+            return Err(Error::new(self, ErrorKind::CharLiteralQuotes));
         }
         if !char.is_ascii() {
-            return Err(Error::new_scan_error(
-                self,
-                ErrorKind::CharLiteralAscii(char),
-            ));
+            return Err(Error::new(self, ErrorKind::CharLiteralAscii(char)));
         };
 
         Ok(char)
@@ -364,10 +361,7 @@ impl<'a> Scanner<'a> {
             '\\' => Ok('\\'),
             '\'' => Ok('\''),
             '\"' => Ok('\"'),
-            _ => Err(Error::new_scan_error(
-                self,
-                ErrorKind::InvalidEscape(char_to_escape),
-            )),
+            _ => Err(Error::new(self, ErrorKind::InvalidEscape(char_to_escape))),
         }
     }
 
@@ -382,7 +376,7 @@ impl<'a> Scanner<'a> {
             })
             .collect::<String>();
         if last_char != '"' {
-            return Err(Error::new_scan_error(self, ErrorKind::UnterminatedString));
+            return Err(Error::new(self, ErrorKind::UnterminatedString));
         }
 
         Ok(result)
@@ -392,6 +386,18 @@ impl<'a> Scanner<'a> {
             .by_ref()
             .take_while(|c| *c != end)
             .for_each(|_| {});
+    }
+}
+
+impl<'a> Location for Scanner<'a> {
+    fn line_index(&self) -> i32 {
+        self.actual_line
+    }
+    fn column(&self) -> i32 {
+        self.column
+    }
+    fn line_string(&self) -> String {
+        self.raw_source[(self.original_line - 1) as usize].clone()
     }
 }
 

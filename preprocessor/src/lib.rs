@@ -45,7 +45,7 @@ impl<'a> Preprocessor<'a> {
     fn consume(&mut self, expected: char, msg: &'static str) -> Result<(), Error> {
         match self.source.next() {
             Some(c) if c == expected => Ok(()),
-            _ => Err(Error::new_pp_error(self, ErrorKind::Regular(msg))),
+            _ => Err(Error::new(self, ErrorKind::Regular(msg))),
         }
     }
     fn get_header_path(&mut self) -> String {
@@ -83,7 +83,7 @@ impl<'a> Preprocessor<'a> {
                                 //.or_else(|e| errors.push(e));
                             }
                             Some('"') => todo!(),
-                            _ => errors.push(Error::new_pp_error(
+                            _ => errors.push(Error::new(
                                 &self,
                                 ErrorKind::Regular(
                                     "Expected opening '<' or '\"' after include directive",
@@ -91,7 +91,7 @@ impl<'a> Preprocessor<'a> {
                             )),
                         }
                     }
-                    d => errors.push(Error::new_pp_error(
+                    d => errors.push(Error::new(
                         &self,
                         ErrorKind::InvalidDirective(d.to_string()),
                     )),

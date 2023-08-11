@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 afl = "*"
 
-[dependencies.rucc]
-path = ".."
+[dependencies.compiler]
+path = "../compiler"

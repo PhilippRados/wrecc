@@ -42,30 +42,27 @@ fn generate_output_file(output: String) {
     writeln!(output_file, "{}", output).expect("write failed");
 }
 
-fn main() {
+fn run() -> Result<(), Vec<Error>> {
     let cli_options = process_cmd_arguments();
 
     let original_source = read_input_file(&cli_options.file_path);
     let preprocessed_source =
-        match Preprocessor::new(&cli_options.file_path, &original_source).preprocess() {
-            Ok(output) => output,
-            Err(errors) => {
-                for e in errors {
-                    e.print_error();
-                }
-                return;
-            }
-        };
+        Preprocessor::new(&cli_options.file_path, &original_source).preprocess()?;
 
-    let output = match compile(&cli_options.file_path, &preprocessed_source) {
-        Ok(output) => output,
+    let output = compile(&cli_options.file_path, &preprocessed_source)?;
+
+    generate_output_file(output);
+
+    Ok(())
+}
+
+fn main() {
+    match run() {
+        Ok(()) => (),
         Err(errors) => {
             for e in errors {
                 e.print_error();
             }
-            return;
         }
-    };
-
-    generate_output_file(output);
+    }
 }

@@ -624,14 +624,14 @@ mod tests {
     use crate::scanner::Scanner;
 
     fn assert_fold(input: &str, expected: &str) -> Option<NEWTypes> {
-        let mut scanner = Scanner::new(input);
+        let mut scanner = Scanner::new("", input);
         let tokens = scanner.scan_token().unwrap();
 
         let mut parser = Parser::new(tokens);
         let mut actual = parser.expression().unwrap();
         actual.integer_const_fold(&Vec::new()).unwrap();
 
-        let mut scanner = Scanner::new(expected);
+        let mut scanner = Scanner::new("", expected);
         let tokens = scanner.scan_token().unwrap();
 
         let mut parser = Parser::new(tokens);
@@ -656,7 +656,7 @@ mod tests {
     }
     macro_rules! assert_fold_error {
         ($input:expr,$expected_err:pat) => {
-            let mut scanner = Scanner::new($input);
+            let mut scanner = Scanner::new("",$input);
             let tokens = scanner.scan_token().unwrap();
 
             let mut parser = Parser::new(tokens);

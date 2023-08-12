@@ -1,8 +1,8 @@
-Error: Function 'printf' expected 1 argument(s) found 0
+Error: in tests/fixtures/varargs_err.c: Function 'printf' expected 1 argument(s) found 0
 |
 7   printf();
 |         ^
-Error: Mismatched arguments in function 'printf': expected parameter 's' to be of type 'char*', found 'long'
+Error: in tests/fixtures/varargs_err.c: Mismatched arguments in function 'printf': expected parameter 's' to be of type 'char*', found 'long'
 |
 9   printf(z,"first",z);
 |         ^

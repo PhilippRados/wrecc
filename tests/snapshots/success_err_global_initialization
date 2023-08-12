@@ -1,4 +1,4 @@
-Error: Global variables can only be initialized to compile-time constants
+Error: in tests/fixtures/err_global_initialization.c: Global variables can only be initialized to compile-time constants
 |
 2 int d = c;
 |     ^

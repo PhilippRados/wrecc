@@ -45,10 +45,19 @@ fn generate_output_file(output: String) {
 fn main() {
     let cli_options = process_cmd_arguments();
 
-    let source = read_input_file(&cli_options.file_path);
-    let source = Preprocessor::new(&source).preprocess().unwrap();
+    let original_source = read_input_file(&cli_options.file_path);
+    let preprocessed_source =
+        match Preprocessor::new(&cli_options.file_path, &original_source).preprocess() {
+            Ok(output) => output,
+            Err(errors) => {
+                for e in errors {
+                    e.print_error();
+                }
+                return;
+            }
+        };
 
-    let output = match compile(&source) {
+    let output = match compile(&cli_options.file_path, &preprocessed_source) {
         Ok(output) => output,
         Err(errors) => {
             for e in errors {

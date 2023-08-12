@@ -1,8 +1,8 @@
-Error: Can only define functions in global scope
+Error: in tests/fixtures/function_call_inside_block.c: Can only define functions in global scope
 |
 5     int some() {
 |         ^
-Error: Undeclared symbol 'some'
+Error: in tests/fixtures/function_call_inside_block.c: Undeclared symbol 'some'
 |
 8     some();
 |     ^

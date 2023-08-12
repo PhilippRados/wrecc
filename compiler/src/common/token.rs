@@ -386,16 +386,30 @@ pub struct Token {
     pub line_index: i32,
     pub column: i32,
     pub line_string: String,
+    pub filename: String,
 }
 impl Token {
-    pub fn new(token: TokenType, line_index: i32, column: i32, line_string: String) -> Self {
-        Token { token, line_index, column, line_string }
+    pub fn new(
+        token: TokenType,
+        line_index: i32,
+        column: i32,
+        line_string: String,
+        filename: String,
+    ) -> Self {
+        Token {
+            token,
+            line_index,
+            column,
+            line_string,
+            filename,
+        }
     }
     pub fn default(kind: TokenType) -> Self {
         Token {
             token: kind,
             line_index: -1,
             line_string: "".to_string(),
+            filename: "".to_string(),
             column: -1,
         }
     }
@@ -460,5 +474,8 @@ impl Location for Token {
     }
     fn line_string(&self) -> String {
         self.line_string.clone()
+    }
+    fn filename(&self) -> String {
+        self.filename.to_string()
     }
 }

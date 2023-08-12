@@ -343,6 +343,7 @@ pub struct Error {
     pub line_index: i32,
     pub line_string: String,
     pub column: i32,
+    pub filename: String,
     pub kind: ErrorKind,
 }
 impl Error {
@@ -351,6 +352,7 @@ impl Error {
             line_index: object.line_index(),
             line_string: object.line_string(),
             column: object.column(),
+            filename: object.filename().to_string(),
             kind,
         }
     }
@@ -373,6 +375,7 @@ impl Error {
         Error {
             line_index: -1,
             line_string: String::from(""),
+            filename: String::from(""),
             column: -1,
             kind: ErrorKind::Multiple(errors),
         }
@@ -381,12 +384,13 @@ impl Error {
         Error {
             line_index: -1,
             line_string: String::from(""),
+            filename: String::from(""),
             column: -1,
             kind: ErrorKind::Eof(expected),
         }
     }
     pub fn print_error(&self) {
-        eprintln!("Error: {}", self.kind.message());
+        eprintln!("Error: in {}: {}", self.filename, self.kind.message());
 
         if self.line_index != -1 {
             let line_length = self.line_index.to_string().len();
@@ -410,4 +414,5 @@ pub trait Location {
     fn line_index(&self) -> i32;
     fn column(&self) -> i32;
     fn line_string(&self) -> String;
+    fn filename(&self) -> String;
 }

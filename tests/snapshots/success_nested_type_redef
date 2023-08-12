@@ -1,16 +1,16 @@
-Error: Redefinition of type 'Other'
+Error: in tests/fixtures/nested_type_redef.c: Redefinition of type 'Other'
 |
 11     union Other {
 |            ^
-Error: Expected type-declaration, found identifier
+Error: in tests/fixtures/nested_type_redef.c: Expected type-declaration, found identifier
 |
 13     } a;
 |        ^
-Error: Expected type-declaration, found '}'
+Error: in tests/fixtures/nested_type_redef.c: Expected type-declaration, found '}'
 |
 15   };
 |    ^
-Error: Expected type-declaration, found '}'
+Error: in tests/fixtures/nested_type_redef.c: Expected type-declaration, found '}'
 |
 16 }
 |  ^

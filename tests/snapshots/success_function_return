@@ -1,4 +1,4 @@
-Error: Function 'bar' has incomplete return type 'struct Some'
+Error: in tests/fixtures/function_return.c: Function 'bar' has incomplete return type 'struct Some'
 |
 4 struct Some bar(){}
 |             ^

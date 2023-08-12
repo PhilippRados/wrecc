@@ -7,21 +7,23 @@ pub struct Scanner<'a> {
     source: Peekable<Chars<'a>>,
     pub raw_source: Vec<String>,
     // line number of source after preprocessor
-    pub actual_line: i32,
+    pub actual_line: Vec<i32>,
     // line number of unpreprocessed source
     pub original_line: i32,
     pub column: i32,
+    pub filenames: Vec<String>,
     keywords: HashMap<&'a str, TokenType>,
 }
 impl<'a> Scanner<'a> {
-    pub fn new(source: &'a str) -> Self {
+    pub fn new(filename: &'a str, source: &'a str) -> Self {
         Scanner {
             source: source.chars().peekable(),
             raw_source: source
                 .split('\n')
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
-            actual_line: 1,
+            filenames: vec![filename.to_string()],
+            actual_line: vec![1],
             original_line: 1,
             column: 1,
             keywords: HashMap::from([
@@ -57,12 +59,13 @@ impl<'a> Scanner<'a> {
         }
     }
     fn add_token(&mut self, tokens: &mut Vec<Token>, current_token: TokenType) {
-        tokens.push(Token {
-            token: current_token.clone(),
-            line_index: self.original_line,
-            column: self.column,
-            line_string: self.raw_source[(self.actual_line - 1) as usize].clone(),
-        });
+        tokens.push(Token::new(
+            current_token.clone(),
+            self.line_index(),
+            self.column(),
+            self.line_string(),
+            self.filename(),
+        ));
         self.column += current_token.len() as i32;
     }
     pub fn scan_token(&mut self) -> Result<Vec<Token>, Vec<Error>> {
@@ -192,7 +195,7 @@ impl<'a> Scanner<'a> {
                         while let Some(c) = self.source.next() {
                             match c {
                                 '\n' => {
-                                    self.actual_line += 1;
+                                    *self.actual_line.last_mut().unwrap() += 1;
                                     self.original_line += 1;
                                     self.column = 1
                                 }
@@ -210,7 +213,7 @@ impl<'a> Scanner<'a> {
                 }
                 ' ' | '\r' | '\t' => self.column += 1,
                 '\n' => {
-                    self.actual_line += 1;
+                    *self.actual_line.last_mut().unwrap() += 1;
                     self.original_line += 1;
                     self.column = 1
                 }
@@ -224,29 +227,30 @@ impl<'a> Scanner<'a> {
                     Err(e) => errors.push(e),
                 },
                 '#' => {
-                    // TODO: add error handling when user inputs # and not pp
-                    self.source.next(); // skip whitespace
+                    // to properly locate error in header-file need to change source-file and index when showing error
+                    match self.consume_until_new(vec![':']).as_ref() {
+                        "pro" => {
+                            self.source.next();
 
-                    while let Some(_) = self.source.by_ref().next_if(|c| c.is_ascii_digit()) {}
-                    self.source.next(); // skip whitespace
-                    self.source.next(); // skip whitespace
-
-                    while let Some(_) = self.source.by_ref().next_if(|c| *c != '"') {}
-                    self.source.next(); // skip whitespace
-
-                    if !self.matches('\n') {
-                        self.source.next(); // skip whitespace
-                        let mut num = String::new();
-                        while let Some(digit) = self.source.by_ref().next_if(|c| c.is_ascii_digit())
-                        {
-                            num.push(digit)
+                            let header_name = self.consume_until_new(vec!['\n']);
+                            self.source.next();
+                            self.actual_line.push(2); // 2 because #pro: is on line 1
+                            self.original_line = 1;
+                            self.filenames.push(header_name);
                         }
+                        "epi" => {
+                            self.source.next();
 
-                        self.source.next();
+                            let num = self.consume_until_new(vec!['\0']);
+                            self.source.next();
 
-                        self.original_line = num.parse::<i32>().unwrap();
+                            self.original_line = num.parse::<i32>().unwrap();
+                            *self.actual_line.last_mut().unwrap() +=
+                                self.actual_line.pop().unwrap() - 1;
+                            self.filenames.pop();
+                        }
+                        _ => unreachable!(),
                     }
-                    self.actual_line += 1;
                     self.column = 1;
                 }
 
@@ -387,17 +391,40 @@ impl<'a> Scanner<'a> {
             .take_while(|c| *c != end)
             .for_each(|_| {});
     }
+    fn consume_until_new(&mut self, expected: Vec<char>) -> String {
+        let mut consumed = String::new();
+
+        while let Some(v) = self.source.by_ref().next_if(|c| !expected.contains(c)) {
+            consumed.push(v);
+        }
+
+        consumed
+    }
+
+    // fn consume_while(&mut self, expected: Vec<char>) -> String {
+    //     let mut consumed = String::new();
+
+    //     while let Some(v) = self.source.by_ref().next_if(|c| expected.contains(c)) {
+    //         consumed.push(v);
+    //     }
+
+    //     consumed
+    // }
 }
 
 impl<'a> Location for Scanner<'a> {
     fn line_index(&self) -> i32 {
-        self.actual_line
+        self.original_line
     }
     fn column(&self) -> i32 {
         self.column
     }
     fn line_string(&self) -> String {
-        self.raw_source[(self.original_line - 1) as usize].clone()
+        self.raw_source[(self.actual_line.last().unwrap() - 1) as usize].clone()
+    }
+
+    fn filename(&self) -> String {
+        self.filenames.last().unwrap().to_string()
     }
 }
 
@@ -407,7 +434,7 @@ mod tests {
     use super::*;
 
     fn setup_generic(input: &str) -> Vec<Token> {
-        let mut scanner = Scanner::new(input);
+        let mut scanner = Scanner::new("", input);
         if let Ok(tokens) = scanner.scan_token() {
             tokens
         } else {
@@ -415,11 +442,20 @@ mod tests {
         }
     }
     fn setup_generic_err(input: &str) -> Vec<Error> {
-        let mut scanner = Scanner::new(input);
+        let mut scanner = Scanner::new("", input);
         if let Err(errs) = scanner.scan_token() {
             errs
         } else {
             unreachable!("want to test errors")
+        }
+    }
+    fn test_token(token: TokenType, line_index: i32, column: i32, line_string: &str) -> Token {
+        Token {
+            token,
+            line_index,
+            column,
+            line_string: line_string.to_string(),
+            filename: "".to_string(),
         }
     }
 
@@ -439,11 +475,11 @@ mod tests {
     fn basic_single_and_double_tokens() {
         let actual = setup_generic("!= = > == \n\n    ;");
         let expected = vec![
-            Token::new(TokenType::BangEqual, 1, 1, "!= = > == ".to_string()),
-            Token::new(TokenType::Equal, 1, 4, "!= = > == ".to_string()),
-            Token::new(TokenType::Greater, 1, 6, "!= = > == ".to_string()),
-            Token::new(TokenType::EqualEqual, 1, 8, "!= = > == ".to_string()),
-            Token::new(TokenType::Semicolon, 3, 5, "    ;".to_string()),
+            test_token(TokenType::BangEqual, 1, 1, "!= = > == "),
+            test_token(TokenType::Equal, 1, 4, "!= = > == "),
+            test_token(TokenType::Greater, 1, 6, "!= = > == "),
+            test_token(TokenType::EqualEqual, 1, 8, "!= = > == "),
+            test_token(TokenType::Semicolon, 3, 5, "    ;"),
         ];
         assert_eq!(actual, expected);
     }
@@ -451,13 +487,8 @@ mod tests {
     fn ignores_comments() {
         let actual = setup_generic("// this is a    comment\n\n!this");
         let expected = vec![
-            Token::new(TokenType::Bang, 3, 1, "!this".to_string()),
-            Token::new(
-                TokenType::Ident("this".to_string(), 0),
-                3,
-                2,
-                "!this".to_string(),
-            ),
+            test_token(TokenType::Bang, 3, 1, "!this"),
+            test_token(TokenType::Ident("this".to_string(), 0), 3, 2, "!this"),
         ];
         assert_eq!(actual, expected);
     }
@@ -507,86 +538,46 @@ mod tests {
     fn matches_complex_keywords() {
         let actual = setup_generic("int some_long;\nwhile (val >= 12) {*p = val}");
         let expected = vec![
-            Token::new(TokenType::Int, 1, 1, "int some_long;".to_string()),
-            Token::new(
+            test_token(TokenType::Int, 1, 1, "int some_long;"),
+            test_token(
                 TokenType::Ident("some_long".to_string(), 0),
                 1,
                 5,
-                "int some_long;".to_string(),
+                "int some_long;",
             ),
-            Token::new(TokenType::Semicolon, 1, 14, "int some_long;".to_string()),
-            Token::new(
-                TokenType::While,
-                2,
-                1,
-                "while (val >= 12) {*p = val}".to_string(),
-            ),
-            Token::new(
-                TokenType::LeftParen,
-                2,
-                7,
-                "while (val >= 12) {*p = val}".to_string(),
-            ),
-            Token::new(
+            test_token(TokenType::Semicolon, 1, 14, "int some_long;"),
+            test_token(TokenType::While, 2, 1, "while (val >= 12) {*p = val}"),
+            test_token(TokenType::LeftParen, 2, 7, "while (val >= 12) {*p = val}"),
+            test_token(
                 TokenType::Ident("val".to_string(), 0),
                 2,
                 8,
-                "while (val >= 12) {*p = val}".to_string(),
+                "while (val >= 12) {*p = val}",
             ),
-            Token::new(
+            test_token(
                 TokenType::GreaterEqual,
                 2,
                 12,
-                "while (val >= 12) {*p = val}".to_string(),
+                "while (val >= 12) {*p = val}",
             ),
-            Token::new(
-                TokenType::Number(12),
-                2,
-                15,
-                "while (val >= 12) {*p = val}".to_string(),
-            ),
-            Token::new(
-                TokenType::RightParen,
-                2,
-                17,
-                "while (val >= 12) {*p = val}".to_string(),
-            ),
-            Token::new(
-                TokenType::LeftBrace,
-                2,
-                19,
-                "while (val >= 12) {*p = val}".to_string(),
-            ),
-            Token::new(
-                TokenType::Star,
-                2,
-                20,
-                "while (val >= 12) {*p = val}".to_string(),
-            ),
-            Token::new(
+            test_token(TokenType::Number(12), 2, 15, "while (val >= 12) {*p = val}"),
+            test_token(TokenType::RightParen, 2, 17, "while (val >= 12) {*p = val}"),
+            test_token(TokenType::LeftBrace, 2, 19, "while (val >= 12) {*p = val}"),
+            test_token(TokenType::Star, 2, 20, "while (val >= 12) {*p = val}"),
+            test_token(
                 TokenType::Ident("p".to_string(), 0),
                 2,
                 21,
-                "while (val >= 12) {*p = val}".to_string(),
+                "while (val >= 12) {*p = val}",
             ),
-            Token::new(
-                TokenType::Equal,
-                2,
-                23,
-                "while (val >= 12) {*p = val}".to_string(),
-            ),
-            Token::new(
+            test_token(TokenType::Equal, 2, 23, "while (val >= 12) {*p = val}"),
+            test_token(
                 TokenType::Ident("val".to_string(), 0),
                 2,
                 25,
-                "while (val >= 12) {*p = val}".to_string(),
+                "while (val >= 12) {*p = val}",
             ),
-            Token::new(
-                TokenType::RightBrace,
-                2,
-                28,
-                "while (val >= 12) {*p = val}".to_string(),
-            ),
+            test_token(TokenType::RightBrace, 2, 28, "while (val >= 12) {*p = val}"),
         ];
         assert_eq!(actual, expected);
     }
@@ -604,18 +595,21 @@ mod tests {
             Error {
                 line_index: 1,
                 column: 10,
+                filename: String::from(""),
                 line_string: "int c = 0$".to_string(),
                 kind: ErrorKind::UnexpectedChar('$'),
             },
             Error {
                 line_index: 3,
                 column: 1,
+                filename: String::from(""),
                 line_string: "‘ ∞".to_string(),
                 kind: ErrorKind::UnexpectedChar('‘'),
             },
             Error {
                 line_index: 3,
                 column: 3,
+                filename: String::from(""),
                 line_string: "‘ ∞".to_string(),
                 kind: ErrorKind::UnexpectedChar('∞'),
             },
@@ -626,15 +620,10 @@ mod tests {
     fn can_handle_non_ascii_alphabet() {
         let actual = setup_generic("\nint ä = 123");
         let expected = vec![
-            Token::new(TokenType::Int, 2, 1, "int ä = 123".to_string()),
-            Token::new(
-                TokenType::Ident("ä".to_string(), 0),
-                2,
-                5,
-                "int ä = 123".to_string(),
-            ),
-            Token::new(TokenType::Equal, 2, 8, "int ä = 123".to_string()), // ä len is 2 but thats fine because its the same when indexing
-            Token::new(TokenType::Number(123), 2, 10, "int ä = 123".to_string()),
+            test_token(TokenType::Int, 2, 1, "int ä = 123"),
+            test_token(TokenType::Ident("ä".to_string(), 0), 2, 5, "int ä = 123"),
+            test_token(TokenType::Equal, 2, 8, "int ä = 123"), // ä len is 2 but thats fine because its the same when indexing
+            test_token(TokenType::Number(123), 2, 10, "int ä = 123"),
         ];
         assert_eq!(actual, expected);
     }
@@ -644,6 +633,7 @@ mod tests {
         let expected = vec![Error {
             line_index: 2,
             column: 8,
+            filename: String::from(""),
             line_string: "int ä @ = 123".to_string(),
             kind: ErrorKind::UnexpectedChar('@'),
         }];

@@ -1,4 +1,4 @@
-Error: Symbol 'main' already exists, but not as function
+Error: in tests/fixtures/var_shadows_funcs.c: Symbol 'main' already exists, but not as function
 |
 4   main();
 |       ^

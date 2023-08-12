@@ -1,20 +1,20 @@
-Error: 'default'-statements have to be inside a 'switch'-statement
+Error: in tests/fixtures/error_switch.c: 'default'-statements have to be inside a 'switch'-statement
 |
 3   default: x = 1;
 |   ^
-Error: Duplicate 'case'-statement with value 3
+Error: in tests/fixtures/error_switch.c: Duplicate 'case'-statement with value 3
 |
 8     case 3: case 3: break;
 |          ^
-Error: Duplicate 'case'-statement with value 2
+Error: in tests/fixtures/error_switch.c: Duplicate 'case'-statement with value 2
 |
 9     case 2: break;
 |     ^
-Error: Can't have multiple 'default'-statements inside a 'switch'-statement
+Error: in tests/fixtures/error_switch.c: Can't have multiple 'default'-statements inside a 'switch'-statement
 |
 12     default: {
 |      ^
-Error: 'case'-statements have to be inside a 'switch'-statement
+Error: in tests/fixtures/error_switch.c: 'case'-statements have to be inside a 'switch'-statement
 |
 16   case 3: x = 1;
 |    ^

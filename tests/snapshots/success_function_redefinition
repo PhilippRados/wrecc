@@ -1,4 +1,4 @@
-Error: Redefinition of function 'main'
+Error: in tests/fixtures/function_redefinition.c: Redefinition of function 'main'
 |
 7 int main(){}
 |     ^

@@ -1221,7 +1221,7 @@ mod tests {
 
     macro_rules! assert_type {
         ($input:expr,$expected_type:pat) => {
-            let mut scanner = Scanner::new($input);
+            let mut scanner = Scanner::new("", $input);
             let tokens = scanner.scan_token().unwrap();
 
             let mut parser = Parser::new(tokens);
@@ -1241,7 +1241,7 @@ mod tests {
 
     macro_rules! assert_type_err {
         ($input:expr,$expected_err:pat) => {
-            let mut scanner = Scanner::new($input);
+            let mut scanner = Scanner::new("", $input);
             let tokens = scanner.scan_token().unwrap();
 
             let mut parser = Parser::new(tokens);
@@ -1261,7 +1261,7 @@ mod tests {
 
     macro_rules! assert_const_expr {
         ($input: expr, $expected: expr, $symbols: expr) => {
-            let mut scanner = Scanner::new($input);
+            let mut scanner = Scanner::new("", $input);
             let tokens = scanner.scan_token().unwrap();
 
             let mut parser = Parser::new(tokens);

@@ -10,9 +10,9 @@ use parser::*;
 use scanner::*;
 use typechecker::*;
 
-pub fn compile(source: &str) -> Result<String, Vec<Error>> {
+pub fn compile(filename: &str, source: &str) -> Result<String, Vec<Error>> {
     // Scan input
-    let tokens = Scanner::new(source).scan_token()?;
+    let tokens = Scanner::new(filename, source).scan_token()?;
 
     // Parse statements and return Abstract Syntax Tree
     let (mut statements, env) = Parser::new(tokens).parse()?;

@@ -1623,12 +1623,7 @@ fn arrow_sugar(left: Expr, member: Token, arrow_token: Token) -> Expr {
                 ExprKind::Grouping {
                     expr: Box::new(Expr::new(
                         ExprKind::Unary {
-                            token: Token::new(
-                                TokenType::Star,
-                                member.line_index,
-                                member.column,
-                                member.line_string,
-                            ),
+                            token: Token { token: TokenType::Star, ..member },
                             right: Box::new(left),
                         },
                         ValueKind::Lvalue,
@@ -1776,23 +1771,13 @@ fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
     // a[i] <=> *(a + i)
     Expr::new(
         ExprKind::Unary {
-            token: Token::new(
-                TokenType::Star,
-                token.line_index,
-                token.column,
-                token.line_string.clone(),
-            ),
+            token: Token { token: TokenType::Star, ..token.clone() },
             right: Box::new(Expr::new(
                 ExprKind::Grouping {
                     expr: Box::new(Expr::new(
                         ExprKind::Binary {
                             left: Box::new(expr),
-                            token: Token::new(
-                                TokenType::Plus,
-                                token.line_index,
-                                token.column,
-                                token.line_string,
-                            ),
+                            token: Token { token: TokenType::Plus, ..token.clone() },
                             right: Box::new(index),
                         },
                         ValueKind::Lvalue,
@@ -2030,12 +2015,12 @@ mod tests {
 
     macro_rules! token_default {
         ($token_type:expr) => {
-            Token::new($token_type, 1, 1, "".to_string())
+            Token::new($token_type, 1, 1, "".to_string(), "".to_string())
         };
     }
 
     fn assert_ast(input: &str, expected: &str) {
-        let mut scanner = Scanner::new(input);
+        let mut scanner = Scanner::new("", input);
         let tokens = scanner.scan_token().unwrap();
 
         let mut parser = Parser::new(tokens);

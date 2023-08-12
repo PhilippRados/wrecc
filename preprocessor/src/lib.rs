@@ -1,5 +1,3 @@
-// pub mod preprocessor;
-
 use compiler::Error;
 use compiler::ErrorKind;
 use compiler::Location;
@@ -12,10 +10,11 @@ pub struct Preprocessor<'a> {
     raw_source: Vec<String>,
     line: i32,
     column: i32,
+    filename: String,
 }
 
 impl<'a> Preprocessor<'a> {
-    pub fn new(input: &'a str) -> Self {
+    pub fn new(filename: &'a str, input: &'a str) -> Self {
         Preprocessor {
             source: input.chars().peekable(),
             raw_source: input
@@ -24,39 +23,46 @@ impl<'a> Preprocessor<'a> {
                 .collect::<Vec<String>>(),
             line: 1,
             column: 1,
+            filename: filename.to_string(),
         }
     }
 
-    fn consume_until(&mut self, expected: char) -> String {
-        let mut directive = String::new();
+    fn consume_until(&mut self, expected: Vec<char>) -> String {
+        let mut consumed = String::new();
 
-        while let Some(v) = self.source.by_ref().next_if(|c| *c != expected) {
-            directive.push(v);
+        while let Some(v) = self.source.by_ref().next_if(|c| !expected.contains(c)) {
+            consumed.push(v);
         }
 
-        directive
+        consumed
+    }
+
+    fn consume_while(&mut self, expected: Vec<char>) -> String {
+        let mut consumed = String::new();
+
+        while let Some(v) = self.source.by_ref().next_if(|c| expected.contains(c)) {
+            consumed.push(v);
+        }
+
+        consumed
+    }
+    fn root_path() -> String {
+        use std::env;
+        env::var("CARGO_MANIFEST_DIR").unwrap()
     }
     fn paste_header(&self, file_path: &str) -> Result<String, Error> {
-        let data = fs::read_to_string(file_path).expect("check read-to-string fail reasons");
-        let header_metadata = format!("# {}", self.line);
+        let root = Self::root_path();
+        let abs_path = root + "/include/" + file_path;
 
-        Ok(data + &header_metadata)
-    }
-    fn consume(&mut self, expected: char, msg: &'static str) -> Result<(), Error> {
-        match self.source.next() {
-            Some(c) if c == expected => Ok(()),
-            _ => Err(Error::new(self, ErrorKind::Regular(msg))),
-        }
-    }
-    fn get_header_path(&mut self) -> String {
-        // let header = self.consume_until('>');
-        let mut header = String::new();
+        let data = fs::read_to_string(&abs_path).or(Err(Error::new(
+            self,
+            ErrorKind::InvalidHeader(file_path.to_string()),
+        )))?;
 
-        while let Some(v) = self.source.by_ref().next_if(|c| c.is_alphabetic()) {
-            header.push(v);
-        }
+        let header_prologue = format!("#pro:{}\n", file_path);
+        let header_epilogue = format!("#epi:{}\0", self.line_index());
 
-        header
+        Ok(header_prologue + &data + &header_epilogue)
     }
     pub fn preprocess(mut self) -> Result<String, Vec<Error>> {
         let mut result = String::from("");
@@ -64,23 +70,22 @@ impl<'a> Preprocessor<'a> {
 
         while let Some(c) = self.source.next() {
             match c {
-                '#' => match self.consume_until(' ').as_ref() {
+                '#' => match self.consume_until(vec![' ']).as_ref() {
                     "include" => {
-                        while self
-                            .source
-                            .by_ref()
-                            .next_if(|c| *c == ' ' || *c == '\t')
-                            .is_some()
-                        {}
+                        self.consume_while(vec![' ', '\t']);
 
                         match self.source.next() {
                             Some('<') => {
-                                let file = self.get_header_path();
-                                self.consume('>', "Expect closing '>' after include-directive");
-                                // .or_else(|e| errors.push(e));
+                                let file = self.consume_until(vec!['>', '\n']);
+                                self.source.next();
 
-                                result.push_str(&self.paste_header(&file).unwrap());
-                                //.or_else(|e| errors.push(e));
+                                match self.paste_header(&file) {
+                                    Ok(header_data) => result.push_str(&header_data),
+                                    Err(e) => {
+                                        errors.push(e);
+                                        continue;
+                                    }
+                                }
                             }
                             Some('"') => todo!(),
                             _ => errors.push(Error::new(
@@ -148,5 +153,8 @@ impl<'a> Location for Preprocessor<'a> {
     }
     fn line_string(&self) -> String {
         self.raw_source[(self.line - 1) as usize].clone()
+    }
+    fn filename(&self) -> String {
+        self.filename.to_string()
     }
 }

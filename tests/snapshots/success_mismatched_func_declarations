@@ -1,4 +1,4 @@
-Error: Mismatched parameter-types in function-declarations: expected 'char', found 'int'
+Error: in tests/fixtures/mismatched_func_declarations.c: Mismatched parameter-types in function-declarations: expected 'char', found 'int'
 |
 2 int some(int i);
 |              ^

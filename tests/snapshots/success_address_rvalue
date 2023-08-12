@@ -1,4 +1,4 @@
-Error: Can't call '&' on r-value
+Error: in tests/fixtures/address_rvalue.c: Can't call '&' on r-value
 |
 8   a = &(b + 3);
 |       ^

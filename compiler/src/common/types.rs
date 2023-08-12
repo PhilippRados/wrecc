@@ -217,12 +217,7 @@ macro_rules! arr_decay {
             $arr = NEWTypes::Pointer(of);
 
             $ast.kind = ExprKind::Unary {
-                token: Token::new(
-                    TokenType::Amp,
-                    $token.line_index,
-                    $token.column,
-                    $token.line_string.clone(),
-                ),
+                token: Token { token: TokenType::Amp, ..$token.clone() },
                 right: Box::new($ast.clone()),
             };
         }

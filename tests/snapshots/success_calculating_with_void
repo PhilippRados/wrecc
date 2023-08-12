@@ -1,4 +1,4 @@
-Error: Invalid binary expression: 'void' '+' 'int'
+Error: in tests/fixtures/calculating_with_void.c: Invalid binary expression: 'void' '+' 'int'
 |
 4   int some = other() + 1;
 |                      ^

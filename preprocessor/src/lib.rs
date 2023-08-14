@@ -1,3 +1,4 @@
+use compiler::consume_while;
 use compiler::Error;
 use compiler::ErrorKind;
 use compiler::Location;
@@ -27,32 +28,10 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
-    fn consume_until(&mut self, expected: Vec<char>) -> String {
-        let mut consumed = String::new();
-
-        while let Some(v) = self.source.by_ref().next_if(|c| !expected.contains(c)) {
-            consumed.push(v);
-        }
-
-        consumed
-    }
-
-    fn consume_while(&mut self, expected: Vec<char>) -> String {
-        let mut consumed = String::new();
-
-        while let Some(v) = self.source.by_ref().next_if(|c| expected.contains(c)) {
-            consumed.push(v);
-        }
-
-        consumed
-    }
-    fn root_path() -> String {
-        use std::env;
-        env::var("CARGO_MANIFEST_DIR").unwrap()
-    }
     fn paste_header(&self, file_path: &str) -> Result<String, Error> {
-        let root = Self::root_path();
-        let abs_path = root + "/include/" + file_path;
+        // WARN: only temporary absolute path. /include will be found via PATH env var
+        let abs_path =
+            "/Users/philipprados/documents/coding/Rust/rucc/include/".to_string() + file_path;
 
         let data = fs::read_to_string(&abs_path).or(Err(Error::new(
             self,
@@ -60,6 +39,7 @@ impl<'a> Preprocessor<'a> {
         )))?;
 
         let header_prologue = format!("#pro:{}\n", file_path);
+        // TODO: maybe can use same marker token \n
         let header_epilogue = format!("#epi:{}\0", self.line_index());
 
         Ok(header_prologue + &data + &header_epilogue)
@@ -70,14 +50,29 @@ impl<'a> Preprocessor<'a> {
 
         while let Some(c) = self.source.next() {
             match c {
-                '#' => match self.consume_until(vec![' ']).as_ref() {
+                '#' => match consume_while(&mut self.source, |c| c != ' ' && c != '\t', false)
+                    .as_ref()
+                {
                     "include" => {
-                        self.consume_while(vec![' ', '\t']);
+                        consume_while(&mut self.source, |c| c == ' ' || c == '\t', false);
 
                         match self.source.next() {
                             Some('<') => {
-                                let file = self.consume_until(vec!['>', '\n']);
-                                self.source.next();
+                                let file = consume_while(
+                                    &mut self.source,
+                                    |c| c != '>' && c != '\n',
+                                    false,
+                                );
+
+                                if let Some('\n') = self.source.next() {
+                                    errors.push(Error::new(
+                                        &self,
+                                        ErrorKind::Regular(
+                                            "Expected closing '>' after header file",
+                                        ),
+                                    ));
+                                    continue;
+                                }
 
                                 match self.paste_header(&file) {
                                     Ok(header_data) => result.push_str(&header_data),
@@ -156,5 +151,23 @@ impl<'a> Location for Preprocessor<'a> {
     }
     fn filename(&self) -> String {
         self.filename.to_string()
+    }
+}
+
+#[cfg(test)]
+#[allow(unused_variables)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_header_file() {
+        let mut input = "here.h>\nint some;".chars().peekable();
+        let actual = consume_while(&mut input, |c| c != '>' && c != '\n', false);
+
+        let expected = "here.h";
+        let expected_steam = ">\nint some;";
+
+        assert_eq!(actual, expected);
+        assert_eq!(input.collect::<String>(), expected_steam);
     }
 }

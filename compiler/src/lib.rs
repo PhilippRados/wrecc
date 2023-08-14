@@ -4,10 +4,11 @@ mod parser;
 mod scanner;
 mod typechecker;
 
-use codegen::{codegen::*, register_allocation::*};
 pub use common::error::*;
+pub use scanner::*;
+
+use codegen::{codegen::*, register_allocation::*};
 use parser::*;
-use scanner::*;
 use typechecker::*;
 
 pub fn compile(filename: &str, source: &str) -> Result<String, Vec<Error>> {

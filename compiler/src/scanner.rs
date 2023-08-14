@@ -182,13 +182,7 @@ impl<'a> Scanner<'a> {
 
                 '/' => {
                     if self.matches('/') {
-                        // there has to be a better way to consume the iter without the first \n
-                        while self
-                            .source
-                            .by_ref()
-                            .next_if(|&c| c != '\n' && c != '\0')
-                            .is_some()
-                        {}
+                        consume_while(&mut self.source, |c| c != '\n' && c != '\0', false);
                     } else if self.matches('*') {
                         // parse multiline comment
                         self.column += 2;
@@ -228,21 +222,16 @@ impl<'a> Scanner<'a> {
                 },
                 '#' => {
                     // to properly locate error in header-file need to change source-file and index when showing error
-                    match self.consume_until_new(vec![':']).as_ref() {
+                    match consume_while(&mut self.source, |c| c != ':', true).as_ref() {
                         "pro" => {
-                            self.source.next();
+                            let header_name = consume_while(&mut self.source, |c| c != '\n', true);
 
-                            let header_name = self.consume_until_new(vec!['\n']);
-                            self.source.next();
                             self.actual_line.push(2); // 2 because #pro: is on line 1
                             self.original_line = 1;
                             self.filenames.push(header_name);
                         }
                         "epi" => {
-                            self.source.next();
-
-                            let num = self.consume_until_new(vec!['\0']);
-                            self.source.next();
+                            let num = consume_while(&mut self.source, |c| c != '\0', true);
 
                             self.original_line = num.parse::<i32>().unwrap();
                             *self.actual_line.last_mut().unwrap() +=
@@ -257,14 +246,9 @@ impl<'a> Scanner<'a> {
                 _ => {
                     if c.is_ascii_digit() {
                         // Number
-                        let mut num = String::new();
-                        // have to prepend already consumed char
-                        num.push(c);
+                        let num = c.to_string()
+                            + &consume_while(&mut self.source, |c| c.is_ascii_digit(), false);
 
-                        while let Some(digit) = self.source.by_ref().next_if(|c| c.is_ascii_digit())
-                        {
-                            num.push(digit);
-                        }
                         match num.parse::<i64>() {
                             Ok(n) => self.add_token(&mut tokens, TokenType::Number(n)),
                             Err(e) => {
@@ -278,20 +262,18 @@ impl<'a> Scanner<'a> {
                         }
                     } else if c.is_alphabetic() || c == '_' {
                         // Identifier
-                        let mut value = String::new();
-                        value.push(c);
-                        while let Some(v) = self
-                            .source
-                            .by_ref()
-                            .next_if(|c| c.is_alphabetic() || *c == '_' || c.is_ascii_digit())
-                        {
-                            value.push(v);
-                        }
-                        if let Some(kw) = self.keywords.get(&value as &str) {
+                        let ident = c.to_string()
+                            + &consume_while(
+                                &mut self.source,
+                                |c| c.is_alphabetic() || c == '_' || c.is_ascii_digit(),
+                                false,
+                            );
+
+                        if let Some(kw) = self.keywords.get(ident.as_str()) {
                             self.add_token(&mut tokens, kw.clone());
                         } else {
                             // use 0 as placeholder value for symbol table index
-                            self.add_token(&mut tokens, TokenType::Ident(value.to_string(), 0))
+                            self.add_token(&mut tokens, TokenType::Ident(ident, 0))
                         }
                     } else {
                         errors.push(Error::new(self, ErrorKind::UnexpectedChar(c)));
@@ -340,14 +322,14 @@ impl<'a> Scanner<'a> {
             char = match self.escape_char(char_to_escape) {
                 Ok(c) => c,
                 Err(e) => {
-                    self.consume_until('\'');
+                    consume_while(&mut self.source, |c| c != '\'', true);
                     return Err(e);
                 }
             }
         }
         if !self.matches('\'') {
             // finish parsing the char so that scanner synchronizes
-            self.consume_until('\'');
+            consume_while(&mut self.source, |c| c != '\'', true);
             return Err(Error::new(self, ErrorKind::CharLiteralQuotes));
         }
         if !char.is_ascii() {
@@ -371,45 +353,40 @@ impl<'a> Scanner<'a> {
 
     fn string(&mut self) -> Result<String, Error> {
         let mut last_char = '\0';
-        let result = self
-            .source
-            .by_ref()
-            .take_while(|c| {
-                last_char = *c;
-                *c != '"'
-            })
-            .collect::<String>();
+        let result = consume_while(
+            &mut self.source,
+            |c| {
+                last_char = c;
+                c != '"'
+            },
+            true,
+        );
         if last_char != '"' {
             return Err(Error::new(self, ErrorKind::UnterminatedString));
         }
 
         Ok(result)
     }
-    fn consume_until(&mut self, end: char) {
-        self.source
-            .by_ref()
-            .take_while(|c| *c != end)
-            .for_each(|_| {});
-    }
-    fn consume_until_new(&mut self, expected: Vec<char>) -> String {
-        let mut consumed = String::new();
+}
 
-        while let Some(v) = self.source.by_ref().next_if(|c| !expected.contains(c)) {
-            consumed.push(v);
+// Consumes the char-string until an expected character is found.
+// if included flag is true then iterator also consumes expected char
+pub fn consume_while<F>(source: &mut Peekable<Chars>, mut predicate: F, included: bool) -> String
+where
+    F: FnMut(char) -> bool,
+{
+    let mut consumed = String::new();
+
+    match included {
+        true => consumed = source.by_ref().take_while(|c| predicate(*c)).collect(),
+        false => {
+            while let Some(v) = source.by_ref().next_if(|c| predicate(*c)) {
+                consumed.push(v);
+            }
         }
-
-        consumed
     }
 
-    // fn consume_while(&mut self, expected: Vec<char>) -> String {
-    //     let mut consumed = String::new();
-
-    //     while let Some(v) = self.source.by_ref().next_if(|c| expected.contains(c)) {
-    //         consumed.push(v);
-    //     }
-
-    //     consumed
-    // }
+    consumed
 }
 
 impl<'a> Location for Scanner<'a> {
@@ -429,7 +406,6 @@ impl<'a> Location for Scanner<'a> {
 }
 
 #[cfg(test)]
-#[allow(unused_variables)]
 mod tests {
     use super::*;
 
@@ -669,5 +645,28 @@ mod tests {
             TokenType::Ellipsis,
         ];
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn consume_while_included() {
+        let mut input = "pro: <here.h>".chars().peekable();
+        let actual = consume_while(&mut input, |c| c != ':', true);
+
+        let expected = "pro";
+        let expected_steam = " <here.h>";
+
+        assert_eq!(actual, expected);
+        assert_eq!(input.collect::<String>(), expected_steam);
+    }
+    #[test]
+    fn consume_while_excluded() {
+        let mut input = "pro: <here.h>".chars().peekable();
+        let actual = consume_while(&mut input, |c| c != ':', false);
+
+        let expected = "pro";
+        let expected_steam = ": <here.h>";
+
+        assert_eq!(actual, expected);
+        assert_eq!(input.collect::<String>(), expected_steam);
     }
 }

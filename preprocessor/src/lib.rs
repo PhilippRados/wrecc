@@ -44,85 +44,107 @@ impl<'a> Preprocessor<'a> {
 
         Ok(header_prologue + &data + &header_epilogue)
     }
+
+    fn consume_comment(&mut self) -> String {
+        let mut result = String::new();
+
+        match self.source.next() {
+            Some(c @ '/') => {
+                result.push(c);
+                result.push_str(&consume_while(
+                    &mut self.source,
+                    |c| c != '\n' && c != '\0',
+                    false,
+                ));
+            }
+            Some(c @ '*') => {
+                result.push(c);
+                while let Some(c) = self.source.next() {
+                    result.push(c);
+                    match c {
+                        '\n' => {
+                            self.line += 1;
+                        }
+                        '*' => match self.source.next() {
+                            Some(c @ '/') => {
+                                result.push(c);
+                                self.column += 2;
+                                break;
+                            }
+                            Some(c) => result.push(c),
+                            None => (),
+                        },
+                        _ => self.column += 1,
+                    }
+                }
+            }
+            Some(c) => result.push(c),
+            None => (),
+        }
+        result
+    }
     pub fn preprocess(mut self) -> Result<String, Vec<Error>> {
         let mut result = String::from("");
         let mut errors = Vec::new();
 
         while let Some(c) = self.source.next() {
             match c {
-                '#' => match consume_while(&mut self.source, |c| c != ' ' && c != '\t', false)
-                    .as_ref()
-                {
-                    "include" => {
-                        consume_while(&mut self.source, |c| c == ' ' || c == '\t', false);
+                '#' if is_first_line_token(&result) => {
+                    match consume_while(&mut self.source, |c| c != ' ' && c != '\t', false).as_ref()
+                    {
+                        "include" => {
+                            consume_while(&mut self.source, |c| c == ' ' || c == '\t', false);
 
-                        match self.source.next() {
-                            Some('<') => {
-                                let file = consume_while(
-                                    &mut self.source,
-                                    |c| c != '>' && c != '\n',
-                                    false,
-                                );
+                            match self.source.next() {
+                                Some('<') => {
+                                    let file = consume_while(
+                                        &mut self.source,
+                                        |c| c != '>' && c != '\n',
+                                        false,
+                                    );
 
-                                if let Some('\n') = self.source.next() {
-                                    errors.push(Error::new(
-                                        &self,
-                                        ErrorKind::Regular(
-                                            "Expected closing '>' after header file",
-                                        ),
-                                    ));
-                                    continue;
-                                }
-
-                                match self.paste_header(&file) {
-                                    Ok(header_data) => result.push_str(&header_data),
-                                    Err(e) => {
-                                        errors.push(e);
+                                    if let Some('\n') = self.source.next() {
+                                        errors.push(Error::new(
+                                            &self,
+                                            ErrorKind::Regular(
+                                                "Expected closing '>' after header file",
+                                            ),
+                                        ));
                                         continue;
                                     }
+
+                                    match self.paste_header(&file) {
+                                        Ok(header_data) => result.push_str(&header_data),
+                                        Err(e) => {
+                                            errors.push(e);
+                                            continue;
+                                        }
+                                    }
                                 }
+                                Some('"') => todo!(),
+                                _ => errors.push(Error::new(
+                                    &self,
+                                    ErrorKind::Regular(
+                                        "Expected opening '<' or '\"' after include directive",
+                                    ),
+                                )),
                             }
-                            Some('"') => todo!(),
-                            _ => errors.push(Error::new(
-                                &self,
-                                ErrorKind::Regular(
-                                    "Expected opening '<' or '\"' after include directive",
-                                ),
-                            )),
                         }
+                        directive => errors.push(Error::new(
+                            &self,
+                            ErrorKind::InvalidDirective(directive.to_string()),
+                        )),
                     }
-                    d => errors.push(Error::new(
-                        &self,
-                        ErrorKind::InvalidDirective(d.to_string()),
-                    )),
-                },
+                }
+
+                // have to consume comments/string/chars seperately so that # directives aren't processed
                 '/' => {
-                    // if self.matches('/') {
-                    //     // there has to be a better way to consume the iter without the first \n
-                    //     while self
-                    //         .source
-                    //         .by_ref()
-                    //         .next_if(|&c| c != '\n' && c != '\0')
-                    //         .is_some()
-                    //     {}
-                    // } else if self.matches('*') {
-                    //     // parse multiline comment
-                    //     self.column += 2;
-                    //     while let Some(c) = self.source.next() {
-                    //         match c {
-                    //             '\n' => {
-                    //                 self.line += 1;
-                    //                 self.column = 1
-                    //             }
-                    //             '*' if self.matches('/') => {
-                    //                 self.column += 2;
-                    //                 break;
-                    //             }
-                    //             _ => self.column += 1,
-                    //         }
-                    //     }
-                    // }
                     result.push(c);
+                    result.push_str(&self.consume_comment());
+                }
+                '"' | '\'' => {
+                    result.push(c);
+                    result.push_str(&consume_while(&mut self.source, |ch| ch != c, false));
                 }
                 '\n' => {
                     self.line += 1;
@@ -154,6 +176,17 @@ impl<'a> Location for Preprocessor<'a> {
     }
 }
 
+fn is_first_line_token(prev_tokens: &str) -> bool {
+    for c in prev_tokens.chars().rev() {
+        match c {
+            '\n' => return true,
+            ' ' | '\t' => (),
+            _ => return false,
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 #[allow(unused_variables)]
 mod tests {
@@ -169,5 +202,14 @@ mod tests {
 
         assert_eq!(actual, expected);
         assert_eq!(input.collect::<String>(), expected_steam);
+    }
+
+    #[test]
+    fn first_line_token() {
+        assert_eq!(is_first_line_token(""), true);
+        assert_eq!(is_first_line_token("\n  \t "), true);
+        assert_eq!(is_first_line_token("\nint\n "), true);
+        assert_eq!(is_first_line_token("\nint "), false);
+        assert_eq!(is_first_line_token("+ "), false);
     }
 }

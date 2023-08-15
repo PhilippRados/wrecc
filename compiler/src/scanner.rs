@@ -222,7 +222,8 @@ impl<'a> Scanner<'a> {
                 },
                 '#' => {
                     // to properly locate error in header-file need to change source-file and index when showing error
-                    match consume_while(&mut self.source, |c| c != ':', true).as_ref() {
+                    match consume_while(&mut self.source, |c| c != ':' && c != '\n', true).as_ref()
+                    {
                         "pro" => {
                             let header_name = consume_while(&mut self.source, |c| c != '\n', true);
 
@@ -238,7 +239,10 @@ impl<'a> Scanner<'a> {
                                 self.actual_line.pop().unwrap() - 1;
                             self.filenames.pop();
                         }
-                        _ => unreachable!(),
+                        other => {
+                            errors.push(Error::new(self, ErrorKind::UnexpectedChar(c)));
+                            self.column += other.len() as i32;
+                        }
                     }
                     self.column = 1;
                 }

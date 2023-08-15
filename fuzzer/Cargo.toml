@@ -7,6 +7,5 @@ edition = "2021"
 
 [dependencies]
 afl = "*"
-
-[dependencies.compiler]
-path = "../compiler"
+preprocessor = { path = "../preprocessor/" }
+compiler = { path = "../compiler/" }

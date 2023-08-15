@@ -49,6 +49,8 @@ fn run() -> Result<(), Vec<Error>> {
     let preprocessed_source =
         Preprocessor::new(&cli_options.file_path, &original_source).preprocess()?;
 
+    // eprintln!("{}", &preprocessed_source);
+
     let output = compile(&cli_options.file_path, &preprocessed_source)?;
 
     generate_output_file(output);

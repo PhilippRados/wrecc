@@ -83,6 +83,27 @@ impl<'a> Preprocessor<'a> {
         }
         result
     }
+    fn include(&mut self) -> Result<String, Error> {
+        match self.source.next() {
+            Some('<') => {
+                let file = consume_while(&mut self.source, |c| c != '>' && c != '\n', false);
+
+                if let Some('\n') = self.source.next() {
+                    return Err(Error::new(
+                        self,
+                        ErrorKind::Regular("Expected closing '>' after header file"),
+                    ));
+                }
+
+                self.paste_header(&file)
+            }
+            Some('"') => todo!(),
+            _ => Err(Error::new(
+                self,
+                ErrorKind::Regular("Expected opening '<' or '\"' after include directive"),
+            )),
+        }
+    }
     pub fn preprocess(mut self) -> Result<String, Vec<Error>> {
         let mut result = String::from("");
         let mut errors = Vec::new();
@@ -95,39 +116,12 @@ impl<'a> Preprocessor<'a> {
                         "include" => {
                             consume_while(&mut self.source, |c| c == ' ' || c == '\t', false);
 
-                            match self.source.next() {
-                                Some('<') => {
-                                    let file = consume_while(
-                                        &mut self.source,
-                                        |c| c != '>' && c != '\n',
-                                        false,
-                                    );
-
-                                    if let Some('\n') = self.source.next() {
-                                        errors.push(Error::new(
-                                            &self,
-                                            ErrorKind::Regular(
-                                                "Expected closing '>' after header file",
-                                            ),
-                                        ));
-                                        continue;
-                                    }
-
-                                    match self.paste_header(&file) {
-                                        Ok(header_data) => result.push_str(&header_data),
-                                        Err(e) => {
-                                            errors.push(e);
-                                            continue;
-                                        }
-                                    }
+                            match self.include() {
+                                Ok(header_data) => result.push_str(&header_data),
+                                Err(e) => {
+                                    errors.push(e);
+                                    continue;
                                 }
-                                Some('"') => todo!(),
-                                _ => errors.push(Error::new(
-                                    &self,
-                                    ErrorKind::Regular(
-                                        "Expected opening '<' or '\"' after include directive",
-                                    ),
-                                )),
                             }
                         }
                         directive => errors.push(Error::new(

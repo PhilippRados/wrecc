@@ -1,0 +1,12 @@
+Error: in stdio.h: Can only define functions in global scope
+|
+30 int printf(char *s, ...);
+|      ^
+Error: in stdio.h: Can only define functions in global scope
+|
+31 int putc(int c, FILE *f);
+|      ^
+Error: in tests/fixtures/includes_header_err.c: Undeclared symbol 'printf'
+|
+15   printf("not header #include <file.h>");
+|    ^

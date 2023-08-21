@@ -7,7 +7,7 @@ pub struct Scanner<'a> {
     source: Peekable<Chars<'a>>,
     pub raw_source: Vec<String>,
     // line number of source after preprocessor
-    pub actual_line: Vec<i32>,
+    pub actual_line: i32,
     // line number of unpreprocessed source
     pub original_line: i32,
     pub column: i32,
@@ -23,7 +23,7 @@ impl<'a> Scanner<'a> {
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
             filenames: vec![filename.to_string()],
-            actual_line: vec![1],
+            actual_line: 1,
             original_line: 1,
             column: 1,
             keywords: HashMap::from([
@@ -189,7 +189,7 @@ impl<'a> Scanner<'a> {
                         while let Some(c) = self.source.next() {
                             match c {
                                 '\n' => {
-                                    *self.actual_line.last_mut().unwrap() += 1;
+                                    self.actual_line += 1;
                                     self.original_line += 1;
                                     self.column = 1
                                 }
@@ -207,7 +207,7 @@ impl<'a> Scanner<'a> {
                 }
                 ' ' | '\r' | '\t' => self.column += 1,
                 '\n' => {
-                    *self.actual_line.last_mut().unwrap() += 1;
+                    self.actual_line += 1;
                     self.original_line += 1;
                     self.column = 1
                 }
@@ -227,7 +227,7 @@ impl<'a> Scanner<'a> {
                         "pro" => {
                             let header_name = consume_while(&mut self.source, |c| c != '\n', true);
 
-                            self.actual_line.push(2); // 2 because #pro: is on line 1
+                            self.actual_line += 1;
                             self.original_line = 1;
                             self.filenames.push(header_name);
                         }
@@ -235,8 +235,6 @@ impl<'a> Scanner<'a> {
                             let num = consume_while(&mut self.source, |c| c != '\0', true);
 
                             self.original_line = num.parse::<i32>().unwrap();
-                            *self.actual_line.last_mut().unwrap() +=
-                                self.actual_line.pop().unwrap() - 1;
                             self.filenames.pop();
                         }
                         other => {
@@ -374,7 +372,7 @@ impl<'a> Scanner<'a> {
 }
 
 // Consumes the char-string until an expected character is found.
-// if included flag is true then iterator also consumes expected char
+// if included flag is true then iterator also consumes expected char but expected char isnt included in return String
 pub fn consume_while<F>(source: &mut Peekable<Chars>, mut predicate: F, included: bool) -> String
 where
     F: FnMut(char) -> bool,
@@ -401,7 +399,7 @@ impl<'a> Location for Scanner<'a> {
         self.column
     }
     fn line_string(&self) -> String {
-        self.raw_source[(self.actual_line.last().unwrap() - 1) as usize].clone()
+        self.raw_source[(self.actual_line - 1) as usize].clone()
     }
 
     fn filename(&self) -> String {

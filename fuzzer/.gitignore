@@ -1,3 +1,4 @@
 target
 outputs
 Cargo.lock
+pending_crashes/

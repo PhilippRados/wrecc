@@ -189,9 +189,7 @@ impl<'a> Scanner<'a> {
                         while let Some(c) = self.source.next() {
                             match c {
                                 '\n' => {
-                                    self.actual_line += 1;
-                                    self.original_line += 1;
-                                    self.column = 1
+                                    self.newline();
                                 }
                                 '*' if self.matches('/') => {
                                     self.column += 2;
@@ -206,11 +204,7 @@ impl<'a> Scanner<'a> {
                     }
                 }
                 ' ' | '\r' | '\t' => self.column += 1,
-                '\n' => {
-                    self.actual_line += 1;
-                    self.original_line += 1;
-                    self.column = 1
-                }
+                '\n' => self.newline(),
 
                 '"' => match self.string() {
                     Ok(string) => self.add_token(&mut tokens, TokenType::String(string.clone())),
@@ -298,6 +292,11 @@ impl<'a> Scanner<'a> {
             Err(errors)
         }
     }
+    fn newline(&mut self) {
+        self.actual_line += 1;
+        self.original_line += 1;
+        self.column = 1
+    }
 
     fn matches(&mut self, expected: char) -> bool {
         match self.source.peek() {
@@ -355,14 +354,32 @@ impl<'a> Scanner<'a> {
 
     fn string(&mut self) -> Result<String, Error> {
         let mut last_char = '\0';
-        let result = consume_while(
-            &mut self.source,
-            |c| {
+        let mut result = String::new();
+
+        while let Some(c) = self.source.next() {
+            if c == '"' {
                 last_char = c;
-                c != '"'
-            },
-            true,
-        );
+                break;
+            }
+            // handle multiline-strings
+            if c == '\n' {
+                if last_char == '\\' {
+                    self.newline();
+
+                    last_char = c;
+                    result.pop();
+                } else {
+                    let err = Err(Error::new(self, ErrorKind::UnterminatedString));
+                    self.newline();
+
+                    return err;
+                }
+            } else {
+                last_char = c;
+                result.push(c);
+            }
+        }
+
         if last_char != '"' {
             return Err(Error::new(self, ErrorKind::UnterminatedString));
         }
@@ -670,5 +687,72 @@ mod tests {
 
         assert_eq!(actual, expected);
         assert_eq!(input.collect::<String>(), expected_steam);
+    }
+
+    #[test]
+    fn handle_newline_string() {
+        let input: String = vec!['"', 'h', 'a', '\\', 'n', 'l', '"']
+            .into_iter()
+            .collect();
+
+        let mut scanner = Scanner::new("", &input);
+        let actual: Vec<TokenType> = scanner
+            .scan_token()
+            .unwrap()
+            .into_iter()
+            .map(|e| e.token)
+            .collect();
+
+        let expected = vec![TokenType::String("ha\\nl".to_string())];
+
+        assert_eq!(actual, expected);
+
+        // doesn't increase line_index if newline in string
+        assert_eq!(scanner.actual_line, 1);
+    }
+
+    #[test]
+    fn handle_multiline_string() {
+        let input: String = vec!['"', 'h', 'a', '\\', '\n', 'l', '"']
+            .into_iter()
+            .collect();
+
+        let mut scanner = Scanner::new("", &input);
+        let actual: Vec<TokenType> = scanner
+            .scan_token()
+            .unwrap()
+            .into_iter()
+            .map(|e| e.token)
+            .collect();
+        let expected = vec![TokenType::String("hal".to_string())];
+
+        assert_eq!(actual, expected);
+
+        // increases line_index if multiline-string
+        assert_eq!(scanner.actual_line, 2);
+    }
+    #[test]
+    fn multiline_string_err() {
+        let input: String = vec!['"', 'h', 'a', '\n', 'l', '"'].into_iter().collect();
+
+        let actual = setup_generic_err(&input);
+        let expected = vec![
+            Error {
+                line_index: 1,
+                column: 1,
+                filename: String::from(""),
+                line_string: "\"ha".to_string(),
+                kind: ErrorKind::UnterminatedString,
+            },
+            Error {
+                line_index: 2,
+                line_string: "l\"".to_string(),
+                column: 2,
+                filename: "".to_string(),
+                kind: ErrorKind::UnterminatedString,
+            },
+        ];
+
+        assert_eq!(actual, expected);
     }
 }

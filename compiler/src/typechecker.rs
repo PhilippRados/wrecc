@@ -874,16 +874,19 @@ impl TypeChecker {
         &self,
         left_paren: &Token,
         func_name: String,
-        params: &[(NEWTypes, Token)],
+        params: &[(NEWTypes, Option<Token>)],
         args: Vec<(&mut Expr, NEWTypes)>,
     ) -> Result<(), Error> {
-        for ((expr, arg_type), (param_type, param_token)) in args.into_iter().zip(params) {
+        for (index, ((expr, arg_type), (param_type, param_token))) in
+            args.into_iter().zip(params).enumerate()
+        {
             self.check_type_compatibility(left_paren, param_type, &arg_type)
                 .or(Err(Error::new(
                     left_paren,
                     ErrorKind::MismatchedArgs(
+                        index,
                         func_name.clone(),
-                        param_token.unwrap_string(),
+                        param_token.clone(),
                         param_type.clone(),
                         arg_type.clone(),
                     ),

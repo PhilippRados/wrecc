@@ -61,18 +61,19 @@ pub enum ErrorKind {
     NotAssignable(NEWTypes),
     NotLvalue,
     MismatchedArity(String, usize, usize),
-    MismatchedArgs(String, String, NEWTypes, NEWTypes),
+    MismatchedArgs(usize, String, Option<Token>, NEWTypes, NEWTypes),
     InvalidLogical(TokenType, NEWTypes, NEWTypes),
     InvalidBinary(TokenType, NEWTypes, NEWTypes),
     InvalidDerefType(NEWTypes),
     InvalidArrayReturn,
     MismatchedFunctionReturn(NEWTypes, NEWTypes),
     InvalidUnary(TokenType, NEWTypes, &'static str),
+    UnnamedFuncParams,
 
     // environment errors
     MismatchedFuncDeclReturn(NEWTypes, NEWTypes),
     MismatchedFuncDeclArity(usize, usize),
-    TypeMismatchFuncDecl(NEWTypes, NEWTypes),
+    TypeMismatchFuncDecl(usize, NEWTypes, NEWTypes),
     MismatchedVariadic(bool, bool),
     UndeclaredSymbol(String),
     IntegerOverflow(NEWTypes),
@@ -252,11 +253,21 @@ impl ErrorKind {
                     name, expected, actual
                 )
             }
-            ErrorKind::MismatchedArgs(func_name, param_name, expected, actual) => {
-                format!(
-                    "Mismatched arguments in function '{}': expected parameter '{}' to be of type '{}', found '{}'",
-                    func_name, param_name, expected, actual
-                )
+            ErrorKind::MismatchedArgs(index, func_name, param_name, expected, actual) => {
+                match param_name {
+                    Some(name) => {
+                        format!(
+                            "Mismatched arguments in function '{}': expected parameter '{}' to be of type '{}', found '{}'",
+                            func_name,name.unwrap_string(), expected, actual
+                        )
+                    }
+                    None => {
+                        format!(
+                            "Mismatched arguments in function '{}': expected {} parameter to be of type '{}', found '{}'",
+                            func_name,num_to_ord(index + 1),  expected, actual
+                        )
+                    }
+                }
             }
             ErrorKind::InvalidLogical(token, left_type, right_type) => {
                 format!(
@@ -311,9 +322,9 @@ impl ErrorKind {
                     bool_to_msg(*actual),
                 )
             }
-            ErrorKind::TypeMismatchFuncDecl(expected, actual) => {
-                format!("Mismatched parameter-types in function-declarations: expected '{}', found '{}'",
-                            expected,actual)
+            ErrorKind::TypeMismatchFuncDecl(index, expected, actual) => {
+                format!("Mismatched parameter-types in function-declarations: expected {} parameter to be of type '{}', found '{}'",
+                            num_to_ord(index + 1),expected,actual)
             }
             ErrorKind::UndeclaredSymbol(name) => {
                 format!("Undeclared symbol '{}'", name)
@@ -323,6 +334,9 @@ impl ErrorKind {
                     "Invalid unary-expression {} with type '{}'. Must be {}-type",
                     token, right_type, kind
                 )
+            }
+            ErrorKind::UnnamedFuncParams => {
+                "Unnamed parameters are not allowed in function definitions".to_string()
             }
 
             ErrorKind::InvalidHeader(s) => format!("{} is not a valid header file", s),
@@ -335,6 +349,15 @@ impl ErrorKind {
                 unreachable!("should be turned into vec<error> and print seperate errors")
             }
         }
+    }
+}
+
+fn num_to_ord(n: usize) -> String {
+    match n {
+        1 => "1st".to_string(),
+        2 => "2nd".to_string(),
+        3 => "3rd".to_string(),
+        _ => n.to_string() + "th",
     }
 }
 

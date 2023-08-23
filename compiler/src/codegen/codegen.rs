@@ -483,7 +483,13 @@ impl Compiler {
         self.current_bp_offset = 0;
 
         // generate function code
-        self.cg_func_preamble(&name, params);
+        self.cg_func_preamble(
+            &name,
+            params
+                .into_iter()
+                .map(|(t, name)| (t, name.expect("all parameters to be named")))
+                .collect(),
+        );
         self.cg_stmts(body);
         self.cg_func_postamble(name, function_epilogue);
 

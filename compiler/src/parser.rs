@@ -844,7 +844,7 @@ impl Parser {
 
         Ok(elements)
     }
-    fn parse_params(&mut self) -> Result<(Vec<(NEWTypes, Token)>, bool), Error> {
+    fn parse_params(&mut self) -> Result<(Vec<(NEWTypes, Option<Token>)>, bool), Error> {
         let mut params = Vec::new();
         let mut variadic = false;
 
@@ -862,18 +862,21 @@ impl Parser {
             }
 
             let mut param_type = self.matches_specifier()?;
-            let mut name = self.consume(TokenKind::Ident, "Expect identifier after type")?;
+            let mut name = self.matches(vec![TokenKind::Ident]);
 
             param_type = self.parse_arr(param_type)?;
             if let NEWTypes::Array { of, .. } = param_type {
                 param_type = NEWTypes::Pointer(of);
             }
-            // insert parameters into symbol table
-            let index = self.env.declare_symbol(
-                &name,
-                Symbols::Variable(SymbolInfo::new(param_type.clone())),
-            )?;
-            name.token.update_index(index);
+
+            if let Some(name) = &mut name {
+                // insert parameters into symbol table
+                let index = self.env.declare_symbol(
+                    &name,
+                    Symbols::Variable(SymbolInfo::new(param_type.clone())),
+                )?;
+                name.token.update_index(index);
+            }
 
             params.push((param_type, name));
 
@@ -906,8 +909,8 @@ impl Parser {
 
         name.token.update_index(index);
 
-        // params can't be in same scope as function-name so
-        // they get added after they have been parsed
+        // params can't be in same scope as function-name so they get added after they
+        // have been parsed
         self.env.enter();
         let (params, variadic) = self.parse_params()?;
 
@@ -920,20 +923,20 @@ impl Parser {
     }
     fn function_definition(&mut self, name: Token) -> Result<Stmt, Error> {
         let index = name.token.get_index();
-        let return_type = self
-            .env
-            .get_mut_symbol(index)
-            .unwrap_func()
-            .return_type
-            .clone();
+        let func = self.env.get_mut_symbol(index).unwrap_func();
+
+        let return_type = func.return_type.clone();
         if !return_type.is_complete() && !return_type.is_void() {
             return Err(Error::new(
                 &name,
                 ErrorKind::IncompleteReturnType(name.unwrap_string(), return_type),
             ));
         }
+        if func.has_unnamed_params() {
+            return Err(Error::new(&name, ErrorKind::UnnamedFuncParams));
+        }
 
-        self.env.get_mut_symbol(index).unwrap_func().kind = FunctionKind::Definition;
+        func.kind = FunctionKind::Definition;
         let body = self.block()?;
 
         Ok(Stmt::Function(name, body))

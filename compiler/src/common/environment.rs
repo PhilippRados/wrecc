@@ -9,7 +9,9 @@ pub enum FunctionKind {
 }
 #[derive(Clone, PartialEq, Debug)]
 pub struct Function {
-    pub params: Vec<(NEWTypes, Token)>,
+    // parameters to a function with it's corresponding name
+    // a parameter-name is optional in a function declaration
+    pub params: Vec<(NEWTypes, Option<Token>)>,
     pub return_type: NEWTypes,
 
     // if function contains var-args
@@ -63,16 +65,30 @@ impl Function {
                 ErrorKind::MismatchedVariadic(self.variadic, other.variadic),
             ))
         } else {
-            for (i, (types, token)) in self.params.iter().enumerate() {
+            for (i, (types, param_token)) in self.params.iter().enumerate() {
                 if *types != other.params[i].0 {
                     return Err(Error::new(
-                        token,
-                        ErrorKind::TypeMismatchFuncDecl(other.params[i].0.clone(), types.clone()),
+                        if let Some(param) = param_token {
+                            param
+                        } else {
+                            token
+                        },
+                        ErrorKind::TypeMismatchFuncDecl(
+                            i,
+                            other.params[i].0.clone(),
+                            types.clone(),
+                        ),
                     ));
                 }
             }
             Ok(())
         }
+    }
+    pub fn has_unnamed_params(&self) -> bool {
+        self.params
+            .iter()
+            .map(|(_, name)| name)
+            .any(|name| name.is_none())
     }
 }
 

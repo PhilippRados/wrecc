@@ -884,10 +884,23 @@ impl Parser {
                 break;
             }
         }
-        self.consume(
+        let paren = self.consume(
             TokenKind::RightParen,
             "Expect ')' after function parameters",
         )?;
+
+        // single unnamed void param is equivalent to empty params
+        if let [(NEWTypes::Primitive(Types::Void), None)] = params.as_slice() {
+            params.pop();
+        } else {
+            if params
+                .iter()
+                .find(|(type_decl, _)| type_decl.is_void())
+                .is_some()
+            {
+                return Err(Error::new(&paren, ErrorKind::VoidFuncArg));
+            }
+        }
 
         Ok((params, variadic))
     }
@@ -932,6 +945,14 @@ impl Parser {
                 ErrorKind::IncompleteReturnType(name.unwrap_string(), return_type),
             ));
         }
+
+        if let Some(param_type) = func.has_incomplete_params() {
+            return Err(Error::new(
+                &name,
+                ErrorKind::IncompleteFuncArg(name.unwrap_string(), param_type.clone()),
+            ));
+        }
+
         if func.has_unnamed_params() {
             return Err(Error::new(&name, ErrorKind::UnnamedFuncParams));
         }

@@ -325,7 +325,7 @@ impl NEWTypes {
         }
     }
     // used in parser to check if type contains any incomplete type when accessing it's members
-    // would be better to check in typechecker but at that point type could be comeplete
+    // would be better to check in typechecker but at that point type could be complete
     pub fn is_complete(&self) -> bool {
         match self {
             NEWTypes::Struct(s) | NEWTypes::Union(s) => s.is_complete(),

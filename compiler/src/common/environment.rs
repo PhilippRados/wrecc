@@ -90,6 +90,13 @@ impl Function {
             .map(|(_, name)| name)
             .any(|name| name.is_none())
     }
+
+    pub fn has_incomplete_params(&self) -> Option<&NEWTypes> {
+        self.params
+            .iter()
+            .map(|(type_decl, _)| type_decl)
+            .find(|type_decl| !type_decl.is_complete())
+    }
 }
 
 #[derive(Clone, Debug)]

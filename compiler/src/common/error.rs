@@ -20,6 +20,8 @@ pub enum ErrorKind {
     EnumOverflow,
     IncompleteType(NEWTypes),
     IncompleteReturnType(String, NEWTypes),
+    IncompleteFuncArg(String, NEWTypes),
+    VoidFuncArg,
     IncompleteMemberAccess(NEWTypes),
     TypeAlreadyExists(String, TokenType),
     EnumForwardDecl,
@@ -140,6 +142,16 @@ impl ErrorKind {
                     "Can't access members of type that contains incomplete type '{}'",
                     type_decl
                 )
+            }
+            ErrorKind::IncompleteFuncArg(func_name, type_decl) => {
+                format!(
+                    "Function '{}' contains incomplete type '{}' as parameter",
+                    func_name, type_decl
+                )
+            }
+            ErrorKind::VoidFuncArg => {
+                "Function argument 'void' must be first and only unnamed argument if specified"
+                    .to_string()
             }
             ErrorKind::TypeAlreadyExists(name, token) => {
                 format!("Type '{}' already exists but not as {}", name, token)

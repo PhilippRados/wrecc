@@ -3,27 +3,27 @@
 typedef char *FILE;
 typedef long fpos_t;
 
-#define stdin *FILE
-#define stdout *FILE
-#define stderr *FILE
-
-#define _IOFBF 0
-#define _IOLBF 1
-#define _IONBF 2
-
-#define BUFSIZ 1024
-#define EOF (-1)
-
-#define FOPEN_MAX 20
-#define FILENAME_MAX 1024
-
-#define SEEK_SET 0
-#define SEEK_CUR 1
-#define SEEK_END 2
-
-#define TMP_MAX 308915776
-
-#define L_tmpnam 1024
+// #define stdin *FILE
+// #define stdout *FILE
+// #define stderr *FILE
+//
+// #define _IOFBF 0
+// #define _IOLBF 1
+// #define _IONBF 2
+//
+// #define BUFSIZ 1024
+// #define EOF (-1)
+//
+// #define FOPEN_MAX 20
+// #define FILENAME_MAX 1024
+//
+// #define SEEK_SET 0
+// #define SEEK_CUR 1
+// #define SEEK_END 2
+//
+// #define TMP_MAX 308915776
+//
+// #define L_tmpnam 1024
 
 void clearerr(FILE *);
 int fclose(FILE *);

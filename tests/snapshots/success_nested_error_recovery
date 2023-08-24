@@ -26,4 +26,4 @@ Error: in tests/fixtures/nested_error_recovery.c: Undeclared symbol 'foo'
 |
 14   for (;;foo-);
 |           ^
-Error: in : Expected closing '}' after Block, found end of file
+Error: in current file: Expected closing '}' after Block, found end of file

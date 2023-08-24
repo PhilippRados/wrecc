@@ -353,7 +353,7 @@ impl ErrorKind {
 
             ErrorKind::InvalidHeader(s) => format!("{} is not a valid header file", s),
             ErrorKind::InvalidDirective(s) => {
-                format!("{} is not a valid preprocessor directive", s)
+                format!("'#{}' is not a valid preprocessor directive", s)
             }
 
             ErrorKind::Regular(s) => s.to_string(),
@@ -416,16 +416,27 @@ impl Error {
         }
     }
     pub fn eof(expected: &'static str) -> Self {
+        // TODO: have correct location info
         Error {
             line_index: -1,
             line_string: String::from(""),
-            filename: String::from(""),
+            filename: String::from("current file"),
             column: -1,
             kind: ErrorKind::Eof(expected),
         }
     }
     pub fn print_error(&self) {
-        eprintln!("Error: in {}: {}", self.filename, self.kind.message());
+        let included = if file_suffix(&self.filename) == ".h" {
+            "included file "
+        } else {
+            ""
+        };
+        eprintln!(
+            "Error: in {}{}: {}",
+            included,
+            self.filename,
+            self.kind.message()
+        );
 
         if self.line_index != -1 {
             let line_length = self.line_index.to_string().len();
@@ -444,6 +455,10 @@ impl Error {
         eprintln!("rucc: {msg}");
         std::process::exit(exit_code);
     }
+}
+fn file_suffix(filename: &str) -> &str {
+    assert!(filename.len() > 2);
+    &filename[filename.len() - 2..]
 }
 pub trait Location {
     fn line_index(&self) -> i32;

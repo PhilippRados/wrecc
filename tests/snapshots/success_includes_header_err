@@ -1,10 +1,66 @@
-Error: in stdio.h: Can only define functions in global scope
+Error: in included file ctype.h: Can only define functions in global scope
 |
-30 int printf(char *, ...);
+1 int isalnum(int);
+|     ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+2 int isalpha(int);
+|     ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+3 int isblank(int);
+|     ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+4 int iscntrl(int);
+|     ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+5 int isdigit(int);
+|     ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+6 int isgraph(int);
+|     ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+7 int islower(int);
+|     ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+8 int isprint(int);
+|     ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+9 int ispunct(int);
+|     ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+10 int isspace(int);
 |      ^
-Error: in stdio.h: Can only define functions in global scope
+Error: in included file ctype.h: Can only define functions in global scope
 |
-31 int putc(int, FILE *);
+11 int isupper(int);
+|      ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+12 int isxdigit(int);
+|      ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+13 int tolower(int);
+|      ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+14 int toupper(int);
+|      ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+15 int isascii(int);
+|      ^
+Error: in included file ctype.h: Can only define functions in global scope
+|
+16 int toascii(int);
 |      ^
 Error: in tests/fixtures/includes_header_err.c: Undeclared symbol 'printf'
 |

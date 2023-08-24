@@ -28,15 +28,17 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
-    fn paste_header(&self, file_path: &str) -> Result<String, Error> {
+    fn paste_header(&self, file_path: &str) -> Result<String, Vec<Error>> {
         // WARN: only temporary absolute path. /include will be found via PATH env var
         let abs_path =
             "/Users/philipprados/documents/coding/Rust/rucc/include/".to_string() + file_path;
 
-        let data = fs::read_to_string(&abs_path).or(Err(Error::new(
+        let data = fs::read_to_string(&abs_path).or(Err(vec![Error::new(
             self,
             ErrorKind::InvalidHeader(file_path.to_string()),
-        )))?;
+        )]))?;
+
+        let data = Preprocessor::new(&file_path, &data).preprocess()?;
 
         let header_prologue = format!("#pro:{}\n", file_path);
         // TODO: maybe can use same marker token \n
@@ -83,25 +85,25 @@ impl<'a> Preprocessor<'a> {
         }
         result
     }
-    fn include(&mut self) -> Result<String, Error> {
+    fn include(&mut self) -> Result<String, Vec<Error>> {
         match self.source.next() {
             Some('<') => {
                 let file = consume_while(&mut self.source, |c| c != '>' && c != '\n', false);
 
                 if let Some('\n') = self.source.next() {
-                    return Err(Error::new(
+                    return Err(vec![Error::new(
                         self,
                         ErrorKind::Regular("Expected closing '>' after header file"),
-                    ));
+                    )]);
                 }
 
                 self.paste_header(&file)
             }
             Some('"') => todo!(),
-            _ => Err(Error::new(
+            _ => Err(vec![Error::new(
                 self,
                 ErrorKind::Regular("Expected opening '<' or '\"' after include directive"),
-            )),
+            )]),
         }
     }
     pub fn preprocess(mut self) -> Result<String, Vec<Error>> {
@@ -116,13 +118,7 @@ impl<'a> Preprocessor<'a> {
                         "include" => {
                             consume_while(&mut self.source, |c| c == ' ' || c == '\t', false);
 
-                            match self.include() {
-                                Ok(header_data) => result.push_str(&header_data),
-                                Err(e) => {
-                                    errors.push(e);
-                                    continue;
-                                }
-                            }
+                            result.push_str(&self.include()?)
                         }
                         directive => errors.push(Error::new(
                             &self,

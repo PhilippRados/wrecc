@@ -1,56 +1,71 @@
+#include <stddef.h>
+
 typedef char *FILE;
 typedef long fpos_t;
-typedef long size_t;
 
-// void clearerr(FILE *);
-// int fclose(FILE *);
-// int feof(FILE *);
-// int ferror(FILE *);
-// int fflush(FILE *);
-// int fgetc(FILE *);
-// int fgetpos(FILE *__restrict, fpos_t *);
-// char *fgets(char *__restrict, int, FILE *);
-// FILE *fopen(char *filename, char *mode);
+#define stdin *FILE
+#define stdout *FILE
+#define stderr *FILE
 
-// int fprintf(FILE *__restrict, const char *__restrict, ...);
-// int fputc(int, FILE *);
-// int fputs(const char *__restrict, FILE *__restrict);
-// size_t fread(void *__restrict __ptr, size_t __size, size_t __nitems,
-//              FILE *__restrict __stream);
-// FILE *freopen(const char *__restrict, const char *__restrict, FILE
-// *__restrict); int fscanf(FILE *__restrict, const char *__restrict, ...); int
-// fseek(FILE *, long, int); int fsetpos(FILE *, const fpos_t *); long
-// ftell(FILE *); size_t fwrite(const void *__restrict __ptr, size_t __size,
-// size_t __nitems,
-//               FILE *__restrict __stream);
-// int getc(FILE *);
-// int getchar(void);
-// char *gets(char *);
-// void perror(const char *);
+#define _IOFBF 0
+#define _IOLBF 1
+#define _IONBF 2
+
+#define BUFSIZ 1024
+#define EOF (-1)
+
+#define FOPEN_MAX 20
+#define FILENAME_MAX 1024
+
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
+#define TMP_MAX 308915776
+
+#define L_tmpnam 1024
+
+void clearerr(FILE *);
+int fclose(FILE *);
+int feof(FILE *);
+int ferror(FILE *);
+int fflush(FILE *);
+int fgetc(FILE *);
+int fgetpos(FILE *, fpos_t *);
+char *fgets(char *, int, FILE *);
+FILE *fopen(char *, char *);
+
+int fprintf(FILE *, char *, ...);
+int fputc(int, FILE *);
+int fputs(char *, FILE *);
+size_t fread(void *, size_t, size_t, FILE *);
+FILE *freopen(char *, char *, FILE *);
+int fscanf(FILE *, char *, ...);
+int fseek(FILE *, long, int);
+int fsetpos(FILE *, fpos_t *);
+long ftell(FILE *);
+size_t fwrite(void *, size_t, size_t, FILE *);
+int getc(FILE *);
+int getchar(void);
+char *gets(char *);
+void perror(char *);
 int printf(char *, ...);
 int putc(int, FILE *);
-// int putchar(int);
-// int puts(const char *);
-// int remove(const char *);
-// int rename(const char *__old, const char *__new);
-// void rewind(FILE *);
-// int scanf(const char *__restrict, ...);
-// void setbuf(FILE *__restrict, char *__restrict);
-// int setvbuf(FILE *__restrict, char *__restrict, int, size_t);
-// int sprintf(char *__restrict, const char *__restrict, ...);
-// int sscanf(const char *__restrict, const char *__restrict, ...);
-// FILE *tmpfile(void);
+int putchar(int);
+int puts(char *);
+int remove(char *);
+int rename(char *, char *);
+void rewind(FILE *);
+int scanf(char *, ...);
+void setbuf(FILE *, char *);
+int setvbuf(FILE *, char *, int, size_t);
+int sprintf(char *, char *, ...);
+int sscanf(char *, char *, ...);
+FILE *tmpfile(void);
 
-// char *tmpnam(char *);
-// int ungetc(int, FILE *);
-// // int vfprintf(FILE *__restrict, const char *__restrict, va_list);
-// // int vprintf(const char *__restrict, va_list);
-// // int vsprintf(char *__restrict, const char *__restrict, va_list);
+char *tmpnam(char *);
+int ungetc(int, FILE *);
 
-// FILE *fdopen(int, const char *);
-
-// int fileno(FILE *);
-
-// int pclose(FILE *);
-
-// FILE *popen(const char *, const char *);
+// int vfprintf(FILE *,  char *, va_list);
+// int vprintf( char *, va_list);
+// int vsprintf(char *,  char *, va_list);

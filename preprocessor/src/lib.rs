@@ -2,6 +2,8 @@ use compiler::consume_while;
 use compiler::Error;
 use compiler::ErrorKind;
 use compiler::Location;
+
+use std::collections::HashMap;
 use std::fs;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -12,6 +14,7 @@ pub struct Preprocessor<'a> {
     line: i32,
     column: i32,
     filename: String,
+    defines: HashMap<String, String>,
 }
 
 impl<'a> Preprocessor<'a> {
@@ -25,10 +28,11 @@ impl<'a> Preprocessor<'a> {
             line: 1,
             column: 1,
             filename: filename.to_string(),
+            defines: HashMap::new(),
         }
     }
 
-    fn paste_header(&self, file_path: &str) -> Result<String, Vec<Error>> {
+    fn paste_header(&mut self, file_path: &str) -> Result<String, Vec<Error>> {
         // WARN: only temporary absolute path. /include will be found via PATH env var
         let abs_path =
             "/Users/philipprados/documents/coding/Rust/rucc/include/".to_string() + file_path;
@@ -38,7 +42,11 @@ impl<'a> Preprocessor<'a> {
             ErrorKind::InvalidHeader(file_path.to_string()),
         )]))?;
 
-        let data = Preprocessor::new(&file_path, &data).preprocess()?;
+        let (data, defines) = Preprocessor::new(&file_path, &data).preprocess()?;
+
+        // TODO: check what happens if two hashmaps have same key
+        // if there were #defines defined in the included file, include them in current file too
+        self.defines.extend(defines);
 
         let header_prologue = format!("#pro:{}\n", file_path);
         // TODO: maybe can use same marker token \n
@@ -106,19 +114,41 @@ impl<'a> Preprocessor<'a> {
             )]),
         }
     }
-    pub fn preprocess(mut self) -> Result<String, Vec<Error>> {
+    fn define(&mut self) -> Result<(), Error> {
+        let identifier = consume_while(&mut self.source, |c| c != ' ' && c != '\t', false);
+        consume_while(&mut self.source, |c| c == ' ' && c == '\t', true);
+
+        let replace_with = consume_while(&mut self.source, |c| c != '\n', false);
+
+        self.defines.insert(identifier, replace_with);
+
+        Ok(())
+    }
+    pub fn preprocess(mut self) -> Result<(String, HashMap<String, String>), Vec<Error>> {
         let mut result = String::from("");
         let mut errors = Vec::new();
 
         while let Some(c) = self.source.next() {
             match c {
                 '#' if is_first_line_token(&result) => {
-                    match consume_while(&mut self.source, |c| c != ' ' && c != '\t', false).as_ref()
+                    match consume_while(
+                        &mut self.source,
+                        |c| c != ' ' && c != '\t' && c != '\n',
+                        false,
+                    )
+                    .as_ref()
                     {
                         "include" => {
                             consume_while(&mut self.source, |c| c == ' ' || c == '\t', false);
 
                             result.push_str(&self.include()?)
+                        }
+                        "define" => {
+                            consume_while(&mut self.source, |c| c == ' ' || c == '\t', false);
+
+                            if let Err(e) = self.define() {
+                                errors.push(e)
+                            }
                         }
                         directive => errors.push(Error::new(
                             &self,
@@ -135,17 +165,34 @@ impl<'a> Preprocessor<'a> {
                 '"' | '\'' => {
                     result.push(c);
                     result.push_str(&consume_while(&mut self.source, |ch| ch != c, false));
+                    if let Some(c) = self.source.next() {
+                        result.push(c)
+                    }
                 }
                 '\n' => {
                     self.line += 1;
                     result.push(c);
+                }
+                _ if c.is_alphabetic() => {
+                    let ident = c.to_string()
+                        + &consume_while(
+                            &mut self.source,
+                            |c| c.is_alphabetic() || c == '_' || c.is_ascii_digit(),
+                            false,
+                        );
+
+                    if let Some(replacement) = self.defines.get(&ident) {
+                        result.push_str(replacement)
+                    } else {
+                        result.push_str(&ident)
+                    }
                 }
                 _ => result.push(c),
             }
         }
 
         if errors.is_empty() {
-            Ok(result)
+            Ok((result, self.defines))
         } else {
             Err(errors)
         }

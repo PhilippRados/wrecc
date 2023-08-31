@@ -34,5 +34,3 @@ void *realloc(void *, size_t);
 int rand(void);
 int abs(int);
 long labs(long);
-div_t div(int, int);
-ldiv_t ldiv(long, long);

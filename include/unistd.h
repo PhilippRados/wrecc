@@ -28,7 +28,7 @@ char *getcwd(char *, size_t);
 gid_t getegid(void);
 uid_t geteuid(void);
 gid_t getgid(void);
-int getgroups(int, gid_t[]);
+int getgroups(int, gid_t *);
 char *getlogin(void);
 pid_t getpgrp(void);
 pid_t getpid(void);

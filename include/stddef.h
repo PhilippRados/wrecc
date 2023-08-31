@@ -1,5 +1,5 @@
 // #ifndef NULL
 #define NULL ((void *)0)
-// #endif
+#endif
 
 typedef long size_t;

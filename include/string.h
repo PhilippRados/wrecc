@@ -2,11 +2,11 @@
 
 void *memchr(void *, int, size_t);
 int memcmp(void *, void *, size_t);
-void *memcpy(void *, void *rc, size_t);
-void *memmove(void *, void *rc, size_t);
+void *memcpy(void *, void *, size_t);
+void *memmove(void *, void *, size_t);
 void *memset(void *, int, size_t);
 char *strcat(char *, char *);
-char *strchr(char *, int __c);
+char *strchr(char *, int);
 int strcmp(char *, char *);
 int strcoll(char *, char *);
 char *strcpy(char *, char *);

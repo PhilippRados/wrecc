@@ -351,7 +351,7 @@ impl ErrorKind {
                 "Unnamed parameters are not allowed in function definitions".to_string()
             }
 
-            ErrorKind::InvalidHeader(s) => format!("{} is not a valid header file", s),
+            ErrorKind::InvalidHeader(s) => format!("'{}' is not a valid header file", s),
             ErrorKind::InvalidDirective(s) => {
                 format!("'#{}' is not a valid preprocessor directive", s)
             }

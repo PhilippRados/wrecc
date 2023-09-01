@@ -1,0 +1,238 @@
+use compiler::Error;
+use compiler::ErrorKind;
+use compiler::Location;
+
+use crate::preprocess;
+use crate::Token;
+
+use std::collections::HashMap;
+use std::fs;
+use std::iter::Peekable;
+use std::vec::IntoIter;
+
+pub struct Preprocessor {
+    tokens: Peekable<IntoIter<Token>>,
+    errors: Vec<Error>,
+    raw_source: Vec<String>,
+    line: i32,
+    column: i32,
+    filename: String,
+    defines: HashMap<String, String>,
+}
+
+impl Preprocessor {
+    pub fn new<'a>(filename: &'a str, input: &'a str, tokens: Vec<Token>) -> Self {
+        Preprocessor {
+            tokens: tokens.into_iter().peekable(),
+            raw_source: input
+                .split('\n')
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>(),
+            errors: Vec::new(),
+            line: 1,
+            column: 1,
+            filename: filename.to_string(),
+            defines: HashMap::new(),
+        }
+    }
+
+    fn paste_header(&mut self, file_path: &str) -> Result<String, ()> {
+        // WARN: only temporary absolute path. /include will be found via PATH env var
+        let abs_path =
+            "/Users/philipprados/documents/coding/Rust/rucc/include/".to_string() + file_path;
+
+        let data = fs::read_to_string(&abs_path).or_else(|_| {
+            Err(self.error(Error::new(
+                self,
+                ErrorKind::InvalidHeader(file_path.to_string()),
+            )))
+        })?;
+
+        let (data, defines) = preprocess(file_path, &data).or_else(|e| Err(self.errors(e)))?;
+
+        // TODO: check what happens if two hashmaps have same key
+        // if there were #defines defined in the included file, include them in current file too
+        self.defines.extend(defines);
+
+        let header_prologue = format!("#pro:{}\n", file_path);
+        // TODO: maybe can use same marker token \n
+        let header_epilogue = format!("#epi:{}\0", self.line_index());
+
+        Ok(header_prologue + &data + &header_epilogue)
+    }
+
+    fn include(&mut self) -> Result<String, ()> {
+        if let Some(Token::String(mut file)) = self.tokens.next() {
+            let kind = file.remove(0);
+
+            match kind {
+                '<' => {
+                    let last = file.pop();
+
+                    if let Some('>') = last {
+                        self.paste_header(&file)
+                    } else {
+                        Err(self.error(Error::new(
+                            self,
+                            ErrorKind::Regular("Expected closing '>' after header file"),
+                        )))
+                    }
+                }
+                '"' => {
+                    todo!()
+                }
+                _ => Err(self.error(Error::new(
+                    self,
+                    ErrorKind::Regular("Expected closing '>' after header file"),
+                ))),
+            }
+        } else {
+            Err(self.error(Error::new(
+                self,
+                ErrorKind::Regular("Expected opening '<' or '\"' after include directive"),
+            )))
+        }
+    }
+    fn define(&mut self) {
+        if let Some(Token::Ident(identifier)) = self.tokens.next() {
+            let replace_with = self.fold_until_newline();
+
+            self.defines.insert(identifier, replace_with);
+        } else {
+            self.error(Error::new(
+                self,
+                ErrorKind::Regular("Macro name must be valid identifier"),
+            ))
+        }
+    }
+
+    pub fn start(mut self) -> Result<(String, HashMap<String, String>), Vec<Error>> {
+        let mut result = String::from("");
+
+        while let Some(token) = self.tokens.next() {
+            match token {
+                Token::Hash if is_first_line_token(&result) => {
+                    self.skip_whitespace(false);
+
+                    match self.tokens.next() {
+                        Some(Token::Include) => {
+                            self.skip_whitespace(true);
+
+                            if let Ok(s) = self.include() {
+                                result.push_str(&s)
+                            }
+                        }
+                        Some(Token::Define) => {
+                            self.skip_whitespace(true);
+
+                            self.define();
+                        }
+                        Some(directive) => self.error(Error::new(
+                            &self,
+                            ErrorKind::InvalidDirective(directive.to_string()),
+                        )),
+                        None => self.error(Error::new(
+                            &self,
+                            ErrorKind::Regular("Expected preprocessor directive following '#'"),
+                        )),
+                    }
+                }
+                Token::Newline => {
+                    self.line += 1;
+                    result.push('\n');
+                }
+                Token::Ident(s) => {
+                    if let Some(replacement) = self.defines.get(&s) {
+                        result.push_str(replacement)
+                    } else {
+                        result.push_str(&s)
+                    }
+                }
+                Token::Other(c) => result.push(c),
+                Token::Comment(s, newlines) => {
+                    self.line += newlines as i32;
+                    result.push_str(&s);
+                }
+                _ => result.push_str(&token.to_string()),
+            }
+        }
+
+        if self.errors.is_empty() {
+            Ok((result, self.defines))
+        } else {
+            Err(self.errors)
+        }
+    }
+    fn error(&mut self, e: Error) {
+        self.errors.push(e)
+    }
+    fn errors(&mut self, mut e: Vec<Error>) {
+        self.errors.append(&mut e)
+    }
+
+    fn skip_whitespace(&mut self, required: bool) {
+        if let Some(Token::Whitespace(_)) = self.tokens.peek() {
+            self.tokens.next();
+            ()
+        } else if required {
+            self.error(Error::new(
+                self,
+                ErrorKind::Regular("Expect whitespace after preprocessing directive"),
+            ))
+        }
+    }
+
+    fn fold_until_newline(&mut self) -> String {
+        let mut result = String::new();
+
+        while let Some(token) = self
+            .tokens
+            .by_ref()
+            .next_if(|t| !matches!(t, Token::Newline))
+        {
+            result.push_str(&token.to_string());
+        }
+        result
+    }
+}
+
+impl Location for Preprocessor {
+    fn line_index(&self) -> i32 {
+        self.line
+    }
+    fn column(&self) -> i32 {
+        self.column
+    }
+    fn line_string(&self) -> String {
+        self.raw_source[(self.line - 1) as usize].clone()
+    }
+    fn filename(&self) -> String {
+        self.filename.to_string()
+    }
+}
+
+fn is_first_line_token(prev_tokens: &str) -> bool {
+    for c in prev_tokens.chars().rev() {
+        match c {
+            '\n' => return true,
+            ' ' | '\t' => (),
+            _ => return false,
+        }
+    }
+    true
+}
+
+#[cfg(test)]
+#[allow(unused_variables)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_line_token() {
+        assert_eq!(is_first_line_token(""), true);
+        assert_eq!(is_first_line_token("\n  \t "), true);
+        assert_eq!(is_first_line_token("\nint\n "), true);
+        assert_eq!(is_first_line_token("\nint "), false);
+        assert_eq!(is_first_line_token("+ "), false);
+    }
+}

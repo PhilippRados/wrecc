@@ -189,10 +189,14 @@ impl Preprocessor {
                         self.tokens.next();
                     } else {
                         self.insert_token(prev);
-                        self.error(Error::new(
-                            self,
-                            ErrorKind::Regular("Expect whitespace after preprocessing directive"),
-                        ));
+                        if required && !found {
+                            self.error(Error::new(
+                                self,
+                                ErrorKind::Regular(
+                                    "Expect whitespace after preprocessing directive",
+                                ),
+                            ));
+                        }
                         break;
                     }
                 }
@@ -272,6 +276,19 @@ fn is_first_line_token(prev_tokens: &str) -> bool {
 #[allow(unused_variables)]
 mod tests {
     use super::*;
+    use crate::Scanner;
+
+    fn scan(input: &str) -> Vec<Token> {
+        Scanner::new(input).scan_token()
+    }
+    fn setup(input: &str) -> (Vec<Token>, Vec<Error>) {
+        let tokens = scan(input);
+
+        let mut pp = Preprocessor::new("", input, tokens);
+        pp.skip_whitespace(true);
+
+        (pp.tokens.collect(), pp.errors)
+    }
 
     #[test]
     fn first_line_token() {
@@ -280,5 +297,50 @@ mod tests {
         assert_eq!(is_first_line_token("\nint\n "), true);
         assert_eq!(is_first_line_token("\nint "), false);
         assert_eq!(is_first_line_token("+ "), false);
+    }
+
+    #[test]
+    fn skips_multiline_whitespace() {
+        let (tokens, errors) = setup("  \\\n \n#include");
+        let expected = scan("\n#include");
+
+        assert_eq!(tokens, expected);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn skips_multiline_whitespace2() {
+        let (tokens, errors) = setup("  \\\n\n#include");
+        let expected = scan("\n#include");
+
+        assert_eq!(tokens, expected);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn skips_multiline_whitespace3() {
+        let (tokens, errors) = setup(" \\include");
+        let expected = scan("\\include");
+
+        assert_eq!(tokens, expected);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn skips_multiline_whitespace_error() {
+        let (tokens, errors) = setup("\\\n#include");
+        let expected = scan("#include");
+
+        assert_eq!(tokens, expected);
+        assert_eq!(errors.len(), 1);
+    }
+
+    #[test]
+    fn skips_multiline_whitespace_error2() {
+        let (tokens, errors) = setup("\\some\n#include");
+        let expected = scan("\\some\n#include");
+
+        assert_eq!(tokens, expected);
+        assert_eq!(errors.len(), 1);
     }
 }

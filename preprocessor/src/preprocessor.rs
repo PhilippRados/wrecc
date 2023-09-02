@@ -62,7 +62,8 @@ impl Preprocessor {
     }
 
     fn include(&mut self) -> Result<String, ()> {
-        if let Some(Token::String(mut file)) = self.tokens.next() {
+        if let Some(Token::String(mut file, newlines)) = self.tokens.next() {
+            self.line += newlines as i32;
             let kind = file.remove(0);
 
             match kind {
@@ -95,6 +96,7 @@ impl Preprocessor {
     }
     fn define(&mut self) {
         if let Some(Token::Ident(identifier)) = self.tokens.next() {
+            self.skip_whitespace(true);
             let replace_with = self.fold_until_newline();
 
             self.defines.insert(identifier, replace_with);
@@ -149,7 +151,7 @@ impl Preprocessor {
                     }
                 }
                 Token::Other(c) => result.push(c),
-                Token::Comment(s, newlines) => {
+                Token::Comment(s, newlines) | Token::String(s, newlines) => {
                     self.line += newlines as i32;
                     result.push_str(&s);
                 }
@@ -171,28 +173,72 @@ impl Preprocessor {
     }
 
     fn skip_whitespace(&mut self, required: bool) {
-        if let Some(Token::Whitespace(_)) = self.tokens.peek() {
-            self.tokens.next();
-            ()
-        } else if required {
-            self.error(Error::new(
-                self,
-                ErrorKind::Regular("Expect whitespace after preprocessing directive"),
-            ))
+        let mut found = false;
+
+        while let Some(token) = self.tokens.peek() {
+            match token {
+                Token::Whitespace(_) => {
+                    self.tokens.next();
+                    found = true;
+                }
+                Token::Other('\\') => {
+                    let prev = self.tokens.next().unwrap();
+
+                    if let Some(Token::Newline) = self.tokens.peek() {
+                        self.line += 1;
+                        self.tokens.next();
+                    } else {
+                        self.insert_token(prev);
+                        self.error(Error::new(
+                            self,
+                            ErrorKind::Regular("Expect whitespace after preprocessing directive"),
+                        ));
+                        break;
+                    }
+                }
+                _ if required && !found => {
+                    self.error(Error::new(
+                        self,
+                        ErrorKind::Regular("Expect whitespace after preprocessing directive"),
+                    ));
+                    break;
+                }
+                _ => break,
+            }
         }
     }
 
     fn fold_until_newline(&mut self) -> String {
         let mut result = String::new();
+        let mut prev_token = Token::Newline;
 
-        while let Some(token) = self
-            .tokens
-            .by_ref()
-            .next_if(|t| !matches!(t, Token::Newline))
-        {
-            result.push_str(&token.to_string());
+        while let Some(token) = self.tokens.peek() {
+            match (&prev_token, token) {
+                (Token::Other('\\'), Token::Newline) => {
+                    self.tokens.next();
+                    result.pop();
+                    self.line += 1;
+                }
+                (_, Token::Newline) => break,
+                (.., t) => {
+                    if let Token::String(_, newline) = t {
+                        self.line += *newline as i32;
+                    }
+                    let token = self.tokens.next().unwrap();
+                    result.push_str(&token.to_string());
+                    prev_token = token.clone();
+                }
+            }
         }
         result
+    }
+
+    fn insert_token(&mut self, token: Token) {
+        let mut start = vec![token];
+        while let Some(t) = self.tokens.next() {
+            start.push(t);
+        }
+        self.tokens = start.into_iter().peekable();
     }
 }
 

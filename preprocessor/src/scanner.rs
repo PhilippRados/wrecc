@@ -4,12 +4,12 @@ use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     Hash,
     Include,
     Define,
-    String(String),
+    String(String, usize),
     Ident(String),
     Newline,
     Whitespace(String),
@@ -23,7 +23,7 @@ impl ToString for Token {
             Token::Include => "include".to_string(),
             Token::Define => "define".to_string(),
             Token::Newline => "\\n".to_string(),
-            Token::Comment(s, _) | Token::String(s) | Token::Ident(s) | Token::Whitespace(s) => {
+            Token::Comment(s, _) | Token::String(s, _) | Token::Ident(s) | Token::Whitespace(s) => {
                 s.to_string()
             }
             Token::Other(c) => c.to_string(),
@@ -56,22 +56,18 @@ impl<'a> Scanner<'a> {
                     Token::Whitespace(c.to_string() + &more_whitespace)
                 }
                 '"' | '\'' | '<' => {
-                    let mut s = String::from(c);
-                    s.push_str(&consume_while(
-                        &mut self.source,
-                        |ch| if c == '<' { ch != '>' } else { ch != c },
-                        false,
-                    ));
-                    if let Some(c) = self.source.next() {
-                        s.push(c)
-                    }
+                    let (s, newlines) = self.string(c);
 
-                    Token::String(s)
+                    Token::String(s, newlines)
                 }
                 '/' => {
                     let (comment, newlines) = self.consume_comment();
 
-                    Token::Comment(c.to_string() + &comment, newlines)
+                    if comment.is_empty() {
+                        Token::Other('/')
+                    } else {
+                        Token::Comment(c.to_string() + &comment, newlines)
+                    }
                 }
                 _ if c.is_alphabetic() || c == '_' => {
                     let ident = c.to_string()
@@ -93,6 +89,32 @@ impl<'a> Scanner<'a> {
             result.push(token);
         }
         result
+    }
+    fn string(&mut self, c: char) -> (String, usize) {
+        let mut result = String::from(c);
+        let mut newlines = 0;
+        let mut prev_char = '\0';
+
+        while let Some(peeked) = self.source.peek() {
+            match (prev_char, peeked) {
+                ('\\', '\n') => {
+                    self.source.next();
+                    result.pop();
+                    newlines += 1;
+                }
+                (_, '\n') => break,
+                (..) if *peeked == matching_closing(c) => {
+                    result.push(self.source.next().unwrap());
+                    break;
+                }
+                (..) => {
+                    let peeked = self.source.next().unwrap();
+                    result.push_str(&peeked.to_string());
+                    prev_char = peeked.clone();
+                }
+            }
+        }
+        (result, newlines)
     }
     fn consume_comment(&mut self) -> (String, usize) {
         let mut result = String::new();
@@ -135,20 +157,83 @@ impl<'a> Scanner<'a> {
     }
 }
 
+fn matching_closing(opening: char) -> char {
+    match opening {
+        '<' => '>',
+        '\'' => '\'',
+        '"' => '"',
+        _ => unreachable!("invalid opening string indicator"),
+    }
+}
+
 #[cfg(test)]
 #[allow(unused_variables)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_header_file() {
-        let mut input = "here.h>\nint some;".chars().peekable();
-        let actual = consume_while(&mut input, |c| c != '>' && c != '\n', false);
+    fn setup(input: &str) -> Vec<Token> {
+        Scanner::new(input).scan_token()
+    }
 
-        let expected = "here.h";
-        let expected_steam = ">\nint some;";
+    #[test]
+    fn simple_pp_directive() {
+        let actual = setup("#  include <'some'>");
+        let expected = vec![
+            Token::Hash,
+            Token::Whitespace("  ".to_string()),
+            Token::Include,
+            Token::Whitespace(" ".to_string()),
+            Token::String("<'some'>".to_string(), 0),
+        ];
 
         assert_eq!(actual, expected);
-        assert_eq!(input.collect::<String>(), expected_steam);
+    }
+
+    #[test]
+    fn string() {
+        let actual = setup("#define <some/* #*/define>");
+        let expected = vec![
+            Token::Hash,
+            Token::Define,
+            Token::Whitespace(" ".to_string()),
+            Token::String("<some/* #*/define>".to_string(), 0),
+        ];
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn ident() {
+        let actual = setup("1first 2 some23: else");
+        let expected = vec![
+            Token::Other('1'),
+            Token::Ident("first".to_string()),
+            Token::Whitespace(" ".to_string()),
+            Token::Other('2'),
+            Token::Whitespace(" ".to_string()),
+            Token::Ident("some23".to_string()),
+            Token::Other(':'),
+            Token::Whitespace(" ".to_string()),
+            Token::Ident("else".to_string()),
+        ];
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn macro_name() {
+        let actual = setup("#define NULL((void *)0)");
+        let expected = vec![
+            Token::Hash,
+            Token::Define,
+            Token::Whitespace(" ".to_string()),
+            Token::Ident("NULL".to_string()),
+            Token::Other('('),
+            Token::Other('('),
+            Token::Ident("void".to_string()),
+            Token::Whitespace(" ".to_string()),
+            Token::Other('*'),
+            Token::Other(')'),
+            Token::Other('0'),
+            Token::Other(')'),
+        ];
     }
 }

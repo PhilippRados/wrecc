@@ -1,0 +1,12 @@
+Error: in tests/fixtures/multiline_pp_err.c: Expected opening '<' or '"' after include directive
+|
+4 #include /<some.h>
+| ^
+Error: in tests/fixtures/multiline_pp_err.c: '#äefe' is not a valid preprocessor directive
+|
+15 #äefe
+|  ^
+Error: in tests/fixtures/multiline_pp_err.c: Expected closing '>' after header file
+|
+17 #include <some
+|  ^

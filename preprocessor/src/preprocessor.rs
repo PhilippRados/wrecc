@@ -2,7 +2,7 @@ use compiler::Error;
 use compiler::ErrorKind;
 use compiler::Location;
 
-use crate::preprocess;
+use crate::preprocess_included;
 use crate::Token;
 
 use std::collections::HashMap;
@@ -21,7 +21,12 @@ pub struct Preprocessor {
 }
 
 impl Preprocessor {
-    pub fn new<'a>(filename: &'a str, input: &'a str, tokens: Vec<Token>) -> Self {
+    pub fn new<'a>(
+        filename: &'a str,
+        input: &'a str,
+        tokens: Vec<Token>,
+        pre_defines: Option<HashMap<String, String>>,
+    ) -> Self {
         Preprocessor {
             tokens: tokens.into_iter().peekable(),
             raw_source: input
@@ -32,7 +37,11 @@ impl Preprocessor {
             line: 1,
             column: 1,
             filename: filename.to_string(),
-            defines: HashMap::new(),
+            defines: if let Some(defines) = pre_defines {
+                defines
+            } else {
+                HashMap::new()
+            },
         }
     }
 
@@ -48,14 +57,12 @@ impl Preprocessor {
             )))
         })?;
 
-        let (data, defines) = preprocess(file_path, &data).or_else(|e| Err(self.errors(e)))?;
+        let (data, defines) = preprocess_included(file_path, &data, self.defines.clone())
+            .or_else(|e| Err(self.errors(e)))?;
 
-        // TODO: check what happens if two hashmaps have same key
-        // if there were #defines defined in the included file, include them in current file too
         self.defines.extend(defines);
 
         let header_prologue = format!("#pro:{}\n", file_path);
-        // TODO: maybe can use same marker token \n
         let header_epilogue = format!("#epi:{}\0", self.line_index());
 
         Ok(header_prologue + &data + &header_epilogue)
@@ -103,8 +110,15 @@ impl Preprocessor {
             let _ = self.skip_whitespace();
             let replace_with = self.fold_until_newline();
 
-            self.defines.insert(identifier, replace_with);
-            Ok(())
+            if self.defines.contains_key(&identifier) {
+                Err(Error::new(
+                    self,
+                    ErrorKind::Redefinition("macro", identifier),
+                ))
+            } else {
+                self.defines.insert(identifier, replace_with);
+                Ok(())
+            }
         } else {
             Err(Error::new(
                 self,
@@ -280,7 +294,7 @@ mod tests {
     fn setup(input: &str) -> (Vec<Token>, bool) {
         let tokens = scan(input);
 
-        let mut pp = Preprocessor::new("", input, tokens);
+        let mut pp = Preprocessor::new("", input, tokens, None);
         let result = pp.skip_whitespace();
 
         (pp.tokens.collect(), result.is_err())

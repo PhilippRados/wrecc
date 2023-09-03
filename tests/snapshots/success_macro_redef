@@ -1,0 +1,8 @@
+Error: in included file stddef.h: Redefinition of macro 'NULL'
+|
+2 #define NULL ((void *)0)
+| ^
+Error: in tests/fixtures/macro_redef.c: Redefinition of macro 'NULL'
+|
+3 #define NULL 1
+| ^

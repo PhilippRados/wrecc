@@ -46,7 +46,7 @@ fn run() -> Result<(), Vec<Error>> {
     let cli_options = process_cmd_arguments();
 
     let original_source = read_input_file(&cli_options.file_path);
-    let (preprocessed_source, _) = preprocess(&cli_options.file_path, &original_source)?;
+    let preprocessed_source = preprocess(&cli_options.file_path, &original_source)?;
 
     // eprintln!("{}", &preprocessed_source);
 

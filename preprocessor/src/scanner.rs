@@ -98,9 +98,10 @@ impl<'a> Scanner<'a> {
         while let Some(peeked) = self.source.peek() {
             match (prev_char, peeked) {
                 ('\\', '\n') => {
-                    self.source.next();
+                    let token = self.source.next().unwrap();
                     result.pop();
                     newlines += 1;
+                    prev_char = token;
                 }
                 (_, '\n') => break,
                 (..) if *peeked == matching_closing(c) => {
@@ -108,9 +109,9 @@ impl<'a> Scanner<'a> {
                     break;
                 }
                 (..) => {
-                    let peeked = self.source.next().unwrap();
-                    result.push_str(&peeked.to_string());
-                    prev_char = peeked.clone();
+                    let token = self.source.next().unwrap();
+                    result.push_str(&token.to_string());
+                    prev_char = token;
                 }
             }
         }
@@ -235,5 +236,43 @@ mod tests {
             Token::Other('0'),
             Token::Other(')'),
         ];
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn multiline_string_escaped() {
+        let actual = setup(" <some\\\n\\else>");
+        let expected = vec![
+            Token::Whitespace(" ".to_string()),
+            Token::String("<some\\else>".to_string(), 1),
+        ];
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn multiline_string_multiple_escapes() {
+        let actual = setup(" <some\\\n\nelse>");
+        let expected = vec![
+            Token::Whitespace(" ".to_string()),
+            Token::String("<some".to_string(), 1),
+            Token::Newline,
+            Token::Ident("else".to_string()),
+            Token::Other('>'),
+        ];
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn multiline_string_unescaped() {
+        let actual = setup(" <some\nelse>");
+        let expected = vec![
+            Token::Whitespace(" ".to_string()),
+            Token::String("<some".to_string(), 0),
+            Token::Newline,
+            Token::Ident("else".to_string()),
+            Token::Other('>'),
+        ];
+
+        assert_eq!(actual, expected);
     }
 }

@@ -62,6 +62,8 @@ impl Preprocessor {
     }
 
     fn include(&mut self) -> Result<String, ()> {
+        self.skip_whitespace().or_else(|e| Err(self.error(e)))?;
+
         if let Some(Token::String(mut file, newlines)) = self.tokens.next() {
             self.line += newlines as i32;
             let kind = file.remove(0);
@@ -84,7 +86,7 @@ impl Preprocessor {
                 }
                 _ => Err(self.error(Error::new(
                     self,
-                    ErrorKind::Regular("Expected closing '>' after header file"),
+                    ErrorKind::Regular("Expected opening '<' or '\"' after include directive"),
                 ))),
             }
         } else {
@@ -94,14 +96,17 @@ impl Preprocessor {
             )))
         }
     }
-    fn define(&mut self) {
+    fn define(&mut self) -> Result<(), Error> {
+        self.skip_whitespace()?;
+
         if let Some(Token::Ident(identifier)) = self.tokens.next() {
-            self.skip_whitespace(true);
+            let _ = self.skip_whitespace();
             let replace_with = self.fold_until_newline();
 
             self.defines.insert(identifier, replace_with);
+            Ok(())
         } else {
-            self.error(Error::new(
+            Err(Error::new(
                 self,
                 ErrorKind::Regular("Macro name must be valid identifier"),
             ))
@@ -114,20 +119,18 @@ impl Preprocessor {
         while let Some(token) = self.tokens.next() {
             match token {
                 Token::Hash if is_first_line_token(&result) => {
-                    self.skip_whitespace(false);
+                    let _ = self.skip_whitespace();
 
                     match self.tokens.next() {
                         Some(Token::Include) => {
-                            self.skip_whitespace(true);
-
                             if let Ok(s) = self.include() {
                                 result.push_str(&s)
                             }
                         }
                         Some(Token::Define) => {
-                            self.skip_whitespace(true);
-
-                            self.define();
+                            if let Err(e) = self.define() {
+                                self.error(e);
+                            }
                         }
                         Some(directive) => self.error(Error::new(
                             &self,
@@ -172,7 +175,7 @@ impl Preprocessor {
         self.errors.append(&mut e)
     }
 
-    fn skip_whitespace(&mut self, required: bool) {
+    fn skip_whitespace(&mut self) -> Result<(), Error> {
         let mut found = false;
 
         while let Some(token) = self.tokens.peek() {
@@ -189,26 +192,19 @@ impl Preprocessor {
                         self.tokens.next();
                     } else {
                         self.insert_token(prev);
-                        if required && !found {
-                            self.error(Error::new(
-                                self,
-                                ErrorKind::Regular(
-                                    "Expect whitespace after preprocessing directive",
-                                ),
-                            ));
-                        }
                         break;
                     }
                 }
-                _ if required && !found => {
-                    self.error(Error::new(
-                        self,
-                        ErrorKind::Regular("Expect whitespace after preprocessing directive"),
-                    ));
-                    break;
-                }
                 _ => break,
             }
+        }
+        if found {
+            Ok(())
+        } else {
+            Err(Error::new(
+                self,
+                ErrorKind::Regular("Expect whitespace after preprocessing directive"),
+            ))
         }
     }
 
@@ -281,13 +277,13 @@ mod tests {
     fn scan(input: &str) -> Vec<Token> {
         Scanner::new(input).scan_token()
     }
-    fn setup(input: &str) -> (Vec<Token>, Vec<Error>) {
+    fn setup(input: &str) -> (Vec<Token>, bool) {
         let tokens = scan(input);
 
         let mut pp = Preprocessor::new("", input, tokens);
-        pp.skip_whitespace(true);
+        let result = pp.skip_whitespace();
 
-        (pp.tokens.collect(), pp.errors)
+        (pp.tokens.collect(), result.is_err())
     }
 
     #[test]
@@ -305,7 +301,7 @@ mod tests {
         let expected = scan("\n#include");
 
         assert_eq!(tokens, expected);
-        assert!(errors.is_empty());
+        assert_eq!(errors, false);
     }
 
     #[test]
@@ -314,7 +310,7 @@ mod tests {
         let expected = scan("\n#include");
 
         assert_eq!(tokens, expected);
-        assert!(errors.is_empty());
+        assert_eq!(errors, false);
     }
 
     #[test]
@@ -323,7 +319,7 @@ mod tests {
         let expected = scan("\\include");
 
         assert_eq!(tokens, expected);
-        assert!(errors.is_empty());
+        assert_eq!(errors, false);
     }
 
     #[test]
@@ -332,7 +328,7 @@ mod tests {
         let expected = scan("#include");
 
         assert_eq!(tokens, expected);
-        assert_eq!(errors.len(), 1);
+        assert_eq!(errors, true);
     }
 
     #[test]
@@ -341,6 +337,6 @@ mod tests {
         let expected = scan("\\some\n#include");
 
         assert_eq!(tokens, expected);
-        assert_eq!(errors.len(), 1);
+        assert_eq!(errors, true);
     }
 }

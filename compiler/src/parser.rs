@@ -1128,7 +1128,7 @@ impl Parser {
             let operator = token;
             let right = self.comparison()?;
             expr = Expr::new(
-                ExprKind::Binary {
+                ExprKind::Comparison {
                     left: Box::new(expr),
                     token: operator,
                     right: Box::new(right),
@@ -1150,7 +1150,7 @@ impl Parser {
             let operator = token;
             let right = self.shift()?;
             expr = Expr::new(
-                ExprKind::Binary {
+                ExprKind::Comparison {
                     left: Box::new(expr),
                     token: operator,
                     right: Box::new(right),

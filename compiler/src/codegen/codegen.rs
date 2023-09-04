@@ -670,6 +670,7 @@ impl Compiler {
                 self.cg_unary(token, *right, ast.type_decl.unwrap())
             }
             ExprKind::Logical { left, token, right } => self.cg_logical(*left, token, *right),
+            ExprKind::Comparison { left, token, right } => self.compare(*left, token, *right),
             ExprKind::Assign { l_expr, r_expr, .. } => {
                 let left_reg = self.execute_expr(*l_expr);
                 let right_reg = self.execute_expr(*r_expr);
@@ -1011,6 +1012,55 @@ impl Compiler {
             _ => unreachable!(),
         }
     }
+    fn compare(&mut self, left: Expr, token: Token, right: Expr) -> Register {
+        let left_reg = self.execute_expr(left);
+        let right_reg = self.execute_expr(right);
+
+        let (left_reg, right_reg) = (
+            self.convert_to_rval(left_reg),
+            self.convert_to_rval(right_reg),
+        );
+
+        match token.token {
+            TokenType::EqualEqual => self.cg_comparison("sete", left_reg, right_reg),
+            TokenType::BangEqual => self.cg_comparison("setne", left_reg, right_reg),
+            TokenType::Greater => self.cg_comparison("setg", left_reg, right_reg),
+            TokenType::GreaterEqual => self.cg_comparison("setge", left_reg, right_reg),
+            TokenType::Less => self.cg_comparison("setl", left_reg, right_reg),
+            TokenType::LessEqual => self.cg_comparison("setle", left_reg, right_reg),
+            _ => unreachable!(),
+        }
+    }
+
+    fn cg_comparison(
+        &mut self,
+        operator: &'static str,
+        left: Register,
+        right: Register,
+    ) -> Register {
+        let left = convert_reg!(
+            self,
+            left,
+            Register::Stack(..) | Register::Label(..) | Register::Literal(..)
+        );
+        let mut right = convert_reg!(
+            self,
+            right,
+            Register::Stack(..) | Register::Label(..) | Register::Literal(..)
+        );
+        self.write_out(Ir::Cmp(right.clone(), left.clone()));
+        self.write_out(Ir::Set(operator));
+
+        right.set_type(NEWTypes::Primitive(Types::Int));
+        self.write_out(Ir::Movz(
+            Register::Return(NEWTypes::Primitive(Types::Char)),
+            right.clone(),
+        ));
+
+        self.free(left);
+        right
+    }
+
     fn cg_or(&mut self, left: Expr, right: Expr) -> Register {
         let mut left = self.execute_expr(left);
         left = convert_reg!(self, left, Register::Literal(..));
@@ -1142,23 +1192,15 @@ impl Compiler {
         self.write_out(Ir::Set("sete"));
 
         let result = Register::Temp(TempRegister::new(
-            reg.get_type(),
+            NEWTypes::Primitive(Types::Int),
             &mut self.interval_counter,
             self.instr_counter,
         ));
 
-        // sets %al to 1 if comparison true and to 0 when false and then copies %al to current reg
-        if reg.get_type() == NEWTypes::Primitive(Types::Char) {
-            self.write_out(Ir::Mov(
-                Register::Return(NEWTypes::Primitive(Types::Char)),
-                result.clone(),
-            ));
-        } else {
-            self.write_out(Ir::Movz(
-                Register::Return(NEWTypes::Primitive(Types::Char)),
-                result.clone(),
-            ));
-        }
+        self.write_out(Ir::Movz(
+            Register::Return(NEWTypes::Primitive(Types::Char)),
+            result.clone(),
+        ));
         self.free(reg);
 
         result
@@ -1334,42 +1376,6 @@ impl Compiler {
 
         left
     }
-    fn cg_comparison(
-        &mut self,
-        operator: &'static str,
-        left: Register,
-        right: Register,
-    ) -> Register {
-        let left = convert_reg!(
-            self,
-            left,
-            Register::Stack(..) | Register::Label(..) | Register::Literal(..)
-        );
-        let right = convert_reg!(
-            self,
-            right,
-            Register::Stack(..) | Register::Label(..) | Register::Literal(..)
-        );
-        self.write_out(Ir::Cmp(right.clone(), left.clone()));
-        self.write_out(Ir::Set(operator));
-
-        // write ZF to %al based on operator and zero extend %right_register with value of %al
-        if right.get_type() == NEWTypes::Primitive(Types::Char) {
-            self.write_out(Ir::Mov(
-                Register::Return(NEWTypes::Primitive(Types::Char)),
-                right.clone(),
-            ));
-        } else {
-            self.write_out(Ir::Movz(
-                Register::Return(NEWTypes::Primitive(Types::Char)),
-                right.clone(),
-            ));
-        }
-
-        self.free(left);
-        right
-    }
-
     fn cg_binary(
         &mut self,
         left_reg: Register,
@@ -1392,12 +1398,6 @@ impl Compiler {
             TokenType::Amp => self.cg_bit_and(left_reg, right_reg),
             TokenType::LessLess => self.cg_shift("l", left_reg, right_reg),
             TokenType::GreaterGreater => self.cg_shift("r", left_reg, right_reg),
-            TokenType::EqualEqual => self.cg_comparison("sete", left_reg, right_reg),
-            TokenType::BangEqual => self.cg_comparison("setne", left_reg, right_reg),
-            TokenType::Greater => self.cg_comparison("setg", left_reg, right_reg),
-            TokenType::GreaterEqual => self.cg_comparison("setge", left_reg, right_reg),
-            TokenType::Less => self.cg_comparison("setl", left_reg, right_reg),
-            TokenType::LessEqual => self.cg_comparison("setle", left_reg, right_reg),
             _ => unreachable!(),
         }
     }

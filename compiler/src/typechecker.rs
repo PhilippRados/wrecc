@@ -616,6 +616,9 @@ impl TypeChecker {
             ExprKind::Logical { left, token, right } => {
                 self.evaluate_logical(left, token, right)?
             }
+            ExprKind::Comparison { left, token, right } => {
+                self.evaluate_comparison(left, token, right)?
+            }
             ExprKind::Ident(token) => self.ident(token)?,
             ExprKind::Assign { l_expr, token, r_expr } => {
                 let l_type = self.expr_type(l_expr)?;
@@ -924,6 +927,43 @@ impl TypeChecker {
 
         Ok(NEWTypes::Primitive(Types::Int))
     }
+    fn evaluate_comparison(
+        &mut self,
+        left: &mut Expr,
+        token: &Token,
+        right: &mut Expr,
+    ) -> Result<NEWTypes, Error> {
+        let mut left_type = self.expr_type(left)?;
+        let mut right_type = self.expr_type(right)?;
+
+        Self::lval_to_rval(left);
+        Self::lval_to_rval(right);
+
+        crate::arr_decay!(left_type, left, token);
+        crate::arr_decay!(right_type, right, token);
+
+        if !left_type.type_compatible(&right_type) || left_type.is_void() || right_type.is_void() {
+            return Err(Error::new(
+                token,
+                ErrorKind::InvalidComp(token.token.clone(), left_type, right_type),
+            ));
+        }
+
+        self.maybe_int_promote(left, &mut left_type);
+        self.maybe_int_promote(right, &mut right_type);
+
+        match left_type.size().cmp(&right_type.size()) {
+            Ordering::Greater => {
+                cast!(right, left_type.clone(), CastDirection::Up);
+            }
+            Ordering::Less => {
+                cast!(left, right_type.clone(), CastDirection::Up);
+            }
+            Ordering::Equal => (),
+        }
+
+        Ok(NEWTypes::Primitive(Types::Int))
+    }
     fn lval_to_rval(expr: &mut Expr) {
         expr.value_kind = ValueKind::Rvalue;
     }
@@ -973,21 +1013,18 @@ impl TypeChecker {
         left: &mut Expr,
         right: &mut Expr,
     ) -> (NEWTypes, Option<usize>) {
-        // resulting type of a shift operation is only dependant on left type
-        if matches!(token, TokenType::GreaterGreater | TokenType::LessLess) {
-            return (left_type, None);
-        }
-        match (&left_type, &right_type) {
-            (l, r) if l.size() > r.size() => {
+        match (&left_type, &right_type, token) {
+            (.., TokenType::GreaterGreater | TokenType::LessLess) => (left_type, None),
+            (l, r, _) if l.size() > r.size() => {
                 cast!(right, left_type.clone(), CastDirection::Up);
                 (left_type, None)
             }
-            (l, r) if l.size() < r.size() => {
+            (l, r, _) if l.size() < r.size() => {
                 cast!(left, right_type.clone(), CastDirection::Up);
                 (right_type, None)
             }
-            // if pointer 'op' pointer, scale result before operation to match left-pointers type
-            (NEWTypes::Pointer(inner), NEWTypes::Pointer(_)) => {
+            // if pointer - pointer, scale result before operation to match left-pointers type
+            (NEWTypes::Pointer(inner), NEWTypes::Pointer(_), _) => {
                 (NEWTypes::Primitive(Types::Long), Some(inner.size()))
             }
             _ => (left_type, None),
@@ -1027,7 +1064,7 @@ impl TypeChecker {
                 TokenType::Star => self.check_deref(token, right_type, ast_valuekind)?,
                 TokenType::Bang => {
                     Self::lval_to_rval(right);
-                    self.maybe_cast(&NEWTypes::Primitive(Types::Int), &right_type, right);
+                    self.maybe_int_promote(right, &mut right_type);
 
                     if !right_type.is_scalar() {
                         return Err(Error::new(
@@ -1125,8 +1162,6 @@ pub fn is_valid_bin(token: &Token, left_type: &NEWTypes, right_type: &NEWTypes) 
         (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => {
             if left_type.type_compatible(right_type) {
                 token.token == TokenType::Minus
-                    || token.token == TokenType::EqualEqual
-                    || token.token == TokenType::BangEqual
             } else {
                 false
             }
@@ -1309,12 +1344,15 @@ mod tests {
     }
 
     #[test]
-    fn logical_type() {
+    fn comp_type() {
         assert_type!("1 == (long)2", NEWTypes::Primitive(Types::Int));
         assert_type!("(char*)1 == (char*)2", NEWTypes::Primitive(Types::Int));
+        assert_type!("1 <= (long)2", NEWTypes::Primitive(Types::Int));
+        assert_type!("(char*)1 > (char*)2", NEWTypes::Primitive(Types::Int));
+        assert_type!("(void*)1 == (long*)2", NEWTypes::Primitive(Types::Int));
 
-        assert_type_err!("1 == (long*)2", ErrorKind::InvalidBinary(..));
-        assert_type_err!("(int*)1 == (long*)2", ErrorKind::InvalidBinary(..));
+        assert_type_err!("1 == (long*)2", ErrorKind::InvalidComp(..));
+        assert_type_err!("(int*)1 == (long*)2", ErrorKind::InvalidComp(..));
     }
 
     #[test]

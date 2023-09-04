@@ -1,0 +1,6 @@
+Inorder traversal 
+5 ->12 ->6 ->1 ->9 ->
+Preorder traversal 
+1 ->12 ->5 ->6 ->9 ->
+Postorder traversal 
+5 ->6 ->12 ->9 ->1 ->

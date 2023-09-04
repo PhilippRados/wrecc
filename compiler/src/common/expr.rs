@@ -31,6 +31,11 @@ pub enum ExprKind {
         token: Token,
         right: Box<Expr>,
     },
+    Comparison {
+        left: Box<Expr>,
+        token: Token,
+        right: Box<Expr>,
+    },
     Call {
         left_paren: Token,
         name: Token,
@@ -155,6 +160,9 @@ impl Expr {
 
             ExprKind::Logical { left, token, right } => {
                 Self::logical_fold(token.clone(), left, right, env)?
+            }
+            ExprKind::Comparison { left, token, right } => {
+                Self::comp_fold(token.clone(), left, right, env)?
             }
             ExprKind::Cast { new_type, token, expr, .. } => {
                 Self::const_cast(token.clone(), new_type.clone(), expr, env)?
@@ -295,16 +303,6 @@ impl Expr {
                     Self::literal_type(token, left_type, right_type, (left_n & right_n, false))?
                 }
 
-                TokenType::BangEqual => Expr::new_literal((left_n != right_n).into(), Types::Int),
-                TokenType::EqualEqual => Expr::new_literal((left_n == right_n).into(), Types::Int),
-
-                TokenType::Greater => Expr::new_literal((left_n > right_n).into(), Types::Int),
-                TokenType::GreaterEqual => {
-                    Expr::new_literal((left_n >= right_n).into(), Types::Int)
-                }
-                TokenType::Less => Expr::new_literal((left_n < right_n).into(), Types::Int),
-                TokenType::LessEqual => Expr::new_literal((left_n <= right_n).into(), Types::Int),
-
                 _ => unreachable!("not binary token"),
             }))
         } else {
@@ -399,24 +397,7 @@ impl Expr {
             (ExprKind::Literal(n), TokenType::Bang) => {
                 Some(Expr::new_literal(if *n == 0 { 1 } else { 0 }, Types::Int))
             }
-            (ExprKind::Literal(n), TokenType::Tilde) => {
-                let right_type = right.type_decl.clone().unwrap();
-
-                if !right_type.is_integer() {
-                    return Err(Error::new(
-                        &token,
-                        ErrorKind::InvalidUnary(token.token.clone(), right_type, "integer"),
-                    ));
-                }
-                // TODO: since unary only has one type => fix passing same type twice
-                Some(Self::literal_type(
-                    token,
-                    right_type.clone(),
-                    right_type,
-                    (!n, false),
-                )?)
-            }
-            (ExprKind::Literal(n), TokenType::Minus | TokenType::Plus) => {
+            (ExprKind::Literal(n), TokenType::Minus | TokenType::Plus | TokenType::Tilde) => {
                 let right_type = right.type_decl.clone().unwrap();
 
                 if !right_type.is_integer() {
@@ -432,6 +413,8 @@ impl Expr {
                     right_type,
                     if token.token == TokenType::Plus {
                         (*n, false)
+                    } else if token.token == TokenType::Tilde {
+                        (!n, false)
                     } else {
                         n.overflowing_neg()
                     },
@@ -477,6 +460,49 @@ impl Expr {
             },
             _ => unreachable!("not logical token"),
         })
+    }
+    fn comp_fold(
+        token: Token,
+        left: &mut Box<Expr>,
+        right: &mut Box<Expr>,
+        env: &Vec<&Symbols>,
+    ) -> Result<Option<Expr>, Error> {
+        left.integer_const_fold(env)?;
+        right.integer_const_fold(env)?;
+
+        if let (ExprKind::Literal(left_n), ExprKind::Literal(right_n)) =
+            (&mut left.kind, &mut right.kind)
+        {
+            let (left_type, right_type) = (
+                left.type_decl.clone().unwrap(),
+                right.type_decl.clone().unwrap(),
+            );
+
+            if !left_type.type_compatible(&right_type)
+                || left_type.is_void()
+                || right_type.is_void()
+            {
+                return Err(Error::new(
+                    &token,
+                    ErrorKind::InvalidComp(token.token.clone(), left_type, right_type),
+                ));
+            }
+
+            Ok(Some(match token.token {
+                TokenType::BangEqual => Expr::new_literal((left_n != right_n).into(), Types::Int),
+                TokenType::EqualEqual => Expr::new_literal((left_n == right_n).into(), Types::Int),
+
+                TokenType::Greater => Expr::new_literal((left_n > right_n).into(), Types::Int),
+                TokenType::GreaterEqual => {
+                    Expr::new_literal((left_n >= right_n).into(), Types::Int)
+                }
+                TokenType::Less => Expr::new_literal((left_n < right_n).into(), Types::Int),
+                TokenType::LessEqual => Expr::new_literal((left_n <= right_n).into(), Types::Int),
+                _ => unreachable!("not valid comparison token"),
+            }))
+        } else {
+            Ok(None)
+        }
     }
     fn const_cast(
         token: Token,
@@ -561,6 +587,12 @@ impl fmt::Display for ExprKind {
                     ExprKind::String(token) => format!("String: {}", token.unwrap_string()),
                     ExprKind::Logical { token, left, right } => format!(
                         "Logical: {}\n{}\n{}",
+                        token.token,
+                        indent_fmt(&left.kind, indent_level + 1),
+                        indent_fmt(&right.kind, indent_level + 1)
+                    ),
+                    ExprKind::Comparison { token, left, right } => format!(
+                        "Comparison: {}\n{}\n{}",
                         token.token,
                         indent_fmt(&left.kind, indent_level + 1),
                         indent_fmt(&right.kind, indent_level + 1)
@@ -724,7 +756,9 @@ mod tests {
         assert_fold("3 <= -2", "0");
 
         assert_fold("(long*)4 == (long*)1", "0");
-        assert_fold_error!("(long*)4 > (char*)1", ErrorKind::InvalidBinary(..));
+        assert_fold("(long*)4 > (long*)1", "1");
+        assert_fold_error!("(int*)4 <= 1", ErrorKind::InvalidComp(..));
+        assert_fold_error!("(long*)4 > (char*)1", ErrorKind::InvalidComp(..));
     }
 
     #[test]

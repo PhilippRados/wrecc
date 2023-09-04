@@ -66,6 +66,7 @@ pub enum ErrorKind {
     MismatchedArgs(usize, String, Option<Token>, NEWTypes, NEWTypes),
     InvalidLogical(TokenType, NEWTypes, NEWTypes),
     InvalidBinary(TokenType, NEWTypes, NEWTypes),
+    InvalidComp(TokenType, NEWTypes, NEWTypes),
     InvalidDerefType(NEWTypes),
     InvalidArrayReturn,
     MismatchedFunctionReturn(NEWTypes, NEWTypes),
@@ -284,6 +285,12 @@ impl ErrorKind {
             ErrorKind::InvalidLogical(token, left_type, right_type) => {
                 format!(
                     "Invalid logical expression: '{}' {} '{}'. Both types need to be scalar",
+                    left_type, token, right_type
+                )
+            }
+            ErrorKind::InvalidComp(token, left_type, right_type) => {
+                format!(
+                    "Invalid comparsion: '{}' {} '{}'",
                     left_type, token, right_type
                 )
             }

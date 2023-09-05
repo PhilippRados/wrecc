@@ -9,6 +9,10 @@ pub enum Token {
     Hash,
     Include,
     Define,
+    Undef,
+    Ifdef,
+    Ifndef,
+    Endif,
     String(String, usize),
     Ident(String),
     Newline,
@@ -22,6 +26,10 @@ impl ToString for Token {
             Token::Hash => "#".to_string(),
             Token::Include => "include".to_string(),
             Token::Define => "define".to_string(),
+            Token::Undef => "undef".to_string(),
+            Token::Ifdef => "ifdef".to_string(),
+            Token::Ifndef => "ifndef".to_string(),
+            Token::Endif => "endif".to_string(),
             Token::Newline => "\\n".to_string(),
             Token::Comment(s, _) | Token::String(s, _) | Token::Ident(s) | Token::Whitespace(s) => {
                 s.to_string()
@@ -39,7 +47,14 @@ impl<'a> Scanner<'a> {
     pub fn new(source: &'a str) -> Scanner {
         Scanner {
             source: source.chars().peekable(),
-            directives: HashMap::from([("include", Token::Include), ("define", Token::Define)]),
+            directives: HashMap::from([
+                ("include", Token::Include),
+                ("define", Token::Define),
+                ("undef", Token::Undef),
+                ("ifdef", Token::Ifdef),
+                ("ifndef", Token::Ifndef),
+                ("endif", Token::Endif),
+            ]),
         }
     }
     pub fn scan_token(mut self) -> Vec<Token> {

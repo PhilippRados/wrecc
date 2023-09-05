@@ -1,3 +1,6 @@
+#ifndef _UNISTD_H_
+#define _UNISTD_H_
+
 #include <stddef.h>
 
 typedef long ssize_t;
@@ -61,3 +64,5 @@ char *ttyname(int);
 int unlink(char *);
 
 ssize_t write(int, void *, size_t);
+
+#endif

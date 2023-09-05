@@ -1,3 +1,6 @@
+#ifndef _STRING_H_
+#define _STRING_H_
+
 #include <stddef.h>
 
 void *memchr(void *, int, size_t);
@@ -22,3 +25,5 @@ size_t strspn(char *, char *);
 char *strstr(char *, char *);
 char *strtok(char *, char *);
 size_t strxfrm(char *, char *, size_t);
+
+#endif

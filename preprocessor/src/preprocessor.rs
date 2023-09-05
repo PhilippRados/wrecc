@@ -18,6 +18,7 @@ pub struct Preprocessor {
     column: i32,
     filename: String,
     defines: HashMap<String, String>,
+    ifs: Vec<Error>,
 }
 
 impl Preprocessor {
@@ -37,6 +38,7 @@ impl Preprocessor {
             line: 1,
             column: 1,
             filename: filename.to_string(),
+            ifs: vec![],
             defines: if let Some(defines) = pre_defines {
                 defines
             } else {
@@ -126,6 +128,74 @@ impl Preprocessor {
             ))
         }
     }
+    fn undef(&mut self) -> Result<(), Error> {
+        self.skip_whitespace()?;
+
+        if let Some(Token::Ident(identifier)) = self.tokens.next() {
+            self.defines.remove(&identifier);
+            Ok(())
+        } else {
+            Err(Error::new(
+                self,
+                ErrorKind::Regular("Macro name must be valid identifier"),
+            ))
+        }
+    }
+    fn ifdef(&mut self, if_kind: Token) -> Result<(), Error> {
+        self.skip_whitespace()?;
+
+        if let Some(Token::Ident(identifier)) = self.tokens.next() {
+            self.ifs.push(Error::new(
+                self,
+                ErrorKind::UnterminatedIf(if_kind == Token::Ifdef),
+            ));
+
+            match (&if_kind, self.defines.contains_key(&identifier)) {
+                // if matching conditional then continue processing tokens
+                (Token::Ifdef, true) | (Token::Ifndef, false) => Ok(()),
+                // if conditional doesn't match then skip all tokens until matching #endif
+                (Token::Ifdef, false) | (Token::Ifndef, true) => {
+                    let matching_endif = self.ifs.len();
+
+                    while let Some(token) = self.tokens.next() {
+                        match token {
+                            Token::Newline => self.line += 1,
+                            Token::Hash => {
+                                let _ = self.skip_whitespace();
+                                match self.tokens.next() {
+                                    Some(Token::Endif) if self.ifs.len() == matching_endif => {
+                                        // #ifs matching #endif
+                                        self.ifs.pop();
+                                        return Ok(());
+                                    }
+                                    Some(Token::Endif) => {
+                                        // matches #if which was defined inside of the skipped #if block
+                                        self.ifs.pop();
+                                    }
+                                    Some(Token::Ifdef | Token::Ifndef) => {
+                                        self.ifs.push(Error::new(
+                                            self,
+                                            ErrorKind::UnterminatedIf(if_kind == Token::Ifdef),
+                                        ));
+                                    }
+                                    _ => (),
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                    // got to end of token-stream without finding matching #endif
+                    Err(self.ifs.pop().unwrap())
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            Err(Error::new(
+                self,
+                ErrorKind::Regular("Macro name must be valid identifier"),
+            ))
+        }
+    }
 
     pub fn start(mut self) -> Result<(String, HashMap<String, String>), Vec<Error>> {
         let mut result = String::from("");
@@ -146,6 +216,26 @@ impl Preprocessor {
                                 self.error(e);
                             }
                         }
+                        Some(Token::Undef) => {
+                            if let Err(e) = self.undef() {
+                                self.error(e);
+                            }
+                        }
+                        Some(if_kind @ (Token::Ifdef | Token::Ifndef)) => {
+                            if let Err(e) = self.ifdef(if_kind) {
+                                self.error(e);
+                            }
+                        }
+                        Some(Token::Endif) => {
+                            if self.ifs.is_empty() {
+                                self.error(Error::new(
+                                    &self,
+                                    ErrorKind::Regular("Found '#endif' without matching '#if'"),
+                                ))
+                            } else {
+                                self.ifs.pop();
+                            }
+                        }
                         Some(directive) => self.error(Error::new(
                             &self,
                             ErrorKind::InvalidDirective(directive.to_string()),
@@ -155,6 +245,7 @@ impl Preprocessor {
                             ErrorKind::Regular("Expected preprocessor directive following '#'"),
                         )),
                     }
+                    // TODO: expect newline after pp-directive
                 }
                 Token::Newline => {
                     self.line += 1;
@@ -174,6 +265,9 @@ impl Preprocessor {
                 }
                 _ => result.push_str(&token.to_string()),
             }
+        }
+        if !self.ifs.is_empty() {
+            self.errors(self.ifs.clone())
         }
 
         if self.errors.is_empty() {

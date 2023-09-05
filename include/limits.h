@@ -1,3 +1,6 @@
+#ifndef _LIMITS_H_
+#define _LIMITS_H_
+
 #define CHAR_BIT 8
 
 #define CHAR_MAX 127
@@ -8,3 +11,5 @@
 
 #define LONG_MAX 9223372036854775807
 #define LONG_MIN (-9223372036854775807 - 1)
+
+#endif

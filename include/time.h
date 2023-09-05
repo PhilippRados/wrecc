@@ -1,3 +1,6 @@
+#ifndef _TIME_H_
+#define _TIME_H_
+
 #include <stddef.h>
 
 #define CLOCKS_PER_SEC 1000000
@@ -29,3 +32,5 @@ time_t mktime(struct tm *);
 size_t strftime(char *, size_t, char *, struct tm *);
 char *strptime(char *, char *, struct tm *);
 time_t time(time_t *);
+
+#endif

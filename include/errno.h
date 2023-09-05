@@ -1,3 +1,6 @@
+#ifndef _ERRNO_H_
+#define _ERRNO_H_
+
 int *__error(void);
 #define errno (*__error())
 
@@ -16,3 +19,5 @@ int *__error(void);
 #define ENOMEM 12
 #define EACCES 13
 #define EFAULT 14
+
+#endif

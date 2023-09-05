@@ -1,3 +1,6 @@
+#ifndef _STDIO_H_
+#define _STDIO_H_
+
 #include <stddef.h>
 
 typedef char *FILE;
@@ -66,6 +69,4 @@ FILE *tmpfile(void);
 char *tmpnam(char *);
 int ungetc(int, FILE *);
 
-// int vfprintf(FILE *,  char *, va_list);
-// int vprintf( char *, va_list);
-// int vsprintf(char *,  char *, va_list);
+#endif

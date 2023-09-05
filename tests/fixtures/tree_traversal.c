@@ -1,6 +1,5 @@
 #include <stdio.h>
-// #include <stdlib.h>
-void *malloc(int);
+#include <stdlib.h>
 
 struct node {
   int item;

@@ -1,3 +1,6 @@
+#ifndef _STDLIB_H_
+#define _STDLIB_H_
+
 #include <stddef.h>
 
 typedef struct {
@@ -34,3 +37,5 @@ void *realloc(void *, size_t);
 int rand(void);
 int abs(int);
 long labs(long);
+
+#endif

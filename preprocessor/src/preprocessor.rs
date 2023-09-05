@@ -205,47 +205,49 @@ impl Preprocessor {
                 Token::Hash if is_first_line_token(&result) => {
                     let _ = self.skip_whitespace();
 
-                    match self.tokens.next() {
+                    let outcome = match self.tokens.next() {
                         Some(Token::Include) => {
                             if let Ok(s) = self.include() {
-                                result.push_str(&s)
+                                Ok(result.push_str(&s))
+                            } else {
+                                // include handles it's errors
+                                continue;
                             }
                         }
-                        Some(Token::Define) => {
-                            if let Err(e) = self.define() {
-                                self.error(e);
-                            }
-                        }
-                        Some(Token::Undef) => {
-                            if let Err(e) = self.undef() {
-                                self.error(e);
-                            }
-                        }
-                        Some(if_kind @ (Token::Ifdef | Token::Ifndef)) => {
-                            if let Err(e) = self.ifdef(if_kind) {
-                                self.error(e);
-                            }
-                        }
+                        Some(Token::Define) => self.define(),
+                        Some(Token::Undef) => self.undef(),
+                        Some(if_kind @ (Token::Ifdef | Token::Ifndef)) => self.ifdef(if_kind),
                         Some(Token::Endif) => {
                             if self.ifs.is_empty() {
-                                self.error(Error::new(
+                                Err(Error::new(
                                     &self,
                                     ErrorKind::Regular("Found '#endif' without matching '#if'"),
                                 ))
                             } else {
                                 self.ifs.pop();
+                                Ok(())
                             }
                         }
-                        Some(directive) => self.error(Error::new(
+                        Some(directive) => Err(Error::new(
                             &self,
                             ErrorKind::InvalidDirective(directive.to_string()),
                         )),
-                        None => self.error(Error::new(
+                        None => Err(Error::new(
                             &self,
                             ErrorKind::Regular("Expected preprocessor directive following '#'"),
                         )),
+                    };
+
+                    if let Err(e) = outcome {
+                        self.error(e)
+                    } else if !matches!(self.tokens.peek(), Some(Token::Newline)) {
+                        self.error(Error::new(
+                            &self,
+                            ErrorKind::Regular(
+                                "Found trailing tokens after preprocessor directive",
+                            ),
+                        ));
                     }
-                    // TODO: expect newline after pp-directive
                 }
                 Token::Newline => {
                     self.line += 1;

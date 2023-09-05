@@ -11,7 +11,7 @@ hello
 */
 int main() {
 
-#include <ctype.h>;
+#include <ctype.h>
   printf("not header #include <file.h>");
 }
 /*

@@ -231,6 +231,12 @@ impl<'a> Scanner<'a> {
                             self.original_line = num.parse::<i32>().unwrap();
                             self.filenames.pop();
                         }
+                        "line" => {
+                            let num = consume_while(&mut self.source, |c| c != '\n', true);
+
+                            self.actual_line += 1;
+                            self.original_line = num.parse::<i32>().unwrap();
+                        }
                         other => {
                             errors.push(Error::new(self, ErrorKind::UnexpectedChar(c)));
                             self.column += other.len() as i32;

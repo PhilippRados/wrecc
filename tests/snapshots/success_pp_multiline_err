@@ -1,0 +1,12 @@
+Error: in tests/fixtures/pp_multiline_err.c: Undeclared symbol 'b'
+|
+1 int foo = &b;
+|            ^
+Error: in tests/fixtures/pp_multiline_err.c: Undeclared symbol 'a'
+|
+8 int bar = &a;
+|            ^
+Error: in tests/fixtures/pp_multiline_err.c: Undeclared symbol 'text'
+|
+19 int main() { text(); }
+|               ^

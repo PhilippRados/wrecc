@@ -151,41 +151,9 @@ impl Preprocessor {
             ));
 
             match (&if_kind, self.defines.contains_key(&identifier)) {
-                // if matching conditional then continue processing tokens
                 (Token::Ifdef, true) | (Token::Ifndef, false) => Ok(()),
-                // if conditional doesn't match then skip all tokens until matching #endif
                 (Token::Ifdef, false) | (Token::Ifndef, true) => {
-                    let matching_endif = self.ifs.len();
-
-                    while let Some(token) = self.tokens.next() {
-                        match token {
-                            Token::Newline => self.line += 1,
-                            Token::Hash => {
-                                let _ = self.skip_whitespace();
-                                match self.tokens.next() {
-                                    Some(Token::Endif) if self.ifs.len() == matching_endif => {
-                                        // #ifs matching #endif
-                                        self.ifs.pop();
-                                        return Ok(());
-                                    }
-                                    Some(Token::Endif) => {
-                                        // matches #if which was defined inside of the skipped #if block
-                                        self.ifs.pop();
-                                    }
-                                    Some(Token::Ifdef | Token::Ifndef) => {
-                                        self.ifs.push(Error::new(
-                                            self,
-                                            ErrorKind::UnterminatedIf(if_kind == Token::Ifdef),
-                                        ));
-                                    }
-                                    _ => (),
-                                }
-                            }
-                            _ => (),
-                        }
-                    }
-                    // got to end of token-stream without finding matching #endif
-                    Err(self.ifs.pop().unwrap())
+                    self.skip_tokens_until_endif(if_kind)
                 }
                 _ => unreachable!(),
             }
@@ -196,6 +164,42 @@ impl Preprocessor {
             ))
         }
     }
+    fn skip_tokens_until_endif(&mut self, if_kind: Token) -> Result<(), Error> {
+        let matching_endif = self.ifs.len();
+
+        while let Some(token) = self.tokens.next() {
+            match token {
+                Token::Hash => {
+                    let _ = self.skip_whitespace();
+                    match self.tokens.next() {
+                        Some(Token::Endif) if self.ifs.len() == matching_endif => {
+                            // #ifs matching #endif
+                            self.ifs.pop();
+                            return Ok(());
+                        }
+                        Some(Token::Endif) => {
+                            // matches #if which was defined inside of the skipped #if block
+                            self.ifs.pop();
+                        }
+                        Some(Token::Ifdef | Token::Ifndef) => {
+                            self.ifs.push(Error::new(
+                                self,
+                                ErrorKind::UnterminatedIf(if_kind == Token::Ifdef),
+                            ));
+                        }
+                        _ => (),
+                    }
+                }
+                Token::Newline => self.line += 1,
+                Token::Comment(_, newlines) | Token::String(_, newlines) => {
+                    self.line += newlines as i32;
+                }
+                _ => (),
+            }
+        }
+        // got to end of token-stream without finding matching #endif
+        Err(self.ifs.pop().unwrap())
+    }
 
     pub fn start(mut self) -> Result<(String, HashMap<String, String>), Vec<Error>> {
         let mut result = String::from("");
@@ -204,6 +208,7 @@ impl Preprocessor {
             match token {
                 Token::Hash if is_first_line_token(&result) => {
                     let _ = self.skip_whitespace();
+                    let newlines = self.line;
 
                     let outcome = match self.tokens.next() {
                         Some(Token::Include) => {
@@ -237,6 +242,12 @@ impl Preprocessor {
                             ErrorKind::Regular("Expected preprocessor directive following '#'"),
                         )),
                     };
+
+                    // if pp-directive more than one line, add marker for scanner
+                    let pp_lines = self.line - newlines;
+                    if pp_lines > 0 {
+                        result.push_str(&format!("#line:{}\n", self.line));
+                    }
 
                     if let Err(e) = outcome {
                         self.error(e)
@@ -331,7 +342,7 @@ impl Preprocessor {
                 }
                 (_, Token::Newline) => break,
                 (.., t) => {
-                    if let Token::String(_, newline) = t {
+                    if let Token::String(_, newline) | Token::Comment(_, newline) = t {
                         self.line += *newline as i32;
                     }
                     let token = self.tokens.next().unwrap();

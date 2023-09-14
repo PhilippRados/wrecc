@@ -12,7 +12,6 @@ use std::vec::IntoIter;
 
 pub struct Preprocessor {
     tokens: Peekable<IntoIter<Token>>,
-    errors: Vec<Error>,
     raw_source: Vec<String>,
     line: i32,
     column: i32,
@@ -34,7 +33,6 @@ impl Preprocessor {
                 .split('\n')
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
-            errors: Vec::new(),
             line: 1,
             column: 1,
             filename: filename.to_string(),
@@ -47,20 +45,20 @@ impl Preprocessor {
         }
     }
 
-    fn paste_header(&mut self, file_path: &str) -> Result<String, ()> {
+    fn paste_header(&mut self, file_path: &str) -> Result<String, Error> {
         // WARN: only temporary absolute path. /include will be found via PATH env var
         let abs_path =
             "/Users/philipprados/documents/coding/Rust/rucc/include/".to_string() + file_path;
 
         let data = fs::read_to_string(&abs_path).or_else(|_| {
-            Err(self.error(Error::new(
+            Err(Error::new(
                 self,
                 ErrorKind::InvalidHeader(file_path.to_string()),
-            )))
+            ))
         })?;
 
         let (data, defines) = preprocess_included(file_path, &data, self.defines.clone())
-            .or_else(|e| Err(self.errors(e)))?;
+            .or_else(|e| Err(Error::new_multiple(e)))?;
 
         self.defines.extend(defines);
 
@@ -70,8 +68,8 @@ impl Preprocessor {
         Ok(header_prologue + &data + &header_epilogue)
     }
 
-    fn include(&mut self) -> Result<String, ()> {
-        self.skip_whitespace().or_else(|e| Err(self.error(e)))?;
+    fn include(&mut self) -> Result<String, Error> {
+        self.skip_whitespace()?;
 
         if let Some(Token::String(mut file, newlines)) = self.tokens.next() {
             self.line += newlines as i32;
@@ -84,25 +82,25 @@ impl Preprocessor {
                     if let Some('>') = last {
                         self.paste_header(&file)
                     } else {
-                        Err(self.error(Error::new(
+                        Err(Error::new(
                             self,
                             ErrorKind::Regular("Expected closing '>' after header file"),
-                        )))
+                        ))
                     }
                 }
                 '"' => {
                     todo!()
                 }
-                _ => Err(self.error(Error::new(
+                _ => Err(Error::new(
                     self,
                     ErrorKind::Regular("Expected opening '<' or '\"' after include directive"),
-                ))),
+                )),
             }
         } else {
-            Err(self.error(Error::new(
+            Err(Error::new(
                 self,
                 ErrorKind::Regular("Expected opening '<' or '\"' after include directive"),
-            )))
+            ))
         }
     }
     fn define(&mut self) -> Result<(), Error> {
@@ -165,21 +163,14 @@ impl Preprocessor {
         }
     }
     fn skip_tokens_until_endif(&mut self, if_kind: Token) -> Result<(), Error> {
-        let matching_endif = self.ifs.len();
-
         while let Some(token) = self.tokens.next() {
             match token {
                 Token::Hash => {
                     let _ = self.skip_whitespace();
                     match self.tokens.next() {
-                        Some(Token::Endif) if self.ifs.len() == matching_endif => {
-                            // #ifs matching #endif
+                        Some(Token::Endif) => {
                             self.ifs.pop();
                             return Ok(());
-                        }
-                        Some(Token::Endif) => {
-                            // matches #if which was defined inside of the skipped #if block
-                            self.ifs.pop();
                         }
                         Some(Token::Ifdef | Token::Ifndef) => {
                             self.ifs.push(Error::new(
@@ -197,12 +188,14 @@ impl Preprocessor {
                 _ => (),
             }
         }
+
         // got to end of token-stream without finding matching #endif
         Err(self.ifs.pop().unwrap())
     }
 
-    pub fn start(mut self) -> Result<(String, HashMap<String, String>), Vec<Error>> {
+    pub fn start(&mut self) -> Result<(String, HashMap<String, String>), Vec<Error>> {
         let mut result = String::from("");
+        let mut errors = Vec::new();
 
         while let Some(token) = self.tokens.next() {
             match token {
@@ -211,21 +204,17 @@ impl Preprocessor {
                     let newlines = self.line;
 
                     let outcome = match self.tokens.next() {
-                        Some(Token::Include) => {
-                            if let Ok(s) = self.include() {
-                                Ok(result.push_str(&s))
-                            } else {
-                                // include handles it's errors
-                                continue;
-                            }
-                        }
+                        Some(Token::Include) => match self.include() {
+                            Ok(s) => Ok(result.push_str(&s)),
+                            Err(e) => Err(e),
+                        },
                         Some(Token::Define) => self.define(),
                         Some(Token::Undef) => self.undef(),
                         Some(if_kind @ (Token::Ifdef | Token::Ifndef)) => self.ifdef(if_kind),
                         Some(Token::Endif) => {
                             if self.ifs.is_empty() {
                                 Err(Error::new(
-                                    &self,
+                                    self,
                                     ErrorKind::Regular("Found '#endif' without matching '#if'"),
                                 ))
                             } else {
@@ -234,11 +223,11 @@ impl Preprocessor {
                             }
                         }
                         Some(directive) => Err(Error::new(
-                            &self,
+                            self,
                             ErrorKind::InvalidDirective(directive.to_string()),
                         )),
                         None => Err(Error::new(
-                            &self,
+                            self,
                             ErrorKind::Regular("Expected preprocessor directive following '#'"),
                         )),
                     };
@@ -250,10 +239,16 @@ impl Preprocessor {
                     }
 
                     if let Err(e) = outcome {
-                        self.error(e)
+                        if let ErrorKind::Multiple(many_errors) = e.kind {
+                            for e in many_errors {
+                                errors.push(e)
+                            }
+                        } else {
+                            errors.push(e)
+                        }
                     } else if !matches!(self.tokens.peek(), Some(Token::Newline)) {
-                        self.error(Error::new(
-                            &self,
+                        errors.push(Error::new(
+                            self,
                             ErrorKind::Regular(
                                 "Found trailing tokens after preprocessor directive",
                             ),
@@ -279,21 +274,16 @@ impl Preprocessor {
                 _ => result.push_str(&token.to_string()),
             }
         }
+
         if !self.ifs.is_empty() {
-            self.errors(self.ifs.clone())
+            errors.append(&mut self.ifs);
         }
 
-        if self.errors.is_empty() {
-            Ok((result, self.defines))
+        if errors.is_empty() {
+            Ok((result, self.defines.clone()))
         } else {
-            Err(self.errors)
+            Err(errors)
         }
-    }
-    fn error(&mut self, e: Error) {
-        self.errors.push(e)
-    }
-    fn errors(&mut self, mut e: Vec<Error>) {
-        self.errors.append(&mut e)
     }
 
     fn skip_whitespace(&mut self) -> Result<(), Error> {

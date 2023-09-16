@@ -42,6 +42,9 @@ impl Parser {
             Err(errors)
         }
     }
+    pub fn is_empty(&self) -> bool {
+        self.tokens.len() == 0
+    }
 
     // If error is found inside of expression or stmt skip to end and start with parsing after
     fn synchronize(&mut self) {

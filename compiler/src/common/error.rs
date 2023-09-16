@@ -84,7 +84,7 @@ pub enum ErrorKind {
     // preprocessor errors
     InvalidDirective(String),
     InvalidHeader(String),
-    UnterminatedIf(bool),
+    UnterminatedIf(String),
 
     Regular(&'static str), // generic error message when message only used once
     Multiple(Vec<Error>),
@@ -363,11 +363,8 @@ impl ErrorKind {
             ErrorKind::InvalidDirective(s) => {
                 format!("'#{}' is not a valid preprocessor directive", s)
             }
-            ErrorKind::UnterminatedIf(is_ifdef) => {
-                format!(
-                    "Unterminated '{}'",
-                    if *is_ifdef { "#ifdef" } else { "#ifndef" }
-                )
+            ErrorKind::UnterminatedIf(if_kind) => {
+                format!("Unterminated '#{}'", if_kind)
             }
 
             ErrorKind::Regular(s) => s.to_string(),

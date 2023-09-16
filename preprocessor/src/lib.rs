@@ -20,8 +20,8 @@ pub fn preprocess(filename: &str, source: &str) -> Result<String, Vec<Error>> {
 fn preprocess_included(
     filename: &str,
     source: &str,
-    defines: HashMap<String, String>,
-) -> Result<(String, HashMap<String, String>), Vec<Error>> {
+    defines: HashMap<String, Vec<Token>>,
+) -> Result<(String, HashMap<String, Vec<Token>>), Vec<Error>> {
     let tokens = Scanner::new(source).scan_token();
 
     Preprocessor::new(filename, source, tokens, Some(defines)).start()

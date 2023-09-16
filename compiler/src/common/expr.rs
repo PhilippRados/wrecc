@@ -132,6 +132,18 @@ impl Expr {
             Err(Error::new(token, ErrorKind::NotIntegerConstant(msg)))
         }
     }
+    pub fn preprocessor_constant(&mut self, pp: &impl Location) -> Result<i64, Error> {
+        self.integer_const_fold(&vec![])?;
+
+        if let ExprKind::Literal(n) = self.kind {
+            Ok(n)
+        } else {
+            Err(Error::new(
+                pp,
+                ErrorKind::Regular("Invalid preprocessor constant expression"),
+            ))
+        }
+    }
     // https://en.cppreference.com/w/c/language/constant_expression
     pub fn integer_const_fold(&mut self, env: &Vec<&Symbols>) -> Result<(), Error> {
         let folded: Option<Expr> = match &mut self.kind {

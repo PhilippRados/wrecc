@@ -4,11 +4,12 @@ mod parser;
 mod scanner;
 mod typechecker;
 
+// All necessary modules used for preprocessor
 pub use common::error::*;
+pub use parser::*;
 pub use scanner::*;
 
 use codegen::{codegen::*, register_allocation::*};
-use parser::*;
 use typechecker::*;
 
 pub fn compile(filename: &str, source: &str) -> Result<String, Vec<Error>> {

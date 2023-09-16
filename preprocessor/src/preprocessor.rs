@@ -1,6 +1,8 @@
 use compiler::Error;
 use compiler::ErrorKind;
 use compiler::Location;
+use compiler::Parser;
+use compiler::Scanner;
 
 use crate::preprocess_included;
 use crate::Token;
@@ -16,7 +18,7 @@ pub struct Preprocessor {
     line: i32,
     column: i32,
     filename: String,
-    defines: HashMap<String, String>,
+    defines: HashMap<String, Vec<Token>>,
     ifs: Vec<Error>,
 }
 
@@ -25,7 +27,7 @@ impl Preprocessor {
         filename: &'a str,
         input: &'a str,
         tokens: Vec<Token>,
-        pre_defines: Option<HashMap<String, String>>,
+        pre_defines: Option<HashMap<String, Vec<Token>>>,
     ) -> Self {
         Preprocessor {
             tokens: tokens.into_iter().peekable(),
@@ -109,6 +111,14 @@ impl Preprocessor {
         if let Some(Token::Ident(identifier)) = self.tokens.next() {
             let _ = self.skip_whitespace();
             let replace_with = self.fold_until_newline();
+            // TODO: replace defines replacement if already defined
+            // let replace_with = replace_with.into_iter().map(|t| {
+            //     if let Some(replacement) = self.defines.get(&t.to_string()) {
+            //         replacement
+            //     } else {
+            //         t
+            //     }
+            // });
 
             if self.defines.contains_key(&identifier) {
                 Err(Error::new(
@@ -143,16 +153,15 @@ impl Preprocessor {
         self.skip_whitespace()?;
 
         if let Some(Token::Ident(identifier)) = self.tokens.next() {
+            // TODO: should this be prior to whitespace check so that #endif still has matching #if?
             self.ifs.push(Error::new(
                 self,
-                ErrorKind::UnterminatedIf(if_kind == Token::Ifdef),
+                ErrorKind::UnterminatedIf(if_kind.to_string()),
             ));
 
             match (&if_kind, self.defines.contains_key(&identifier)) {
                 (Token::Ifdef, true) | (Token::Ifndef, false) => Ok(()),
-                (Token::Ifdef, false) | (Token::Ifndef, true) => {
-                    self.skip_tokens_until_endif(if_kind)
-                }
+                (Token::Ifdef, false) | (Token::Ifndef, true) => self.skip_until_endif(),
                 _ => unreachable!(),
             }
         } else {
@@ -162,7 +171,127 @@ impl Preprocessor {
             ))
         }
     }
-    fn skip_tokens_until_endif(&mut self, if_kind: Token) -> Result<(), Error> {
+    fn if_expr(&mut self, if_kind: Token) -> Result<(), Error> {
+        self.ifs.push(Error::new(
+            self,
+            ErrorKind::UnterminatedIf(if_kind.to_string()),
+        ));
+
+        self.skip_whitespace()?;
+
+        let cond = self.fold_until_newline();
+        let cond = self.replace_define_expr(cond)?;
+
+        if cond.is_empty() {
+            return Err(Error::new(
+                self,
+                ErrorKind::Regular("'#if' directive expects expression"),
+            ));
+        }
+
+        let value = self.pp_const_value(cond);
+
+        match value {
+            Ok(n) if n != 0 => Ok(()),
+            Ok(_) => self.skip_until_endif(),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn pp_const_value(&self, cond: String) -> Result<i64, Error> {
+        let tokens = Scanner::new(&self.filename, &cond)
+            .scan_token()
+            .or_else(|errs| {
+                Err(Error::new_multiple(
+                    errs.into_iter().map(|e| Error::new(self, e.kind)).collect(),
+                ))
+            })?;
+        let mut parser = Parser::new(tokens);
+        let mut expr = parser
+            .expression()
+            .or_else(|e| Err(Error::new(self, e.kind)))?;
+
+        if !parser.is_empty() {
+            return Err(Error::new(
+                self,
+                ErrorKind::Regular("Trailing tokens in preprocessor expression"),
+            ));
+        }
+
+        let value = expr.preprocessor_constant(self)?;
+
+        Ok(value)
+    }
+
+    fn replace_define_expr(&mut self, cond: Vec<Token>) -> Result<String, Error> {
+        let mut result = Vec::with_capacity(cond.len());
+        let mut cond = cond.into_iter().peekable();
+
+        while let Some(token) = cond.next() {
+            match &token {
+                Token::Defined => {
+                    let _ = skip_whitespace(&mut cond, &mut self.line);
+
+                    let open_paren = if let Some(Token::Other('(')) = cond.peek() {
+                        cond.next();
+                        true
+                    } else {
+                        false
+                    };
+
+                    let _ = skip_whitespace(&mut cond, &mut self.line);
+                    if let Some(Token::Ident(identifier)) = cond.next() {
+                        if self.defines.contains_key(&identifier) {
+                            result.push(Token::Whitespace(" ".to_string()));
+                            result.push(Token::Other('1'));
+                            result.push(Token::Whitespace(" ".to_string()));
+                        } else {
+                            result.push(Token::Whitespace(" ".to_string()));
+                            result.push(Token::Other('0'));
+                            result.push(Token::Whitespace(" ".to_string()));
+                        }
+
+                        let _ = skip_whitespace(&mut cond, &mut self.line);
+                        if open_paren && !matches!(cond.next(), Some(Token::Other(')'))) {
+                            return Err(Error::new(
+                                self,
+                                ErrorKind::Regular("Expect closing ')' after 'defined'"),
+                            ));
+                        }
+                    } else {
+                        return Err(Error::new(
+                            self,
+                            ErrorKind::Regular("Expect identifier after 'defined'-operator"),
+                        ));
+                    }
+                }
+                Token::Ident(s) => {
+                    // if ident is defined replace it
+                    if let Some(replacement) = self.defines.get(s) {
+                        result.extend(replacement.clone())
+                    } else {
+                        result.push(token)
+                    }
+                }
+                _ => result.push(token),
+            }
+        }
+        // replace all identifiers with 0
+        let result = result
+            .into_iter()
+            .map(|token| {
+                if let Token::Ident(_) = token {
+                    // hacky: insert whitespace so doesnt get appended to existing number
+                    " 0 ".to_string()
+                } else {
+                    token.to_string()
+                }
+            })
+            .collect();
+
+        Ok(result)
+    }
+    fn skip_until_endif(&mut self) -> Result<(), Error> {
         while let Some(token) = self.tokens.next() {
             match token {
                 Token::Hash => {
@@ -172,10 +301,10 @@ impl Preprocessor {
                             self.ifs.pop();
                             return Ok(());
                         }
-                        Some(Token::Ifdef | Token::Ifndef) => {
+                        Some(Token::Ifdef | Token::Ifndef | Token::If) => {
                             self.ifs.push(Error::new(
                                 self,
-                                ErrorKind::UnterminatedIf(if_kind == Token::Ifdef),
+                                ErrorKind::UnterminatedIf(token.to_string()),
                             ));
                         }
                         _ => (),
@@ -193,7 +322,7 @@ impl Preprocessor {
         Err(self.ifs.pop().unwrap())
     }
 
-    pub fn start(&mut self) -> Result<(String, HashMap<String, String>), Vec<Error>> {
+    pub fn start(&mut self) -> Result<(String, HashMap<String, Vec<Token>>), Vec<Error>> {
         let mut result = String::from("");
         let mut errors = Vec::new();
 
@@ -210,7 +339,8 @@ impl Preprocessor {
                         },
                         Some(Token::Define) => self.define(),
                         Some(Token::Undef) => self.undef(),
-                        Some(if_kind @ (Token::Ifdef | Token::Ifndef)) => self.ifdef(if_kind),
+                        Some(token @ (Token::Ifdef | Token::Ifndef)) => self.ifdef(token),
+                        Some(token @ Token::If) => self.if_expr(token),
                         Some(Token::Endif) => {
                             if self.ifs.is_empty() {
                                 Err(Error::new(
@@ -261,7 +391,12 @@ impl Preprocessor {
                 }
                 Token::Ident(s) => {
                     if let Some(replacement) = self.defines.get(&s) {
-                        result.push_str(replacement)
+                        result.push_str(
+                            &replacement
+                                .into_iter()
+                                .map(|t| t.to_string())
+                                .collect::<String>(),
+                        )
                     } else {
                         result.push_str(&s)
                     }
@@ -286,41 +421,8 @@ impl Preprocessor {
         }
     }
 
-    fn skip_whitespace(&mut self) -> Result<(), Error> {
-        let mut found = false;
-
-        while let Some(token) = self.tokens.peek() {
-            match token {
-                Token::Whitespace(_) => {
-                    self.tokens.next();
-                    found = true;
-                }
-                Token::Other('\\') => {
-                    let prev = self.tokens.next().unwrap();
-
-                    if let Some(Token::Newline) = self.tokens.peek() {
-                        self.line += 1;
-                        self.tokens.next();
-                    } else {
-                        self.insert_token(prev);
-                        break;
-                    }
-                }
-                _ => break,
-            }
-        }
-        if found {
-            Ok(())
-        } else {
-            Err(Error::new(
-                self,
-                ErrorKind::Regular("Expect whitespace after preprocessing directive"),
-            ))
-        }
-    }
-
-    fn fold_until_newline(&mut self) -> String {
-        let mut result = String::new();
+    fn fold_until_newline(&mut self) -> Vec<Token> {
+        let mut result = Vec::new();
         let mut prev_token = Token::Newline;
 
         while let Some(token) = self.tokens.peek() {
@@ -336,21 +438,61 @@ impl Preprocessor {
                         self.line += *newline as i32;
                     }
                     let token = self.tokens.next().unwrap();
-                    result.push_str(&token.to_string());
-                    prev_token = token.clone();
+                    result.push(token.clone());
+                    prev_token = token;
                 }
             }
         }
         result
     }
-
-    fn insert_token(&mut self, token: Token) {
-        let mut start = vec![token];
-        while let Some(t) = self.tokens.next() {
-            start.push(t);
+    // wrapper for easier access
+    fn skip_whitespace(&mut self) -> Result<(), Error> {
+        if let Err(_) = skip_whitespace(&mut self.tokens, &mut self.line) {
+            Err(Error::new(
+                self,
+                ErrorKind::Regular("Expect whitespace after preprocessing directive"),
+            ))
+        } else {
+            Ok(())
         }
-        self.tokens = start.into_iter().peekable();
     }
+}
+
+fn skip_whitespace(tokens: &mut Peekable<IntoIter<Token>>, line_index: &mut i32) -> Result<(), ()> {
+    let mut found = false;
+
+    while let Some(token) = tokens.peek() {
+        match token {
+            Token::Whitespace(_) => {
+                tokens.next();
+                found = true;
+            }
+            Token::Other('\\') => {
+                let prev = tokens.next().unwrap();
+
+                if let Some(Token::Newline) = tokens.peek() {
+                    *line_index += 1;
+                    tokens.next();
+                } else {
+                    insert_token(tokens, prev);
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+    if found {
+        Ok(())
+    } else {
+        Err(())
+    }
+}
+fn insert_token(tokens: &mut Peekable<IntoIter<Token>>, token: Token) {
+    let mut start = vec![token];
+    while let Some(t) = tokens.next() {
+        start.push(t);
+    }
+    *tokens = start.into_iter().peekable();
 }
 
 impl Location for Preprocessor {

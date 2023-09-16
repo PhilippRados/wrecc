@@ -9,9 +9,11 @@ pub enum Token {
     Hash,
     Include,
     Define,
+    Defined,
     Undef,
     Ifdef,
     Ifndef,
+    If,
     Endif,
     String(String, usize),
     Ident(String),
@@ -26,9 +28,11 @@ impl ToString for Token {
             Token::Hash => "#".to_string(),
             Token::Include => "include".to_string(),
             Token::Define => "define".to_string(),
+            Token::Defined => "defined".to_string(),
             Token::Undef => "undef".to_string(),
             Token::Ifdef => "ifdef".to_string(),
             Token::Ifndef => "ifndef".to_string(),
+            Token::If => "if".to_string(),
             Token::Endif => "endif".to_string(),
             Token::Newline => "\\n".to_string(),
             Token::Comment(s, _) | Token::String(s, _) | Token::Ident(s) | Token::Whitespace(s) => {
@@ -50,9 +54,11 @@ impl<'a> Scanner<'a> {
             directives: HashMap::from([
                 ("include", Token::Include),
                 ("define", Token::Define),
+                ("defined", Token::Defined),
                 ("undef", Token::Undef),
                 ("ifdef", Token::Ifdef),
                 ("ifndef", Token::Ifndef),
+                ("if", Token::If),
                 ("endif", Token::Endif),
             ]),
         }
@@ -286,6 +292,23 @@ mod tests {
             Token::Newline,
             Token::Ident("else".to_string()),
             Token::Other('>'),
+        ];
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn if_const_expr() {
+        let actual = setup("#if 1 < num\n");
+        let expected = vec![
+            Token::Hash,
+            Token::If,
+            Token::Whitespace(" ".to_string()),
+            Token::Other('1'),
+            Token::Whitespace(" ".to_string()),
+            Token::Other('<'),
+            Token::Whitespace(" ".to_string()),
+            Token::Ident("num".to_string()),
+            Token::Newline,
         ];
 
         assert_eq!(actual, expected);

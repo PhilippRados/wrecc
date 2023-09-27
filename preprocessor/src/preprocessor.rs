@@ -112,15 +112,17 @@ impl Preprocessor {
             let _ = self.skip_whitespace();
             let replace_with = self.fold_until_newline();
 
-            if self.defines.contains_key(&identifier) {
-                Err(Error::new(
-                    self,
-                    ErrorKind::Redefinition("macro", identifier),
-                ))
-            } else {
-                self.defines.insert(identifier, replace_with);
-                Ok(())
+            // same macro already exists but with different replacement-list
+            if let Some(existing_replacement) = self.defines.get(&identifier) {
+                if existing_replacement != &replace_with {
+                    return Err(Error::new(
+                        self,
+                        ErrorKind::Redefinition("macro", identifier),
+                    ));
+                }
             }
+            self.defines.insert(identifier, replace_with);
+            Ok(())
         } else {
             Err(Error::new(
                 self,

@@ -133,17 +133,16 @@ impl Preprocessor {
     fn replace_macros(&self, macro_name: &str, replace_list: Vec<Token>) -> Vec<Token> {
         replace_list
             .into_iter()
-            .flat_map(|t| {
-                if t.to_string() != macro_name {
-                    if let Some(replacement) = self.defines.get(&t.to_string()) {
+            .flat_map(|token| {
+                match (token.to_string(), self.defines.get(&token.to_string())) {
+                    (token_name, Some(replacement)) if token_name != macro_name => {
                         // replace all macros in replacement
                         self.replace_macros(macro_name, replacement.clone())
-                    } else {
-                        vec![t]
                     }
-                } else {
-                    // can't further replace if replacement is current macro name
-                    vec![t]
+                    _ => {
+                        // can't further replace if replacement is current macro name
+                        vec![token]
+                    }
                 }
             })
             .collect()

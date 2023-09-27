@@ -111,14 +111,6 @@ impl Preprocessor {
         if let Some(Token::Ident(identifier)) = self.tokens.next() {
             let _ = self.skip_whitespace();
             let replace_with = self.fold_until_newline();
-            // TODO: replace defines replacement if already defined
-            // let replace_with = replace_with.into_iter().map(|t| {
-            //     if let Some(replacement) = self.defines.get(&t.to_string()) {
-            //         replacement
-            //     } else {
-            //         t
-            //     }
-            // });
 
             if self.defines.contains_key(&identifier) {
                 Err(Error::new(
@@ -135,6 +127,24 @@ impl Preprocessor {
                 ErrorKind::Regular("Macro name must be valid identifier"),
             ))
         }
+    }
+    fn replace_macros(&self, macro_name: &str, replace_list: Vec<Token>) -> Vec<Token> {
+        replace_list
+            .into_iter()
+            .flat_map(|t| {
+                if t.to_string() != macro_name {
+                    if let Some(replacement) = self.defines.get(&t.to_string()) {
+                        // replace all macros in replacement
+                        self.replace_macros(macro_name, replacement.clone())
+                    } else {
+                        vec![t]
+                    }
+                } else {
+                    // can't further replace if replacement is current macro name
+                    vec![t]
+                }
+            })
+            .collect()
     }
     fn undef(&mut self) -> Result<(), Error> {
         self.skip_whitespace()?;
@@ -241,15 +251,13 @@ impl Preprocessor {
 
                     let _ = skip_whitespace(&mut cond, &mut self.line);
                     if let Some(Token::Ident(identifier)) = cond.next() {
-                        if self.defines.contains_key(&identifier) {
-                            result.push(Token::Whitespace(" ".to_string()));
-                            result.push(Token::Other('1'));
-                            result.push(Token::Whitespace(" ".to_string()));
+                        result.push(Token::Whitespace(" ".to_string()));
+                        result.push(if self.defines.contains_key(&identifier) {
+                            Token::Other('1')
                         } else {
-                            result.push(Token::Whitespace(" ".to_string()));
-                            result.push(Token::Other('0'));
-                            result.push(Token::Whitespace(" ".to_string()));
-                        }
+                            Token::Other('0')
+                        });
+                        result.push(Token::Whitespace(" ".to_string()));
 
                         let _ = skip_whitespace(&mut cond, &mut self.line);
                         if open_paren && !matches!(cond.next(), Some(Token::Other(')'))) {
@@ -268,7 +276,8 @@ impl Preprocessor {
                 Token::Ident(s) => {
                     // if ident is defined replace it
                     if let Some(replacement) = self.defines.get(s) {
-                        result.extend(replacement.clone())
+                        let expanded_replacement = self.replace_macros(&s, replacement.clone());
+                        result.extend(expanded_replacement)
                     } else {
                         result.push(token)
                     }
@@ -391,8 +400,9 @@ impl Preprocessor {
                 }
                 Token::Ident(s) => {
                     if let Some(replacement) = self.defines.get(&s) {
+                        let expanded_replacement = self.replace_macros(&s, replacement.clone());
                         result.push_str(
-                            &replacement
+                            &expanded_replacement
                                 .into_iter()
                                 .map(|t| t.to_string())
                                 .collect::<String>(),
@@ -530,10 +540,36 @@ mod tests {
     fn scan(input: &str) -> Vec<Token> {
         Scanner::new(input).scan_token()
     }
-    fn setup(input: &str) -> (Vec<Token>, bool) {
+
+    fn setup(input: &str) -> Preprocessor {
         let tokens = scan(input);
 
-        let mut pp = Preprocessor::new("", input, tokens, None);
+        Preprocessor::new("", input, tokens, None)
+    }
+
+    fn setup_macro_replacement(defined: HashMap<&str, &str>) -> HashMap<String, String> {
+        let defined: HashMap<String, Vec<Token>> = defined
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), scan(v)))
+            .collect();
+        let pp = Preprocessor::new("", "", Vec::new(), Some(defined.clone()));
+
+        let mut result = HashMap::new();
+        for (name, replace_list) in defined {
+            result.insert(
+                name.to_string(),
+                pp.replace_macros(&name, replace_list)
+                    .into_iter()
+                    .map(|t| t.to_string())
+                    .collect(),
+            );
+        }
+
+        result
+    }
+
+    fn setup_whitespace_skip(input: &str) -> (Vec<Token>, bool) {
+        let mut pp = setup(input);
         let result = pp.skip_whitespace();
 
         (pp.tokens.collect(), result.is_err())
@@ -550,7 +586,7 @@ mod tests {
 
     #[test]
     fn skips_multiline_whitespace() {
-        let (tokens, errors) = setup("  \\\n \n#include");
+        let (tokens, errors) = setup_whitespace_skip("  \\\n \n#include");
         let expected = scan("\n#include");
 
         assert_eq!(tokens, expected);
@@ -559,7 +595,7 @@ mod tests {
 
     #[test]
     fn skips_multiline_whitespace2() {
-        let (tokens, errors) = setup("  \\\n\n#include");
+        let (tokens, errors) = setup_whitespace_skip("  \\\n\n#include");
         let expected = scan("\n#include");
 
         assert_eq!(tokens, expected);
@@ -568,7 +604,7 @@ mod tests {
 
     #[test]
     fn skips_multiline_whitespace3() {
-        let (tokens, errors) = setup(" \\include");
+        let (tokens, errors) = setup_whitespace_skip(" \\include");
         let expected = scan("\\include");
 
         assert_eq!(tokens, expected);
@@ -577,7 +613,7 @@ mod tests {
 
     #[test]
     fn skips_multiline_whitespace_error() {
-        let (tokens, errors) = setup("\\\n#include");
+        let (tokens, errors) = setup_whitespace_skip("\\\n#include");
         let expected = scan("#include");
 
         assert_eq!(tokens, expected);
@@ -586,10 +622,67 @@ mod tests {
 
     #[test]
     fn skips_multiline_whitespace_error2() {
-        let (tokens, errors) = setup("\\some\n#include");
+        let (tokens, errors) = setup_whitespace_skip("\\some\n#include");
         let expected = scan("\\some\n#include");
 
         assert_eq!(tokens, expected);
         assert_eq!(errors, true);
+    }
+
+    #[test]
+    fn macro_replacements() {
+        let actual = setup_macro_replacement(HashMap::from([
+            ("num", "3"),
+            ("foo", "num"),
+            ("bar", "foo"),
+        ]));
+        let expected = HashMap::from([
+            (String::from("num"), String::from("3")),
+            (String::from("foo"), String::from("3")),
+            (String::from("bar"), String::from("3")),
+        ]);
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn macro_list_replacements() {
+        let actual = setup_macro_replacement(HashMap::from([
+            ("foo", "one two three"),
+            ("some", "four foo six"),
+            ("bar", "foo seven some"),
+        ]));
+        let expected = HashMap::from([
+            (String::from("foo"), String::from("one two three")),
+            (String::from("some"), String::from("four one two three six")),
+            (
+                String::from("bar"),
+                String::from("one two three seven four one two three six"),
+            ),
+        ]);
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn cyclic_macros() {
+        let actual = setup_macro_replacement(HashMap::from([("foo", "bar"), ("bar", "foo")]));
+        let expected = HashMap::from([
+            (String::from("foo"), String::from("foo")),
+            (String::from("bar"), String::from("bar")),
+        ]);
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn cyclic_macros2() {
+        let actual = setup_macro_replacement(HashMap::from([("foo1", "bar"), ("bar", "foo2")]));
+        let expected = HashMap::from([
+            (String::from("foo1"), String::from("foo2")),
+            (String::from("bar"), String::from("foo2")),
+        ]);
+
+        assert_eq!(actual, expected);
     }
 }

@@ -13,26 +13,21 @@ char* sec = "true";
 char* third = "true";
 #endif
 
-// TODO: defines replacement:
-// #define foo some name
-// #if some || foo
-// #define foo some
-// #if foo - 3
-// char* fourth = "true";
-// #else
-// char* fourth = "false";
-// #endif
+#define foo some
+#if foo == 3
+char* fourth = "true";
+#endif
 
 // TODO: < string replacement
 // #if 2 < some
 // ...
 // #endif
 
-#define foo bar
-#if foo != 0
-char* fourth = "true";
+#define other bar
+#if other != 0
+char* fifth = "true";
 #endif
-char* fourth = "false";
+char* fifth = "false";
 
 
 int main() {
@@ -40,4 +35,5 @@ int main() {
   printf("%s\n",sec);
   printf("%s\n",third);
   printf("%s\n",fourth);
+  printf("%s\n",fifth);
 }

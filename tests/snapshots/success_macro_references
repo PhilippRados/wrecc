@@ -1,0 +1,8 @@
+Error: in tests/fixtures/macro_references.c: Undeclared symbol 'foo2'
+|
+11   foo2;
+|    ^
+Error: in tests/fixtures/macro_references.c: Undeclared symbol 'test'
+|
+12   test test;
+|    ^

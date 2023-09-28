@@ -136,8 +136,12 @@ impl Preprocessor {
             .flat_map(|token| {
                 match (token.to_string(), self.defines.get(&token.to_string())) {
                     (token_name, Some(replacement)) if token_name != macro_name => {
-                        // replace all macros in replacement
-                        self.replace_macros(macro_name, replacement.clone())
+                        // INFO: Replace all macros in replacement and add whitespace so that wrong
+                        // tokens don't get accidentally glued together during stringification
+                        let mut replaced = vec![Token::Whitespace(" ".to_string())];
+                        replaced.extend(self.replace_macros(macro_name, replacement.clone()));
+                        replaced.push(Token::Whitespace(" ".to_string()));
+                        replaced
                     }
                     _ => {
                         // can't further replace if replacement is current macro name
@@ -402,12 +406,13 @@ impl Preprocessor {
                 Token::Ident(s) => {
                     if let Some(replacement) = self.defines.get(&s) {
                         let expanded_replacement = self.replace_macros(&s, replacement.clone());
-                        result.push_str(
+                        result.push_str(&format!(
+                            " {} ",
                             &expanded_replacement
                                 .into_iter()
                                 .map(|t| t.to_string())
                                 .collect::<String>(),
-                        )
+                        ))
                     } else {
                         result.push_str(&s)
                     }
@@ -639,8 +644,8 @@ mod tests {
         ]));
         let expected = HashMap::from([
             (String::from("num"), String::from("3")),
-            (String::from("foo"), String::from("3")),
-            (String::from("bar"), String::from("3")),
+            (String::from("foo"), String::from(" 3 ")),
+            (String::from("bar"), String::from("  3  ")),
         ]);
 
         assert_eq!(actual, expected);
@@ -655,10 +660,13 @@ mod tests {
         ]));
         let expected = HashMap::from([
             (String::from("foo"), String::from("one two three")),
-            (String::from("some"), String::from("four one two three six")),
+            (
+                String::from("some"),
+                String::from("four  one two three  six"),
+            ),
             (
                 String::from("bar"),
-                String::from("one two three seven four one two three six"),
+                String::from(" one two three  seven  four  one two three  six "),
             ),
         ]);
 
@@ -669,8 +677,8 @@ mod tests {
     fn cyclic_macros() {
         let actual = setup_macro_replacement(HashMap::from([("foo", "bar"), ("bar", "foo")]));
         let expected = HashMap::from([
-            (String::from("foo"), String::from("foo")),
-            (String::from("bar"), String::from("bar")),
+            (String::from("foo"), String::from(" foo ")),
+            (String::from("bar"), String::from(" bar ")),
         ]);
 
         assert_eq!(actual, expected);
@@ -680,7 +688,7 @@ mod tests {
     fn cyclic_macros2() {
         let actual = setup_macro_replacement(HashMap::from([("foo1", "bar"), ("bar", "foo2")]));
         let expected = HashMap::from([
-            (String::from("foo1"), String::from("foo2")),
+            (String::from("foo1"), String::from(" foo2 ")),
             (String::from("bar"), String::from("foo2")),
         ]);
 

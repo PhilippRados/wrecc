@@ -73,36 +73,29 @@ impl Preprocessor {
     fn include(&mut self) -> Result<String, Error> {
         self.skip_whitespace()?;
 
-        if let Some(Token::String(mut file, newlines)) = self.tokens.next() {
-            self.line += newlines as i32;
-            let kind = file.remove(0);
+        match self.tokens.next() {
+            Some(Token::String(..)) => todo!(),
+            Some(Token::Other('<')) => {
+                let file = self
+                    .fold_until_token(Token::Other('>'))
+                    .into_iter()
+                    .map(|t| t.to_string())
+                    .collect::<String>();
+                let closing = self.tokens.next();
 
-            match kind {
-                '<' => {
-                    let last = file.pop();
-
-                    if let Some('>') = last {
-                        self.paste_header(&file)
-                    } else {
-                        Err(Error::new(
-                            self,
-                            ErrorKind::Regular("Expected closing '>' after header file"),
-                        ))
-                    }
+                if let Some(Token::Other('>')) = closing {
+                    self.paste_header(&file)
+                } else {
+                    Err(Error::new(
+                        self,
+                        ErrorKind::Regular("Expected closing '>' after header file"),
+                    ))
                 }
-                '"' => {
-                    todo!()
-                }
-                _ => Err(Error::new(
-                    self,
-                    ErrorKind::Regular("Expected opening '<' or '\"' after include directive"),
-                )),
             }
-        } else {
-            Err(Error::new(
+            _ => Err(Error::new(
                 self,
                 ErrorKind::Regular("Expected opening '<' or '\"' after include directive"),
-            ))
+            )),
         }
     }
     fn define(&mut self) -> Result<(), Error> {
@@ -110,7 +103,7 @@ impl Preprocessor {
 
         if let Some(Token::Ident(identifier)) = self.tokens.next() {
             let _ = self.skip_whitespace();
-            let replace_with = self.fold_until_newline();
+            let replace_with = self.fold_until_token(Token::Newline);
             let replace_with = trim_trailing_whitespace(replace_with);
 
             // same macro already exists but with different replacement-list
@@ -195,7 +188,7 @@ impl Preprocessor {
 
         self.skip_whitespace()?;
 
-        let cond = self.fold_until_newline();
+        let cond = self.fold_until_token(Token::Newline);
         let cond = self.replace_define_expr(cond)?;
 
         if cond.is_empty() {
@@ -438,7 +431,8 @@ impl Preprocessor {
         }
     }
 
-    fn fold_until_newline(&mut self) -> Vec<Token> {
+    // combines tokens until either an unescaped newline is reached or the token is found
+    fn fold_until_token(&mut self, end: Token) -> Vec<Token> {
         let mut result = Vec::new();
         let mut prev_token = Token::Newline;
 
@@ -450,6 +444,7 @@ impl Preprocessor {
                     self.line += 1;
                 }
                 (_, Token::Newline) => break,
+                (_, token) if token == &end => break,
                 (.., t) => {
                     if let Token::String(_, newline) | Token::Comment(_, newline) = t {
                         self.line += *newline as i32;
@@ -705,7 +700,7 @@ mod tests {
 
     #[test]
     fn fold_until_newline_escaped() {
-        let actual = setup("1 2   \\\n\\3\n   \\\nwhat").fold_until_newline();
+        let actual = setup("1 2   \\\n\\3\n   \\\nwhat").fold_until_token(Token::Newline);
         let expected = scan("1 2   \\3");
 
         assert_eq!(actual, expected);
@@ -713,7 +708,7 @@ mod tests {
 
     #[test]
     fn fold_until_newline_escaped2() {
-        let actual = setup("1 2   \\\n\\\n3\n   \\\nwhat").fold_until_newline();
+        let actual = setup("1 2   \\\n\\\n3\n   \\\nwhat").fold_until_token(Token::Newline);
         let expected = scan("1 2   3");
 
         assert_eq!(actual, expected);

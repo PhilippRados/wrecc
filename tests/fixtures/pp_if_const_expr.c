@@ -18,17 +18,15 @@ char* third = "true";
 char* fourth = "true";
 #endif
 
-// TODO: < string replacement
-// #if 2 < some
-// ...
-// #endif
-
 #define other bar
 #if other != 0
 char* fifth = "true";
 #endif
 char* fifth = "false";
 
+#if 2 < some && !undefined
+char* sixth = "true";
+#endif
 
 int main() {
   printf("%s\n",first);
@@ -36,4 +34,5 @@ int main() {
   printf("%s\n",third);
   printf("%s\n",fourth);
   printf("%s\n",fifth);
+  printf("%s\n",sixth);
 }

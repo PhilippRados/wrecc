@@ -76,7 +76,7 @@ impl<'a> Scanner<'a> {
 
                     Token::Whitespace(c.to_string() + &more_whitespace)
                 }
-                '"' | '\'' | '<' => {
+                '"' | '\'' => {
                     let (s, newlines) = self.string(c);
 
                     Token::String(s, newlines)
@@ -199,13 +199,13 @@ mod tests {
 
     #[test]
     fn simple_pp_directive() {
-        let actual = setup("#  include <'some'>");
+        let actual = setup("#  include \"'some'\"");
         let expected = vec![
             Token::Hash,
             Token::Whitespace("  ".to_string()),
             Token::Include,
             Token::Whitespace(" ".to_string()),
-            Token::String("<'some'>".to_string(), 0),
+            Token::String("\"'some'\"".to_string(), 0),
         ];
 
         assert_eq!(actual, expected);
@@ -213,12 +213,12 @@ mod tests {
 
     #[test]
     fn string() {
-        let actual = setup("#define <some/* #*/define>");
+        let actual = setup("#define \"some/* #*/define\"");
         let expected = vec![
             Token::Hash,
             Token::Define,
             Token::Whitespace(" ".to_string()),
-            Token::String("<some/* #*/define>".to_string(), 0),
+            Token::String("\"some/* #*/define\"".to_string(), 0),
         ];
 
         assert_eq!(actual, expected);
@@ -262,36 +262,36 @@ mod tests {
     }
     #[test]
     fn multiline_string_escaped() {
-        let actual = setup(" <some\\\n\\else>");
+        let actual = setup(" \"some\\\n\\else\"");
         let expected = vec![
             Token::Whitespace(" ".to_string()),
-            Token::String("<some\\else>".to_string(), 1),
+            Token::String("\"some\\else\"".to_string(), 1),
         ];
 
         assert_eq!(actual, expected);
     }
     #[test]
     fn multiline_string_multiple_escapes() {
-        let actual = setup(" <some\\\n\nelse>");
+        let actual = setup(" \"some\\\n\nelse\"");
         let expected = vec![
             Token::Whitespace(" ".to_string()),
-            Token::String("<some".to_string(), 1),
+            Token::String("\"some".to_string(), 1),
             Token::Newline,
             Token::Ident("else".to_string()),
-            Token::Other('>'),
+            Token::String("\"".to_string(), 0),
         ];
 
         assert_eq!(actual, expected);
     }
     #[test]
     fn multiline_string_unescaped() {
-        let actual = setup(" <some\nelse>");
+        let actual = setup(" \"some\nelse\"");
         let expected = vec![
             Token::Whitespace(" ".to_string()),
-            Token::String("<some".to_string(), 0),
+            Token::String("\"some".to_string(), 0),
             Token::Newline,
             Token::Ident("else".to_string()),
-            Token::Other('>'),
+            Token::String("\"".to_string(), 0),
         ];
 
         assert_eq!(actual, expected);

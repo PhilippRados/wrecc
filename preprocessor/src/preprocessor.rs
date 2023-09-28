@@ -111,6 +111,7 @@ impl Preprocessor {
         if let Some(Token::Ident(identifier)) = self.tokens.next() {
             let _ = self.skip_whitespace();
             let replace_with = self.fold_until_newline();
+            let replace_with = trim_trailing_whitespace(replace_with);
 
             // same macro already exists but with different replacement-list
             if let Some(existing_replacement) = self.defines.get(&identifier) {
@@ -444,7 +445,7 @@ impl Preprocessor {
         while let Some(token) = self.tokens.peek() {
             match (&prev_token, token) {
                 (Token::Other('\\'), Token::Newline) => {
-                    self.tokens.next();
+                    prev_token = self.tokens.next().unwrap();
                     result.pop();
                     self.line += 1;
                 }
@@ -472,6 +473,13 @@ impl Preprocessor {
             Ok(())
         }
     }
+}
+
+fn trim_trailing_whitespace(mut tokens: Vec<Token>) -> Vec<Token> {
+    while let Some(Token::Whitespace(_)) = tokens.last() {
+        tokens.pop();
+    }
+    tokens
 }
 
 fn skip_whitespace(tokens: &mut Peekable<IntoIter<Token>>, line_index: &mut i32) -> Result<(), ()> {
@@ -691,6 +699,52 @@ mod tests {
             (String::from("foo1"), String::from(" foo2 ")),
             (String::from("bar"), String::from("foo2")),
         ]);
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn fold_until_newline_escaped() {
+        let actual = setup("1 2   \\\n\\3\n   \\\nwhat").fold_until_newline();
+        let expected = scan("1 2   \\3");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn fold_until_newline_escaped2() {
+        let actual = setup("1 2   \\\n\\\n3\n   \\\nwhat").fold_until_newline();
+        let expected = scan("1 2   3");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn trim_trailing_whitespace_none() {
+        let actual = trim_trailing_whitespace(scan("1 2"));
+        let expected = scan("1 2");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn trim_trailing_whitespace_test() {
+        let actual = trim_trailing_whitespace(scan("1 2  "));
+        let expected = scan("1 2");
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn trim_trailing_whitespace_multiple() {
+        let input = vec![
+            Token::Ident("some".to_string()),
+            Token::Whitespace("  ".to_string()),
+            Token::Other('1'),
+            Token::Whitespace("  ".to_string()),
+            Token::Whitespace(" ".to_string()),
+        ];
+        let actual = trim_trailing_whitespace(input);
+        let expected = scan("some  1");
 
         assert_eq!(actual, expected);
     }

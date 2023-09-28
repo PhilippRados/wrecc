@@ -16,11 +16,22 @@ pub enum Token {
     If,
     Endif,
     String(String, usize),
+    CharLit(String, usize),
     Ident(String),
     Newline,
     Whitespace(String),
     Comment(String, usize),
     Other(char),
+}
+impl Token {
+    pub fn get_newlines(&self) -> Option<i32> {
+        match self {
+            Token::String(_, newline) | Token::Comment(_, newline) | Token::CharLit(_, newline) => {
+                Some(*newline as i32)
+            }
+            _ => None,
+        }
+    }
 }
 impl ToString for Token {
     fn to_string(&self) -> String {
@@ -34,10 +45,12 @@ impl ToString for Token {
             Token::Ifndef => "ifndef".to_string(),
             Token::If => "if".to_string(),
             Token::Endif => "endif".to_string(),
-            Token::Newline => "\\n".to_string(),
-            Token::Comment(s, _) | Token::String(s, _) | Token::Ident(s) | Token::Whitespace(s) => {
-                s.to_string()
-            }
+            Token::Newline => "\n".to_string(),
+            Token::Comment(s, _)
+            | Token::String(s, _)
+            | Token::CharLit(s, _)
+            | Token::Ident(s)
+            | Token::Whitespace(s) => s.to_string(),
             Token::Other(c) => c.to_string(),
         }
     }
@@ -76,10 +89,15 @@ impl<'a> Scanner<'a> {
 
                     Token::Whitespace(c.to_string() + &more_whitespace)
                 }
-                '"' | '\'' => {
-                    let (s, newlines) = self.string(c);
+                '"' => {
+                    let (s, newlines) = self.string('"');
 
                     Token::String(s, newlines)
+                }
+                '\'' => {
+                    let (s, newlines) = self.string('\'');
+
+                    Token::CharLit(s, newlines)
                 }
                 '/' => {
                     let (comment, newlines) = self.consume_comment();
@@ -125,7 +143,7 @@ impl<'a> Scanner<'a> {
                     prev_char = token;
                 }
                 (_, '\n') => break,
-                (..) if *peeked == matching_closing(c) => {
+                (..) if *peeked == c => {
                     result.push(self.source.next().unwrap());
                     break;
                 }
@@ -176,15 +194,6 @@ impl<'a> Scanner<'a> {
         }
 
         (result, newlines)
-    }
-}
-
-fn matching_closing(opening: char) -> char {
-    match opening {
-        '<' => '>',
-        '\'' => '\'',
-        '"' => '"',
-        _ => unreachable!("invalid opening string indicator"),
     }
 }
 

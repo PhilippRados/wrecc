@@ -319,10 +319,11 @@ impl Preprocessor {
                     }
                 }
                 Token::Newline => self.line += 1,
-                Token::Comment(_, newlines) | Token::String(_, newlines) => {
-                    self.line += newlines as i32;
+                token => {
+                    if let Some(newlines) = token.get_newlines() {
+                        self.line += newlines;
+                    }
                 }
-                _ => (),
             }
         }
 
@@ -411,12 +412,12 @@ impl Preprocessor {
                         result.push_str(&s)
                     }
                 }
-                Token::Other(c) => result.push(c),
-                Token::Comment(s, newlines) | Token::String(s, newlines) => {
-                    self.line += newlines as i32;
-                    result.push_str(&s);
+                token => {
+                    if let Some(newlines) = token.get_newlines() {
+                        self.line += newlines;
+                    }
+                    result.push_str(&token.to_string())
                 }
-                _ => result.push_str(&token.to_string()),
             }
         }
 
@@ -446,9 +447,10 @@ impl Preprocessor {
                 (_, Token::Newline) => break,
                 (_, token) if token == &end => break,
                 (.., t) => {
-                    if let Token::String(_, newline) | Token::Comment(_, newline) = t {
-                        self.line += *newline as i32;
+                    if let Some(newlines) = t.get_newlines() {
+                        self.line += newlines;
                     }
+
                     let token = self.tokens.next().unwrap();
                     result.push(token.clone());
                     prev_token = token;
@@ -457,6 +459,7 @@ impl Preprocessor {
         }
         result
     }
+
     // wrapper for easier access
     fn skip_whitespace(&mut self) -> Result<(), Error> {
         if let Err(_) = skip_whitespace(&mut self.tokens, &mut self.line) {

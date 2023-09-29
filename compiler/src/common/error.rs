@@ -84,7 +84,11 @@ pub enum ErrorKind {
     // preprocessor errors
     InvalidDirective(String),
     InvalidHeader(String),
+    InvalidMacroName,
     UnterminatedIf(String),
+    DuplicateElse,
+    MissingIf(String),
+    ElifAfterElse,
 
     Regular(&'static str), // generic error message when message only used once
     Multiple(Vec<Error>),
@@ -366,6 +370,14 @@ impl ErrorKind {
             ErrorKind::UnterminatedIf(if_kind) => {
                 format!("Unterminated '#{}'", if_kind)
             }
+            ErrorKind::InvalidMacroName => "Macro name must be valid identifier".to_string(),
+            ErrorKind::DuplicateElse => {
+                "Can only have single '#else' in '#if'-directive".to_string()
+            }
+            ErrorKind::MissingIf(kind) => {
+                format!("Found '#{}' without matching '#if'", kind)
+            }
+            ErrorKind::ElifAfterElse => "Found '#elif' after '#else'".to_string(),
 
             ErrorKind::Regular(s) => s.to_string(),
             ErrorKind::Multiple(_) => {

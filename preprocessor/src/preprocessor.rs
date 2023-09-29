@@ -12,6 +12,17 @@ use std::fs;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
+struct IfDirective {
+    location: Error,
+    has_else: bool,
+}
+
+impl IfDirective {
+    fn new(location: Error) -> Self {
+        IfDirective { location, has_else: false }
+    }
+}
+
 pub struct Preprocessor {
     tokens: Peekable<IntoIter<Token>>,
     raw_source: Vec<String>,
@@ -19,7 +30,7 @@ pub struct Preprocessor {
     column: i32,
     filename: String,
     defines: HashMap<String, Vec<Token>>,
-    ifs: Vec<Error>,
+    ifs: Vec<IfDirective>,
 }
 
 impl Preprocessor {
@@ -118,10 +129,7 @@ impl Preprocessor {
             self.defines.insert(identifier, replace_with);
             Ok(())
         } else {
-            Err(Error::new(
-                self,
-                ErrorKind::Regular("Macro name must be valid identifier"),
-            ))
+            Err(Error::new(self, ErrorKind::InvalidMacroName))
         }
     }
     fn replace_macros(&self, macro_name: &str, replace_list: Vec<Token>) -> Vec<Token> {
@@ -152,10 +160,7 @@ impl Preprocessor {
             self.defines.remove(&identifier);
             Ok(())
         } else {
-            Err(Error::new(
-                self,
-                ErrorKind::Regular("Macro name must be valid identifier"),
-            ))
+            Err(Error::new(self, ErrorKind::InvalidMacroName))
         }
     }
     fn ifdef(&mut self, if_kind: Token) -> Result<(), Error> {
@@ -163,31 +168,54 @@ impl Preprocessor {
 
         if let Some(Token::Ident(identifier)) = self.tokens.next() {
             // TODO: should this be prior to whitespace check so that #endif still has matching #if?
-            self.ifs.push(Error::new(
+            self.ifs.push(IfDirective::new(Error::new(
                 self,
                 ErrorKind::UnterminatedIf(if_kind.to_string()),
-            ));
+            )));
 
             match (&if_kind, self.defines.contains_key(&identifier)) {
                 (Token::Ifdef, true) | (Token::Ifndef, false) => Ok(()),
-                (Token::Ifdef, false) | (Token::Ifndef, true) => self.skip_until_endif(),
+                (Token::Ifdef, false) | (Token::Ifndef, true) => self.eval_else_branch(),
                 _ => unreachable!(),
             }
         } else {
-            Err(Error::new(
-                self,
-                ErrorKind::Regular("Macro name must be valid identifier"),
-            ))
+            Err(Error::new(self, ErrorKind::InvalidMacroName))
         }
     }
     fn if_expr(&mut self, if_kind: Token) -> Result<(), Error> {
-        self.ifs.push(Error::new(
+        self.ifs.push(IfDirective::new(Error::new(
             self,
             ErrorKind::UnterminatedIf(if_kind.to_string()),
-        ));
+        )));
 
         self.skip_whitespace()?;
 
+        match self.eval_cond()? {
+            true => Ok(()),
+            false => self.eval_else_branch(),
+        }
+    }
+
+    fn eval_else_branch(&mut self) -> Result<(), Error> {
+        loop {
+            match self.skip_branch(false)? {
+                Token::Elif => {
+                    if self.eval_cond()? {
+                        return Ok(());
+                    }
+                }
+                Token::Else => {
+                    return Ok(());
+                }
+                Token::Endif => {
+                    return Ok(());
+                }
+                _ => unreachable!("not #if token"),
+            }
+        }
+    }
+
+    fn eval_cond(&mut self) -> Result<bool, Error> {
         let cond = self.fold_until_token(Token::Newline);
         let cond = self.replace_define_expr(cond)?;
 
@@ -198,12 +226,9 @@ impl Preprocessor {
             ));
         }
 
-        let value = self.pp_const_value(cond);
-
-        match value {
-            Ok(n) if n != 0 => Ok(()),
-            Ok(_) => self.skip_until_endif(),
-            Err(e) => Err(e),
+        match self.pp_const_value(cond)? {
+            0 => Ok(false),
+            _ => Ok(true),
         }
     }
 
@@ -299,21 +324,47 @@ impl Preprocessor {
 
         Ok(result)
     }
-    fn skip_until_endif(&mut self) -> Result<(), Error> {
+    fn skip_branch(&mut self, skip_to_end: bool) -> Result<Token, Error> {
+        let matching_if = self.ifs.len();
+
         while let Some(token) = self.tokens.next() {
             match token {
                 Token::Hash => {
                     let _ = self.skip_whitespace();
                     match self.tokens.next() {
+                        Some(Token::Endif) if self.ifs.len() == matching_if => {
+                            self.ifs.pop();
+                            return Ok(Token::Endif);
+                        }
                         Some(Token::Endif) => {
                             self.ifs.pop();
-                            return Ok(());
+                        }
+                        Some(Token::Elif) => {
+                            if let Some(if_dir) = self.ifs.last_mut() {
+                                if if_dir.has_else {
+                                    return Err(Error::new(self, ErrorKind::ElifAfterElse));
+                                }
+                            }
+                            if !skip_to_end {
+                                return Ok(Token::Elif);
+                            }
+                        }
+                        Some(Token::Else) => {
+                            if let Some(if_dir) = self.ifs.last_mut() {
+                                if if_dir.has_else {
+                                    return Err(Error::new(self, ErrorKind::DuplicateElse));
+                                }
+                                if_dir.has_else = true;
+                            }
+                            if !skip_to_end {
+                                return Ok(Token::Else);
+                            }
                         }
                         Some(Token::Ifdef | Token::Ifndef | Token::If) => {
-                            self.ifs.push(Error::new(
+                            self.ifs.push(IfDirective::new(Error::new(
                                 self,
                                 ErrorKind::UnterminatedIf(token.to_string()),
-                            ));
+                            )));
                         }
                         _ => (),
                     }
@@ -328,7 +379,7 @@ impl Preprocessor {
         }
 
         // got to end of token-stream without finding matching #endif
-        Err(self.ifs.pop().unwrap())
+        Err(self.ifs.pop().unwrap().location)
     }
 
     pub fn start(&mut self) -> Result<(String, HashMap<String, Vec<Token>>), Vec<Error>> {
@@ -350,11 +401,41 @@ impl Preprocessor {
                         Some(Token::Undef) => self.undef(),
                         Some(token @ (Token::Ifdef | Token::Ifndef)) => self.ifdef(token),
                         Some(token @ Token::If) => self.if_expr(token),
+                        Some(Token::Elif) => {
+                            if self.ifs.is_empty() {
+                                Err(Error::new(
+                                    self,
+                                    ErrorKind::MissingIf(Token::Elif.to_string()),
+                                ))
+                            } else {
+                                if self.ifs.last().unwrap().has_else {
+                                    Err(Error::new(self, ErrorKind::ElifAfterElse))
+                                } else {
+                                    self.skip_branch(true).map(|_| ())
+                                }
+                            }
+                        }
+                        Some(Token::Else) => {
+                            if self.ifs.is_empty() {
+                                Err(Error::new(
+                                    self,
+                                    ErrorKind::MissingIf(Token::Else.to_string()),
+                                ))
+                            } else {
+                                let mut matching_if = self.ifs.last_mut().unwrap();
+                                if matching_if.has_else {
+                                    Err(Error::new(self, ErrorKind::DuplicateElse))
+                                } else {
+                                    matching_if.has_else = true;
+                                    self.skip_branch(true).map(|_| ())
+                                }
+                            }
+                        }
                         Some(Token::Endif) => {
                             if self.ifs.is_empty() {
                                 Err(Error::new(
                                     self,
-                                    ErrorKind::Regular("Found '#endif' without matching '#if'"),
+                                    ErrorKind::MissingIf(Token::Endif.to_string()),
                                 ))
                             } else {
                                 self.ifs.pop();
@@ -422,7 +503,7 @@ impl Preprocessor {
         }
 
         if !self.ifs.is_empty() {
-            errors.append(&mut self.ifs);
+            errors.append(&mut self.ifs.iter().map(|i| i.location.clone()).collect());
         }
 
         if errors.is_empty() {
@@ -557,6 +638,18 @@ mod tests {
         let tokens = scan(input);
 
         Preprocessor::new("", input, tokens, None)
+    }
+
+    fn setup_complete(input: &str) -> String {
+        setup(input).start().unwrap().0
+    }
+
+    fn setup_complete_err(input: &str) -> Vec<ErrorKind> {
+        if let Err(e) = setup(input).start() {
+            e.into_iter().map(|e| e.kind).collect()
+        } else {
+            unreachable!()
+        }
     }
 
     fn setup_macro_replacement(defined: HashMap<&str, &str>) -> HashMap<String, String> {
@@ -745,5 +838,176 @@ mod tests {
         let expected = scan("some  1");
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn skips_multiple_ifs() {
+        let actual = setup_complete(
+            "
+#if 0
+#if 1
+char s = 'l';
+#endif
+char s = 'i';
+#endif
+char empty = 0;
+",
+        );
+        let expected = "\n#line:7\n\nchar empty = 0;\n";
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn skips_nested_ifs() {
+        let actual = setup_complete(
+            "
+#if 1
+#if 0
+char s = 'l';
+#endif
+char s = 'i';
+#endif
+char empty = 0;
+",
+        );
+        let expected = "\n\n#line:5\n\nchar s = 'i';\n\nchar empty = 0;\n";
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn multiple_ifs_single_endif() {
+        let actual = setup_complete_err(
+            "
+#if 1
+#if 0
+char s = 'l';
+char s = 'i';
+#endif
+char empty = 0;
+",
+        );
+
+        assert!(matches!(actual[..], [ErrorKind::UnterminatedIf(_)]));
+    }
+
+    #[test]
+    fn if_else() {
+        let actual = setup_complete(
+            "
+#if 1
+char s = 'l';
+#else
+char s = 'o';
+#endif
+#ifdef foo
+char c = 1;
+#else
+char c = 2;
+#endif
+",
+        );
+        let expected = "\n\nchar s = 'l';\n#line:6\n\n#line:9\n\nchar c = 2;\n\n";
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn if_elif() {
+        let actual = setup_complete(
+            "
+#define foo
+#if !defined foo
+char s = 'l';
+#elif 1
+char s = 'o';
+#elif !foo
+char s = 's';
+#endif
+",
+        );
+        let expected = "\n\n#line:5\n\nchar s = 'o';\n#line:9\n\n";
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn missing_ifs() {
+        let actual = setup_complete_err(
+            "
+#if 1
+char s = 'l';
+#else
+char s = 'i';
+#endif
+#elif nothing
+#else
+#endif
+#ifndef foo
+char empty = 0;
+",
+        );
+
+        assert!(matches!(
+            actual[..],
+            [
+                ErrorKind::MissingIf(_),
+                ErrorKind::MissingIf(_),
+                ErrorKind::MissingIf(_),
+                ErrorKind::UnterminatedIf(_),
+            ]
+        ));
+    }
+    #[test]
+    fn duplicate_else() {
+        let actual = setup_complete_err(
+            "
+#if 1
+char s = 's';
+#if 1
+#elif 0
+char *s = 'o';
+#else
+char *s = 'n';
+#else
+char *s = 'm';
+#endif
+#endif
+",
+        );
+
+        assert!(matches!(actual[..], [ErrorKind::DuplicateElse]));
+    }
+
+    #[test]
+    fn nested_duplicate_else() {
+        let actual = setup_complete_err(
+            "
+#if 1
+char *s = 'if';
+#else
+char *s = 'else1';
+
+#if 1
+#else
+char *s = 'elif';
+#elif 0
+#else
+char *s = 'else2';
+#endif
+
+#else
+#endif
+",
+        );
+
+        assert!(matches!(
+            actual[..],
+            [
+                ErrorKind::ElifAfterElse,
+                ErrorKind::DuplicateElse,
+                ErrorKind::DuplicateElse
+            ]
+        ));
     }
 }

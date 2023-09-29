@@ -7,6 +7,8 @@ char* first = "true";
 #define some 3
 #if defined(  some ) && !none
 char* sec = "true";
+#else
+char* sec = "false";
 #endif
 
 #if (!defined some & 3) + 2
@@ -21,11 +23,15 @@ char* fourth = "true";
 #define other bar
 #if other != 0
 char* fifth = "true";
-#endif
+#elif 0
+#else
 char* fifth = "false";
+#endif
 
 #if 2 < some && !undefined
 char* sixth = "true";
+#elif !defined(not)
+char* sixth = "false";
 #endif
 
 int main() {

@@ -14,6 +14,8 @@ pub enum Token {
     Ifdef,
     Ifndef,
     If,
+    Elif,
+    Else,
     Endif,
     String(String, usize),
     CharLit(String, usize),
@@ -44,6 +46,8 @@ impl ToString for Token {
             Token::Ifdef => "ifdef".to_string(),
             Token::Ifndef => "ifndef".to_string(),
             Token::If => "if".to_string(),
+            Token::Elif => "elif".to_string(),
+            Token::Else => "else".to_string(),
             Token::Endif => "endif".to_string(),
             Token::Newline => "\n".to_string(),
             Token::Comment(s, _)
@@ -72,6 +76,8 @@ impl<'a> Scanner<'a> {
                 ("ifdef", Token::Ifdef),
                 ("ifndef", Token::Ifndef),
                 ("if", Token::If),
+                ("elif", Token::Elif),
+                ("else", Token::Else),
                 ("endif", Token::Endif),
             ]),
         }
@@ -234,7 +240,7 @@ mod tests {
     }
     #[test]
     fn ident() {
-        let actual = setup("1first 2 some23: else");
+        let actual = setup("1first 2 some23: more");
         let expected = vec![
             Token::Other('1'),
             Token::Ident("first".to_string()),
@@ -244,7 +250,7 @@ mod tests {
             Token::Ident("some23".to_string()),
             Token::Other(':'),
             Token::Whitespace(" ".to_string()),
-            Token::Ident("else".to_string()),
+            Token::Ident("more".to_string()),
         ];
 
         assert_eq!(actual, expected);
@@ -281,12 +287,12 @@ mod tests {
     }
     #[test]
     fn multiline_string_multiple_escapes() {
-        let actual = setup(" \"some\\\n\nelse\"");
+        let actual = setup(" \"some\\\n\nmore\"");
         let expected = vec![
             Token::Whitespace(" ".to_string()),
             Token::String("\"some".to_string(), 1),
             Token::Newline,
-            Token::Ident("else".to_string()),
+            Token::Ident("more".to_string()),
             Token::String("\"".to_string(), 0),
         ];
 
@@ -294,12 +300,12 @@ mod tests {
     }
     #[test]
     fn multiline_string_unescaped() {
-        let actual = setup(" \"some\nelse\"");
+        let actual = setup(" \"some\nmore\"");
         let expected = vec![
             Token::Whitespace(" ".to_string()),
             Token::String("\"some".to_string(), 0),
             Token::Newline,
-            Token::Ident("else".to_string()),
+            Token::Ident("more".to_string()),
             Token::String("\"".to_string(), 0),
         ];
 

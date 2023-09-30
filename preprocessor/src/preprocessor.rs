@@ -195,7 +195,30 @@ impl Preprocessor {
             false => self.eval_else_branch(),
         }
     }
+    fn conditional_block(&mut self, token: Token) -> Result<(), Error> {
+        if self.ifs.is_empty() {
+            Err(Error::new(self, ErrorKind::MissingIf(token.to_string())))
+        } else {
+            let matching_if = self.ifs.last_mut().unwrap();
 
+            match (matching_if.has_else, token) {
+                (true, Token::Elif) => Err(Error::new(self, ErrorKind::ElifAfterElse)),
+                (false, Token::Elif) => self.skip_branch(true).map(|_| ()),
+                (true, Token::Else) => Err(Error::new(self, ErrorKind::DuplicateElse)),
+                (false, Token::Else) => {
+                    matching_if.has_else = true;
+                    self.skip_branch(true).map(|_| ())
+                }
+                (_, Token::Endif) => {
+                    self.ifs.pop();
+                    Ok(())
+                }
+                _ => unreachable!("not conditional block token"),
+            }
+        }
+    }
+
+    // skips branch until another conditional block token that must be evaluated is reached
     fn eval_else_branch(&mut self) -> Result<(), Error> {
         loop {
             match self.skip_branch(false)? {
@@ -204,10 +227,7 @@ impl Preprocessor {
                         return Ok(());
                     }
                 }
-                Token::Else => {
-                    return Ok(());
-                }
-                Token::Endif => {
+                Token::Else | Token::Endif => {
                     return Ok(());
                 }
                 _ => unreachable!("not #if token"),
@@ -339,25 +359,22 @@ impl Preprocessor {
                         Some(Token::Endif) => {
                             self.ifs.pop();
                         }
-                        Some(Token::Elif) => {
-                            if let Some(if_dir) = self.ifs.last_mut() {
-                                if if_dir.has_else {
+                        Some(token @ (Token::Elif | Token::Else)) => {
+                            let if_directive = self.ifs.last_mut().unwrap();
+                            match (if_directive.has_else, &token) {
+                                (true, Token::Elif) => {
                                     return Err(Error::new(self, ErrorKind::ElifAfterElse));
                                 }
-                            }
-                            if !skip_to_end {
-                                return Ok(Token::Elif);
-                            }
-                        }
-                        Some(Token::Else) => {
-                            if let Some(if_dir) = self.ifs.last_mut() {
-                                if if_dir.has_else {
+                                (true, Token::Else) => {
                                     return Err(Error::new(self, ErrorKind::DuplicateElse));
                                 }
-                                if_dir.has_else = true;
+                                (false, Token::Else) => {
+                                    if_directive.has_else = true;
+                                }
+                                _ => (),
                             }
                             if !skip_to_end {
-                                return Ok(Token::Else);
+                                return Ok(token);
                             }
                         }
                         Some(Token::Ifdef | Token::Ifndef | Token::If) => {
@@ -401,46 +418,8 @@ impl Preprocessor {
                         Some(Token::Undef) => self.undef(),
                         Some(token @ (Token::Ifdef | Token::Ifndef)) => self.ifdef(token),
                         Some(token @ Token::If) => self.if_expr(token),
-                        Some(Token::Elif) => {
-                            if self.ifs.is_empty() {
-                                Err(Error::new(
-                                    self,
-                                    ErrorKind::MissingIf(Token::Elif.to_string()),
-                                ))
-                            } else {
-                                if self.ifs.last().unwrap().has_else {
-                                    Err(Error::new(self, ErrorKind::ElifAfterElse))
-                                } else {
-                                    self.skip_branch(true).map(|_| ())
-                                }
-                            }
-                        }
-                        Some(Token::Else) => {
-                            if self.ifs.is_empty() {
-                                Err(Error::new(
-                                    self,
-                                    ErrorKind::MissingIf(Token::Else.to_string()),
-                                ))
-                            } else {
-                                let mut matching_if = self.ifs.last_mut().unwrap();
-                                if matching_if.has_else {
-                                    Err(Error::new(self, ErrorKind::DuplicateElse))
-                                } else {
-                                    matching_if.has_else = true;
-                                    self.skip_branch(true).map(|_| ())
-                                }
-                            }
-                        }
-                        Some(Token::Endif) => {
-                            if self.ifs.is_empty() {
-                                Err(Error::new(
-                                    self,
-                                    ErrorKind::MissingIf(Token::Endif.to_string()),
-                                ))
-                            } else {
-                                self.ifs.pop();
-                                Ok(())
-                            }
+                        Some(token @ (Token::Elif | Token::Else | Token::Endif)) => {
+                            self.conditional_block(token)
                         }
                         Some(directive) => Err(Error::new(
                             self,
@@ -1009,5 +988,19 @@ char *s = 'else2';
                 ErrorKind::DuplicateElse
             ]
         ));
+    }
+    #[test]
+    fn skipped_if() {
+        let actual = setup_complete(
+            "
+#if 0
+#else
+int only_this;
+#endif
+",
+        );
+        let expected = "\n#line:3\n\nint only_this;\n\n";
+
+        assert_eq!(actual, expected);
     }
 }

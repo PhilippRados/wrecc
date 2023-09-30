@@ -34,6 +34,23 @@ impl Token {
             _ => None,
         }
     }
+    // returns string of all valid identifiers
+    pub fn as_ident(&self) -> Option<String> {
+        match self {
+            Token::Ident(_)
+            | Token::Include
+            | Token::Define
+            | Token::Defined
+            | Token::Undef
+            | Token::Ifdef
+            | Token::Ifndef
+            | Token::If
+            | Token::Elif
+            | Token::Else
+            | Token::Endif => Some(self.to_string()),
+            _ => None,
+        }
+    }
 }
 impl ToString for Token {
     fn to_string(&self) -> String {

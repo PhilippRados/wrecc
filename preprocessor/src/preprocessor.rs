@@ -112,24 +112,25 @@ impl Preprocessor {
     fn define(&mut self) -> Result<(), Error> {
         self.skip_whitespace()?;
 
-        if let Some(Token::Ident(identifier)) = self.tokens.next() {
-            let _ = self.skip_whitespace();
-            let replace_with = self.fold_until_token(Token::Newline);
-            let replace_with = trim_trailing_whitespace(replace_with);
+        match self.tokens.next().map(|t| t.as_ident()) {
+            Some(Some(identifier)) => {
+                let _ = self.skip_whitespace();
+                let replace_with = self.fold_until_token(Token::Newline);
+                let replace_with = trim_trailing_whitespace(replace_with);
 
-            // same macro already exists but with different replacement-list
-            if let Some(existing_replacement) = self.defines.get(&identifier) {
-                if existing_replacement != &replace_with {
-                    return Err(Error::new(
-                        self,
-                        ErrorKind::Redefinition("macro", identifier),
-                    ));
+                // same macro already exists but with different replacement-list
+                if let Some(existing_replacement) = self.defines.get(&identifier) {
+                    if existing_replacement != &replace_with {
+                        return Err(Error::new(
+                            self,
+                            ErrorKind::Redefinition("macro", identifier),
+                        ));
+                    }
                 }
+                self.defines.insert(identifier, replace_with);
+                Ok(())
             }
-            self.defines.insert(identifier, replace_with);
-            Ok(())
-        } else {
-            Err(Error::new(self, ErrorKind::InvalidMacroName))
+            _ => Err(Error::new(self, ErrorKind::InvalidMacroName)),
         }
     }
     fn replace_macros(&self, macro_name: &str, replace_list: Vec<Token>) -> Vec<Token> {
@@ -138,12 +139,7 @@ impl Preprocessor {
             .flat_map(|token| {
                 match (token.to_string(), self.defines.get(&token.to_string())) {
                     (token_name, Some(replacement)) if token_name != macro_name => {
-                        // INFO: Replace all macros in replacement and add whitespace so that wrong
-                        // tokens don't get accidentally glued together during stringification
-                        let mut replaced = vec![Token::Whitespace(" ".to_string())];
-                        replaced.extend(self.replace_macros(macro_name, replacement.clone()));
-                        replaced.push(Token::Whitespace(" ".to_string()));
-                        replaced
+                        pad_whitespace(self.replace_macros(macro_name, replacement.clone()))
                     }
                     _ => {
                         // can't further replace if replacement is current macro name
@@ -156,30 +152,32 @@ impl Preprocessor {
     fn undef(&mut self) -> Result<(), Error> {
         self.skip_whitespace()?;
 
-        if let Some(Token::Ident(identifier)) = self.tokens.next() {
-            self.defines.remove(&identifier);
-            Ok(())
-        } else {
-            Err(Error::new(self, ErrorKind::InvalidMacroName))
+        match self.tokens.next().map(|t| t.as_ident()) {
+            Some(Some(identifier)) => {
+                self.defines.remove(&identifier);
+                Ok(())
+            }
+            _ => Err(Error::new(self, ErrorKind::InvalidMacroName)),
         }
     }
     fn ifdef(&mut self, if_kind: Token) -> Result<(), Error> {
         self.skip_whitespace()?;
 
-        if let Some(Token::Ident(identifier)) = self.tokens.next() {
-            // TODO: should this be prior to whitespace check so that #endif still has matching #if?
-            self.ifs.push(IfDirective::new(Error::new(
-                self,
-                ErrorKind::UnterminatedIf(if_kind.to_string()),
-            )));
+        match self.tokens.next().map(|t| t.as_ident()) {
+            Some(Some(identifier)) => {
+                // TODO: should this be prior to whitespace check so that #endif still has matching #if?
+                self.ifs.push(IfDirective::new(Error::new(
+                    self,
+                    ErrorKind::UnterminatedIf(if_kind.to_string()),
+                )));
 
-            match (&if_kind, self.defines.contains_key(&identifier)) {
-                (Token::Ifdef, true) | (Token::Ifndef, false) => Ok(()),
-                (Token::Ifdef, false) | (Token::Ifndef, true) => self.eval_else_branch(),
-                _ => unreachable!(),
+                match (&if_kind, self.defines.contains_key(&identifier)) {
+                    (Token::Ifdef, true) | (Token::Ifndef, false) => Ok(()),
+                    (Token::Ifdef, false) | (Token::Ifndef, true) => self.eval_else_branch(),
+                    _ => unreachable!(),
+                }
             }
-        } else {
-            Err(Error::new(self, ErrorKind::InvalidMacroName))
+            _ => Err(Error::new(self, ErrorKind::InvalidMacroName)),
         }
     }
     fn if_expr(&mut self, if_kind: Token) -> Result<(), Error> {
@@ -294,33 +292,40 @@ impl Preprocessor {
                     };
 
                     let _ = skip_whitespace(&mut cond, &mut self.line);
-                    if let Some(Token::Ident(identifier)) = cond.next() {
-                        result.push(Token::Whitespace(" ".to_string()));
-                        result.push(if self.defines.contains_key(&identifier) {
-                            Token::Other('1')
-                        } else {
-                            Token::Other('0')
-                        });
-                        result.push(Token::Whitespace(" ".to_string()));
+                    match cond.next().map(|t| t.as_ident()) {
+                        Some(Some(identifier)) => {
+                            let replacement = if self.defines.contains_key(&identifier) {
+                                Token::Other('1')
+                            } else {
+                                Token::Other('0')
+                            };
+                            let replacement = pad_whitespace(vec![replacement]);
 
-                        let _ = skip_whitespace(&mut cond, &mut self.line);
-                        if open_paren && !matches!(cond.next(), Some(Token::Other(')'))) {
+                            result.extend(replacement);
+
+                            let _ = skip_whitespace(&mut cond, &mut self.line);
+                            if open_paren && !matches!(cond.next(), Some(Token::Other(')'))) {
+                                return Err(Error::new(
+                                    self,
+                                    ErrorKind::Regular("Expect closing ')' after 'defined'"),
+                                ));
+                            }
+                        }
+                        _ => {
                             return Err(Error::new(
                                 self,
-                                ErrorKind::Regular("Expect closing ')' after 'defined'"),
-                            ));
+                                ErrorKind::Regular("Expect identifier after 'defined'-operator"),
+                            ))
                         }
-                    } else {
-                        return Err(Error::new(
-                            self,
-                            ErrorKind::Regular("Expect identifier after 'defined'-operator"),
-                        ));
                     }
                 }
-                Token::Ident(s) => {
+                ident if ident.as_ident().is_some() => {
+                    let identifier = ident.as_ident().unwrap();
+
                     // if ident is defined replace it
-                    if let Some(replacement) = self.defines.get(s) {
-                        let expanded_replacement = self.replace_macros(&s, replacement.clone());
+                    if let Some(replacement) = self.defines.get(&identifier) {
+                        let expanded_replacement =
+                            self.replace_macros(&identifier, replacement.clone());
                         result.extend(expanded_replacement)
                     } else {
                         result.push(token)
@@ -333,7 +338,7 @@ impl Preprocessor {
         let result = result
             .into_iter()
             .map(|token| {
-                if let Token::Ident(_) = token {
+                if let Some(_) = token.as_ident() {
                     // hacky: insert whitespace so doesnt get appended to existing number
                     " 0 ".to_string()
                 } else {
@@ -458,18 +463,21 @@ impl Preprocessor {
                     self.line += 1;
                     result.push('\n');
                 }
-                Token::Ident(s) => {
-                    if let Some(replacement) = self.defines.get(&s) {
-                        let expanded_replacement = self.replace_macros(&s, replacement.clone());
-                        result.push_str(&format!(
-                            " {} ",
+                ident if ident.as_ident().is_some() => {
+                    let identifier = ident.as_ident().unwrap();
+
+                    if let Some(replacement) = self.defines.get(&identifier) {
+                        let expanded_replacement =
+                            pad_whitespace(self.replace_macros(&identifier, replacement.clone()));
+
+                        result.push_str(
                             &expanded_replacement
                                 .into_iter()
                                 .map(|t| t.to_string())
                                 .collect::<String>(),
-                        ))
+                        )
                     } else {
-                        result.push_str(&s)
+                        result.push_str(&identifier)
                     }
                 }
                 token => {
@@ -531,6 +539,14 @@ impl Preprocessor {
             Ok(())
         }
     }
+}
+
+// surrounds a list of tokens with additional whitespace to avoid them being glued together during stringification
+fn pad_whitespace(tokens: Vec<Token>) -> Vec<Token> {
+    let mut replaced = vec![Token::Whitespace(" ".to_string())];
+    replaced.extend(tokens);
+    replaced.push(Token::Whitespace(" ".to_string()));
+    replaced
 }
 
 fn trim_trailing_whitespace(mut tokens: Vec<Token>) -> Vec<Token> {
@@ -1000,6 +1016,22 @@ int only_this;
 ",
         );
         let expected = "\n#line:3\n\nint only_this;\n\n";
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn keywords_as_idents() {
+        let actual = setup_complete(
+            "
+#if include != 0
+int skip_here;
+#elif !defined(elif) + define
+int only_this;
+#endif
+",
+        );
+        let expected = "\n#line:4\n\nint only_this;\n\n";
 
         assert_eq!(actual, expected);
     }

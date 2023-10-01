@@ -1,5 +1,6 @@
 use crate::common::{token::*, types::*};
 use std::num::IntErrorKind;
+use std::path::PathBuf;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ErrorKind {
@@ -401,7 +402,7 @@ pub struct Error {
     pub line_index: i32,
     pub line_string: String,
     pub column: i32,
-    pub filename: String,
+    pub filename: PathBuf,
     pub kind: ErrorKind,
 }
 impl Error {
@@ -410,7 +411,7 @@ impl Error {
             line_index: object.line_index(),
             line_string: object.line_string(),
             column: object.column(),
-            filename: object.filename().to_string(),
+            filename: object.filename().into(),
             kind,
         }
     }
@@ -433,7 +434,7 @@ impl Error {
         Error {
             line_index: -1,
             line_string: String::from(""),
-            filename: String::from(""),
+            filename: PathBuf::new(),
             column: -1,
             kind: ErrorKind::Multiple(errors),
         }
@@ -443,13 +444,13 @@ impl Error {
         Error {
             line_index: -1,
             line_string: String::from(""),
-            filename: String::from("current file"),
+            filename: PathBuf::from("current file"),
             column: -1,
             kind: ErrorKind::Eof(expected),
         }
     }
     pub fn print_error(&self) {
-        let included = if file_suffix(&self.filename) == ".h" {
+        let included = if let Some(Some("h")) = self.filename.extension().map(|s| s.to_str()) {
             "included file "
         } else {
             ""
@@ -457,7 +458,7 @@ impl Error {
         eprintln!(
             "Error: in {}{}: {}",
             included,
-            self.filename,
+            self.filename.display(),
             self.kind.message()
         );
 
@@ -479,13 +480,9 @@ impl Error {
         std::process::exit(exit_code);
     }
 }
-fn file_suffix(filename: &str) -> &str {
-    assert!(filename.len() > 2);
-    &filename[filename.len() - 2..]
-}
 pub trait Location {
     fn line_index(&self) -> i32;
     fn column(&self) -> i32;
     fn line_string(&self) -> String;
-    fn filename(&self) -> String;
+    fn filename(&self) -> PathBuf;
 }

@@ -1,6 +1,7 @@
 use crate::common::error::Location;
 use crate::common::types::*;
 use std::fmt::Display;
+use std::path::PathBuf;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum TokenKind {
@@ -386,7 +387,7 @@ pub struct Token {
     pub line_index: i32,
     pub column: i32,
     pub line_string: String,
-    pub filename: String,
+    pub filename: PathBuf,
 }
 impl Token {
     pub fn new(
@@ -394,7 +395,7 @@ impl Token {
         line_index: i32,
         column: i32,
         line_string: String,
-        filename: String,
+        filename: PathBuf,
     ) -> Self {
         Token {
             token,
@@ -409,7 +410,7 @@ impl Token {
             token: kind,
             line_index: -1,
             line_string: "".to_string(),
-            filename: "".to_string(),
+            filename: PathBuf::new(),
             column: -1,
         }
     }
@@ -475,7 +476,7 @@ impl Location for Token {
     fn line_string(&self) -> String {
         self.line_string.clone()
     }
-    fn filename(&self) -> String {
-        self.filename.to_string()
+    fn filename(&self) -> PathBuf {
+        self.filename.clone()
     }
 }

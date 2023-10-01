@@ -1,6 +1,7 @@
 use crate::common::{error::*, token::*};
 use std::collections::HashMap;
 use std::iter::Peekable;
+use std::path::{Path, PathBuf};
 use std::str::Chars;
 
 pub struct Scanner<'a> {
@@ -11,18 +12,18 @@ pub struct Scanner<'a> {
     // line number of unpreprocessed source
     pub original_line: i32,
     pub column: i32,
-    pub filenames: Vec<String>,
+    pub filenames: Vec<PathBuf>,
     keywords: HashMap<&'a str, TokenType>,
 }
 impl<'a> Scanner<'a> {
-    pub fn new(filename: &'a str, source: &'a str) -> Self {
+    pub fn new(filename: &'a Path, source: &'a str) -> Self {
         Scanner {
             source: source.chars().peekable(),
             raw_source: source
                 .split('\n')
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
-            filenames: vec![filename.to_string()],
+            filenames: vec![filename.into()],
             actual_line: 1,
             original_line: 1,
             column: 1,
@@ -223,7 +224,7 @@ impl<'a> Scanner<'a> {
 
                             self.actual_line += 1;
                             self.original_line = 1;
-                            self.filenames.push(header_name);
+                            self.filenames.push(PathBuf::from(header_name));
                         }
                         "epi" => {
                             let num = consume_while(&mut self.source, |c| c != '\0', true);
@@ -425,8 +426,8 @@ impl<'a> Location for Scanner<'a> {
         self.raw_source[(self.actual_line - 1) as usize].clone()
     }
 
-    fn filename(&self) -> String {
-        self.filenames.last().unwrap().to_string()
+    fn filename(&self) -> PathBuf {
+        self.filenames.last().unwrap().clone()
     }
 }
 
@@ -435,7 +436,7 @@ mod tests {
     use super::*;
 
     fn setup_generic(input: &str) -> Vec<Token> {
-        let mut scanner = Scanner::new("", input);
+        let mut scanner = Scanner::new(Path::new(""), input);
         if let Ok(tokens) = scanner.scan_token() {
             tokens
         } else {
@@ -443,7 +444,7 @@ mod tests {
         }
     }
     fn setup_generic_err(input: &str) -> Vec<Error> {
-        let mut scanner = Scanner::new("", input);
+        let mut scanner = Scanner::new(Path::new(""), input);
         if let Err(errs) = scanner.scan_token() {
             errs
         } else {
@@ -456,7 +457,7 @@ mod tests {
             line_index,
             column,
             line_string: line_string.to_string(),
-            filename: "".to_string(),
+            filename: PathBuf::new(),
         }
     }
 
@@ -596,21 +597,21 @@ mod tests {
             Error {
                 line_index: 1,
                 column: 10,
-                filename: String::from(""),
+                filename: PathBuf::from(""),
                 line_string: "int c = 0$".to_string(),
                 kind: ErrorKind::UnexpectedChar('$'),
             },
             Error {
                 line_index: 3,
                 column: 1,
-                filename: String::from(""),
+                filename: PathBuf::from(""),
                 line_string: "‘ ∞".to_string(),
                 kind: ErrorKind::UnexpectedChar('‘'),
             },
             Error {
                 line_index: 3,
                 column: 3,
-                filename: String::from(""),
+                filename: PathBuf::from(""),
                 line_string: "‘ ∞".to_string(),
                 kind: ErrorKind::UnexpectedChar('∞'),
             },
@@ -634,7 +635,7 @@ mod tests {
         let expected = vec![Error {
             line_index: 2,
             column: 8,
-            filename: String::from(""),
+            filename: PathBuf::from(""),
             line_string: "int ä @ = 123".to_string(),
             kind: ErrorKind::UnexpectedChar('@'),
         }];
@@ -701,7 +702,7 @@ mod tests {
             .into_iter()
             .collect();
 
-        let mut scanner = Scanner::new("", &input);
+        let mut scanner = Scanner::new(Path::new(""), &input);
         let actual: Vec<TokenType> = scanner
             .scan_token()
             .unwrap()
@@ -723,7 +724,7 @@ mod tests {
             .into_iter()
             .collect();
 
-        let mut scanner = Scanner::new("", &input);
+        let mut scanner = Scanner::new(Path::new(""), &input);
         let actual: Vec<TokenType> = scanner
             .scan_token()
             .unwrap()
@@ -746,7 +747,7 @@ mod tests {
             Error {
                 line_index: 1,
                 column: 1,
-                filename: String::from(""),
+                filename: PathBuf::new(),
                 line_string: "\"ha".to_string(),
                 kind: ErrorKind::UnterminatedString,
             },
@@ -754,7 +755,7 @@ mod tests {
                 line_index: 2,
                 line_string: "l\"".to_string(),
                 column: 2,
-                filename: "".to_string(),
+                filename: PathBuf::new(),
                 kind: ErrorKind::UnterminatedString,
             },
         ];

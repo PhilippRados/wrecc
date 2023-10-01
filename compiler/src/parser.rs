@@ -2039,15 +2039,17 @@ mod initializer_list_types {
 mod tests {
     use super::*;
     use crate::scanner::Scanner;
+    use std::path::Path;
+    use std::path::PathBuf;
 
     macro_rules! token_default {
         ($token_type:expr) => {
-            Token::new($token_type, 1, 1, "".to_string(), "".to_string())
+            Token::new($token_type, 1, 1, "".to_string(), PathBuf::new())
         };
     }
 
     fn assert_ast(input: &str, expected: &str) {
-        let mut scanner = Scanner::new("", input);
+        let mut scanner = Scanner::new(Path::new(""), input);
         let tokens = scanner.scan_token().unwrap();
 
         let mut parser = Parser::new(tokens);

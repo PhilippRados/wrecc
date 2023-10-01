@@ -10,8 +10,7 @@ use crate::Token;
 use std::collections::HashMap;
 use std::fs;
 use std::iter::Peekable;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::vec::IntoIter;
 
 struct IfDirective {
@@ -25,20 +24,20 @@ impl IfDirective {
     }
 }
 
-pub struct Preprocessor {
+pub struct Preprocessor<'a> {
     tokens: Peekable<IntoIter<Token>>,
     raw_source: Vec<String>,
     line: i32,
     column: i32,
-    filename: String,
+    filename: &'a Path,
     defines: HashMap<String, Vec<Token>>,
     ifs: Vec<IfDirective>,
     system_header_path: PathBuf,
 }
 
-impl Preprocessor {
-    pub fn new<'a>(
-        filename: &'a str,
+impl<'a> Preprocessor<'a> {
+    pub fn new(
+        filename: &'a Path,
         input: &'a str,
         tokens: Vec<Token>,
         pre_defines: Option<HashMap<String, Vec<Token>>>,
@@ -51,7 +50,7 @@ impl Preprocessor {
                 .collect::<Vec<String>>(),
             line: 1,
             column: 1,
-            filename: filename.to_string(),
+            filename,
             ifs: vec![],
             // WARN: only temporary absolute path. /include will be found via PATH env var.
             // Maybe has to be vector if there are multiple search paths
@@ -66,13 +65,13 @@ impl Preprocessor {
         }
     }
 
-    fn paste_header(&mut self, (file_path, data): (String, String)) -> Result<String, Error> {
+    fn paste_header(&mut self, (file_path, data): (PathBuf, String)) -> Result<String, Error> {
         let (data, defines) = preprocess_included(&file_path, &data, self.defines.clone())
             .or_else(|e| Err(Error::new_multiple(e)))?;
 
         self.defines.extend(defines);
 
-        let header_prologue = format!("#pro:{}\n", file_path);
+        let header_prologue = format!("#pro:{}\n", file_path.display());
         let header_epilogue = format!("#epi:{}\0", self.line_index());
 
         Ok(header_prologue + &data + &header_epilogue)
@@ -86,7 +85,7 @@ impl Preprocessor {
                 file.remove(0);
 
                 if let Some('"') = file.pop() {
-                    let file_data = self.include_data(file, true)?;
+                    let file_data = self.include_data(PathBuf::from(file), true)?;
                     self.paste_header(file_data)
                 } else {
                     Err(Error::new(
@@ -104,7 +103,7 @@ impl Preprocessor {
                 let closing = self.tokens.next();
 
                 if let Some(Token::Other('>')) = closing {
-                    let file_data = self.include_data(file, false)?;
+                    let file_data = self.include_data(PathBuf::from(file), false)?;
                     self.paste_header(file_data)
                 } else {
                     Err(Error::new(
@@ -123,16 +122,16 @@ impl Preprocessor {
     // and returns the data it contains together with the filepath where it was found
     fn include_data(
         &self,
-        file_path: String,
+        file_path: PathBuf,
         search_local: bool,
-    ) -> Result<(String, String), Error> {
+    ) -> Result<(PathBuf, String), Error> {
         if search_local {
             let file_path = Path::new(&self.filename)
                 .parent()
                 .expect("empty filename")
                 .join(&file_path);
             if let Ok(data) = fs::read_to_string(&file_path) {
-                return Ok((file_path.to_string_lossy().to_string(), data));
+                return Ok((file_path, data));
             }
         }
         let abs_system_path = self.system_header_path.join(&file_path);
@@ -140,7 +139,7 @@ impl Preprocessor {
             Ok(data) => Ok((file_path, data)),
             Err(_) => Err(Error::new(
                 self,
-                ErrorKind::InvalidHeader(file_path.to_string()),
+                ErrorKind::InvalidHeader(file_path.to_string_lossy().to_string()),
             )),
         }
     }
@@ -286,7 +285,7 @@ impl Preprocessor {
     }
 
     fn pp_const_value(&self, cond: String) -> Result<i64, Error> {
-        let tokens = Scanner::new(&self.filename, &cond)
+        let tokens = Scanner::new(self.filename, &cond)
             .scan_token()
             .or_else(|errs| {
                 Err(Error::new_multiple(
@@ -628,7 +627,7 @@ fn insert_token(tokens: &mut Peekable<IntoIter<Token>>, token: Token) {
     *tokens = start.into_iter().peekable();
 }
 
-impl Location for Preprocessor {
+impl<'a> Location for Preprocessor<'a> {
     fn line_index(&self) -> i32 {
         self.line
     }
@@ -638,8 +637,8 @@ impl Location for Preprocessor {
     fn line_string(&self) -> String {
         self.raw_source[(self.line - 1) as usize].clone()
     }
-    fn filename(&self) -> String {
-        self.filename.to_string()
+    fn filename(&self) -> PathBuf {
+        self.filename.into()
     }
 }
 
@@ -667,7 +666,7 @@ mod tests {
     fn setup(input: &str) -> Preprocessor {
         let tokens = scan(input);
 
-        Preprocessor::new("", input, tokens, None)
+        Preprocessor::new(Path::new(""), input, tokens, None)
     }
 
     fn setup_complete(input: &str) -> String {
@@ -687,7 +686,7 @@ mod tests {
             .into_iter()
             .map(|(k, v)| (k.to_string(), scan(v)))
             .collect();
-        let pp = Preprocessor::new("", "", Vec::new(), Some(defined.clone()));
+        let pp = Preprocessor::new(Path::new(""), "", Vec::new(), Some(defined.clone()));
 
         let mut result = HashMap::new();
         for (name, replace_list) in defined {

@@ -10,9 +10,10 @@ pub use parser::*;
 pub use scanner::*;
 
 use codegen::{codegen::*, register_allocation::*};
+use std::path::Path;
 use typechecker::*;
 
-pub fn compile(filename: &str, source: &str) -> Result<String, Vec<Error>> {
+pub fn compile(filename: &Path, source: &str) -> Result<String, Vec<Error>> {
     // Scan input
     let tokens = Scanner::new(filename, source).scan_token()?;
 

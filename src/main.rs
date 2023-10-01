@@ -2,15 +2,16 @@ use compiler::*;
 use preprocessor::*;
 
 use std::fs;
+use std::path::{Path, PathBuf};
 
 struct CliOptions {
     // required argument specifying file to compile
-    file_path: String,
+    file_path: PathBuf,
 
     // optional argument specifying output-file to write to
     // TODO: parse -o flag
     #[allow(dead_code)]
-    output_path: Option<String>,
+    output_path: Option<PathBuf>,
 }
 
 fn process_cmd_arguments() -> CliOptions {
@@ -21,13 +22,17 @@ fn process_cmd_arguments() -> CliOptions {
         _ => Error::sys_exit("Usage: rucc <file>", 22),
     };
 
-    CliOptions { file_path, output_path: None }
+    CliOptions {
+        file_path: PathBuf::from(file_path),
+        output_path: None,
+    }
 }
 
 // Reads in string from file passed from user
-fn read_input_file(file: &str) -> String {
-    let source = fs::read_to_string(&file)
-        .unwrap_or_else(|_| Error::sys_exit(&format!("Couldn't find file: '{}'", file), 2));
+fn read_input_file(file: &Path) -> String {
+    let source = fs::read_to_string(&file).unwrap_or_else(|_| {
+        Error::sys_exit(&format!("Couldn't find file: '{}'", file.display()), 2)
+    });
 
     source
 }

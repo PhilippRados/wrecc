@@ -1,0 +1,8 @@
+Error: in tests/fixtures/header_include_err.c: '/stdio.h' is not a valid header file
+|
+2 #include "/stdio.h"
+| ^
+Error: in tests/fixtures/header_include_err.c: '../../include/stdio.h' is not a valid header file
+|
+3 #include <../../include/stdio.h>
+| ^

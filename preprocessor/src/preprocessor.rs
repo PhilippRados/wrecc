@@ -10,6 +10,8 @@ use crate::Token;
 use std::collections::HashMap;
 use std::fs;
 use std::iter::Peekable;
+use std::path::Path;
+use std::path::PathBuf;
 use std::vec::IntoIter;
 
 struct IfDirective {
@@ -31,6 +33,7 @@ pub struct Preprocessor {
     filename: String,
     defines: HashMap<String, Vec<Token>>,
     ifs: Vec<IfDirective>,
+    system_header_path: PathBuf,
 }
 
 impl Preprocessor {
@@ -50,6 +53,11 @@ impl Preprocessor {
             column: 1,
             filename: filename.to_string(),
             ifs: vec![],
+            // WARN: only temporary absolute path. /include will be found via PATH env var.
+            // Maybe has to be vector if there are multiple search paths
+            system_header_path: PathBuf::from(
+                "/Users/philipprados/documents/coding/Rust/rucc/include/",
+            ),
             defines: if let Some(defines) = pre_defines {
                 defines
             } else {
@@ -58,19 +66,8 @@ impl Preprocessor {
         }
     }
 
-    fn paste_header(&mut self, file_path: &str) -> Result<String, Error> {
-        // WARN: only temporary absolute path. /include will be found via PATH env var
-        let abs_path =
-            "/Users/philipprados/documents/coding/Rust/rucc/include/".to_string() + file_path;
-
-        let data = fs::read_to_string(&abs_path).or_else(|_| {
-            Err(Error::new(
-                self,
-                ErrorKind::InvalidHeader(file_path.to_string()),
-            ))
-        })?;
-
-        let (data, defines) = preprocess_included(file_path, &data, self.defines.clone())
+    fn paste_header(&mut self, (file_path, data): (String, String)) -> Result<String, Error> {
+        let (data, defines) = preprocess_included(&file_path, &data, self.defines.clone())
             .or_else(|e| Err(Error::new_multiple(e)))?;
 
         self.defines.extend(defines);
@@ -85,7 +82,19 @@ impl Preprocessor {
         self.skip_whitespace()?;
 
         match self.tokens.next() {
-            Some(Token::String(..)) => todo!(),
+            Some(Token::String(mut file, _)) => {
+                file.remove(0);
+
+                if let Some('"') = file.pop() {
+                    let file_data = self.include_data(file, true)?;
+                    self.paste_header(file_data)
+                } else {
+                    Err(Error::new(
+                        self,
+                        ErrorKind::Regular("Expected closing '\"' after header file"),
+                    ))
+                }
+            }
             Some(Token::Other('<')) => {
                 let file = self
                     .fold_until_token(Token::Other('>'))
@@ -95,7 +104,8 @@ impl Preprocessor {
                 let closing = self.tokens.next();
 
                 if let Some(Token::Other('>')) = closing {
-                    self.paste_header(&file)
+                    let file_data = self.include_data(file, false)?;
+                    self.paste_header(file_data)
                 } else {
                     Err(Error::new(
                         self,
@@ -106,6 +116,31 @@ impl Preprocessor {
             _ => Err(Error::new(
                 self,
                 ErrorKind::Regular("Expected opening '<' or '\"' after include directive"),
+            )),
+        }
+    }
+    // first searches current directory (if search_local is set), otherwise searches system path
+    // and returns the data it contains together with the filepath where it was found
+    fn include_data(
+        &self,
+        file_path: String,
+        search_local: bool,
+    ) -> Result<(String, String), Error> {
+        if search_local {
+            let file_path = Path::new(&self.filename)
+                .parent()
+                .expect("empty filename")
+                .join(&file_path);
+            if let Ok(data) = fs::read_to_string(&file_path) {
+                return Ok((file_path.to_string_lossy().to_string(), data));
+            }
+        }
+        let abs_system_path = self.system_header_path.join(&file_path);
+        match fs::read_to_string(&abs_system_path) {
+            Ok(data) => Ok((file_path, data)),
+            Err(_) => Err(Error::new(
+                self,
+                ErrorKind::InvalidHeader(file_path.to_string()),
             )),
         }
     }

@@ -1,0 +1,7 @@
+#ifndef _FOO_
+#define _FOO_
+char* header_name = "foo";
+
+#define random_num 3
+#define num random_num
+#endif

@@ -1,5 +1,5 @@
 [package]
-name = "rucc"
+name = "wrecc"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,7 +10,7 @@ preprocessor = { path = "./preprocessor/" }
 compiler = { path = "./compiler/" }
 
 [[bin]]
-name = "rucc"
+name = "wrecc"
 path = "src/main.rs"
 
 [workspace]

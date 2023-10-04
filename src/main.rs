@@ -19,7 +19,7 @@ fn process_cmd_arguments() -> CliOptions {
 
     let file_path = match args.len() {
         2 => args[1].to_string(),
-        _ => Error::sys_exit("Usage: rucc <file>", 22),
+        _ => Error::sys_exit("Usage: wrecc <file>", 22),
     };
 
     CliOptions {
@@ -41,7 +41,7 @@ fn read_input_file(file: &Path) -> String {
 fn generate_output_file(output: String) {
     use std::io::Write;
     let mut output_file =
-        std::fs::File::create("/Users/philipprados/documents/coding/Rust/rucc/generated.s")
+        std::fs::File::create("/Users/philipprados/documents/coding/Rust/wrecc/generated.s")
             .expect("create failed");
 
     writeln!(output_file, "{}", output).expect("write failed");

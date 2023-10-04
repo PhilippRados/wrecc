@@ -476,7 +476,7 @@ impl Error {
     }
 
     pub fn sys_exit(msg: &str, exit_code: i32) -> ! {
-        eprintln!("rucc: {msg}");
+        eprintln!("wrecc: {msg}");
         std::process::exit(exit_code);
     }
 }

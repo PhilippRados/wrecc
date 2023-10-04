@@ -55,7 +55,7 @@ impl<'a> Preprocessor<'a> {
             // WARN: only temporary absolute path. /include will be found via PATH env var.
             // Maybe has to be vector if there are multiple search paths
             system_header_path: PathBuf::from(
-                "/Users/philipprados/documents/coding/Rust/rucc/include/",
+                "/Users/philipprados/documents/coding/Rust/wrecc/include/",
             ),
             defines: if let Some(defines) = pre_defines {
                 defines

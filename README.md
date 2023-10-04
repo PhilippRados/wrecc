@@ -1,4 +1,8 @@
-# wrecc
+<div>
+  <p align="left">
+    <img src="https://i.ibb.co/1bfxpbb/wreckage-mj.jpg" width="800">
+  </p>
+</div>
 Wreck: A rusting ship on the sea floor<br>
 Wrecc: A C compiler written from scratch in Rust
 

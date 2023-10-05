@@ -15,12 +15,11 @@ function assert_eq {
     exit 1
   fi
 
-$(RUSTFLAGS="-A warnings" ./target/release/wrecc "$fixture" -o generated.s 2> static_err)
+$(RUSTFLAGS="-A warnings" ./target/release/wrecc "$fixture" 2> static_err)
   
   found_error=$(cat static_err)
   if [[ "$found_error" = "" ]]; then
-    $(gcc generated.s -o tmp1)
-    $(./tmp1 >& tmp)
+    $(./a.out >& tmp)
   else
     $(cat static_err >& tmp)
   fi
@@ -33,7 +32,7 @@ $(RUSTFLAGS="-A warnings" ./target/release/wrecc "$fixture" -o generated.s 2> st
   fi
 
   if [[ "$found_error" = "" ]]; then
-    rm tmp1
+    rm a.out
   fi
   rm static_err
   rm tmp

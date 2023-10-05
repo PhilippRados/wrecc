@@ -18,7 +18,8 @@ const HELP: &'static str = "usage: wrecc [options] <file>
 options:
     -o | --output <file>    Specifies the output-file to write to
     -E | --preprocess-only  Stops evaluation after preprocessing printing the preprocessed source
-    -S | --compile-only     Stops evaluation after compiling printing the generated assembly
+    -S | --compile-only     Stops evaluation after compiling resulting in a .s file
+    -c | --no-link          Stops evaluation after assembling resulting in a .o file
     -h                      Prints usage information
     --help                  Prints elaborate help information
     -v | --version          Prints version information
@@ -41,8 +42,11 @@ pub struct CliOptions {
     // stops evaluation after preprocessing printing the preprocessed source
     pub preprocess_only: bool,
 
-    // stops evaluation after compiling printing the resulting asm
+    // stops evaluation after compiling resulting in a .s file
     pub compile_only: bool,
+
+    // stops evaluation after assembling resulting in an .o file
+    pub no_link: bool,
 }
 impl CliOptions {
     fn default() -> CliOptions {
@@ -51,6 +55,7 @@ impl CliOptions {
             output_path: None,
             preprocess_only: false,
             compile_only: false,
+            no_link: false,
         }
     }
     pub fn parse() -> CliOptions {
@@ -72,6 +77,7 @@ impl CliOptions {
                     }
                     "-E" | "--preprocess-only" => cli_options.preprocess_only = true,
                     "-S" | "--compile-only" => cli_options.compile_only = true,
+                    "-c" | "--no-link" => cli_options.no_link = true,
                     "-h" => sys_info(USAGE),
                     "--help" => sys_info(HELP),
                     "-v" | "--version" => sys_info(VERSION),

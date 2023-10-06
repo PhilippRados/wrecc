@@ -1,4 +1,4 @@
-use compiler::Error;
+use crate::Error;
 use std::path::PathBuf;
 
 // TODO: add license information
@@ -58,7 +58,7 @@ impl CliOptions {
             no_link: false,
         }
     }
-    pub fn parse() -> CliOptions {
+    pub fn parse() -> Result<CliOptions, Error> {
         let mut cli_options = CliOptions::default();
         let mut args = std::env::args()
             .collect::<Vec<String>>()
@@ -72,7 +72,10 @@ impl CliOptions {
                         if let Some(file) = args.next() {
                             cli_options.output_path = Some(PathBuf::from(file));
                         } else {
-                            Error::sys_exit(&format!("Expects file following '{}' option", arg), 1)
+                            return Err(Error::Sys(format!(
+                                "Expects file following '{}' option",
+                                arg
+                            )));
                         }
                     }
                     "-E" | "--preprocess-only" => cli_options.preprocess_only = true,
@@ -81,7 +84,7 @@ impl CliOptions {
                     "-h" => sys_info(USAGE),
                     "--help" => sys_info(HELP),
                     "-v" | "--version" => sys_info(VERSION),
-                    _ => Error::sys_exit(&format!("Illegal option '{}'", arg), 1),
+                    _ => return Err(Error::Sys(format!("Illegal option '{}'", arg))),
                 }
             } else {
                 cli_options.file_path = PathBuf::from(arg);
@@ -89,17 +92,14 @@ impl CliOptions {
         }
 
         if cli_options.file_path.to_string_lossy().is_empty() {
-            Error::sys_exit("No input files given", 1);
+            Err(Error::Sys("No input files given".to_string()))
         } else if let Some(Some("c")) = cli_options.file_path.extension().map(|s| s.to_str()) {
-            cli_options
+            Ok(cli_options)
         } else {
-            Error::sys_exit(
-                &format!(
-                    "File '{}' is not a valid C source file",
-                    cli_options.file_path.display()
-                ),
-                1,
-            );
+            Err(Error::Sys(format!(
+                "File '{}' is not a valid C source file",
+                cli_options.file_path.display()
+            )))
         }
     }
 }

@@ -474,11 +474,6 @@ impl Error {
             eprintln!("^");
         }
     }
-
-    pub fn sys_exit(msg: &str, exit_code: i32) -> ! {
-        eprintln!("wrecc: {msg}");
-        std::process::exit(exit_code);
-    }
 }
 pub trait Location {
     fn line_index(&self) -> i32;

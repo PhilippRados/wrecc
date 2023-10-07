@@ -323,13 +323,13 @@ impl Parser {
         let then_branch = self.statement()?;
         let mut else_branch = None;
         if self.matches(vec![TokenKind::Else]).is_some() {
-            else_branch = Some(self.statement()?)
+            else_branch = Some(Box::new(self.statement()?))
         }
         Ok(Stmt::If(
             keyword,
             condition,
             Box::new(then_branch),
-            Box::new(else_branch),
+            else_branch,
         ))
     }
     fn parse_ptr(&mut self, mut type_decl: NEWTypes) -> NEWTypes {
@@ -2048,16 +2048,27 @@ mod tests {
         };
     }
 
-    fn assert_ast(input: &str, expected: &str) {
+    fn assert_ast(input: &str, expected: &str, only_expr: bool) {
         let mut scanner = Scanner::new(Path::new(""), input);
         let tokens = scanner.scan_token().unwrap();
 
         let mut parser = Parser::new(tokens);
-        // using ternary_conditional as expression evaluator because assignment() and expression()
-        // get folded and we don't test for assign or comma in these unit tests anyways
-        let actual = parser.ternary_conditional().unwrap();
+        let actual = if only_expr {
+            // using ternary_conditional as expression evaluator because assignment() and expression()
+            // get folded and we don't test for assign or comma in these unit tests anyways
+            parser.ternary_conditional().unwrap().to_string()
+        } else {
+            parser
+                .parse()
+                .map(|(stmt, _)| stmt)
+                .unwrap()
+                .iter()
+                .map(|stmt| stmt.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
 
-        assert_eq!(actual.kind.to_string(), expected);
+        assert_eq!(actual, expected);
     }
     #[test]
     fn unary_precedence() {
@@ -2065,9 +2076,9 @@ mod tests {
         let expected = "Unary: '-'\n\
             -MemberAccess: 'some'\n\
             --PostUnary: '++'\n\
-            ---Literal: 2\n";
+            ---Literal: 2";
 
-        assert_ast(input, expected);
+        assert_ast(input, expected, true);
     }
 
     #[test]
@@ -2077,9 +2088,9 @@ mod tests {
             -Literal: 32\n\
             -Binary: '*'\n\
             --Literal: 1\n\
-            --Literal: 2\n";
+            --Literal: 2";
 
-        assert_ast(input, expected);
+        assert_ast(input, expected, true);
     }
     #[test]
     fn nested_groupings() {
@@ -2094,9 +2105,110 @@ mod tests {
             ------Literal: 6\n\
             ------Literal: 7\n\
             ---Literal: 2\n\
-            -Literal: 1\n";
+            -Literal: 1";
 
-        assert_ast(input, expected);
+        assert_ast(input, expected, true);
+    }
+
+    #[test]
+    fn stmt_ast() {
+        let input = r#"
+int printf(char *, ...);
+
+struct Some {
+  int age;
+};
+
+struct Some a[2] = {{.age = 21}, 33};
+
+int main() {
+  int i = 0;
+  int b;
+  if (1) {
+    switch (b) {
+    case 1 + 2: {
+      printf("case");
+      break;
+    }
+    default:
+      printf("hello");
+    }
+  } else {
+    for (int i = 5;; i -= 2) {
+      goto end;
+    }
+  }
+  return 1 == 2 ? i - 1 : b;
+  int a;
+end:
+  return 1;
+}
+"#;
+        let expected = r#"Decl: 'printf'
+Expr:
+-Nop
+InitList: 'a'
+-Assignment:
+--MemberAccess: 'age'
+---Unary: '*'
+----Grouping:
+-----Binary: '+'
+------Ident: 'a'
+------Literal: 0
+--Literal: 21
+-Assignment:
+--MemberAccess: 'age'
+---Unary: '*'
+----Grouping:
+-----Binary: '+'
+------Ident: 'a'
+------Literal: 1
+--Literal: 33
+Func: 'main'
+-Init: 'i'
+--Literal: 0
+-Decl: 'b'
+-If:
+--Literal: 1
+--Block:
+---Switch:
+----Ident: 'b'
+----Block:
+-----Case:
+------Value: 3
+------Block:
+-------Expr:
+--------FuncCall: 'printf'
+---------String: 'case'
+-------Break
+-----Default:
+------Expr:
+-------FuncCall: 'printf'
+--------String: 'hello'
+--Block:
+---For:
+----Init: 'i'
+-----Literal: 5
+----CompoundAssign: '-='
+-----Ident: 'i'
+-----Literal: 2
+----Block:
+-----Goto: 'end'
+-Return:
+--Ternary:
+---Comparison: '=='
+----Literal: 1
+----Literal: 2
+---Binary: '-'
+----Ident: 'i'
+----Literal: 1
+---Ident: 'b'
+-Decl: 'a'
+-Label: 'end'
+--Return:
+---Literal: 1"#;
+
+        assert_ast(input, expected, false);
     }
 
     #[test]

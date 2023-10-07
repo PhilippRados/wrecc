@@ -108,7 +108,7 @@ impl Compiler {
             Stmt::Function(name, body) => self.function_definition(name, body),
             Stmt::Return(_, expr) => self.return_statement(expr),
             Stmt::If(_, cond, then_branch, else_branch) => {
-                self.if_statement(cond, *then_branch, *else_branch)
+                self.if_statement(cond, *then_branch, else_branch)
             }
             Stmt::While(_, cond, body) => self.while_statement(cond, *body),
             Stmt::Do(_, body, cond) => self.do_statement(*body, cond),
@@ -303,7 +303,7 @@ impl Compiler {
         self.jump_labels.pop();
     }
 
-    fn if_statement(&mut self, cond: Expr, then_branch: Stmt, else_branch: Option<Stmt>) {
+    fn if_statement(&mut self, cond: Expr, then_branch: Stmt, else_branch: Option<Box<Stmt>>) {
         let cond_reg = self.execute_expr(cond);
         let cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
@@ -326,7 +326,7 @@ impl Compiler {
         if let Some(else_branch) = else_branch {
             self.write_out(Ir::Jmp(done_label));
             self.write_out(Ir::LabelDefinition(else_label));
-            self.visit(else_branch);
+            self.visit(*else_branch);
         }
         self.write_out(Ir::LabelDefinition(done_label));
     }
@@ -653,7 +653,7 @@ impl Compiler {
                     unreachable!()
                 }
             }
-            _ => unreachable!("non global-constant expr {}", ast.kind),
+            _ => unreachable!("non global-constant expr {}", ast),
         }
     }
     pub fn execute_expr(&mut self, ast: Expr) -> Register {

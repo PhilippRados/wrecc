@@ -146,7 +146,11 @@ fn run() -> Result<(), Error> {
         return Ok(eprintln!("{}", &preprocessed_source));
     }
 
-    let asm_output = compile(&cli_options.file_path, &preprocessed_source)?;
+    let asm_output = compile(
+        &cli_options.file_path,
+        &preprocessed_source,
+        cli_options.dump_ast,
+    )?;
 
     let filename = generate_asm_file(&cli_options, asm_output)?;
 

@@ -12,7 +12,8 @@ const VERSION: &'static str = concat!(
 
 const USAGE: &'static str = "\
 usage: wrecc [-o | --output <file>] [-E | --preprocess-only]
-        [-S | --compile-only] [-h | --help] [-v | --version] <file>";
+        [-S | --compile-only] [-c | --no-link] [-a | --dump-ast]
+        [-h | --help] [-v | --version] <file>";
 
 const HELP: &'static str = "usage: wrecc [options] <file>
 options:
@@ -20,6 +21,7 @@ options:
     -E | --preprocess-only  Stops evaluation after preprocessing printing the preprocessed source
     -S | --compile-only     Stops evaluation after compiling resulting in a .s file
     -c | --no-link          Stops evaluation after assembling resulting in a .o file
+    -a | --dump-ast         Displays the AST produced by the parser while also compiling program as usual
     -h                      Prints usage information
     --help                  Prints elaborate help information
     -v | --version          Prints version information
@@ -47,6 +49,9 @@ pub struct CliOptions {
 
     // stops evaluation after assembling resulting in an .o file
     pub no_link: bool,
+
+    // displays AST while also compiling program as usual
+    pub dump_ast: bool,
 }
 impl CliOptions {
     fn default() -> CliOptions {
@@ -56,6 +61,7 @@ impl CliOptions {
             preprocess_only: false,
             compile_only: false,
             no_link: false,
+            dump_ast: false,
         }
     }
     pub fn parse() -> Result<CliOptions, Error> {
@@ -81,6 +87,7 @@ impl CliOptions {
                     "-E" | "--preprocess-only" => cli_options.preprocess_only = true,
                     "-S" | "--compile-only" => cli_options.compile_only = true,
                     "-c" | "--no-link" => cli_options.no_link = true,
+                    "-a" | "--dump-ast" => cli_options.dump_ast = true,
                     "-h" => sys_info(USAGE),
                     "--help" => sys_info(HELP),
                     "-v" | "--version" => sys_info(VERSION),

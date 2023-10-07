@@ -479,7 +479,7 @@ impl TypeChecker {
         keyword: &Token,
         cond: &mut Expr,
         then_branch: &mut Stmt,
-        else_branch: &mut Option<Stmt>,
+        else_branch: &mut Option<Box<Stmt>>,
     ) -> Result<(), Error> {
         let cond_type = self.expr_type(cond)?;
         if !cond_type.is_scalar() {

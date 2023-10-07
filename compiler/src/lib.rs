@@ -13,12 +13,16 @@ use codegen::{codegen::*, register_allocation::*};
 use std::path::Path;
 use typechecker::*;
 
-pub fn compile(filename: &Path, source: &str) -> Result<String, Vec<Error>> {
+pub fn compile(filename: &Path, source: &str, dump_ast: bool) -> Result<String, Vec<Error>> {
     // Scan input
     let tokens = Scanner::new(filename, source).scan_token()?;
 
     // Parse statements and return Abstract Syntax Tree
     let (mut statements, env) = Parser::new(tokens).parse()?;
+
+    if dump_ast {
+        statements.iter().for_each(|s| eprintln!("{}", s));
+    }
 
     // Check for semantic errors
     let (const_labels, env, switches) = TypeChecker::new(env).check(&mut statements)?;

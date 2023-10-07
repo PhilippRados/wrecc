@@ -563,101 +563,114 @@ impl Expr {
     }
 }
 
-impl fmt::Display for ExprKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn indent_fmt(expr: &ExprKind, indent_level: usize) -> String {
-            let indent = "-".repeat(indent_level);
-
-            format!(
-                "{}{}",
-                indent,
-                match expr {
-                    ExprKind::Binary { left, token, right } => format!(
-                        "Binary: {}\n{}\n{}",
-                        token.token,
-                        indent_fmt(&left.kind, indent_level + 1),
-                        indent_fmt(&right.kind, indent_level + 1)
-                    ),
-                    ExprKind::Unary { token, right, .. } => {
-                        format!(
-                            "Unary: {}\n{}",
-                            token.token,
-                            indent_fmt(&right.kind, indent_level + 1)
-                        )
-                    }
-                    ExprKind::Grouping { expr } =>
-                        format!("Grouping:\n{}", indent_fmt(&expr.kind, indent_level + 1)),
-                    ExprKind::Assign { l_expr, r_expr, .. } => {
-                        format!(
-                            "Assignment:\n{}\n{}",
-                            indent_fmt(&l_expr.kind, indent_level + 1),
-                            indent_fmt(&r_expr.kind, indent_level + 1)
-                        )
-                    }
-                    ExprKind::Literal(n) => format!("Literal: {}", n),
-                    ExprKind::Ident(name) => format!("Ident: {}", name.unwrap_string()),
-                    ExprKind::String(token) => format!("String: {}", token.unwrap_string()),
-                    ExprKind::Logical { token, left, right } => format!(
-                        "Logical: {}\n{}\n{}",
-                        token.token,
-                        indent_fmt(&left.kind, indent_level + 1),
-                        indent_fmt(&right.kind, indent_level + 1)
-                    ),
-                    ExprKind::Comparison { token, left, right } => format!(
-                        "Comparison: {}\n{}\n{}",
-                        token.token,
-                        indent_fmt(&left.kind, indent_level + 1),
-                        indent_fmt(&right.kind, indent_level + 1)
-                    ),
-                    ExprKind::Call { name, .. } => format!("FuncCall: {}", name.unwrap_string()),
-                    ExprKind::Cast { new_type, expr, .. } => format!(
-                        "Cast: '{}'\n{}",
-                        new_type,
-                        indent_fmt(&expr.kind, indent_level + 1)
-                    ),
-                    ExprKind::PostUnary { token, left, .. } => format!(
-                        "PostUnary: {}\n{}",
-                        token.token,
-                        indent_fmt(&left.kind, indent_level + 1)
-                    ),
-                    ExprKind::MemberAccess { member, expr, .. } => format!(
-                        "MemberAccess: '{}'\n{}",
-                        member.unwrap_string(),
-                        indent_fmt(&expr.kind, indent_level + 1),
-                    ),
-                    ExprKind::CompoundAssign { token, l_expr, r_expr } => {
-                        format!(
-                            "CompoundAssign: {}\n{}\n{}",
-                            token.token,
-                            indent_fmt(&l_expr.kind, indent_level + 1),
-                            indent_fmt(&r_expr.kind, indent_level + 1)
-                        )
-                    }
-                    ExprKind::Ternary { cond, true_expr, false_expr, .. } => format!(
-                        "Ternary:\n{}\n{}\n{}",
-                        indent_fmt(&cond.kind, indent_level + 1),
-                        indent_fmt(&true_expr.kind, indent_level + 1),
-                        indent_fmt(&false_expr.kind, indent_level + 1)
-                    ),
-                    ExprKind::Comma { left, right } => {
-                        format!(
-                            "Comma:\nleft: {}\nright: {}",
-                            indent_fmt(&left.kind, indent_level + 1),
-                            indent_fmt(&right.kind, indent_level + 1)
-                        )
-                    }
-                    ExprKind::SizeofExpr { expr, .. } => {
-                        format!("Sizeof:\n{}", indent_fmt(&expr.kind, indent_level + 1))
-                    }
-                    ExprKind::SizeofType { value } => format!("SizeofType: {}", value),
-                    ExprKind::Nop => "Nop".to_string(),
-                    ExprKind::ScaleUp { .. } => "'scaling-up'".to_string(),
-                    ExprKind::ScaleDown { .. } => "'scaling-down'".to_string(),
-                }
-            )
+pub trait PrintIndent {
+    fn print_indent(&self, indent_level: usize) -> String;
+}
+impl PrintIndent for Expr {
+    fn print_indent(&self, indent_level: usize) -> String {
+        match &self.kind {
+            ExprKind::Binary { left, token, right } => format!(
+                "Binary: {}\n{}\n{}",
+                token.token,
+                indent_fmt(left.as_ref(), indent_level + 1),
+                indent_fmt(right.as_ref(), indent_level + 1)
+            ),
+            ExprKind::Unary { token, right, .. } => {
+                format!(
+                    "Unary: {}\n{}",
+                    token.token,
+                    indent_fmt(right.as_ref(), indent_level + 1)
+                )
+            }
+            ExprKind::Grouping { expr } => {
+                format!("Grouping:\n{}", indent_fmt(expr.as_ref(), indent_level + 1))
+            }
+            ExprKind::Assign { l_expr, r_expr, .. } => {
+                format!(
+                    "Assignment:\n{}\n{}",
+                    indent_fmt(l_expr.as_ref(), indent_level + 1),
+                    indent_fmt(r_expr.as_ref(), indent_level + 1)
+                )
+            }
+            ExprKind::Literal(n) => format!("Literal: {}", n),
+            ExprKind::Ident(name) => format!("Ident: '{}'", name.unwrap_string()),
+            ExprKind::String(token) => format!("String: '{}'", token.unwrap_string()),
+            ExprKind::Logical { token, left, right } => format!(
+                "Logical: {}\n{}\n{}",
+                token.token,
+                indent_fmt(left.as_ref(), indent_level + 1),
+                indent_fmt(right.as_ref(), indent_level + 1)
+            ),
+            ExprKind::Comparison { token, left, right } => format!(
+                "Comparison: {}\n{}\n{}",
+                token.token,
+                indent_fmt(left.as_ref(), indent_level + 1),
+                indent_fmt(right.as_ref(), indent_level + 1)
+            ),
+            ExprKind::Call { name, args, .. } => {
+                let args: String = args
+                    .iter()
+                    .map(|arg| indent_fmt(arg, indent_level + 1))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!("FuncCall: '{}'\n{}", name.unwrap_string(), args)
+            }
+            ExprKind::Cast { new_type, expr, .. } => format!(
+                "Cast: '{}'\n{}",
+                new_type,
+                indent_fmt(expr.as_ref(), indent_level + 1)
+            ),
+            ExprKind::PostUnary { token, left, .. } => format!(
+                "PostUnary: {}\n{}",
+                token.token,
+                indent_fmt(left.as_ref(), indent_level + 1)
+            ),
+            ExprKind::MemberAccess { member, expr, .. } => format!(
+                "MemberAccess: '{}'\n{}",
+                member.unwrap_string(),
+                indent_fmt(expr.as_ref(), indent_level + 1),
+            ),
+            ExprKind::CompoundAssign { token, l_expr, r_expr } => {
+                format!(
+                    "CompoundAssign: {}\n{}\n{}",
+                    token.token,
+                    indent_fmt(l_expr.as_ref(), indent_level + 1),
+                    indent_fmt(r_expr.as_ref(), indent_level + 1)
+                )
+            }
+            ExprKind::Ternary { cond, true_expr, false_expr, .. } => format!(
+                "Ternary:\n{}\n{}\n{}",
+                indent_fmt(cond.as_ref(), indent_level + 1),
+                indent_fmt(true_expr.as_ref(), indent_level + 1),
+                indent_fmt(false_expr.as_ref(), indent_level + 1)
+            ),
+            ExprKind::Comma { left, right } => {
+                format!(
+                    "Comma:\nleft: {}\nright: {}",
+                    indent_fmt(left.as_ref(), indent_level + 1),
+                    indent_fmt(right.as_ref(), indent_level + 1)
+                )
+            }
+            ExprKind::SizeofExpr { expr, .. } => {
+                format!("Sizeof:\n{}", indent_fmt(expr.as_ref(), indent_level + 1))
+            }
+            ExprKind::SizeofType { value } => format!("SizeofType: {}", value),
+            ExprKind::Nop => "Nop".to_string(),
+            ExprKind::ScaleUp { .. } => "'scaling-up'".to_string(),
+            ExprKind::ScaleDown { .. } => "'scaling-down'".to_string(),
         }
+    }
+}
 
-        writeln!(f, "{}", indent_fmt(self, 0))
+pub fn indent_fmt<T: PrintIndent>(object: &T, indent_level: usize) -> String {
+    let indent = "-".repeat(indent_level);
+
+    format!("{}{}", indent, object.print_indent(indent_level))
+}
+
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", indent_fmt(self, 0))
     }
 }
 

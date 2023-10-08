@@ -874,10 +874,9 @@ impl Parser {
 
             if let Some(name) = &mut name {
                 // insert parameters into symbol table
-                let index = self.env.declare_symbol(
-                    &name,
-                    Symbols::Variable(SymbolInfo::new(param_type.clone())),
-                )?;
+                let index = self
+                    .env
+                    .declare_symbol(name, Symbols::Variable(SymbolInfo::new(param_type.clone())))?;
                 name.token.update_index(index);
             }
 
@@ -895,14 +894,8 @@ impl Parser {
         // single unnamed void param is equivalent to empty params
         if let [(NEWTypes::Primitive(Types::Void), None)] = params.as_slice() {
             params.pop();
-        } else {
-            if params
-                .iter()
-                .find(|(type_decl, _)| type_decl.is_void())
-                .is_some()
-            {
-                return Err(Error::new(&paren, ErrorKind::VoidFuncArg));
-            }
+        } else if params.iter().any(|(type_decl, _)| type_decl.is_void()) {
+            return Err(Error::new(&paren, ErrorKind::VoidFuncArg));
         }
 
         Ok((params, variadic))
@@ -1395,27 +1388,9 @@ impl Parser {
             _,
         )) = self.env.get_symbol(ident)
         {
-            self.complete_access(token, &type_decl)?
+            complete_access(token, &type_decl)?
         }
         Ok(())
-    }
-    fn complete_access(&self, token: &Token, type_decl: &NEWTypes) -> Result<(), Error> {
-        let is_complete = match type_decl {
-            NEWTypes::Struct(s) | NEWTypes::Union(s) => s.is_complete(),
-            NEWTypes::Pointer(to) | NEWTypes::Array { of: to, .. } => {
-                self.complete_access(token, to).and(Ok(true))?
-            }
-            _ => true,
-        };
-
-        if !is_complete {
-            Err(Error::new(
-                token,
-                ErrorKind::IncompleteMemberAccess(type_decl.clone()),
-            ))
-        } else {
-            Ok(())
-        }
     }
     fn call(&mut self, left_paren: Token, callee: Expr) -> Result<Expr, Error> {
         let mut args = Vec::new();
@@ -1598,6 +1573,26 @@ fn check_duplicate(vec: &[(NEWTypes, Token)]) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+// checks if member-access-ident is eligible
+fn complete_access(token: &Token, type_decl: &NEWTypes) -> Result<(), Error> {
+    let is_complete = match type_decl {
+        NEWTypes::Struct(s) | NEWTypes::Union(s) => s.is_complete(),
+        NEWTypes::Pointer(to) | NEWTypes::Array { of: to, .. } => {
+            complete_access(token, to).and(Ok(true))?
+        }
+        _ => true,
+    };
+
+    if !is_complete {
+        Err(Error::new(
+            token,
+            ErrorKind::IncompleteMemberAccess(type_decl.clone()),
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 fn array_of(type_decl: NEWTypes, size: i64) -> NEWTypes {
@@ -1804,7 +1799,7 @@ fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
                     expr: Box::new(Expr::new(
                         ExprKind::Binary {
                             left: Box::new(expr),
-                            token: Token { token: TokenType::Plus, ..token.clone() },
+                            token: Token { token: TokenType::Plus, ..token },
                             right: Box::new(index),
                         },
                         ValueKind::Lvalue,

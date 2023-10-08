@@ -307,10 +307,7 @@ impl NEWTypes {
         }
     }
     pub fn is_aggregate(&self) -> bool {
-        match self {
-            NEWTypes::Struct(_) | NEWTypes::Union(_) => true,
-            _ => false,
-        }
+        matches!(self, NEWTypes::Struct(_) | NEWTypes::Union(_))
     }
     fn union_biggest(&self) -> NEWTypes {
         match self {

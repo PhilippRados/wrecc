@@ -772,7 +772,7 @@ impl Compiler {
                 address
             };
 
-            result.set_type(member_type.clone());
+            result.set_type(member_type);
             result.set_value_kind(ValueKind::Lvalue);
             result
         } else if let NEWTypes::Union(s) = reg.get_type() {
@@ -780,7 +780,7 @@ impl Compiler {
 
             let mut result = self.cg_address_at(reg, free);
 
-            result.set_type(member_type.clone());
+            result.set_type(member_type);
             result.set_value_kind(ValueKind::Lvalue);
             result
         } else {

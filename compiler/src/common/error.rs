@@ -411,7 +411,7 @@ impl Error {
             line_index: object.line_index(),
             line_string: object.line_string(),
             column: object.column(),
-            filename: object.filename().into(),
+            filename: object.filename(),
             kind,
         }
     }

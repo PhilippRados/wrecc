@@ -2,7 +2,7 @@ use crate::Error;
 use std::path::PathBuf;
 
 // TODO: add license information
-const VERSION: &'static str = concat!(
+const VERSION: &str = concat!(
     env!("CARGO_PKG_NAME"),
     " ",
     env!("CARGO_PKG_VERSION"),
@@ -10,12 +10,12 @@ const VERSION: &'static str = concat!(
     "https://github.com/PhilippRados/wrecc"
 );
 
-const USAGE: &'static str = "\
+const USAGE: &str = "\
 usage: wrecc [-o | --output <file>] [-E | --preprocess-only]
         [-S | --compile-only] [-c | --no-link] [-a | --dump-ast]
         [-h | --help] [-v | --version] <file>";
 
-const HELP: &'static str = "usage: wrecc [options] <file>
+const HELP: &str = "usage: wrecc [options] <file>
 options:
     -o | --output <file>    Specifies the output-file to write to
     -E | --preprocess-only  Stops evaluation after preprocessing printing the preprocessed source

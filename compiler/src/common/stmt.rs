@@ -113,9 +113,9 @@ impl PrintIndent for Stmt {
             Stmt::Return(_, Some(expr)) => {
                 format!("Return:\n{}", indent_fmt(expr, indent_level + 1))
             }
-            Stmt::Return(_, None) => format!("Return"),
-            Stmt::Break(_) => format!("Break"),
-            Stmt::Continue(_) => format!("Continue"),
+            Stmt::Return(_, None) => "Return".to_string(),
+            Stmt::Break(_) => "Break".to_string(),
+            Stmt::Continue(_) => "Continue".to_string(),
             Stmt::Switch(_, cond, body) => format!(
                 "Switch:\n{}\n{}",
                 indent_fmt(cond, indent_level + 1),
@@ -123,7 +123,7 @@ impl PrintIndent for Stmt {
             ),
             Stmt::Case(_, value, body) => format!(
                 "Case:\n{}\n{}",
-                format!("{}Value: {}", "-".repeat(indent_level + 1), value),
+                format_args!("{}Value: {}", "-".repeat(indent_level + 1), value),
                 indent_fmt(body.as_ref(), indent_level + 1)
             ),
             Stmt::Default(_, body) => {

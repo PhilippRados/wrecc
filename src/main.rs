@@ -63,7 +63,7 @@ impl From<Vec<CompilerError>> for Error {
 
 // Reads in string from file passed from user
 fn read_input_file(file: &Path) -> Result<String, Error> {
-    fs::read_to_string(&file)
+    fs::read_to_string(file)
         .map_err(|_| Error::Sys(format!("Couldn't find file: '{}'", file.display())))
 }
 
@@ -78,7 +78,7 @@ fn generate_asm_file(cli_options: &CliOptions, output: String) -> Result<OutFile
         ))
     })?;
 
-    if let Err(_) = writeln!(output_file, "{}", output) {
+    if writeln!(output_file, "{}", output).is_err() {
         Err(Error::Sys(format!(
             "Couldn't write to file '{}'",
             output_path.get().display()

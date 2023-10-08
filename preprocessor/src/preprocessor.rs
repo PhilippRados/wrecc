@@ -67,7 +67,7 @@ impl<'a> Preprocessor<'a> {
 
     fn paste_header(&mut self, (file_path, data): (PathBuf, String)) -> Result<String, Error> {
         let (data, defines) = preprocess_included(&file_path, &data, self.defines.clone())
-            .or_else(|e| Err(Error::new_multiple(e)))?;
+            .map_err(Error::new_multiple)?;
 
         self.defines.extend(defines);
 
@@ -135,7 +135,7 @@ impl<'a> Preprocessor<'a> {
             }
         }
         let abs_system_path = self.system_header_path.join(&file_path);
-        match fs::read_to_string(&abs_system_path) {
+        match fs::read_to_string(abs_system_path) {
             Ok(data) => Ok((file_path, data)),
             Err(_) => Err(Error::new(
                 self,
@@ -287,15 +287,11 @@ impl<'a> Preprocessor<'a> {
     fn pp_const_value(&self, cond: String) -> Result<i64, Error> {
         let tokens = Scanner::new(self.filename, &cond)
             .scan_token()
-            .or_else(|errs| {
-                Err(Error::new_multiple(
-                    errs.into_iter().map(|e| Error::new(self, e.kind)).collect(),
-                ))
+            .map_err(|errs| {
+                Error::new_multiple(errs.into_iter().map(|e| Error::new(self, e.kind)).collect())
             })?;
         let mut parser = Parser::new(tokens);
-        let mut expr = parser
-            .expression()
-            .or_else(|e| Err(Error::new(self, e.kind)))?;
+        let mut expr = parser.expression().map_err(|e| Error::new(self, e.kind))?;
 
         if !parser.is_empty() {
             return Err(Error::new(
@@ -372,7 +368,7 @@ impl<'a> Preprocessor<'a> {
         let result = result
             .into_iter()
             .map(|token| {
-                if let Some(_) = token.as_ident() {
+                if token.as_ident().is_some() {
                     // hacky: insert whitespace so doesnt get appended to existing number
                     " 0 ".to_string()
                 } else {
@@ -564,7 +560,7 @@ impl<'a> Preprocessor<'a> {
 
     // wrapper for easier access
     fn skip_whitespace(&mut self) -> Result<(), Error> {
-        if let Err(_) = skip_whitespace(&mut self.tokens, &mut self.line) {
+        if skip_whitespace(&mut self.tokens, &mut self.line).is_err() {
             Err(Error::new(
                 self,
                 ErrorKind::Regular("Expect whitespace after preprocessing directive"),

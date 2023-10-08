@@ -549,9 +549,6 @@ mod tests {
     fn assert_regalloc(input: Vec<Ir>, expected: Vec<Ir>, reg_alloc: RegisterAllocation) {
         let actual = reg_alloc.generate(input);
 
-        dbg!(&actual);
-        dbg!(&expected);
-
         assert_eq!(actual.len(), expected.len());
         for (actual, expected) in actual.iter().zip(expected) {
             let actual_ir = mem::discriminant(actual) == mem::discriminant(&expected);

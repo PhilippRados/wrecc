@@ -109,7 +109,10 @@ fn assemble(cli_options: &CliOptions, filename: OutFile) -> Result<OutFile, Erro
     if output.status.success() {
         Ok(output_path)
     } else {
-        Err(Error::Sys(String::from_utf8(output.stderr).unwrap()))
+        Err(Error::Sys(format!(
+            "as: {}",
+            String::from_utf8(output.stderr).unwrap()
+        )))
     }
 }
 

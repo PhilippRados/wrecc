@@ -783,8 +783,9 @@ impl Parser {
                 ))
             }
         };
-        let mut elements =
-            vec![Expr::new(ExprKind::Nop, ValueKind::Rvalue); type_element_count(type_decl)];
+        let mut elements = fill_default(type_decl);
+        assert_eq!(elements.len(), type_element_count(type_decl));
+
         let mut element_index = 0;
         let mut depth;
         let mut found_des;
@@ -1602,6 +1603,7 @@ fn array_of(type_decl: NEWTypes, size: i64) -> NEWTypes {
     }
 }
 
+// returns the length of the flattened type
 fn type_element_count(type_decl: &NEWTypes) -> usize {
     match type_decl {
         NEWTypes::Array { amount, of } => amount * type_element_count(of),
@@ -1615,6 +1617,53 @@ fn type_element_count(type_decl: &NEWTypes) -> usize {
         _ => 1,
     }
 }
+
+// creates the flattened list with all the aggregate types broken down in its primitives default types
+fn fill_default(type_decl: &NEWTypes) -> Vec<Expr> {
+    match type_decl {
+        NEWTypes::Primitive(_) | NEWTypes::Enum(..) => vec![Expr {
+            kind: ExprKind::Nop,
+            value_kind: ValueKind::Rvalue,
+            type_decl: Some(NEWTypes::default()),
+        }],
+        NEWTypes::Array { amount, of } => {
+            let mut result = Vec::with_capacity(*amount);
+            for _ in 0..*amount {
+                result.append(&mut fill_default(of))
+            }
+            result
+        }
+        NEWTypes::Pointer(_) => vec![Expr {
+            kind: ExprKind::Nop,
+            value_kind: ValueKind::Rvalue,
+            type_decl: Some(NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
+                Types::Void,
+            )))),
+        }],
+        NEWTypes::Struct(s) | NEWTypes::Union(s) => {
+            let mut result = Vec::new();
+            for (member_type, _) in s.members().iter() {
+                result.append(&mut fill_default(member_type))
+            }
+            result
+        }
+    }
+}
+
+fn replace_default(expr: &Expr) -> Expr {
+    if let ExprKind::Nop = expr.kind {
+        Expr {
+            kind: ExprKind::Literal(0),
+            value_kind: ValueKind::Rvalue,
+            type_decl: expr.type_decl.clone(), // is filled in by fill_default()
+        }
+    } else {
+        expr.clone()
+    }
+}
+
+// checks that a given element index is still in bound of the flattened init list
+// and returns Some((index,max len of flat list)) if not
 fn init_overflow(
     type_decl: &NEWTypes,
     found_designator: bool,
@@ -1693,11 +1742,7 @@ fn list_sugar_assign(
             .into_iter()
             .enumerate()
             {
-                let value = if let ExprKind::Nop = list[i + offset].kind.clone() {
-                    Expr::new_literal(0, Types::Int)
-                } else {
-                    list[i + offset].clone()
-                };
+                let value = replace_default(&list[i + offset]);
                 result.push(match is_outer {
                     true => Expr::new(
                         ExprKind::Assign {
@@ -1742,11 +1787,7 @@ fn list_sugar_assign(
             .into_iter()
             .enumerate()
             {
-                let value = if let ExprKind::Nop = list[i + offset].kind.clone() {
-                    Expr::new_literal(0, Types::Int)
-                } else {
-                    list[i + offset].clone()
-                };
+                let value = replace_default(&list[i + offset]);
                 result.push(match is_outer {
                     true => Expr::new(
                         ExprKind::Assign {
@@ -2043,53 +2084,82 @@ mod tests {
         };
     }
 
-    fn assert_ast(input: &str, expected: &str, only_expr: bool) {
+    fn setup(input: &str) -> Parser {
         let mut scanner = Scanner::new(Path::new(""), input);
         let tokens = scanner.scan_token().unwrap();
 
-        let mut parser = Parser::new(tokens);
-        let actual = if only_expr {
-            // using ternary_conditional as expression evaluator because assignment() and expression()
-            // get folded and we don't test for assign or comma in these unit tests anyways
-            parser.ternary_conditional().unwrap().to_string()
-        } else {
-            parser
-                .parse()
-                .map(|(stmt, _)| stmt)
-                .unwrap()
-                .iter()
-                .map(|stmt| stmt.to_string())
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-
-        assert_eq!(actual, expected);
+        Parser::new(tokens)
     }
+    fn setup_expr(input: &str) -> String {
+        setup(input).ternary_conditional().unwrap().to_string()
+    }
+    fn setup_stmt(input: &str) -> String {
+        setup(input)
+            .parse()
+            .map(|(stmt, _)| stmt)
+            .unwrap()
+            .iter()
+            .map(|stmt| stmt.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn assert_init_list(input: &str, expected: &str) {
+        let Stmt::Declaration(v) =
+            setup(input).external_declaration().unwrap() else {unreachable!("only passing type")};
+
+        let DeclarationKind::InitList(.., actual, _) = v[0].clone() else {unreachable!()};
+
+        let display_expr = |input| {
+            let mut parser = setup(input);
+            let _ = parser.env.declare_symbol(
+                &token_default!(TokenType::Ident("a".to_string(), 0)),
+                Symbols::TypeDef(NEWTypes::default()),
+            );
+
+            parser.var_assignment().unwrap().to_string()
+        };
+        let expected = expected
+            .split(";\n")
+            .map(display_expr)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(
+            actual
+                .into_iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            expected
+        );
+    }
+
     #[test]
     fn unary_precedence() {
-        let input = "-2++.some";
+        let actual = setup_expr("-2++.some");
         let expected = "Unary: '-'\n\
             -MemberAccess: 'some'\n\
             --PostUnary: '++'\n\
             ---Literal: 2";
 
-        assert_ast(input, expected, true);
+        assert_eq!(actual, expected);
     }
 
     #[test]
     fn creates_ast_for_expression() {
-        let input = "32 + 1 * 2";
+        let actual = setup_expr("32 + 1 * 2");
         let expected = "Binary: '+'\n\
             -Literal: 32\n\
             -Binary: '*'\n\
             --Literal: 1\n\
             --Literal: 2";
 
-        assert_ast(input, expected, true);
+        assert_eq!(actual, expected);
     }
     #[test]
     fn nested_groupings() {
-        let input = "(3 / (6 - 7) * 2) + 1";
+        let actual = setup_expr("(3 / (6 - 7) * 2) + 1");
         let expected = "Binary: '+'\n\
             -Grouping:\n\
             --Binary: '*'\n\
@@ -2102,12 +2172,13 @@ mod tests {
             ---Literal: 2\n\
             -Literal: 1";
 
-        assert_ast(input, expected, true);
+        assert_eq!(actual, expected);
     }
 
     #[test]
     fn stmt_ast() {
-        let input = r#"
+        let actual = setup_stmt(
+            r#"
 int printf(char *, ...);
 
 struct Some {
@@ -2138,7 +2209,8 @@ int main() {
 end:
   return 1;
 }
-"#;
+"#,
+        );
         let expected = r#"Decl: 'printf'
 Expr:
 -Nop
@@ -2203,7 +2275,7 @@ Func: 'main'
 --Return:
 ---Literal: 1"#;
 
-        assert_ast(input, expected, false);
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -2216,6 +2288,7 @@ Func: 'main'
 
         let result = p.matches(vec![TokenKind::Number, TokenKind::String]);
         let expected = Some(token_default!(TokenType::Number(2)));
+
         assert_eq!(result, expected);
     }
 
@@ -2231,5 +2304,46 @@ Func: 'main'
         let actual = type_element_count(&input);
 
         assert_eq!(actual, 4);
+    }
+    #[test]
+    fn array_init_list() {
+        let input = "int a[3] = {1,2};";
+        let expected = r#"
+    a[0] = 1;
+    a[1] = 2;
+    a[2] = 0"#;
+
+        assert_init_list(input, expected);
+    }
+
+    #[test]
+    fn struct_init_list() {
+        let input = r#"struct Foo {
+            char name[5];
+            int* self;
+        } a = {"hei"};"#;
+        let expected = r#"
+    a.name[0] = 'h';
+    a.name[1] = 'e';
+    a.name[2] = 'i';
+    a.name[3] = 0;
+    a.name[4] = 0;
+    a.self = 0"#;
+
+        assert_init_list(input, expected);
+    }
+
+    #[test]
+    fn nested_arr_init_list() {
+        let input = r#"int a[2][3] = {{1},1,2};"#;
+        let expected = r#"
+    a[0][0] = 1;
+    a[0][1] = 0;
+    a[0][2] = 0;
+    a[1][0] = 1;
+    a[1][1] = 2;
+    a[1][2] = 0"#;
+
+        assert_init_list(input, expected);
     }
 }

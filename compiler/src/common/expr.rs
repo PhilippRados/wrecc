@@ -156,12 +156,15 @@ impl PrintIndent for Expr {
                 indent_fmt(right.as_ref(), indent_level + 1)
             ),
             ExprKind::Call { name, args, .. } => {
-                let args: String = args
+                let mut args: String = args
                     .iter()
                     .map(|arg| indent_fmt(arg, indent_level + 1))
                     .collect::<Vec<_>>()
                     .join("\n");
-                format!("FuncCall: '{}'\n{}", name.unwrap_string(), args)
+                if !args.is_empty() {
+                    args.insert(0, '\n');
+                }
+                format!("FuncCall: '{}'{}", name.unwrap_string(), args)
             }
             ExprKind::Cast { new_type, expr, .. } => format!(
                 "Cast: '{}'\n{}",

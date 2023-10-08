@@ -110,10 +110,13 @@ impl PrintIndent for Stmt {
 
                 format!("Func: '{}'\n{}", name.unwrap_string(), body)
             }
-            Stmt::Return(_, Some(expr)) => {
-                format!("Return:\n{}", indent_fmt(expr, indent_level + 1))
+            Stmt::Return(_, expr) => {
+                let mut expr = display_option(expr.as_ref(), indent_level + 1, false);
+                if !expr.is_empty() {
+                    expr.insert_str(0, ":\n");
+                }
+                format!("Return{}", expr)
             }
-            Stmt::Return(_, None) => "Return".to_string(),
             Stmt::Break(_) => "Break".to_string(),
             Stmt::Continue(_) => "Continue".to_string(),
             Stmt::Switch(_, cond, body) => format!(

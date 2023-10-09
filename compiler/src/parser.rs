@@ -2345,7 +2345,7 @@ Func: 'main'
 
     #[test]
     fn nested_arr_init_list() {
-        let input = r#"int a[2][3] = {{1},1,2};"#;
+        let input = "int a[2][3] = {{1},1,2};";
         let expected = r#"
     a[0][0] = 1;
     a[0][1] = 0;
@@ -2353,6 +2353,49 @@ Func: 'main'
     a[1][0] = 1;
     a[1][1] = 2;
     a[1][2] = 0"#;
+
+        assert_init_list(input, expected);
+    }
+
+    #[test]
+    fn nested_arr_struct_init() {
+        let input = r#"struct Foo { 
+            struct Bar {
+                int age;
+                long number[3];
+            } other[2]; 
+            int arr[3];
+        } a = {{1,2,[1].age = 21,[1].number[1] = 3,4},.arr = {1,[2] = 2}};"#;
+        let expected = r#"
+a.other[0].age = 1;
+a.other[0].number[0] = 2;
+a.other[0].number[1] = 0;
+a.other[0].number[2] = 0;
+a.other[1].age = 21;
+a.other[1].number[0] = 0;
+a.other[1].number[1] = 3;
+a.other[1].number[2] = 4;
+a.arr[0] = 1;
+a.arr[1] = 0;
+a.arr[2] = 2"#;
+
+        assert_init_list(input, expected);
+    }
+
+    #[test]
+    fn struct_string_init() {
+        let input = r#"struct Foo {
+            char c;
+            char name[3];
+            int arr[2];
+        } a = {2,"me",{1,[0] = 2,4}};"#;
+        let expected = r#"
+    a.c = 2;
+    a.name[0] = 109;
+    a.name[1] = 101;
+    a.name[2] = 0;
+    a.arr[0] = 2;
+    a.arr[1] = 4"#;
 
         assert_init_list(input, expected);
     }

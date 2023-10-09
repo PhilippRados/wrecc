@@ -585,6 +585,8 @@ impl Parser {
     ) -> Result<DeclarationKind, Error> {
         match self.initializers(&type_decl) {
             Some(elements) => {
+                // WARN: takes way too long on big arrays > 4096
+                // since it generates syntax sugar for every element
                 let assign_sugar = list_sugar_assign(
                     name.clone(),
                     &mut elements?,
@@ -705,6 +707,13 @@ impl Parser {
                 let designator_constant =
                     designator_expr.get_literal_constant(&t, &self.env, "Array designator")?;
 
+                if designator_constant < 0 {
+                    return Err(Error::new(
+                        &t,
+                        ErrorKind::Regular("Array designator must be positive number"),
+                    ));
+                }
+
                 result.0 = designator_constant as usize * type_element_count(of);
 
                 self.consume(
@@ -783,6 +792,7 @@ impl Parser {
                 ))
             }
         };
+
         let mut elements = fill_default(type_decl);
         assert_eq!(elements.len(), type_element_count(type_decl));
 

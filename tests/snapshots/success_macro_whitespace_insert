@@ -1,12 +1,15 @@
-Error: in tests/fixtures/macro_whitespace_insert.c: Expected expression found: '='
+error: Expected expression found: '='
+|  --> in tests/fixtures/macro_whitespace_insert.c:9:6
 |
 9    + =  ;
 |      ^
-Error: in tests/fixtures/macro_whitespace_insert.c: Expect ';' after declaration
+error: Expect ';' after declaration
+|  --> in tests/fixtures/macro_whitespace_insert.c:11:13
 |
 11   int b = 1 12 ;
 |              ^
-Error: in tests/fixtures/macro_whitespace_insert.c: Expected expression found: '>'
+error: Expected expression found: '>'
+|  --> in tests/fixtures/macro_whitespace_insert.c:14:7
 |
 14   a > > = 2;
 |        ^

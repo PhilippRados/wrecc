@@ -1,4 +1,5 @@
-Error: in tests/fixtures/union_overflow.c: Initializer overflow. Expected size: 3, Actual size: 4
+error: Initializer overflow. Expected size: 3, Actual size: 4
+|  --> in tests/fixtures/union_overflow.c:10:9
 |
 10   } b = {'u', 'w', 'e', 2};
 |          ^

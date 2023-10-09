@@ -1,29 +1,36 @@
-Error: in tests/fixtures/nested_error_recovery.c: Undeclared symbol 'foo'
+error: Undeclared symbol 'foo'
+|  --> in tests/fixtures/nested_error_recovery.c:4:3
 |
 4   foo;
 |   ^
-Error: in tests/fixtures/nested_error_recovery.c: Undeclared symbol 'k'
+error: Undeclared symbol 'k'
+|  --> in tests/fixtures/nested_error_recovery.c:8:11
 |
 8   int a = k;
 |           ^
-Error: in tests/fixtures/nested_error_recovery.c: Undeclared symbol 'k'
+error: Undeclared symbol 'k'
+|  --> in tests/fixtures/nested_error_recovery.c:9:15
 |
 9   int b = 4 + k++ - 45 * 3;
 |               ^
-Error: in tests/fixtures/nested_error_recovery.c: Undeclared symbol 'foo'
+error: Undeclared symbol 'foo'
+|  --> in tests/fixtures/nested_error_recovery.c:11:10
 |
 11   for (;;foo-{) {
 |           ^
-Error: in tests/fixtures/nested_error_recovery.c: Expected expression found: ')'
+error: Expected expression found: ')'
+|  --> in tests/fixtures/nested_error_recovery.c:11:15
 |
 11   for (;;foo-{) {
 |                ^
-Error: in tests/fixtures/nested_error_recovery.c: Undeclared symbol 'bar'
+error: Undeclared symbol 'bar'
+|  --> in tests/fixtures/nested_error_recovery.c:12:5
 |
 12     bar();
 |      ^
-Error: in tests/fixtures/nested_error_recovery.c: Undeclared symbol 'foo'
+error: Undeclared symbol 'foo'
+|  --> in tests/fixtures/nested_error_recovery.c:14:10
 |
 14   for (;;foo-);
 |           ^
-Error: in current file: Expected closing '}' after Block, found end of file
+error: Expected closing '}' after Block, found end of file

@@ -1,4 +1,5 @@
-Error: in included file stddef.h: Redefinition of macro 'NULL'
+error: Redefinition of macro 'NULL'
+|  --> in included file stddef.h:4:1
 |
 4 #define NULL ((void *)0)
 | ^

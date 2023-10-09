@@ -1,4 +1,5 @@
-Error: in tests/fixtures/return_all_paths_err.c: Non-void function 'some' doesn't return in all code paths
+error: Non-void function 'some' doesn't return in all code paths
+|  --> in tests/fixtures/return_all_paths_err.c:3:5
 |
 3 int some(char a){
 |     ^

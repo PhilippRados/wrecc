@@ -1,8 +1,10 @@
-Error: in tests/fixtures/multiple_errors_print_expressions.c: Expected expression found: ';'
+error: Expected expression found: ';'
+|  --> in tests/fixtures/multiple_errors_print_expressions.c:2:15
 |
 2   int a = (2 +;
 |               ^
-Error: in tests/fixtures/multiple_errors_print_expressions.c: missing closing ')'
+error: missing closing ')'
+|  --> in tests/fixtures/multiple_errors_print_expressions.c:3:22
 |
 3   int b = ((2 * 1 -12;
 |                      ^

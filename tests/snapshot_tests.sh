@@ -15,7 +15,7 @@ function assert_eq {
     exit 1
   fi
 
-$(RUSTFLAGS="-A warnings" ./target/release/wrecc "$fixture" 2> static_err)
+$(RUSTFLAGS="-A warnings" ./target/release/wrecc "$fixture" --no-color 2> static_err)
   
   found_error=$(cat static_err)
   if [[ "$found_error" = "" ]]; then

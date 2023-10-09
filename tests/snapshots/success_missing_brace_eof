@@ -1,2 +1,2 @@
-Error: in current file: Expected closing '}' after Block, found end of file
-Error: in current file: Expected closing '}' after Block, found end of file
+error: Expected closing '}' after Block, found end of file
+error: Expected closing '}' after Block, found end of file

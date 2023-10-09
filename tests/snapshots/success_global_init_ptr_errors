@@ -1,20 +1,25 @@
-Error: in tests/fixtures/global_init_ptr_errors.c: Global variables can only be initialized to compile-time constants
+error: Global variables can only be initialized to compile-time constants
+|  --> in tests/fixtures/global_init_ptr_errors.c:4:6
 |
 4 int *array_element_addr = &*(arr + 3);
 |      ^
-Error: in tests/fixtures/global_init_ptr_errors.c: Global variables can only be initialized to compile-time constants
+error: Global variables can only be initialized to compile-time constants
+|  --> in tests/fixtures/global_init_ptr_errors.c:5:6
 |
 5 int *arr_offset_neg = arr - 1;
 |      ^
-Error: in tests/fixtures/global_init_ptr_errors.c: Global variables can only be initialized to compile-time constants
+error: Global variables can only be initialized to compile-time constants
+|  --> in tests/fixtures/global_init_ptr_errors.c:6:6
 |
 6 int *arr_offset_neg_nested = &((arr + 2)[-1]);
 |      ^
-Error: in tests/fixtures/global_init_ptr_errors.c: Global variables can only be initialized to compile-time constants
+error: Global variables can only be initialized to compile-time constants
+|  --> in tests/fixtures/global_init_ptr_errors.c:10:6
 |
 10 int *array_element_indirection = &*&arr[2];
 |       ^
-Error: in tests/fixtures/global_init_ptr_errors.c: Global variables can only be initialized to compile-time constants
+error: Global variables can only be initialized to compile-time constants
+|  --> in tests/fixtures/global_init_ptr_errors.c:13:6
 |
 13 int *multi_arr_first = *multi_arr;
 |       ^

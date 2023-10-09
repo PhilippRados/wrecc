@@ -1,28 +1,35 @@
-Error: in tests/fixtures/struct_decl_errors.c: 'struct Other' contains incomplete type
+error: 'struct Other' contains incomplete type
+|  --> in tests/fixtures/struct_decl_errors.c:13:18
 |
 13     struct Other some;
 |                   ^
-Error: in tests/fixtures/struct_decl_errors.c: Expected type-declaration, found '}'
+error: Expected type-declaration, found '}'
+|  --> in tests/fixtures/struct_decl_errors.c:14:1
 |
 14 };
 |  ^
-Error: in tests/fixtures/struct_decl_errors.c: 'struct Another[6]' contains incomplete type
+error: 'struct Another[6]' contains incomplete type
+|  --> in tests/fixtures/struct_decl_errors.c:18:20
 |
 18     struct Another some[6];
 |                     ^
-Error: in tests/fixtures/struct_decl_errors.c: Expected type-declaration, found '}'
+error: Expected type-declaration, found '}'
+|  --> in tests/fixtures/struct_decl_errors.c:19:1
 |
 19 };
 |  ^
-Error: in tests/fixtures/struct_decl_errors.c: 'struct some' contains incomplete type
+error: 'struct some' contains incomplete type
+|  --> in tests/fixtures/struct_decl_errors.c:23:17
 |
 23     struct some a;
 |                  ^
-Error: in tests/fixtures/struct_decl_errors.c: Expected type-declaration, found '}'
+error: Expected type-declaration, found '}'
+|  --> in tests/fixtures/struct_decl_errors.c:24:3
 |
 24   } e;
 |    ^
-Error: in tests/fixtures/struct_decl_errors.c: Expected type-declaration, found '}'
+error: Expected type-declaration, found '}'
+|  --> in tests/fixtures/struct_decl_errors.c:26:1
 |
 26 };
 |  ^

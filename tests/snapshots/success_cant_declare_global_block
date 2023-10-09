@@ -1,16 +1,20 @@
-Error: in tests/fixtures/cant_declare_global_block.c: Expected type-declaration, found '{'
+error: Expected type-declaration, found '{'
+|  --> in tests/fixtures/cant_declare_global_block.c:2:1
 |
 2 {
 | ^
-Error: in tests/fixtures/cant_declare_global_block.c: Expected type-declaration, found '{'
+error: Expected type-declaration, found '{'
+|  --> in tests/fixtures/cant_declare_global_block.c:3:13
 |
 3   int main(){
 |             ^
-Error: in tests/fixtures/cant_declare_global_block.c: Expected type-declaration, found 'return'
+error: Expected type-declaration, found 'return'
+|  --> in tests/fixtures/cant_declare_global_block.c:5:5
 |
 5     return 0;
 |     ^
-Error: in tests/fixtures/cant_declare_global_block.c: Expected type-declaration, found '}'
+error: Expected type-declaration, found '}'
+|  --> in tests/fixtures/cant_declare_global_block.c:6:3
 |
 6   }
 |   ^

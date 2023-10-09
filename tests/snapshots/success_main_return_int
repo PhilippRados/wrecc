@@ -1,4 +1,5 @@
-Error: in tests/fixtures/main_return_int.c: Expected 'main' return type 'int', found: 'char'
+error: Expected 'main' return type 'int', found: 'char'
+|  --> in tests/fixtures/main_return_int.c:1:6
 |
 1 char main() {
 |      ^

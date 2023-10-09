@@ -1,4 +1,5 @@
-Error: in tests/fixtures/ignores_pp_directives.c: Undeclared symbol 'printf'
+error: Undeclared symbol 'printf'
+|  --> in tests/fixtures/ignores_pp_directives.c:9:14
 |
 9 int main() { printf("not header #include <file.h>"); }
 |              ^

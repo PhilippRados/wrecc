@@ -38,15 +38,15 @@ impl OutFile {
     }
 }
 pub enum Error {
-    Comp(Vec<CompilerError>),
+    Comp(Vec<CompilerError>, bool),
     Sys(String),
 }
 impl Error {
     fn print(self) {
         match self {
-            Error::Comp(errors) => {
+            Error::Comp(errors, no_color) => {
                 for e in errors {
-                    e.print_error();
+                    e.print_error(no_color);
                 }
             }
             Error::Sys(e) => {
@@ -55,9 +55,9 @@ impl Error {
         }
     }
 }
-impl From<Vec<CompilerError>> for Error {
-    fn from(errors: Vec<CompilerError>) -> Self {
-        Error::Comp(errors)
+impl From<(Vec<CompilerError>, bool)> for Error {
+    fn from((errors, no_color): (Vec<CompilerError>, bool)) -> Self {
+        Error::Comp(errors, no_color)
     }
 }
 
@@ -68,8 +68,8 @@ fn read_input_file(file: &Path) -> Result<String, Error> {
 }
 
 // Generates x8664 assembly output file
-fn generate_asm_file(cli_options: &CliOptions, output: String) -> Result<OutFile, Error> {
-    let output_path = output_path(cli_options, cli_options.compile_only, "s");
+fn generate_asm_file(options: &CliOptions, output: String) -> Result<OutFile, Error> {
+    let output_path = output_path(options, options.compile_only, "s");
 
     let mut output_file = std::fs::File::create(output_path.get()).map_err(|_| {
         Error::Sys(format!(
@@ -88,16 +88,16 @@ fn generate_asm_file(cli_options: &CliOptions, output: String) -> Result<OutFile
     }
 }
 
-fn output_path(cli_options: &CliOptions, is_last_phase: bool, extension: &'static str) -> OutFile {
-    match (&cli_options.output_path, is_last_phase) {
+fn output_path(options: &CliOptions, is_last_phase: bool, extension: &'static str) -> OutFile {
+    match (&options.output_path, is_last_phase) {
         (Some(file), true) => OutFile::Regular(file.clone()),
-        (None, true) => OutFile::Regular(cli_options.file_path.with_extension(extension)),
+        (None, true) => OutFile::Regular(options.file_path.with_extension(extension)),
         (_, false) => OutFile::Temp(TempFile::new(extension)),
     }
 }
 
-fn assemble(cli_options: &CliOptions, filename: OutFile) -> Result<OutFile, Error> {
-    let output_path = output_path(cli_options, cli_options.no_link, "o");
+fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, Error> {
+    let output_path = output_path(options, options.no_link, "o");
 
     let output = Command::new("as")
         .arg(filename.get())
@@ -116,7 +116,7 @@ fn assemble(cli_options: &CliOptions, filename: OutFile) -> Result<OutFile, Erro
     }
 }
 
-fn link(filename: OutFile, output_path: Option<PathBuf>) -> Result<(), Error> {
+fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), Error> {
     let mut cmd = Command::new("ld");
     cmd.arg("-dynamic")
         .arg("-lSystem")
@@ -140,34 +140,31 @@ fn link(filename: OutFile, output_path: Option<PathBuf>) -> Result<(), Error> {
 }
 
 fn run() -> Result<(), Error> {
-    let cli_options = CliOptions::parse()?;
+    let options = CliOptions::parse()?;
 
-    let original_source = read_input_file(&cli_options.file_path)?;
-    let preprocessed_source = preprocess(&cli_options.file_path, &original_source)?;
+    let source = read_input_file(&options.file_path)?;
+    let pp_source = preprocess(&options.file_path, &source).map_err(|e| (e, options.no_color))?;
 
-    if cli_options.preprocess_only {
-        return Ok(eprintln!("{}", &preprocessed_source));
+    if options.preprocess_only {
+        return Ok(eprintln!("{}", &pp_source));
     }
 
-    let asm_output = compile(
-        &cli_options.file_path,
-        &preprocessed_source,
-        cli_options.dump_ast,
-    )?;
+    let asm_source = compile(&options.file_path, &pp_source, options.dump_ast)
+        .map_err(|e| (e, options.no_color))?;
 
-    let filename = generate_asm_file(&cli_options, asm_output)?;
+    let asm_file = generate_asm_file(&options, asm_source)?;
 
-    if cli_options.compile_only {
+    if options.compile_only {
         return Ok(());
     }
 
-    let filename = assemble(&cli_options, filename)?;
+    let object_file = assemble(&options, asm_file)?;
 
-    if cli_options.no_link {
+    if options.no_link {
         return Ok(());
     }
 
-    link(filename, cli_options.output_path)?;
+    link(object_file, &options.output_path)?;
 
     Ok(())
 }

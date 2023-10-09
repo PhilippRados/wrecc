@@ -315,7 +315,7 @@ impl ErrorKind {
             ErrorKind::InvalidArrayReturn => "Can't return stack-array from function".to_string(),
             ErrorKind::MismatchedFunctionReturn(func_return, body_return) => {
                 format!(
-                    "Mismatched function return type: '{}', found: '{}'",
+                    "Mismatched function return type: expected '{}', found: '{}'",
                     func_return, body_return
                 )
             }
@@ -449,29 +449,47 @@ impl Error {
             kind: ErrorKind::Eof(expected),
         }
     }
-    pub fn print_error(&self) {
+    pub fn print_error(&self, no_color: bool) {
         let included = if let Some(Some("h")) = self.filename.extension().map(|s| s.to_str()) {
             "included file "
         } else {
             ""
         };
         eprintln!(
-            "Error: in {}{}: {}",
-            included,
-            self.filename.display(),
-            self.kind.message()
+            "{}: {}",
+            color_text("error", Color::Red, true, no_color),
+            color_text(&self.kind.message(), Color::White, true, no_color),
         );
 
         if self.line_index != -1 {
+            eprintln!(
+                "{}  {} in {}{}:{}:{}",
+                color_text("|", Color::Blue, false, no_color),
+                color_text("-->", Color::Blue, false, no_color),
+                included,
+                color_text(
+                    &self.filename.display().to_string(),
+                    Color::White,
+                    true,
+                    no_color
+                ),
+                self.line_index,
+                self.column,
+            );
+
             let line_length = self.line_index.to_string().len();
 
-            eprintln!("|");
-            eprintln!("{} {}", self.line_index, self.line_string);
-            eprint!("|");
+            eprintln!("{}", color_text("|", Color::Blue, false, no_color));
+            eprintln!(
+                "{} {}",
+                color_text(&self.line_index.to_string(), Color::Blue, true, no_color),
+                self.line_string
+            );
+            eprint!("{}", color_text("|", Color::Blue, false, no_color));
             for _ in 1..self.column as usize + line_length {
                 eprint!(" ");
             }
-            eprintln!("^");
+            eprintln!("{}", color_text("^", Color::Red, true, no_color));
         }
     }
 }
@@ -480,4 +498,30 @@ pub trait Location {
     fn column(&self) -> i32;
     fn line_string(&self) -> String;
     fn filename(&self) -> PathBuf;
+}
+enum Color {
+    Red,
+    Blue,
+    White,
+}
+impl Color {
+    fn code(&self) -> usize {
+        match self {
+            Color::Red => 31,
+            Color::Blue => 34,
+            Color::White => 37,
+        }
+    }
+}
+fn color_text(text: &str, color: Color, bold: bool, no_color: bool) -> String {
+    if no_color {
+        text.to_string()
+    } else {
+        format!(
+            "\x1b[{};{}m{}\x1b[0m",
+            color.code(),
+            if bold { "1" } else { "" },
+            text
+        )
+    }
 }

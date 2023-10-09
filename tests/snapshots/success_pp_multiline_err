@@ -1,12 +1,15 @@
-Error: in tests/fixtures/pp_multiline_err.c: Undeclared symbol 'b'
+error: Undeclared symbol 'b'
+|  --> in tests/fixtures/pp_multiline_err.c:1:12
 |
 1 int foo = &b;
 |            ^
-Error: in tests/fixtures/pp_multiline_err.c: Undeclared symbol 'a'
+error: Undeclared symbol 'a'
+|  --> in tests/fixtures/pp_multiline_err.c:8:12
 |
 8 int bar = &a;
 |            ^
-Error: in tests/fixtures/pp_multiline_err.c: Undeclared symbol 'text'
+error: Undeclared symbol 'text'
+|  --> in tests/fixtures/pp_multiline_err.c:19:14
 |
 19 int main() { text(); }
 |               ^

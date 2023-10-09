@@ -1,12 +1,15 @@
-Error: in tests/fixtures/include_guards_err.c: Found '#endif' without matching '#if'
+error: Found '#endif' without matching '#if'
+|  --> in tests/fixtures/include_guards_err.c:7:1
 |
 7 #endif
 | ^
-Error: in tests/fixtures/include_guards_err.c: Unterminated '#ifdef'
+error: Unterminated '#ifdef'
+|  --> in tests/fixtures/include_guards_err.c:16:1
 |
 16 #ifdef uwe
 |  ^
-Error: in tests/fixtures/include_guards_err.c: Unterminated '#ifndef'
+error: Unterminated '#ifndef'
+|  --> in tests/fixtures/include_guards_err.c:9:1
 |
 9 #ifndef sme
 | ^

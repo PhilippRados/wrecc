@@ -1,4 +1,5 @@
-Error: in tests/fixtures/var_redefinition_errors.c: Redefinition of symbol 'a'
+error: Redefinition of symbol 'a'
+|  --> in tests/fixtures/var_redefinition_errors.c:9:7
 |
 9   int a = 2;
 |       ^

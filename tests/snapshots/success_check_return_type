@@ -1,4 +1,5 @@
-Error: in tests/fixtures/check_return_type.c: Mismatched function return type: 'int', found: 'void'
+error: Mismatched function return type: expected 'int', found: 'void'
+|  --> in tests/fixtures/check_return_type.c:5:5
 |
 5     return;
 |     ^

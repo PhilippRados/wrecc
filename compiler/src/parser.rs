@@ -7,8 +7,12 @@ use std::vec::IntoIter;
 
 pub struct Parser {
     tokens: Peekable<IntoIter<Token>>,
+
     // public so I can set it up in unit-tests
     pub env: Scope,
+
+    // nest-depth to indicate matching synchronizing token
+    nest_level: usize,
 }
 
 impl Parser {
@@ -16,9 +20,10 @@ impl Parser {
         Parser {
             tokens: tokens.into_iter().peekable(),
             env: Scope::new(),
+            nest_level: 0,
         }
     }
-    // return identifier namespace table
+    // return list of all statements and identifier namespace table
     pub fn parse(mut self) -> Result<(Vec<Stmt>, Vec<Symbols>), Vec<Error>> {
         let mut statements: Vec<Stmt> = Vec::new();
         let mut errors = vec![];
@@ -31,7 +36,7 @@ impl Parser {
                 }
                 Err(e) => {
                     errors.push(e);
-                    self.synchronize();
+                    self.sync();
                 }
             }
         }
@@ -46,52 +51,44 @@ impl Parser {
         self.tokens.len() == 0
     }
 
-    // If error is found inside of expression or stmt skip to end and start with parsing after
-    fn synchronize(&mut self) {
-        let mut prev = self.tokens.next();
+    // if is_block: skip until next statement
+    // if not: skip until next declaration
+    fn sync(&mut self) {
+        let mut scope = self.nest_level;
 
-        while let Some(v) = self.tokens.peek() {
-            if v.token == TokenType::LeftBrace {
-                return;
-            } else if prev.unwrap().token == TokenType::Semicolon {
-                match v.token {
-                    TokenType::If
-                    | TokenType::Return
-                    | TokenType::While
-                    | TokenType::For
-                    | TokenType::Char
-                    | TokenType::Int
-                    | TokenType::Long
-                    | TokenType::Void
-                    | TokenType::Struct
-                    | TokenType::Union
-                    | TokenType::Enum
-                    | TokenType::TypeDef
-                    | TokenType::RightBrace
-                    | TokenType::Ident(..) => return,
-                    _ => (),
+        while let Some(v) = self.tokens.next() {
+            match v.token {
+                TokenType::Semicolon if scope == 0 => break,
+                TokenType::LeftBrace => scope += 1,
+                TokenType::RightBrace => {
+                    if scope == 0 || scope == 1 {
+                        break;
+                    }
+                    scope -= 1;
                 }
+                _ => (),
             }
-            prev = self.tokens.next();
         }
+        self.nest_level = 0;
     }
+
     fn external_declaration(&mut self) -> Result<Stmt, Error> {
         if self.matches(vec![TokenKind::Semicolon]).is_some() {
             return Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue)));
         }
-        match self.matches_type() {
-            Ok(t) => {
-                if let Some(left) = self.matches(vec![TokenKind::LeftBracket]) {
-                    return Err(Error::new(&left, ErrorKind::BracketsNotAllowed));
-                }
-                if self.matches(vec![TokenKind::Semicolon]).is_some() {
-                    Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue)))
-                } else {
-                    self.declaration(t)
-                }
-            }
-            Err(_) if self.matches(vec![TokenKind::TypeDef]).is_some() => self.typedef(),
-            Err(e) => Err(e),
+
+        if self.matches(vec![TokenKind::TypeDef]).is_some() {
+            return self.typedef();
+        }
+
+        let type_decl = self.matches_type()?;
+        if let Some(left) = self.matches(vec![TokenKind::LeftBracket]) {
+            return Err(Error::new(&left, ErrorKind::BracketsNotAllowed));
+        }
+        if self.matches(vec![TokenKind::Semicolon]).is_some() {
+            Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue)))
+        } else {
+            self.declaration(type_decl)
         }
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
@@ -266,7 +263,7 @@ impl Parser {
                 break;
             }
             let stmt = match self.external_declaration() {
-                Err(e @ Error { kind: ErrorKind::UndeclaredType(..), .. }) => {
+                Err(e) if matches!(e.kind, ErrorKind::UndeclaredType(_)) => {
                     let token = self
                         .tokens
                         .next()
@@ -279,7 +276,7 @@ impl Parser {
                         self.statement()
                     }
                 }
-                Err(Error { kind: ErrorKind::NotType(..), .. }) => self.statement(),
+                Err(e) if matches!(e.kind, ErrorKind::NotType(_)) => self.statement(),
                 stmt => stmt,
             };
 
@@ -291,7 +288,7 @@ impl Parser {
                 }
                 Err(e) => {
                     errors.push(e);
-                    self.synchronize();
+                    self.sync();
                 }
             }
         }
@@ -399,9 +396,11 @@ impl Parser {
     }
     fn parse_members(&mut self, token: &Token) -> Result<Vec<(NEWTypes, Token)>, Error> {
         let mut members = Vec::new();
+
         if self.check(TokenKind::RightBrace) {
             return Err(Error::new(token, ErrorKind::IsEmpty(token.token.clone())));
         }
+
         while self.matches(vec![TokenKind::RightBrace]).is_none() {
             let member_type = self.matches_type()?;
             loop {
@@ -437,12 +436,14 @@ impl Parser {
             (Some(name), Some(_)) => {
                 Ok(match token.token {
                     TokenType::Struct | TokenType::Union => {
+                        self.nest_level += 1;
                         let index = self.env.declare_type(
                             name,
                             Tags::Aggregate(StructRef::new(token.clone().token, true)),
                         )?;
 
                         let members = self.parse_members(token)?;
+                        self.nest_level -= 1;
 
                         let custom_type = self.env.get_mut_type(index);
                         let Tags::Aggregate(struct_ref) = custom_type else { unreachable!()};
@@ -452,7 +453,9 @@ impl Parser {
                         into_newtype!(&token.token, name.unwrap_string(), custom_type.clone())
                     }
                     TokenType::Enum => {
+                        self.nest_level += 1;
                         let members = self.parse_enum(token)?;
+                        self.nest_level -= 1;
 
                         // declare the enum tag in the tag namespace
                         self.env.declare_type(name, Tags::Enum(members.clone()))?;
@@ -501,9 +504,17 @@ impl Parser {
                 ))
             }
             (None, Some(_)) => Ok(if token.token == TokenType::Enum {
-                into_newtype!(self.parse_enum(token)?)
+                self.nest_level += 1;
+                let enum_values = self.parse_enum(token)?;
+                self.nest_level -= 1;
+
+                into_newtype!(enum_values)
             } else {
-                into_newtype!(token.token, self.parse_members(token)?)
+                self.nest_level += 1;
+                let members = self.parse_members(token)?;
+                self.nest_level -= 1;
+
+                into_newtype!(token.token, members)
             }),
             (None, None) => Err(Error::new(
                 token,
@@ -583,13 +594,13 @@ impl Parser {
         type_decl: NEWTypes,
         is_global: bool,
     ) -> Result<DeclarationKind, Error> {
-        match self.initializers(&type_decl) {
-            Some(elements) => {
+        match self.initializers(&type_decl)? {
+            Some(mut elements) => {
                 // WARN: takes way too long on big arrays > 4096
                 // since it generates syntax sugar for every element
                 let assign_sugar = list_sugar_assign(
                     name.clone(),
-                    &mut elements?,
+                    &mut elements,
                     type_decl.clone(),
                     true,
                     Expr::new(ExprKind::Ident(name.clone()), ValueKind::Lvalue),
@@ -739,15 +750,17 @@ impl Parser {
         Ok((result, found))
     }
 
-    fn initializers(&mut self, type_decl: &NEWTypes) -> Option<Result<Vec<Expr>, Error>> {
-        let token = match self.peek() {
-            Ok(t) => t.clone(),
-            Err(e) => return Some(Err(e)),
-        };
+    fn initializers(&mut self, type_decl: &NEWTypes) -> Result<Option<Vec<Expr>>, Error> {
+        let token = self.peek()?.clone();
+
         match (token.token.clone(), type_decl.clone()) {
             (TokenType::LeftBrace, _) => {
                 self.tokens.next();
-                Some(self.initializer_list(type_decl, token))
+                self.nest_level += 1;
+                let init_list = self.initializer_list(type_decl, token)?;
+                self.nest_level -= 1;
+
+                Ok(Some(init_list))
             }
             (TokenType::String(mut s), NEWTypes::Array { amount, of })
                 if matches!(*of, NEWTypes::Primitive(Types::Char)) =>
@@ -755,10 +768,10 @@ impl Parser {
                 // char s[] = "abc" identical to char s[] = {'a','b','c','\0'} (6.7.8)
                 self.tokens.next();
                 if amount < s.len() {
-                    return Some(Err(Error::new(
+                    return Err(Error::new(
                         &token,
                         ErrorKind::TooLong("Initializer-string", amount, s.len()),
-                    )));
+                    ));
                 }
                 let mut diff = amount - s.len();
                 while diff > 0 {
@@ -766,13 +779,14 @@ impl Parser {
                     s.push('\0'); // append implicit NULL terminator to string
                 }
 
-                Some(Ok(s
-                    .as_bytes()
-                    .iter()
-                    .map(|c| Expr::new_literal(*c as i64, Types::Char))
-                    .collect()))
+                Ok(Some(
+                    s.as_bytes()
+                        .iter()
+                        .map(|c| Expr::new_literal(*c as i64, Types::Char))
+                        .collect(),
+                ))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
     fn initializer_list(&mut self, type_decl: &NEWTypes, token: Token) -> Result<Vec<Expr>, Error> {
@@ -821,8 +835,8 @@ impl Parser {
             match self.peek()?.token {
                 TokenType::LeftBrace => {
                     for e in self
-                        .initializers(&element_types[element_index].at(depth))
-                        .unwrap()?
+                        .initializers(&element_types[element_index].at(depth))?
+                        .unwrap()
                     {
                         elements[element_index] = e;
                         element_index += 1;
@@ -832,8 +846,8 @@ impl Parser {
                     if element_types[element_index].contains_char_arr().is_some() =>
                 {
                     for e in self
-                        .initializers(&element_types[element_index].contains_char_arr().unwrap())
-                        .unwrap()?
+                        .initializers(&element_types[element_index].contains_char_arr().unwrap())?
+                        .unwrap()
                     {
                         elements[element_index] = e;
                         element_index += 1;
@@ -932,12 +946,18 @@ impl Parser {
         // params can't be in same scope as function-name so they get added after they
         // have been parsed
         self.env.enter();
-        let (params, variadic) = self.parse_params()?;
+        let (params, variadic) = self.parse_params().map_err(|e| {
+            self.env.exit();
+            e
+        })?;
 
         self.env.get_mut_symbol(index).unwrap_func().params = params;
         self.env.get_mut_symbol(index).unwrap_func().variadic = variadic;
 
-        self.compare_existing(&name, index, existing)?;
+        self.compare_existing(&name, index, existing).map_err(|e| {
+            self.env.exit();
+            e
+        })?;
 
         Ok(DeclarationKind::FuncDecl(name))
     }
@@ -1512,6 +1532,7 @@ impl Parser {
                 if !v.is_type() && !matches!(v.token, TokenType::Ident(..)) {
                     return Err(Error::new(v, ErrorKind::NotType(v.token.clone())));
                 }
+
                 let v = v.clone();
                 let type_decl = match v.token {
                     TokenType::Struct | TokenType::Union | TokenType::Enum => {

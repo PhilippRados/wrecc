@@ -1,10 +1,10 @@
 error: Can only define functions in global scope
-|  --> in tests/fixtures/function_call_inside_block.c:5:9
+|  --> in tests/fixtures/func_def_in_block.c:5:9
 |
 5     int some() {
 |         ^
 error: Undeclared symbol 'some'
-|  --> in tests/fixtures/function_call_inside_block.c:8:5
+|  --> in tests/fixtures/func_def_in_block.c:8:5
 |
 8     some();
 |     ^

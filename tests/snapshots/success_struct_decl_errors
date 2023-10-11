@@ -3,33 +3,13 @@ error: 'struct Other' contains incomplete type
 |
 13     struct Other some;
 |                   ^
-error: Expected type-declaration, found '}'
-|  --> in tests/fixtures/struct_decl_errors.c:14:1
-|
-14 };
-|  ^
 error: 'struct Another[6]' contains incomplete type
 |  --> in tests/fixtures/struct_decl_errors.c:18:20
 |
 18     struct Another some[6];
 |                     ^
-error: Expected type-declaration, found '}'
-|  --> in tests/fixtures/struct_decl_errors.c:19:1
-|
-19 };
-|  ^
 error: 'struct some' contains incomplete type
 |  --> in tests/fixtures/struct_decl_errors.c:23:17
 |
 23     struct some a;
 |                  ^
-error: Expected type-declaration, found '}'
-|  --> in tests/fixtures/struct_decl_errors.c:24:3
-|
-24   } e;
-|    ^
-error: Expected type-declaration, found '}'
-|  --> in tests/fixtures/struct_decl_errors.c:26:1
-|
-26 };
-|  ^

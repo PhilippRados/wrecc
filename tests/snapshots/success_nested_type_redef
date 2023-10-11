@@ -3,18 +3,3 @@ error: Redefinition of type 'Other'
 |
 11     union Other {
 |            ^
-error: Expected type-declaration, found identifier
-|  --> in tests/fixtures/nested_type_redef.c:13:7
-|
-13     } a;
-|        ^
-error: Expected type-declaration, found '}'
-|  --> in tests/fixtures/nested_type_redef.c:15:3
-|
-15   };
-|    ^
-error: Expected type-declaration, found '}'
-|  --> in tests/fixtures/nested_type_redef.c:16:1
-|
-16 }
-|  ^

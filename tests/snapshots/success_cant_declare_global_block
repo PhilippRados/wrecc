@@ -3,18 +3,3 @@ error: Expected type-declaration, found '{'
 |
 2 {
 | ^
-error: Expected type-declaration, found '{'
-|  --> in tests/fixtures/cant_declare_global_block.c:3:13
-|
-3   int main(){
-|             ^
-error: Expected type-declaration, found 'return'
-|  --> in tests/fixtures/cant_declare_global_block.c:5:5
-|
-5     return 0;
-|     ^
-error: Expected type-declaration, found '}'
-|  --> in tests/fixtures/cant_declare_global_block.c:6:3
-|
-6   }
-|   ^

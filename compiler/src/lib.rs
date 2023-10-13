@@ -6,7 +6,7 @@ mod typechecker;
 
 // All necessary modules used for preprocessor
 pub use common::error::*;
-pub use parser::*;
+pub use parser::parser::*;
 pub use scanner::*;
 
 use codegen::{codegen::*, register_allocation::*};

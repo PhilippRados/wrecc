@@ -458,7 +458,7 @@ impl Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::Parser;
+    use crate::parser::parser::Parser;
     use crate::scanner::Scanner;
     use std::path::Path;
 

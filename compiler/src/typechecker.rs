@@ -1254,7 +1254,7 @@ fn log_2(x: i32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::Parser;
+    use crate::parser::parser::Parser;
     use crate::scanner::Scanner;
     use std::path::Path;
 

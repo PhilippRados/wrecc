@@ -1,13 +1,10 @@
 use crate::codegen::register::*;
 use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
 use crate::into_newtype;
-use crate::parser::init_list::init_list_types::*;
-use crate::parser::init_list::*;
-use std::iter::Peekable;
-use std::vec::IntoIter;
+use crate::parser::{double_peek::*, init_list::init_list_types::*, init_list::*};
 
 pub struct Parser {
-    tokens: Peekable<IntoIter<Token>>,
+    tokens: DoublePeek<Token>,
 
     // public so I can set it up in unit-tests
     pub env: Scope,
@@ -19,7 +16,7 @@ pub struct Parser {
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser {
-            tokens: tokens.into_iter().peekable(),
+            tokens: DoublePeek::new(tokens),
             env: Scope::new(),
             nest_level: 0,
         }
@@ -29,7 +26,7 @@ impl Parser {
         let mut statements: Vec<Stmt> = Vec::new();
         let mut errors = vec![];
 
-        while self.tokens.peek().is_some() {
+        while self.tokens.peek().is_ok() {
             match self.external_declaration() {
                 Ok(v) => statements.push(v),
                 Err(e @ Error { kind: ErrorKind::Multiple(..), .. }) => {
@@ -73,26 +70,26 @@ impl Parser {
     }
 
     fn external_declaration(&mut self) -> Result<Stmt, Error> {
-        if self.matches(vec![TokenKind::Semicolon]).is_some() {
+        if self.matches(&[TokenKind::Semicolon]).is_some() {
             return Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue)));
         }
 
-        if self.matches(vec![TokenKind::TypeDef]).is_some() {
+        if self.matches(&[TokenKind::TypeDef]).is_some() {
             return self.typedef();
         }
 
         let type_decl = self.matches_type()?;
-        if let Some(left) = self.matches(vec![TokenKind::LeftBracket]) {
+        if let Some(left) = self.matches(&[TokenKind::LeftBracket]) {
             return Err(Error::new(&left, ErrorKind::BracketsNotAllowed));
         }
-        if self.matches(vec![TokenKind::Semicolon]).is_some() {
+        if self.matches(&[TokenKind::Semicolon]).is_some() {
             Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue)))
         } else {
             self.declaration(type_decl)
         }
     }
     fn statement(&mut self) -> Result<Stmt, Error> {
-        if let Some(token) = self.matches(vec![
+        if let Some(token) = self.matches(&[
             TokenKind::For,
             TokenKind::Return,
             TokenKind::If,
@@ -127,12 +124,13 @@ impl Parser {
                 _ => unreachable!(),
             };
         }
-        if let Some(ident) = self.matches(vec![TokenKind::Ident]) {
-            if self.matches(vec![TokenKind::Colon]).is_some() {
+        if let TokenType::Ident(..) = self.tokens.peek()?.token {
+            if let TokenType::Colon = self.tokens.double_peek()?.token {
+                let ident = self.tokens.next().expect("value is peeked");
+                self.tokens.next();
+
                 return self.label_statement(ident);
             }
-            // if not a label then has to be expression so have to insert ident back into iter
-            self.insert_token(ident)
         }
         self.expression_statement()
     }
@@ -258,21 +256,16 @@ impl Parser {
         let mut statements = Vec::new();
         let mut errors = Vec::new();
 
-        while let Some(token) = self.tokens.peek() {
+        while let Ok(token) = self.tokens.peek() {
             if token.token == TokenType::RightBrace {
                 break;
             }
             let stmt = match self.external_declaration() {
                 Err(e) if matches!(e.kind, ErrorKind::UndeclaredType(_)) => {
-                    let token = self
-                        .tokens
-                        .next()
-                        .ok_or(Error::eof("Expected expression"))?;
-
-                    if let TokenType::Ident(..) = self.peek()?.token {
+                    if let TokenType::Ident(..) = self.tokens.double_peek()?.token {
+                        self.tokens.next().unwrap();
                         Err(e)
                     } else {
-                        self.insert_token(token);
                         self.statement()
                     }
                 }
@@ -319,7 +312,7 @@ impl Parser {
 
         let then_branch = self.statement()?;
         let mut else_branch = None;
-        if self.matches(vec![TokenKind::Else]).is_some() {
+        if self.matches(&[TokenKind::Else]).is_some() {
             else_branch = Some(Box::new(self.statement()?))
         }
         Ok(Stmt::If(
@@ -330,13 +323,13 @@ impl Parser {
         ))
     }
     fn parse_ptr(&mut self, mut type_decl: NEWTypes) -> NEWTypes {
-        while self.matches(vec![TokenKind::Star]).is_some() {
+        while self.matches(&[TokenKind::Star]).is_some() {
             type_decl.pointer_to();
         }
         type_decl
     }
     fn parse_arr(&mut self, type_decl: NEWTypes) -> Result<NEWTypes, Error> {
-        if let Some(token) = self.matches(vec![TokenKind::LeftBracket]) {
+        if let Some(token) = self.matches(&[TokenKind::LeftBracket]) {
             let mut size = self.var_assignment()?;
             let size = size.get_literal_constant(&token, &self.env, "Array size specifier")?;
 
@@ -360,9 +353,9 @@ impl Parser {
         if self.check(TokenKind::RightBrace) {
             return Err(Error::new(token, ErrorKind::IsEmpty(token.token.clone())));
         }
-        while self.matches(vec![TokenKind::RightBrace]).is_none() {
+        while self.matches(&[TokenKind::RightBrace]).is_none() {
             let ident = self.consume(TokenKind::Ident, "Expect identifier in enum definition")?;
-            if let Some(t) = self.matches(vec![TokenKind::Equal]) {
+            if let Some(t) = self.matches(&[TokenKind::Equal]) {
                 let mut index_expr = self.var_assignment()?;
                 index = index_expr.get_literal_constant(&t, &self.env, "Enum Constant")? as i32;
             }
@@ -401,7 +394,7 @@ impl Parser {
             return Err(Error::new(token, ErrorKind::IsEmpty(token.token.clone())));
         }
 
-        while self.matches(vec![TokenKind::RightBrace]).is_none() {
+        while self.matches(&[TokenKind::RightBrace]).is_none() {
             let member_type = self.matches_type()?;
             loop {
                 let member_specifier = self.parse_ptr(member_type.clone());
@@ -416,7 +409,7 @@ impl Parser {
                 }
 
                 members.push((member_specifier, name));
-                if self.matches(vec![TokenKind::Comma]).is_none() {
+                if self.matches(&[TokenKind::Comma]).is_none() {
                     break;
                 }
             }
@@ -429,8 +422,8 @@ impl Parser {
         Ok(members)
     }
     fn parse_aggregate(&mut self, token: &Token) -> Result<NEWTypes, Error> {
-        let name = self.matches(vec![TokenKind::Ident]);
-        let has_members = self.matches(vec![TokenKind::LeftBrace]);
+        let name = self.matches(&[TokenKind::Ident]);
+        let has_members = self.matches(&[TokenKind::LeftBrace]);
 
         match (&name, has_members) {
             (Some(name), Some(_)) => {
@@ -540,13 +533,13 @@ impl Parser {
 
         if let (DeclarationKind::FuncDecl(name), true) = (
             decl.clone(),
-            self.matches(vec![TokenKind::LeftBrace]).is_some(),
+            self.matches(&[TokenKind::LeftBrace]).is_some(),
         ) {
             return self.function_definition(name);
         }
 
         decls.push(decl);
-        while self.matches(vec![TokenKind::Comma]).is_some() {
+        while self.matches(&[TokenKind::Comma]).is_some() {
             let decl = self.init_decl(type_decl.clone())?;
             decls.push(decl);
         }
@@ -561,7 +554,7 @@ impl Parser {
             "Expect identifier following type-specifier",
         )?;
 
-        if self.matches(vec![TokenKind::LeftParen]).is_some() {
+        if self.matches(&[TokenKind::LeftParen]).is_some() {
             self.function_decl(type_decl, name)
         } else {
             let is_global = self.env.is_global();
@@ -572,7 +565,7 @@ impl Parser {
                 .declare_symbol(&name, Symbols::Variable(SymbolInfo::new(type_decl.clone())))?;
             name.token.update_index(index);
 
-            if self.matches(vec![TokenKind::Equal]).is_some() {
+            if self.matches(&[TokenKind::Equal]).is_some() {
                 if !type_decl.is_complete() {
                     return Err(Error::new(&name, ErrorKind::IncompleteType(type_decl)));
                 }
@@ -627,7 +620,7 @@ impl Parser {
         existing: Option<(Symbols, usize)>,
     ) -> Result<(), Error> {
         // compare with existing symbol in symbol table
-        let is_def = self.peek()?.token == TokenType::LeftBrace;
+        let is_def = self.tokens.peek()?.token == TokenType::LeftBrace;
         match existing {
             Some((Symbols::Func(other), ..)) => {
                 if is_def && other.kind == FunctionKind::Definition {
@@ -664,7 +657,7 @@ impl Parser {
     }
 
     fn initializers(&mut self, type_decl: &NEWTypes) -> Result<Option<Vec<Expr>>, Error> {
-        let token = self.peek()?.clone();
+        let token = self.tokens.peek()?.clone();
 
         match (token.token.clone(), type_decl.clone()) {
             (TokenType::LeftBrace, _) => {
@@ -746,7 +739,7 @@ impl Parser {
                 ));
             }
             // this is really verbose but i have to check for a valid index beforehand
-            match self.peek()?.token {
+            match self.tokens.peek()?.token {
                 TokenType::LeftBrace => {
                     for e in self
                         .initializers(&element_types[element_index].at(depth))?
@@ -790,10 +783,10 @@ impl Parser {
     fn parse_designator(&mut self, type_decl: &NEWTypes) -> Result<((usize, usize), bool), Error> {
         let mut result = (0, 0);
         let mut found = false;
-        if let Some(t) = self.matches(vec![TokenKind::Dot]) {
+        if let Some(t) = self.matches(&[TokenKind::Dot]) {
             // parse member-designator {.member = value}
             if let NEWTypes::Struct(s) | NEWTypes::Union(s) = type_decl {
-                if let Some(ident) = self.matches(vec![TokenKind::Ident]) {
+                if let Some(ident) = self.matches(&[TokenKind::Ident]) {
                     let member = ident.unwrap_string();
                     let index = if let Some(i) = s
                         .members()
@@ -835,7 +828,7 @@ impl Parser {
                     ),
                 ));
             }
-        } else if let Some(t) = self.matches(vec![TokenKind::LeftBracket]) {
+        } else if let Some(t) = self.matches(&[TokenKind::LeftBracket]) {
             // parse array-designator {[3] = value}
             if let NEWTypes::Array { of, .. } = type_decl {
                 let mut designator_expr = self.var_assignment()?;
@@ -878,11 +871,11 @@ impl Parser {
         let mut params = Vec::new();
         let mut variadic = false;
 
-        if self.matches(vec![TokenKind::RightParen]).is_some() {
+        if self.matches(&[TokenKind::RightParen]).is_some() {
             return Ok((params, variadic));
         }
         loop {
-            match (self.matches(vec![TokenKind::Ellipsis]), params.len()) {
+            match (self.matches(&[TokenKind::Ellipsis]), params.len()) {
                 (Some(t), 0) => return Err(Error::new(&t, ErrorKind::InvalidVariadic)),
                 (Some(_), _) => {
                     variadic = true;
@@ -892,7 +885,7 @@ impl Parser {
             }
 
             let mut param_type = self.matches_specifier()?;
-            let mut name = self.matches(vec![TokenKind::Ident]);
+            let mut name = self.matches(&[TokenKind::Ident]);
 
             param_type = self.parse_arr(param_type)?;
             if let NEWTypes::Array { of, .. } = param_type {
@@ -909,7 +902,7 @@ impl Parser {
 
             params.push((param_type, name));
 
-            if self.matches(vec![TokenKind::Comma]).is_none() {
+            if self.matches(&[TokenKind::Comma]).is_none() {
                 break;
             }
         }
@@ -997,7 +990,7 @@ impl Parser {
     fn comma(&mut self) -> Result<Expr, Error> {
         let mut expr = self.var_assignment()?;
 
-        while self.matches(vec![TokenKind::Comma]).is_some() {
+        while self.matches(&[TokenKind::Comma]).is_some() {
             expr = Expr::new(
                 ExprKind::Comma {
                     left: Box::new(expr),
@@ -1012,7 +1005,7 @@ impl Parser {
     fn var_assignment(&mut self) -> Result<Expr, Error> {
         let expr = self.ternary_conditional()?;
 
-        if let Some(t) = self.matches(vec![TokenKind::Equal]) {
+        if let Some(t) = self.matches(&[TokenKind::Equal]) {
             let value = self.var_assignment()?;
             return Ok(Expr::new(
                 ExprKind::Assign {
@@ -1022,7 +1015,7 @@ impl Parser {
                 },
                 ValueKind::Rvalue,
             ));
-        } else if let Some(t) = self.matches(vec![
+        } else if let Some(t) = self.matches(&[
             TokenKind::PlusEqual,
             TokenKind::MinusEqual,
             TokenKind::StarEqual,
@@ -1050,7 +1043,7 @@ impl Parser {
     fn ternary_conditional(&mut self) -> Result<Expr, Error> {
         let mut expr = self.or()?;
 
-        while let Some(token) = self.matches(vec![TokenKind::Question]) {
+        while let Some(token) = self.matches(&[TokenKind::Question]) {
             let true_expr = self.expression()?;
             self.consume(
                 TokenKind::Colon,
@@ -1073,7 +1066,7 @@ impl Parser {
     fn or(&mut self) -> Result<Expr, Error> {
         let mut expr = self.and()?;
 
-        while let Some(token) = self.matches(vec![TokenKind::PipePipe]) {
+        while let Some(token) = self.matches(&[TokenKind::PipePipe]) {
             let right = self.and()?;
             expr = Expr::new(
                 ExprKind::Logical {
@@ -1089,7 +1082,7 @@ impl Parser {
     fn and(&mut self) -> Result<Expr, Error> {
         let mut expr = self.bit_or()?;
 
-        while let Some(token) = self.matches(vec![TokenKind::AmpAmp]) {
+        while let Some(token) = self.matches(&[TokenKind::AmpAmp]) {
             let right = self.bit_or()?;
             expr = Expr::new(
                 ExprKind::Logical {
@@ -1105,7 +1098,7 @@ impl Parser {
     fn bit_or(&mut self) -> Result<Expr, Error> {
         let mut expr = self.bit_xor()?;
 
-        while let Some(token) = self.matches(vec![TokenKind::Pipe]) {
+        while let Some(token) = self.matches(&[TokenKind::Pipe]) {
             let right = self.bit_xor()?;
             expr = Expr::new(
                 ExprKind::Binary {
@@ -1121,7 +1114,7 @@ impl Parser {
     fn bit_xor(&mut self) -> Result<Expr, Error> {
         let mut expr = self.bit_and()?;
 
-        while let Some(token) = self.matches(vec![TokenKind::Xor]) {
+        while let Some(token) = self.matches(&[TokenKind::Xor]) {
             let right = self.bit_and()?;
             expr = Expr::new(
                 ExprKind::Binary {
@@ -1137,7 +1130,7 @@ impl Parser {
     fn bit_and(&mut self) -> Result<Expr, Error> {
         let mut expr = self.equality()?;
 
-        while let Some(token) = self.matches(vec![TokenKind::Amp]) {
+        while let Some(token) = self.matches(&[TokenKind::Amp]) {
             let right = self.equality()?;
             expr = Expr::new(
                 ExprKind::Binary {
@@ -1153,7 +1146,7 @@ impl Parser {
     fn equality(&mut self) -> Result<Expr, Error> {
         let mut expr = self.comparison()?;
 
-        while let Some(token) = self.matches(vec![TokenKind::BangEqual, TokenKind::EqualEqual]) {
+        while let Some(token) = self.matches(&[TokenKind::BangEqual, TokenKind::EqualEqual]) {
             let operator = token;
             let right = self.comparison()?;
             expr = Expr::new(
@@ -1170,7 +1163,7 @@ impl Parser {
     fn comparison(&mut self) -> Result<Expr, Error> {
         let mut expr = self.shift()?;
 
-        while let Some(token) = self.matches(vec![
+        while let Some(token) = self.matches(&[
             TokenKind::Greater,
             TokenKind::GreaterEqual,
             TokenKind::Less,
@@ -1192,7 +1185,7 @@ impl Parser {
     fn shift(&mut self) -> Result<Expr, Error> {
         let mut expr = self.term()?;
 
-        while let Some(token) = self.matches(vec![TokenKind::GreaterGreater, TokenKind::LessLess]) {
+        while let Some(token) = self.matches(&[TokenKind::GreaterGreater, TokenKind::LessLess]) {
             let operator = token;
             let right = self.term()?;
             expr = Expr::new(
@@ -1210,7 +1203,7 @@ impl Parser {
     fn term(&mut self) -> Result<Expr, Error> {
         let mut expr = self.factor()?;
 
-        while let Some(token) = self.matches(vec![TokenKind::Minus, TokenKind::Plus]) {
+        while let Some(token) = self.matches(&[TokenKind::Minus, TokenKind::Plus]) {
             let operator = token;
             let right = self.factor()?;
             expr = Expr::new(
@@ -1227,9 +1220,7 @@ impl Parser {
     fn factor(&mut self) -> Result<Expr, Error> {
         let mut expr = self.unary()?;
 
-        while let Some(token) =
-            self.matches(vec![TokenKind::Slash, TokenKind::Star, TokenKind::Mod])
-        {
+        while let Some(token) = self.matches(&[TokenKind::Slash, TokenKind::Star, TokenKind::Mod]) {
             let operator = token;
             let right = self.unary()?;
             expr = Expr::new(
@@ -1244,21 +1235,21 @@ impl Parser {
         Ok(expr)
     }
     fn unary(&mut self) -> Result<Expr, Error> {
-        if let Some(token) = self.matches(vec![
-            TokenKind::Star,
-            TokenKind::Amp,
-            TokenKind::Bang,
-            TokenKind::Tilde,
-            TokenKind::Minus,
-            TokenKind::Plus,
-            TokenKind::PlusPlus,
-            TokenKind::MinusMinus,
-            TokenKind::LeftParen,
-            TokenKind::Sizeof,
-        ]) {
-            return Ok(match token.token {
+        if let kind @ (TokenType::Star
+        | TokenType::Amp
+        | TokenType::Bang
+        | TokenType::Tilde
+        | TokenType::Minus
+        | TokenType::Plus
+        | TokenType::PlusPlus
+        | TokenType::MinusMinus
+        | TokenType::LeftParen
+        | TokenType::Sizeof) = self.tokens.peek()?.token.clone()
+        {
+            return Ok(match kind {
                 // ++a or --a is equivalent to a += 1 or a -= 1
                 TokenType::PlusPlus | TokenType::MinusMinus => {
+                    let token = self.tokens.next().unwrap();
                     let right = self.unary()?;
                     Expr::new(
                         ExprKind::CompoundAssign {
@@ -1271,55 +1262,42 @@ impl Parser {
                 }
                 // typecast
                 // have to check whether expression or type inside of parentheses
-                TokenType::LeftParen => match self.matches_specifier() {
-                    Ok(type_decl) => self.typecast(token, type_decl)?,
-                    Err(Error {
-                        kind: ErrorKind::NotType(_) | ErrorKind::UndeclaredType(..),
-                        ..
-                    }) => {
-                        self.insert_token(token);
+                TokenType::LeftParen => {
+                    if self.is_type(self.tokens.double_peek()?) {
+                        let token = self.tokens.next().unwrap();
+                        let type_decl = self.matches_specifier()?;
+                        let type_decl = self.parse_arr(type_decl)?;
 
-                        return self.postfix();
-                    }
-                    Err(e) => return Err(e),
-                },
-                TokenType::Sizeof => {
-                    // sizeof expr doesnt need parentheses but sizeof type does
-                    if let Some(t) = self.matches(vec![TokenKind::LeftParen]) {
-                        match self.matches_specifier() {
-                            Ok(type_decl) => {
-                                let type_decl = self.parse_arr(type_decl)?;
-                                self.consume(
-                                    TokenKind::RightParen,
-                                    "Expect closing ')' after sizeof",
-                                )?;
-                                Expr::new(
-                                    ExprKind::SizeofType { value: type_decl.size() },
-                                    ValueKind::Rvalue,
-                                )
-                            }
-                            Err(Error {
-                                kind: ErrorKind::NotType(_) | ErrorKind::UndeclaredType(..),
-                                ..
-                            }) => {
-                                self.insert_token(t);
-                                let right = self.unary()?;
-                                Expr::new(
-                                    ExprKind::SizeofExpr { expr: Box::new(right), value: None },
-                                    ValueKind::Rvalue,
-                                )
-                            }
-                            Err(e) => return Err(e),
-                        }
+                        self.typecast(token, type_decl)?
                     } else {
-                        let right = self.unary()?;
-                        Expr::new(
-                            ExprKind::SizeofExpr { expr: Box::new(right), value: None },
-                            ValueKind::Rvalue,
-                        )
+                        self.postfix()?
                     }
                 }
+                TokenType::Sizeof => {
+                    // sizeof expr doesnt need parentheses but sizeof type does
+                    self.tokens.next().unwrap();
+                    if let TokenType::LeftParen = self.tokens.peek()?.token {
+                        if self.is_type(self.tokens.double_peek()?) {
+                            self.tokens.next().unwrap();
+                            let type_decl = self.matches_specifier()?;
+                            let type_decl = self.parse_arr(type_decl)?;
+
+                            self.consume(TokenKind::RightParen, "Expect closing ')' after sizeof")?;
+                            return Ok(Expr::new(
+                                ExprKind::SizeofType { value: type_decl.size() },
+                                ValueKind::Rvalue,
+                            ));
+                        }
+                    }
+
+                    let right = self.unary()?;
+                    Expr::new(
+                        ExprKind::SizeofExpr { expr: Box::new(right), value: None },
+                        ValueKind::Rvalue,
+                    )
+                }
                 _ => {
+                    let token = self.tokens.next().unwrap();
                     let right = self.unary()?;
                     Expr::new(
                         ExprKind::Unary {
@@ -1353,7 +1331,7 @@ impl Parser {
     fn postfix(&mut self) -> Result<Expr, Error> {
         let mut expr = self.primary()?;
 
-        while let Some(token) = self.matches(vec![
+        while let Some(token) = self.matches(&[
             TokenKind::LeftBracket,
             TokenKind::LeftParen,
             TokenKind::PlusPlus,
@@ -1379,7 +1357,7 @@ impl Parser {
                     self.has_complete_ident(&expr, &token)?;
 
                     // some.member or some->member
-                    if let Some(member) = self.matches(vec![TokenKind::Ident]) {
+                    if let Some(member) = self.matches(&[TokenKind::Ident]) {
                         expr = match token.token {
                             TokenType::Dot => Expr::new(
                                 ExprKind::MemberAccess { token, member, expr: Box::new(expr) },
@@ -1430,7 +1408,7 @@ impl Parser {
         if !self.check(TokenKind::RightParen) {
             loop {
                 args.push(self.var_assignment()?);
-                if self.matches(vec![TokenKind::Comma]).is_none() {
+                if self.matches(&[TokenKind::Comma]).is_none() {
                     break;
                 }
             }
@@ -1449,14 +1427,14 @@ impl Parser {
         }
     }
     fn primary(&mut self) -> Result<Expr, Error> {
-        if let Some(n) = self.matches(vec![TokenKind::Number]) {
+        if let Some(n) = self.matches(&[TokenKind::Number]) {
             let n = n.unwrap_num();
             return Ok(Expr::new_literal(n, integer_type(n)));
         }
-        if let Some(c) = self.matches(vec![TokenKind::CharLit]) {
+        if let Some(c) = self.matches(&[TokenKind::CharLit]) {
             return Ok(Expr::new_literal(c.unwrap_char() as i64, Types::Char));
         }
-        if let Some(mut s) = self.matches(vec![TokenKind::Ident]) {
+        if let Some(mut s) = self.matches(&[TokenKind::Ident]) {
             // if identifier isn't known in symbol table then error
             let (symbol, table_index) = self.env.get_symbol(&s)?;
 
@@ -1472,11 +1450,11 @@ impl Parser {
                 _ => Expr::new(ExprKind::Ident(s), ValueKind::Lvalue),
             });
         }
-        if let Some(s) = self.matches(vec![TokenKind::String]) {
+        if let Some(s) = self.matches(&[TokenKind::String]) {
             return Ok(Expr::new(ExprKind::String(s), ValueKind::Lvalue));
         }
 
-        if self.matches(vec![TokenKind::LeftParen]).is_some() {
+        if self.matches(&[TokenKind::LeftParen]).is_some() {
             let expr = self.expression()?;
             self.consume(TokenKind::RightParen, "missing closing ')'")?;
 
@@ -1486,7 +1464,7 @@ impl Parser {
             ));
         }
 
-        let t = self.peek()?;
+        let t = self.tokens.peek()?;
         Err(Error::new(
             t,
             ErrorKind::ExpectedExpression(t.token.clone()),
@@ -1494,90 +1472,73 @@ impl Parser {
     }
     fn consume(&mut self, token: TokenKind, msg: &'static str) -> Result<Token, Error> {
         match self.tokens.peek() {
-            Some(v) => {
+            Ok(v) => {
                 if TokenKind::from(&v.token) != token {
                     Err(Error::new(v, ErrorKind::Regular(msg)))
                 } else {
                     Ok(self.tokens.next().unwrap())
                 }
             }
-            None => Err(Error::eof(msg)),
+            Err(_) => Err(Error::eof(msg)),
         }
     }
     fn check(&mut self, expected: TokenKind) -> bool {
-        if let Some(token) = self.tokens.peek() {
+        if let Ok(token) = self.tokens.peek() {
             return TokenKind::from(&token.token) == expected;
         }
         false
     }
 
-    fn peek(&mut self) -> Result<&Token, Error> {
+    fn matches(&mut self, expected: &[TokenKind]) -> Option<Token> {
         match self.tokens.peek() {
-            Some(t) => Ok(t),
-            None => Err(Error::eof("Expected expression")),
-        }
-    }
-    fn matches(&mut self, expected: Vec<TokenKind>) -> Option<Token> {
-        match self.tokens.peek() {
-            Some(v) => {
+            Ok(v) => {
                 if !expected.contains(&TokenKind::from(&v.token)) {
                     return None;
                 }
             }
-            None => return None,
+            Err(_) => return None,
         }
         self.tokens.next()
     }
     fn matches_type(&mut self) -> Result<NEWTypes, Error> {
-        match self.peek() {
-            Ok(v) => {
-                if !v.is_type() && !matches!(v.token, TokenType::Ident(..)) {
-                    return Err(Error::new(v, ErrorKind::NotType(v.token.clone())));
-                }
-
-                let v = v.clone();
-                let type_decl = match v.token {
-                    TokenType::Struct | TokenType::Union | TokenType::Enum => {
-                        let token = self
-                            .tokens
-                            .next()
-                            .expect("can unwrap because successfull peek");
-                        self.parse_aggregate(&token)?
-                    }
-                    // typedefed type
-                    TokenType::Ident(..) => {
-                        if let Ok((Symbols::TypeDef(t), _)) = self.env.get_symbol(&v) {
-                            self.tokens.next();
-                            t
-                        } else {
-                            return Err(Error::new(&v, ErrorKind::NotType(v.token.clone())));
-                        }
-                    }
-                    // otherwise parse primitive
-                    _ => self
-                        .tokens
-                        .next()
-                        .expect("can only be types because of previous check")
-                        .into_type(),
-                };
-
-                Ok(type_decl)
+        let token = self.tokens.peek()?;
+        match token.token {
+            TokenType::Struct | TokenType::Union | TokenType::Enum => {
+                let token = self
+                    .tokens
+                    .next()
+                    .expect("can unwrap because successfull peek");
+                self.parse_aggregate(&token)
             }
-            Err(e) => Err(e),
+            // typedefed type
+            TokenType::Ident(..) => {
+                if let Ok((Symbols::TypeDef(t), _)) = self.env.get_symbol(&token) {
+                    self.tokens.next();
+                    Ok(t)
+                } else {
+                    Err(Error::new(token, ErrorKind::NotType(token.token.clone())))
+                }
+            }
+            _ if !token.is_type() => {
+                Err(Error::new(token, ErrorKind::NotType(token.token.clone())))
+            }
+            // otherwise parse primitive
+            _ => Ok(self
+                .tokens
+                .next()
+                .expect("can only be types because of previous check")
+                .into_type()),
         }
+    }
+    fn is_type(&self, token: &Token) -> bool {
+        if let TokenType::Ident(..) = token.token {
+            return matches!(self.env.get_symbol(token), Ok((Symbols::TypeDef(_), _)));
+        }
+        token.is_type()
     }
     fn matches_specifier(&mut self) -> Result<NEWTypes, Error> {
         let t = self.matches_type()?;
         Ok(self.parse_ptr(t))
-    }
-    // hacky and slow way of inserting token back into iterator
-    // TODO: remove this by using multipeek() when adding libraries
-    fn insert_token(&mut self, token: Token) {
-        let mut start = vec![token];
-        while let Some(t) = self.tokens.next() {
-            start.push(t);
-        }
-        self.tokens = start.into_iter().peekable();
     }
 }
 
@@ -1888,7 +1849,7 @@ Func: 'main'
         ];
         let mut p = Parser::new(tokens);
 
-        let result = p.matches(vec![TokenKind::Number, TokenKind::String]);
+        let result = p.matches(&[TokenKind::Number, TokenKind::String]);
         let expected = Some(token_default!(TokenType::Number(2)));
 
         assert_eq!(result, expected);

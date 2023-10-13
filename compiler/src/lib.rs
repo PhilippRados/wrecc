@@ -6,7 +6,7 @@ mod typechecker;
 
 // All necessary modules used for preprocessor
 pub use common::error::*;
-pub use parser::parser::*;
+pub use parser::{double_peek::*, parser::*};
 pub use scanner::*;
 
 use codegen::{codegen::*, register_allocation::*};
@@ -17,7 +17,7 @@ pub fn compile(filename: &Path, source: &str, dump_ast: bool) -> Result<String, 
     // Scan input
     let tokens = Scanner::new(filename, source).scan_token()?;
 
-    // Parse statements and return Abstract Syntax Tree
+    // Parse statements and return Abstract Syntax Tree and symbol table
     let (mut statements, env) = Parser::new(tokens).parse()?;
 
     if dump_ast {

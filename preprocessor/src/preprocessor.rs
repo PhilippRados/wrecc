@@ -1,3 +1,4 @@
+use compiler::DoublePeek;
 use compiler::Error;
 use compiler::ErrorKind;
 use compiler::Location;
@@ -9,9 +10,7 @@ use crate::Token;
 
 use std::collections::HashMap;
 use std::fs;
-use std::iter::Peekable;
 use std::path::{Path, PathBuf};
-use std::vec::IntoIter;
 
 struct IfDirective {
     location: Error,
@@ -25,7 +24,7 @@ impl IfDirective {
 }
 
 pub struct Preprocessor<'a> {
-    tokens: Peekable<IntoIter<Token>>,
+    tokens: DoublePeek<Token>,
     raw_source: Vec<String>,
     line: i32,
     column: i32,
@@ -43,7 +42,7 @@ impl<'a> Preprocessor<'a> {
         pre_defines: Option<HashMap<String, Vec<Token>>>,
     ) -> Self {
         Preprocessor {
-            tokens: tokens.into_iter().peekable(),
+            tokens: DoublePeek::new(tokens.into()),
             raw_source: input
                 .split('\n')
                 .map(|s| s.to_string())
@@ -307,14 +306,14 @@ impl<'a> Preprocessor<'a> {
 
     fn replace_define_expr(&mut self, cond: Vec<Token>) -> Result<String, Error> {
         let mut result = Vec::with_capacity(cond.len());
-        let mut cond = cond.into_iter().peekable();
+        let mut cond = DoublePeek::new(cond.into());
 
         while let Some(token) = cond.next() {
             match &token {
                 Token::Defined => {
                     let _ = skip_whitespace(&mut cond, &mut self.line);
 
-                    let open_paren = if let Some(Token::Other('(')) = cond.peek() {
+                    let open_paren = if let Ok(Token::Other('(')) = cond.peek() {
                         cond.next();
                         true
                     } else {
@@ -480,7 +479,7 @@ impl<'a> Preprocessor<'a> {
                         } else {
                             errors.push(e)
                         }
-                    } else if !matches!(self.tokens.peek(), Some(Token::Newline)) {
+                    } else if !matches!(self.tokens.peek(), Ok(Token::Newline)) {
                         errors.push(Error::new(
                             self,
                             ErrorKind::Regular(
@@ -535,7 +534,7 @@ impl<'a> Preprocessor<'a> {
         let mut result = Vec::new();
         let mut prev_token = Token::Newline;
 
-        while let Some(token) = self.tokens.peek() {
+        while let Ok(token) = self.tokens.peek() {
             match (&prev_token, token) {
                 (Token::Other('\\'), Token::Newline) => {
                     prev_token = self.tokens.next().unwrap();
@@ -586,23 +585,21 @@ fn trim_trailing_whitespace(mut tokens: Vec<Token>) -> Vec<Token> {
     tokens
 }
 
-fn skip_whitespace(tokens: &mut Peekable<IntoIter<Token>>, line_index: &mut i32) -> Result<(), ()> {
+fn skip_whitespace(tokens: &mut DoublePeek<Token>, line_index: &mut i32) -> Result<(), ()> {
     let mut found = false;
 
-    while let Some(token) = tokens.peek() {
+    while let Ok(token) = tokens.peek() {
         match token {
             Token::Whitespace(_) => {
                 tokens.next();
                 found = true;
             }
             Token::Other('\\') => {
-                let prev = tokens.next().unwrap();
-
-                if let Some(Token::Newline) = tokens.peek() {
+                if let Ok(Token::Newline) = tokens.double_peek() {
                     *line_index += 1;
                     tokens.next();
+                    tokens.next();
                 } else {
-                    insert_token(tokens, prev);
                     break;
                 }
             }
@@ -614,13 +611,6 @@ fn skip_whitespace(tokens: &mut Peekable<IntoIter<Token>>, line_index: &mut i32)
     } else {
         Err(())
     }
-}
-fn insert_token(tokens: &mut Peekable<IntoIter<Token>>, token: Token) {
-    let mut start = vec![token];
-    while let Some(t) = tokens.next() {
-        start.push(t);
-    }
-    *tokens = start.into_iter().peekable();
 }
 
 impl<'a> Location for Preprocessor<'a> {
@@ -702,7 +692,7 @@ mod tests {
         let mut pp = setup(input);
         let result = pp.skip_whitespace();
 
-        (pp.tokens.collect(), result.is_err())
+        (pp.tokens.to_vec(), result.is_err())
     }
 
     #[test]

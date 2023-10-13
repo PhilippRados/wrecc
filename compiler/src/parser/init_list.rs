@@ -1,6 +1,12 @@
 use crate::common::{expr::*, token::*, types::*};
 use crate::parser::parser::*;
 
+// int a[3] = {1,2,3};
+// equivalent to:
+// int a[3];
+// a[0] = 1;
+// a[1] = 2;
+// a[2] = 3;
 pub fn init_list_sugar(
     token: Token,
     list: &mut Vec<Expr>,
@@ -8,12 +14,6 @@ pub fn init_list_sugar(
     is_outer: bool,
     left: Expr,
 ) -> Vec<Expr> {
-    // int a[3] = {1,2,3};
-    // equivalent to:
-    // int a[3];
-    // a[0] = 1;
-    // a[1] = 2;
-    // a[2] = 3;
     if let NEWTypes::Array { amount, of } = type_decl.clone() {
         let mut result = Vec::new();
         for ((i, _), arr_i) in list
@@ -159,8 +159,8 @@ fn replace_default(expr: &Expr) -> Expr {
     }
 }
 
+// remove unused members so they don't overwrite existing ones
 fn remove_unused_members(members: &mut Vec<(NEWTypes, Token)>, list: &mut Vec<Expr>) {
-    // remove unused members so they don't overwrite existing ones
     let old_members = members.clone();
     let mut new_members = vec![];
     let mut new_list = vec![];
@@ -338,10 +338,9 @@ pub mod init_list_types {
         //   int age;
         //   Line address;
         // } Person;
-        #[allow(non_snake_case)]
         #[test]
         fn complex_struct() {
-            let Point = NEWTypes::Struct(StructInfo::Anonymous(vec![
+            let point = NEWTypes::Struct(StructInfo::Anonymous(vec![
                 (
                     NEWTypes::Primitive(Types::Int),
                     Token::default(TokenType::Comma),
@@ -351,11 +350,11 @@ pub mod init_list_types {
                     Token::default(TokenType::Comma),
                 ),
             ]));
-            let Line = NEWTypes::Struct(StructInfo::Anonymous(vec![
-                (Point.clone(), Token::default(TokenType::Comma)),
-                (Point.clone(), Token::default(TokenType::Comma)),
+            let line = NEWTypes::Struct(StructInfo::Anonymous(vec![
+                (point.clone(), Token::default(TokenType::Comma)),
+                (point.clone(), Token::default(TokenType::Comma)),
             ]));
-            let Person = NEWTypes::Struct(StructInfo::Anonymous(vec![
+            let person = NEWTypes::Struct(StructInfo::Anonymous(vec![
                 (
                     NEWTypes::Array {
                         of: Box::new(NEWTypes::Primitive(Types::Char)),
@@ -367,12 +366,12 @@ pub mod init_list_types {
                     NEWTypes::Primitive(Types::Int),
                     Token::default(TokenType::Comma),
                 ),
-                (Line.clone(), Token::default(TokenType::Comma)),
+                (line.clone(), Token::default(TokenType::Comma)),
             ]));
 
             let expected = ElementType::Multiple(vec![
                 ElementType::Multiple(vec![
-                    ElementType::Single(Person.clone()),
+                    ElementType::Single(person.clone()),
                     ElementType::Single(NEWTypes::Array {
                         of: Box::new(NEWTypes::Primitive(Types::Char)),
                         amount: 5,
@@ -385,18 +384,18 @@ pub mod init_list_types {
                 ElementType::Single(NEWTypes::Primitive(Types::Char)),
                 ElementType::Single(NEWTypes::Primitive(Types::Int)),
                 ElementType::Multiple(vec![
-                    ElementType::Single(Line.clone()),
-                    ElementType::Single(Point.clone()),
+                    ElementType::Single(line.clone()),
+                    ElementType::Single(point.clone()),
                     ElementType::Single(NEWTypes::Primitive(Types::Int)),
                 ]),
                 ElementType::Single(NEWTypes::Primitive(Types::Int)),
                 ElementType::Multiple(vec![
-                    ElementType::Single(Point.clone()),
+                    ElementType::Single(point.clone()),
                     ElementType::Single(NEWTypes::Primitive(Types::Int)),
                 ]),
                 ElementType::Single(NEWTypes::Primitive(Types::Int)),
             ]);
-            let actual = init_default(&Person);
+            let actual = init_default(&person);
 
             assert_eq!(actual, expected);
         }

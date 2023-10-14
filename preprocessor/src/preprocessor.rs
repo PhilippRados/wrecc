@@ -42,7 +42,7 @@ impl<'a> Preprocessor<'a> {
         pre_defines: Option<HashMap<String, Vec<Token>>>,
     ) -> Self {
         Preprocessor {
-            tokens: DoublePeek::new(tokens.into()),
+            tokens: DoublePeek::new(tokens),
             raw_source: input
                 .split('\n')
                 .map(|s| s.to_string())
@@ -306,7 +306,7 @@ impl<'a> Preprocessor<'a> {
 
     fn replace_define_expr(&mut self, cond: Vec<Token>) -> Result<String, Error> {
         let mut result = Vec::with_capacity(cond.len());
-        let mut cond = DoublePeek::new(cond.into());
+        let mut cond = DoublePeek::new(cond);
 
         while let Some(token) = cond.next() {
             match &token {

@@ -3,3 +3,4 @@ error: Mismatched function return type: expected 'int', found: 'void'
 |
 5     return;
 |     ^
+1 error generated.

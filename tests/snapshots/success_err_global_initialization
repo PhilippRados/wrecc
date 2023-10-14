@@ -3,3 +3,4 @@ error: Global variables can only be initialized to compile-time constants
 |
 2 int d = c;
 |     ^
+1 error generated.

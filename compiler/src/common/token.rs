@@ -3,6 +3,7 @@ use crate::common::types::*;
 use std::fmt::Display;
 use std::path::PathBuf;
 
+// same as TokenType but without the associated types to allow checking for equality
 #[derive(PartialEq, Clone, Debug)]
 pub enum TokenKind {
     // Single-character tokens.

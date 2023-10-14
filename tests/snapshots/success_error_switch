@@ -23,3 +23,4 @@ error: 'case'-statements have to be inside a 'switch'-statement
 |
 16   case 3: x = 1;
 |    ^
+5 errors generated.

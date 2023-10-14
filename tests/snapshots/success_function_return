@@ -3,3 +3,4 @@ error: Function 'bar' has incomplete return type 'struct Some'
 |
 4 struct Some bar(){}
 |             ^
+1 error generated.

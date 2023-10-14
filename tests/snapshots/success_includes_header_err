@@ -83,3 +83,4 @@ error: Undeclared symbol 'printf'
 |
 15   printf("not header #include <file.h>");
 |    ^
+17 errors generated.

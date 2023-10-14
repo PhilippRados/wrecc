@@ -1,17 +1,17 @@
-mod codegen;
 mod common;
-mod parser;
 mod scanner;
 mod typechecker;
+mod wrecc_codegen;
+mod wrecc_parser;
 
 // All necessary modules used for preprocessor
 pub use common::error::*;
-pub use parser::{double_peek::*, parser::*};
 pub use scanner::*;
+pub use wrecc_parser::{double_peek::*, parser::*};
 
-use codegen::{codegen::*, register_allocation::*};
 use std::path::Path;
 use typechecker::*;
+use wrecc_codegen::{codegen::*, register_allocation::*};
 
 pub fn compile(filename: &Path, source: &str, dump_ast: bool) -> Result<String, Vec<Error>> {
     // Scan input

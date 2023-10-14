@@ -3,3 +3,4 @@ error: Mismatched arguments in function 'some': expected parameter 'c' to be of 
 |
 8   a = *some(a);
 |            ^
+1 error generated.

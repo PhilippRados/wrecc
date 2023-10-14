@@ -8,3 +8,4 @@ error: '../../include/stdio.h' is not a valid header file
 |
 3 #include <../../include/stdio.h>
 | ^
+2 errors generated.

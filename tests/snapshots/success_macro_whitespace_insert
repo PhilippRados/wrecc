@@ -13,3 +13,4 @@ error: Expected expression found: '>'
 |
 14   a > > = 2;
 |        ^
+3 errors generated.

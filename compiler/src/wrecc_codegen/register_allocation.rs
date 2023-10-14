@@ -1,5 +1,5 @@
-use crate::codegen::{ir::*, register::*};
 use crate::common::{environment::*, types::*};
+use crate::wrecc_codegen::{ir::*, register::*};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]

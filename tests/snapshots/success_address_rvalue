@@ -3,3 +3,4 @@ error: Can't call '&' on r-value
 |
 8   a = &(b + 3);
 |       ^
+1 error generated.

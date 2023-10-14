@@ -1,7 +1,7 @@
-use crate::codegen::register::*;
 use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
 use crate::into_newtype;
-use crate::parser::{double_peek::*, init_list::init_list_types::*, init_list::*};
+use crate::wrecc_codegen::register::*;
+use crate::wrecc_parser::{double_peek::*, init_list::init_list_types::*, init_list::*};
 
 pub struct Parser {
     tokens: DoublePeek<Token>,
@@ -1512,7 +1512,7 @@ impl Parser {
             }
             // typedefed type
             TokenType::Ident(..) => {
-                if let Ok((Symbols::TypeDef(t), _)) = self.env.get_symbol(&token) {
+                if let Ok((Symbols::TypeDef(t), _)) = self.env.get_symbol(token) {
                     self.tokens.next();
                     Ok(t)
                 } else {

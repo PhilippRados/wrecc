@@ -19,3 +19,4 @@ error: Undeclared symbol 'foo'
 11   for (;;foo-{) {
 |           ^
 error: Expected closing '}' after Block, found end of file
+5 errors generated.

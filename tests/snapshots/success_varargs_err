@@ -8,3 +8,4 @@ error: Mismatched arguments in function 'printf': expected parameter 's' to be o
 |
 9   printf(z,"first",z);
 |         ^
+2 errors generated.

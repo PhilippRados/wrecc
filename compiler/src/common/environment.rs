@@ -1,5 +1,5 @@
-use crate::codegen::register::*;
 use crate::common::{error::*, token::*, types::*};
+use crate::wrecc_codegen::register::*;
 use std::collections::HashMap;
 
 #[derive(Clone, PartialEq, Debug)]

@@ -3,3 +3,4 @@ error: Redefinition of function 'main'
 |
 7 int main(){}
 |     ^
+1 error generated.

@@ -3,3 +3,4 @@ error: Expected 'main' return type 'int', found: 'char'
 |
 1 char main() {
 |      ^
+1 error generated.

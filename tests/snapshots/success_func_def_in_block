@@ -8,3 +8,4 @@ error: Undeclared symbol 'some'
 |
 8     some();
 |     ^
+2 errors generated.

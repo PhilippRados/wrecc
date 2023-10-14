@@ -3,3 +3,4 @@ error: Undeclared symbol 'printf'
 |
 9 int main() { printf("not header #include <file.h>"); }
 |              ^
+1 error generated.

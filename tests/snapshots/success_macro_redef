@@ -3,3 +3,4 @@ error: Redefinition of macro 'NULL'
 |
 4 #define NULL ((void *)0)
 | ^
+1 error generated.

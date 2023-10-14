@@ -1,5 +1,5 @@
-use crate::codegen::codegen::align;
 use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
+use crate::wrecc_codegen::codegen::align;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
@@ -1254,8 +1254,8 @@ fn log_2(x: i32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::parser::Parser;
     use crate::scanner::Scanner;
+    use crate::wrecc_parser::parser::Parser;
     use std::path::Path;
 
     macro_rules! assert_type {

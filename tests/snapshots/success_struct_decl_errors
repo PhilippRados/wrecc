@@ -13,3 +13,4 @@ error: 'struct some' contains incomplete type
 |
 23     struct some a;
 |                  ^
+3 errors generated.

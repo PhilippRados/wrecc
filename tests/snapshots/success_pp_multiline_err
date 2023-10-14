@@ -13,3 +13,4 @@ error: Undeclared symbol 'text'
 |
 19 int main() { text(); }
 |               ^
+3 errors generated.

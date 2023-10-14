@@ -3,3 +3,4 @@ error: Initializer overflow. Expected size: 3, Actual size: 4
 |
 10   } b = {'u', 'w', 'e', 2};
 |          ^
+1 error generated.

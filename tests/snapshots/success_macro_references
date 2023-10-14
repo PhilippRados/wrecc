@@ -8,3 +8,4 @@ error: Undeclared symbol 'test'
 |
 12      test    test  ;
 |       ^
+2 errors generated.

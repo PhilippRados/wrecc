@@ -3,3 +3,4 @@ error: Mismatched parameter-types in function-declarations: expected 1st paramet
 |
 2 int some(int i);
 |              ^
+1 error generated.

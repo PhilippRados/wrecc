@@ -3,3 +3,4 @@ error: Redefinition of symbol 'a'
 |
 9   int a = 2;
 |       ^
+1 error generated.

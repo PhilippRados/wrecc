@@ -13,3 +13,4 @@ error: Unterminated '#ifndef'
 |
 9 #ifndef sme
 | ^
+3 errors generated.

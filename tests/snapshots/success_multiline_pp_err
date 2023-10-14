@@ -13,3 +13,4 @@ error: Expected closing '>' after header file
 |
 17 #include <some
 |  ^
+3 errors generated.

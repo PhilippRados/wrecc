@@ -3,3 +3,4 @@ error: Invalid binary expression: 'void' '+' 'int'
 |
 4   int some = other() + 1;
 |                      ^
+1 error generated.

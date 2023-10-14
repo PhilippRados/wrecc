@@ -1,5 +1,5 @@
-use crate::codegen::register::*;
 use crate::common::{environment::*, error::*, expr::*, token::*, types::*};
+use crate::wrecc_codegen::register::*;
 
 impl Expr {
     pub fn new_literal(value: i64, primitive_type: Types) -> Self {
@@ -458,8 +458,8 @@ impl Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::parser::Parser;
     use crate::scanner::Scanner;
+    use crate::wrecc_parser::parser::Parser;
     use std::path::Path;
 
     fn assert_fold(input: &str, expected: &str) -> Option<NEWTypes> {

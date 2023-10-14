@@ -13,3 +13,4 @@ error: Undeclared symbol 'C'
 |
 9   printf("%d\n",C);
 |                 ^
+3 errors generated.

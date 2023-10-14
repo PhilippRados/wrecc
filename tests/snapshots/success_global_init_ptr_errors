@@ -23,3 +23,4 @@ error: Global variables can only be initialized to compile-time constants
 |
 13 int *multi_arr_first = *multi_arr;
 |       ^
+5 errors generated.

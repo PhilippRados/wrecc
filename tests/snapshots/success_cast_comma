@@ -8,3 +8,4 @@ error: Can't assign to type 'struct <anonymous>' with type 'long'
 |
 10   a = (long)1, (char)7;
 |      ^
+2 errors generated.

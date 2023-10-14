@@ -8,3 +8,4 @@ error: missing closing ')'
 |
 3   int b = ((2 * 1 -12;
 |                      ^
+2 errors generated.

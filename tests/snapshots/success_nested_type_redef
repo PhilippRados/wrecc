@@ -3,3 +3,4 @@ error: Redefinition of type 'Other'
 |
 11     union Other {
 |            ^
+1 error generated.

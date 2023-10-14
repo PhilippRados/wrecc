@@ -45,9 +45,14 @@ impl Error {
     fn print(self) {
         match self {
             Error::Comp(errors, no_color) => {
-                for e in errors {
+                for e in &errors {
                     e.print_error(no_color);
                 }
+                eprintln!(
+                    "{} error{} generated.",
+                    errors.len(),
+                    if errors.len() > 1 { "s" } else { "" }
+                );
             }
             Error::Sys(e) => {
                 eprintln!("wrecc: {}", e);

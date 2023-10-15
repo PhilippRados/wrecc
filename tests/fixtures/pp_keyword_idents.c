@@ -1,4 +1,4 @@
-#include <stdio.h>
+#include <../include/stdio.h>
 
 #define if 2
 

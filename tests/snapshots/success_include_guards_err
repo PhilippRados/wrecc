@@ -1,16 +1,16 @@
 error: Found '#endif' without matching '#if'
-|  --> in tests/fixtures/include_guards_err.c:7:1
+|  --> in tests/fixtures/include_guards_err.c:7:2
 |
 7 #endif
-| ^
+|  ^
 error: Unterminated '#ifdef'
-|  --> in tests/fixtures/include_guards_err.c:16:1
+|  --> in tests/fixtures/include_guards_err.c:16:2
 |
 16 #ifdef uwe
-|  ^
+|   ^
 error: Unterminated '#ifndef'
-|  --> in tests/fixtures/include_guards_err.c:9:1
+|  --> in tests/fixtures/include_guards_err.c:9:2
 |
 9 #ifndef sme
-| ^
+|  ^
 3 errors generated.

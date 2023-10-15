@@ -7,6 +7,7 @@ use compiler::Scanner;
 
 use crate::preprocess_included;
 use crate::Token;
+use crate::TokenKind;
 
 use std::collections::HashMap;
 use std::fs;
@@ -26,11 +27,17 @@ impl IfDirective {
 pub struct Preprocessor<'a> {
     tokens: DoublePeek<Token>,
     raw_source: Vec<String>,
-    line: i32,
-    column: i32,
+
+    // current file being preprocessed
     filename: &'a Path,
-    defines: HashMap<String, Vec<Token>>,
+
+    // #define's mapping identifier to list of tokens until newline
+    defines: HashMap<String, Vec<TokenKind>>,
+
+    // list of #if directives with last one being the most deeply nested
     ifs: Vec<IfDirective>,
+
+    // path to custom system header files
     system_header_path: PathBuf,
 }
 
@@ -39,7 +46,7 @@ impl<'a> Preprocessor<'a> {
         filename: &'a Path,
         input: &'a str,
         tokens: Vec<Token>,
-        pre_defines: Option<HashMap<String, Vec<Token>>>,
+        pre_defines: Option<HashMap<String, Vec<TokenKind>>>,
     ) -> Self {
         Preprocessor {
             tokens: DoublePeek::new(tokens),
@@ -47,8 +54,6 @@ impl<'a> Preprocessor<'a> {
                 .split('\n')
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
-            line: 1,
-            column: 1,
             filename,
             ifs: vec![],
             // WARN: only temporary absolute path. /include will be found via PATH env var.
@@ -64,14 +69,18 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
-    fn paste_header(&mut self, (file_path, data): (PathBuf, String)) -> Result<String, Error> {
+    fn paste_header(
+        &mut self,
+        token: Token,
+        (file_path, data): (PathBuf, String),
+    ) -> Result<String, Error> {
         let (data, defines) = preprocess_included(&file_path, &data, self.defines.clone())
             .map_err(Error::new_multiple)?;
 
         self.defines.extend(defines);
 
         let header_prologue = format!("#pro:{}\n", file_path.display());
-        let header_epilogue = format!("#epi:{}\0", self.line_index());
+        let header_epilogue = format!("#epi:{}\0", token.line);
 
         Ok(header_prologue + &data + &header_epilogue)
     }
@@ -79,40 +88,42 @@ impl<'a> Preprocessor<'a> {
     fn include(&mut self) -> Result<String, Error> {
         self.skip_whitespace()?;
 
-        match self.tokens.next() {
-            Some(Token::String(mut file, _)) => {
+        let token = self.tokens.next();
+        match token.clone().map(|t| t.kind) {
+            Some(TokenKind::String(mut file)) => {
                 file.remove(0);
 
                 if let Some('"') = file.pop() {
-                    let file_data = self.include_data(PathBuf::from(file), true)?;
-                    self.paste_header(file_data)
+                    let file_data = self.include_data(token.as_ref(), PathBuf::from(file), true)?;
+                    self.paste_header(token.unwrap(), file_data)
                 } else {
                     Err(Error::new(
-                        self,
+                        &self.location(token.as_ref()),
                         ErrorKind::Regular("Expected closing '\"' after header file"),
                     ))
                 }
             }
-            Some(Token::Other('<')) => {
+            Some(TokenKind::Other('<')) => {
                 let file = self
-                    .fold_until_token(Token::Other('>'))
+                    .fold_until_token(TokenKind::Other('>'))
                     .into_iter()
-                    .map(|t| t.to_string())
+                    .map(|t| t.kind.to_string())
                     .collect::<String>();
-                let closing = self.tokens.next();
+                let closing = self.tokens.next().map(|t| t.kind);
 
-                if let Some(Token::Other('>')) = closing {
-                    let file_data = self.include_data(PathBuf::from(file), false)?;
-                    self.paste_header(file_data)
+                if let Some(TokenKind::Other('>')) = closing {
+                    let file_data =
+                        self.include_data(token.as_ref(), PathBuf::from(file), false)?;
+                    self.paste_header(token.unwrap(), file_data)
                 } else {
                     Err(Error::new(
-                        self,
+                        &self.location(token.as_ref()),
                         ErrorKind::Regular("Expected closing '>' after header file"),
                     ))
                 }
             }
             _ => Err(Error::new(
-                self,
+                &self.location(token.as_ref()),
                 ErrorKind::Regular("Expected opening '<' or '\"' after include directive"),
             )),
         }
@@ -121,6 +132,7 @@ impl<'a> Preprocessor<'a> {
     // and returns the data it contains together with the filepath where it was found
     fn include_data(
         &self,
+        token: Option<&Token>,
         file_path: PathBuf,
         search_local: bool,
     ) -> Result<(PathBuf, String), Error> {
@@ -137,7 +149,7 @@ impl<'a> Preprocessor<'a> {
         match fs::read_to_string(abs_system_path) {
             Ok(data) => Ok((file_path, data)),
             Err(_) => Err(Error::new(
-                self,
+                &self.location(token),
                 ErrorKind::InvalidHeader(file_path.to_string_lossy().to_string()),
             )),
         }
@@ -145,17 +157,19 @@ impl<'a> Preprocessor<'a> {
     fn define(&mut self) -> Result<(), Error> {
         self.skip_whitespace()?;
 
-        match self.tokens.next().map(|t| t.as_ident()) {
+        let token = self.tokens.next();
+        match token.as_ref().map(|t| t.kind.as_ident()) {
             Some(Some(identifier)) => {
                 let _ = self.skip_whitespace();
-                let replace_with = self.fold_until_token(Token::Newline);
-                let replace_with = trim_trailing_whitespace(replace_with);
+                let replace_with = self.fold_until_token(TokenKind::Newline);
+                let replace_with =
+                    trim_trailing_whitespace(replace_with.into_iter().map(|t| t.kind).collect());
 
                 // same macro already exists but with different replacement-list
                 if let Some(existing_replacement) = self.defines.get(&identifier) {
                     if existing_replacement != &replace_with {
                         return Err(Error::new(
-                            self,
+                            &self.location(token.as_ref()),
                             ErrorKind::Redefinition("macro", identifier),
                         ));
                     }
@@ -163,10 +177,13 @@ impl<'a> Preprocessor<'a> {
                 self.defines.insert(identifier, replace_with);
                 Ok(())
             }
-            _ => Err(Error::new(self, ErrorKind::InvalidMacroName)),
+            _ => Err(Error::new(
+                &self.location(token.as_ref()),
+                ErrorKind::InvalidMacroName,
+            )),
         }
     }
-    fn replace_macros(&self, macro_name: &str, replace_list: Vec<Token>) -> Vec<Token> {
+    fn replace_macros(&self, macro_name: &str, replace_list: Vec<TokenKind>) -> Vec<TokenKind> {
         replace_list
             .into_iter()
             .flat_map(|token| {
@@ -185,62 +202,81 @@ impl<'a> Preprocessor<'a> {
     fn undef(&mut self) -> Result<(), Error> {
         self.skip_whitespace()?;
 
-        match self.tokens.next().map(|t| t.as_ident()) {
+        let token = self.tokens.next();
+        match token.as_ref().map(|t| t.kind.as_ident()) {
             Some(Some(identifier)) => {
                 self.defines.remove(&identifier);
                 Ok(())
             }
-            _ => Err(Error::new(self, ErrorKind::InvalidMacroName)),
+            _ => Err(Error::new(
+                &self.location(token.as_ref()),
+                ErrorKind::InvalidMacroName,
+            )),
         }
     }
     fn ifdef(&mut self, if_kind: Token) -> Result<(), Error> {
         self.skip_whitespace()?;
 
-        match self.tokens.next().map(|t| t.as_ident()) {
+        let token = self.tokens.next();
+        match token.as_ref().map(|t| t.kind.as_ident()) {
             Some(Some(identifier)) => {
                 // TODO: should this be prior to whitespace check so that #endif still has matching #if?
                 self.ifs.push(IfDirective::new(Error::new(
-                    self,
-                    ErrorKind::UnterminatedIf(if_kind.to_string()),
+                    &self.location(Some(&if_kind)),
+                    ErrorKind::UnterminatedIf(if_kind.kind.to_string()),
                 )));
 
-                match (&if_kind, self.defines.contains_key(&identifier)) {
-                    (Token::Ifdef, true) | (Token::Ifndef, false) => Ok(()),
-                    (Token::Ifdef, false) | (Token::Ifndef, true) => self.eval_else_branch(),
+                match (&if_kind.kind, self.defines.contains_key(&identifier)) {
+                    (TokenKind::Ifdef, true) | (TokenKind::Ifndef, false) => Ok(()),
+                    (TokenKind::Ifdef, false) | (TokenKind::Ifndef, true) => {
+                        self.eval_else_branch()
+                    }
                     _ => unreachable!(),
                 }
             }
-            _ => Err(Error::new(self, ErrorKind::InvalidMacroName)),
+            _ => Err(Error::new(
+                &self.location(token.as_ref()),
+                ErrorKind::InvalidMacroName,
+            )),
         }
     }
     fn if_expr(&mut self, if_kind: Token) -> Result<(), Error> {
         self.ifs.push(IfDirective::new(Error::new(
-            self,
-            ErrorKind::UnterminatedIf(if_kind.to_string()),
+            &self.location(Some(&if_kind)),
+            ErrorKind::UnterminatedIf(if_kind.kind.to_string()),
         )));
 
         self.skip_whitespace()?;
 
-        match self.eval_cond()? {
+        match self.eval_cond(if_kind)? {
             true => Ok(()),
             false => self.eval_else_branch(),
         }
     }
     fn conditional_block(&mut self, token: Token) -> Result<(), Error> {
         if self.ifs.is_empty() {
-            Err(Error::new(self, ErrorKind::MissingIf(token.to_string())))
+            Err(Error::new(
+                &self.location(Some(&token)),
+                ErrorKind::MissingIf(token.kind.to_string()),
+            ))
         } else {
             let matching_if = self.ifs.last_mut().unwrap();
 
-            match (matching_if.has_else, token) {
-                (true, Token::Elif) => Err(Error::new(self, ErrorKind::ElifAfterElse)),
-                (false, Token::Elif) => self.skip_branch(true).map(|_| ()),
-                (true, Token::Else) => Err(Error::new(self, ErrorKind::DuplicateElse)),
-                (false, Token::Else) => {
+            match (matching_if.has_else, &token.kind) {
+                (true, TokenKind::Elif) => Err(Error::new(
+                    &self.location(Some(&token)),
+                    ErrorKind::ElifAfterElse,
+                )),
+                (false, TokenKind::Elif) => self.skip_branch(true).map(|_| ()),
+                (true, TokenKind::Else) => Err(Error::new(
+                    &self.location(Some(&token)),
+                    ErrorKind::DuplicateElse,
+                )),
+                (false, TokenKind::Else) => {
                     matching_if.has_else = true;
                     self.skip_branch(true).map(|_| ())
                 }
-                (_, Token::Endif) => {
+                (_, TokenKind::Endif) => {
                     self.ifs.pop();
                     Ok(())
                 }
@@ -252,13 +288,14 @@ impl<'a> Preprocessor<'a> {
     // skips branch until another conditional block token that must be evaluated is reached
     fn eval_else_branch(&mut self) -> Result<(), Error> {
         loop {
-            match self.skip_branch(false)? {
-                Token::Elif => {
-                    if self.eval_cond()? {
+            let token = self.skip_branch(false)?;
+            match token.kind {
+                TokenKind::Elif => {
+                    if self.eval_cond(token)? {
                         return Ok(());
                     }
                 }
-                Token::Else | Token::Endif => {
+                TokenKind::Else | TokenKind::Endif => {
                     return Ok(());
                 }
                 _ => unreachable!("not #if token"),
@@ -266,40 +303,46 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
-    fn eval_cond(&mut self) -> Result<bool, Error> {
-        let cond = self.fold_until_token(Token::Newline);
+    fn eval_cond(&mut self, if_kind: Token) -> Result<bool, Error> {
+        let cond = self.fold_until_token(TokenKind::Newline);
         let cond = self.replace_define_expr(cond)?;
 
-        if cond.is_empty() {
+        if cond.is_empty() || cond.chars().all(char::is_whitespace) {
             return Err(Error::new(
-                self,
-                ErrorKind::Regular("'#if' directive expects expression"),
+                &self.location(Some(&if_kind)),
+                ErrorKind::MissingExpression(if_kind.kind.to_string()),
             ));
         }
 
-        match self.pp_const_value(cond)? {
+        match self.pp_const_value(if_kind, cond)? {
             0 => Ok(false),
             _ => Ok(true),
         }
     }
 
-    fn pp_const_value(&self, cond: String) -> Result<i64, Error> {
+    fn pp_const_value(&self, if_kind: Token, cond: String) -> Result<i64, Error> {
         let tokens = Scanner::new(self.filename, &cond)
             .scan_token()
             .map_err(|errs| {
-                Error::new_multiple(errs.into_iter().map(|e| Error::new(self, e.kind)).collect())
+                Error::new_multiple(
+                    errs.into_iter()
+                        .map(|e| Error::new(&self.location(Some(&if_kind)), e.kind))
+                        .collect(),
+                )
             })?;
         let mut parser = Parser::new(tokens);
-        let mut expr = parser.expression().map_err(|e| Error::new(self, e.kind))?;
+        let mut expr = parser
+            .expression()
+            .map_err(|e| Error::new(&self.location(Some(&if_kind)), e.kind))?;
 
         if !parser.is_empty() {
             return Err(Error::new(
-                self,
+                &self.location(Some(&if_kind)),
                 ErrorKind::Regular("Trailing tokens in preprocessor expression"),
             ));
         }
 
-        let value = expr.preprocessor_constant(self)?;
+        let value = expr.preprocessor_constant(&self.location(Some(&if_kind)))?;
 
         Ok(value)
     }
@@ -309,40 +352,49 @@ impl<'a> Preprocessor<'a> {
         let mut cond = DoublePeek::new(cond);
 
         while let Some(token) = cond.next() {
-            match &token {
-                Token::Defined => {
-                    let _ = skip_whitespace(&mut cond, &mut self.line);
+            match &token.kind {
+                TokenKind::Defined => {
+                    skip_whitespace(&mut cond);
 
-                    let open_paren = if let Ok(Token::Other('(')) = cond.peek() {
-                        cond.next();
-                        true
+                    let open_paren = if let Ok(TokenKind::Other('(')) = cond.peek().map(|t| &t.kind)
+                    {
+                        cond.next()
                     } else {
-                        false
+                        None
                     };
 
-                    let _ = skip_whitespace(&mut cond, &mut self.line);
-                    match cond.next().map(|t| t.as_ident()) {
+                    skip_whitespace(&mut cond);
+                    let token = cond.next();
+                    match token.as_ref().map(|t| t.kind.as_ident()) {
                         Some(Some(identifier)) => {
                             let replacement = if self.defines.contains_key(&identifier) {
-                                Token::Other('1')
+                                TokenKind::Other('1')
                             } else {
-                                Token::Other('0')
+                                TokenKind::Other('0')
                             };
                             let replacement = pad_whitespace(vec![replacement]);
 
                             result.extend(replacement);
 
-                            let _ = skip_whitespace(&mut cond, &mut self.line);
-                            if open_paren && !matches!(cond.next(), Some(Token::Other(')'))) {
+                            skip_whitespace(&mut cond);
+
+                            if open_paren.is_some()
+                                && !matches!(
+                                    cond.next(),
+                                    Some(Token { kind: TokenKind::Other(')'), .. })
+                                )
+                            {
                                 return Err(Error::new(
-                                    self,
-                                    ErrorKind::Regular("Expect closing ')' after 'defined'"),
+                                    &self.location(open_paren.as_ref()),
+                                    ErrorKind::Regular(
+                                        "Expect matching closing ')' after 'defined'",
+                                    ),
                                 ));
                             }
                         }
                         _ => {
                             return Err(Error::new(
-                                self,
+                                &self.location(token.as_ref()),
                                 ErrorKind::Regular("Expect identifier after 'defined'-operator"),
                             ))
                         }
@@ -357,10 +409,10 @@ impl<'a> Preprocessor<'a> {
                             self.replace_macros(&identifier, replacement.clone());
                         result.extend(expanded_replacement)
                     } else {
-                        result.push(token)
+                        result.push(token.kind)
                     }
                 }
-                _ => result.push(token),
+                _ => result.push(token.kind),
             }
         }
         // replace all identifiers with 0
@@ -382,50 +434,53 @@ impl<'a> Preprocessor<'a> {
         let matching_if = self.ifs.len();
 
         while let Some(token) = self.tokens.next() {
-            match token {
-                Token::Hash => {
+            match token.kind {
+                TokenKind::Hash => {
                     let _ = self.skip_whitespace();
-                    match self.tokens.next() {
-                        Some(Token::Endif) if self.ifs.len() == matching_if => {
+
+                    let token = self.tokens.next();
+                    match token.as_ref().map(|t| t.kind.clone()) {
+                        Some(TokenKind::Endif) if self.ifs.len() == matching_if => {
                             self.ifs.pop();
-                            return Ok(Token::Endif);
+                            return Ok(token.unwrap());
                         }
-                        Some(Token::Endif) => {
+                        Some(TokenKind::Endif) => {
                             self.ifs.pop();
                         }
-                        Some(token @ (Token::Elif | Token::Else)) => {
+                        Some(kind @ (TokenKind::Elif | TokenKind::Else)) => {
                             let if_directive = self.ifs.last_mut().unwrap();
-                            match (if_directive.has_else, &token) {
-                                (true, Token::Elif) => {
-                                    return Err(Error::new(self, ErrorKind::ElifAfterElse));
+                            match (if_directive.has_else, &kind) {
+                                (true, TokenKind::Elif) => {
+                                    return Err(Error::new(
+                                        &self.location(token.as_ref()),
+                                        ErrorKind::ElifAfterElse,
+                                    ));
                                 }
-                                (true, Token::Else) => {
-                                    return Err(Error::new(self, ErrorKind::DuplicateElse));
+                                (true, TokenKind::Else) => {
+                                    return Err(Error::new(
+                                        &self.location(token.as_ref()),
+                                        ErrorKind::DuplicateElse,
+                                    ));
                                 }
-                                (false, Token::Else) => {
+                                (false, TokenKind::Else) => {
                                     if_directive.has_else = true;
                                 }
                                 _ => (),
                             }
                             if !skip_to_end {
-                                return Ok(token);
+                                return Ok(token.unwrap());
                             }
                         }
-                        Some(Token::Ifdef | Token::Ifndef | Token::If) => {
+                        Some(kind @ (TokenKind::Ifdef | TokenKind::Ifndef | TokenKind::If)) => {
                             self.ifs.push(IfDirective::new(Error::new(
-                                self,
-                                ErrorKind::UnterminatedIf(token.to_string()),
+                                &self.location(token.as_ref()),
+                                ErrorKind::UnterminatedIf(kind.to_string()),
                             )));
                         }
                         _ => (),
                     }
                 }
-                Token::Newline => self.line += 1,
-                token => {
-                    if let Some(newlines) = token.get_newlines() {
-                        self.line += newlines;
-                    }
-                }
+                _ => (),
             }
         }
 
@@ -433,43 +488,40 @@ impl<'a> Preprocessor<'a> {
         Err(self.ifs.pop().unwrap().location)
     }
 
-    pub fn start(&mut self) -> Result<(String, HashMap<String, Vec<Token>>), Vec<Error>> {
+    pub fn start(&mut self) -> Result<(String, HashMap<String, Vec<TokenKind>>), Vec<Error>> {
         let mut result = String::from("");
         let mut errors = Vec::new();
 
         while let Some(token) = self.tokens.next() {
-            match token {
-                Token::Hash if is_first_line_token(&result) => {
+            match token.kind {
+                TokenKind::Hash if is_first_line_token(&result) => {
                     let _ = self.skip_whitespace();
-                    let newlines = self.line;
+                    let newlines = token.line;
 
-                    let outcome = match self.tokens.next() {
-                        Some(Token::Include) => match self.include() {
+                    let directive = self.tokens.next();
+                    let outcome = match directive.as_ref().map(|t| &t.kind) {
+                        Some(TokenKind::Include) => match self.include() {
                             Ok(s) => Ok(result.push_str(&s)),
                             Err(e) => Err(e),
                         },
-                        Some(Token::Define) => self.define(),
-                        Some(Token::Undef) => self.undef(),
-                        Some(token @ (Token::Ifdef | Token::Ifndef)) => self.ifdef(token),
-                        Some(token @ Token::If) => self.if_expr(token),
-                        Some(token @ (Token::Elif | Token::Else | Token::Endif)) => {
-                            self.conditional_block(token)
+                        Some(TokenKind::Define) => self.define(),
+                        Some(TokenKind::Undef) => self.undef(),
+                        Some(TokenKind::Ifdef | TokenKind::Ifndef) => {
+                            self.ifdef(directive.unwrap())
                         }
-                        Some(directive) => Err(Error::new(
-                            self,
-                            ErrorKind::InvalidDirective(directive.to_string()),
+                        Some(TokenKind::If) => self.if_expr(directive.unwrap()),
+                        Some(TokenKind::Elif | TokenKind::Else | TokenKind::Endif) => {
+                            self.conditional_block(directive.unwrap())
+                        }
+                        Some(directive_kind) => Err(Error::new(
+                            &self.location(directive.as_ref()),
+                            ErrorKind::InvalidDirective(directive_kind.to_string()),
                         )),
                         None => Err(Error::new(
-                            self,
+                            &self.location(directive.as_ref()),
                             ErrorKind::Regular("Expected preprocessor directive following '#'"),
                         )),
                     };
-
-                    // if pp-directive more than one line, add marker for scanner
-                    let pp_lines = self.line - newlines;
-                    if pp_lines > 0 {
-                        result.push_str(&format!("#line:{}\n", self.line));
-                    }
 
                     if let Err(e) = outcome {
                         if let ErrorKind::Multiple(many_errors) = e.kind {
@@ -479,18 +531,26 @@ impl<'a> Preprocessor<'a> {
                         } else {
                             errors.push(e)
                         }
-                    } else if !matches!(self.tokens.peek(), Ok(Token::Newline)) {
-                        errors.push(Error::new(
-                            self,
-                            ErrorKind::Regular(
-                                "Found trailing tokens after preprocessor directive",
-                            ),
-                        ));
+                    } else {
+                        match self.tokens.peek() {
+                            Ok(token) if !matches!(token.kind, TokenKind::Newline) => {
+                                errors.push(Error::new(
+                                    &self.location(Some(token)),
+                                    ErrorKind::Regular(
+                                        "Found trailing tokens after preprocessor directive",
+                                    ),
+                                ))
+                            }
+                            Ok(token) => {
+                                // if pp-directive more than one line, add marker for scanner
+                                let pp_lines = token.line - newlines;
+                                if pp_lines > 0 {
+                                    result.push_str(&format!("#line:{}\n", token.line));
+                                }
+                            }
+                            _ => (),
+                        }
                     }
-                }
-                Token::Newline => {
-                    self.line += 1;
-                    result.push('\n');
                 }
                 ident if ident.as_ident().is_some() => {
                     let identifier = ident.as_ident().unwrap();
@@ -509,12 +569,7 @@ impl<'a> Preprocessor<'a> {
                         result.push_str(&identifier)
                     }
                 }
-                token => {
-                    if let Some(newlines) = token.get_newlines() {
-                        self.line += newlines;
-                    }
-                    result.push_str(&token.to_string())
-                }
+                _ => result.push_str(&token.kind.to_string()),
             }
         }
 
@@ -530,27 +585,22 @@ impl<'a> Preprocessor<'a> {
     }
 
     // combines tokens until either an unescaped newline is reached or the token is found
-    fn fold_until_token(&mut self, end: Token) -> Vec<Token> {
+    fn fold_until_token(&mut self, end: TokenKind) -> Vec<Token> {
         let mut result = Vec::new();
-        let mut prev_token = Token::Newline;
+        let mut prev_token = TokenKind::Newline;
 
         while let Ok(token) = self.tokens.peek() {
-            match (&prev_token, token) {
-                (Token::Other('\\'), Token::Newline) => {
-                    prev_token = self.tokens.next().unwrap();
+            match (&prev_token, &token.kind) {
+                (TokenKind::Other('\\'), TokenKind::Newline) => {
+                    prev_token = self.tokens.next().unwrap().kind;
                     result.pop();
-                    self.line += 1;
                 }
-                (_, Token::Newline) => break,
+                (_, TokenKind::Newline) => break,
                 (_, token) if token == &end => break,
-                (.., t) => {
-                    if let Some(newlines) = t.get_newlines() {
-                        self.line += newlines;
-                    }
-
+                (..) => {
                     let token = self.tokens.next().unwrap();
-                    result.push(token.clone());
-                    prev_token = token;
+                    prev_token = token.kind.clone();
+                    result.push(token);
                 }
             }
         }
@@ -559,44 +609,62 @@ impl<'a> Preprocessor<'a> {
 
     // wrapper for easier access
     fn skip_whitespace(&mut self) -> Result<(), Error> {
-        if skip_whitespace(&mut self.tokens, &mut self.line).is_err() {
+        if !skip_whitespace(&mut self.tokens) {
+            let token = self.tokens.peek();
             Err(Error::new(
-                self,
+                &self.location(token.ok()),
                 ErrorKind::Regular("Expect whitespace after preprocessing directive"),
             ))
         } else {
             Ok(())
         }
     }
+    // helper function since token holds column and line information but can't hold filename info
+    fn location(&self, token: Option<&Token>) -> Loc {
+        let line = if let Some(token) = token {
+            token.line
+        } else {
+            -1
+        };
+        Loc {
+            line,
+            column: if let Some(token) = token {
+                token.column
+            } else {
+                -1
+            },
+            line_string: self.raw_source[(line - 1) as usize].clone(),
+            filename: self.filename.into(),
+        }
+    }
 }
 
 // surrounds a list of tokens with additional whitespace to avoid them being glued together during stringification
-fn pad_whitespace(tokens: Vec<Token>) -> Vec<Token> {
-    let mut replaced = vec![Token::Whitespace(" ".to_string())];
+fn pad_whitespace(tokens: Vec<TokenKind>) -> Vec<TokenKind> {
+    let mut replaced = vec![TokenKind::Whitespace(" ".to_string())];
     replaced.extend(tokens);
-    replaced.push(Token::Whitespace(" ".to_string()));
+    replaced.push(TokenKind::Whitespace(" ".to_string()));
     replaced
 }
 
-fn trim_trailing_whitespace(mut tokens: Vec<Token>) -> Vec<Token> {
-    while let Some(Token::Whitespace(_)) = tokens.last() {
+fn trim_trailing_whitespace(mut tokens: Vec<TokenKind>) -> Vec<TokenKind> {
+    while let Some(TokenKind::Whitespace(_)) = tokens.last() {
         tokens.pop();
     }
     tokens
 }
 
-fn skip_whitespace(tokens: &mut DoublePeek<Token>, line_index: &mut i32) -> Result<(), ()> {
+fn skip_whitespace(tokens: &mut DoublePeek<Token>) -> bool {
     let mut found = false;
 
     while let Ok(token) = tokens.peek() {
-        match token {
-            Token::Whitespace(_) => {
+        match token.kind {
+            TokenKind::Whitespace(_) => {
                 tokens.next();
                 found = true;
             }
-            Token::Other('\\') => {
-                if let Ok(Token::Newline) = tokens.double_peek() {
-                    *line_index += 1;
+            TokenKind::Other('\\') => {
+                if let Ok(TokenKind::Newline) = tokens.double_peek().map(|t| &t.kind) {
                     tokens.next();
                     tokens.next();
                 } else {
@@ -606,14 +674,16 @@ fn skip_whitespace(tokens: &mut DoublePeek<Token>, line_index: &mut i32) -> Resu
             _ => break,
         }
     }
-    if found {
-        Ok(())
-    } else {
-        Err(())
-    }
+    found
 }
 
-impl<'a> Location for Preprocessor<'a> {
+struct Loc {
+    line: i32,
+    column: i32,
+    line_string: String,
+    filename: PathBuf,
+}
+impl Location for Loc {
     fn line_index(&self) -> i32 {
         self.line
     }
@@ -621,10 +691,10 @@ impl<'a> Location for Preprocessor<'a> {
         self.column
     }
     fn line_string(&self) -> String {
-        self.raw_source[(self.line - 1) as usize].clone()
+        self.line_string.clone()
     }
     fn filename(&self) -> PathBuf {
-        self.filename.into()
+        self.filename.clone()
     }
 }
 
@@ -645,12 +715,16 @@ mod tests {
     use super::*;
     use crate::Scanner;
 
-    fn scan(input: &str) -> Vec<Token> {
-        Scanner::new(input).scan_token()
+    fn scan(input: &str) -> Vec<TokenKind> {
+        Scanner::new(input)
+            .scan_token()
+            .into_iter()
+            .map(|t| t.kind)
+            .collect()
     }
 
     fn setup(input: &str) -> Preprocessor {
-        let tokens = scan(input);
+        let tokens = Scanner::new(input).scan_token();
 
         Preprocessor::new(Path::new(""), input, tokens, None)
     }
@@ -668,7 +742,7 @@ mod tests {
     }
 
     fn setup_macro_replacement(defined: HashMap<&str, &str>) -> HashMap<String, String> {
-        let defined: HashMap<String, Vec<Token>> = defined
+        let defined: HashMap<String, Vec<TokenKind>> = defined
             .into_iter()
             .map(|(k, v)| (k.to_string(), scan(v)))
             .collect();
@@ -688,11 +762,21 @@ mod tests {
         result
     }
 
-    fn setup_whitespace_skip(input: &str) -> (Vec<Token>, bool) {
+    fn setup_whitespace_skip(input: &str) -> (Vec<TokenKind>, bool) {
         let mut pp = setup(input);
         let result = pp.skip_whitespace();
 
-        (pp.tokens.to_vec(), result.is_err())
+        (
+            pp.tokens.to_vec().into_iter().map(|t| t.kind).collect(),
+            result.is_err(),
+        )
+    }
+    fn setup_fold_until_newline(input: &str) -> Vec<TokenKind> {
+        setup(input)
+            .fold_until_token(TokenKind::Newline)
+            .into_iter()
+            .map(|t| t.kind)
+            .collect()
     }
 
     #[test]
@@ -811,7 +895,7 @@ mod tests {
 
     #[test]
     fn fold_until_newline_escaped() {
-        let actual = setup("1 2   \\\n\\3\n   \\\nwhat").fold_until_token(Token::Newline);
+        let actual = setup_fold_until_newline("1 2   \\\n\\3\n   \\\nwhat");
         let expected = scan("1 2   \\3");
 
         assert_eq!(actual, expected);
@@ -819,7 +903,7 @@ mod tests {
 
     #[test]
     fn fold_until_newline_escaped2() {
-        let actual = setup("1 2   \\\n\\\n3\n   \\\nwhat").fold_until_token(Token::Newline);
+        let actual = setup_fold_until_newline("1 2   \\\n\\\n3\n   \\\nwhat");
         let expected = scan("1 2   3");
 
         assert_eq!(actual, expected);
@@ -843,11 +927,11 @@ mod tests {
     #[test]
     fn trim_trailing_whitespace_multiple() {
         let input = vec![
-            Token::Ident("some".to_string()),
-            Token::Whitespace("  ".to_string()),
-            Token::Other('1'),
-            Token::Whitespace("  ".to_string()),
-            Token::Whitespace(" ".to_string()),
+            TokenKind::Ident("some".to_string()),
+            TokenKind::Whitespace("  ".to_string()),
+            TokenKind::Other('1'),
+            TokenKind::Whitespace("  ".to_string()),
+            TokenKind::Whitespace(" ".to_string()),
         ];
         let actual = trim_trailing_whitespace(input);
         let expected = scan("some  1");

@@ -1,16 +1,16 @@
 error: Expected opening '<' or '"' after include directive
-|  --> in tests/fixtures/multiline_pp_err.c:4:1
+|  --> in tests/fixtures/multiline_pp_err.c:4:10
 |
 4 #include /<some.h>
-| ^
+|          ^
 error: '#äefe' is not a valid preprocessor directive
-|  --> in tests/fixtures/multiline_pp_err.c:15:1
+|  --> in tests/fixtures/multiline_pp_err.c:15:2
 |
 15 #äefe
-|  ^
+|   ^
 error: Expected closing '>' after header file
-|  --> in tests/fixtures/multiline_pp_err.c:17:1
+|  --> in tests/fixtures/multiline_pp_err.c:17:10
 |
 17 #include <some
-|  ^
+|           ^
 3 errors generated.

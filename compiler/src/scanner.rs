@@ -5,14 +5,23 @@ use std::path::{Path, PathBuf};
 use std::str::Chars;
 
 pub struct Scanner<'a> {
+    // source used for iterating
     source: Peekable<Chars<'a>>,
+
+    // source used for displaying error message
     pub raw_source: Vec<String>,
+
     // line number of source after preprocessor
     pub actual_line: i32,
+
     // line number of unpreprocessed source
     pub original_line: i32,
+
     pub column: i32,
+
+    // list of current filenames when iterating through nested includes
     pub filenames: Vec<PathBuf>,
+
     keywords: HashMap<&'a str, TokenType>,
 }
 impl<'a> Scanner<'a> {

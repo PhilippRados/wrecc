@@ -5,7 +5,7 @@ use std::iter::Peekable;
 use std::str::Chars;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Token {
+pub enum TokenKind {
     Hash,
     Include,
     Define,
@@ -17,85 +17,106 @@ pub enum Token {
     Elif,
     Else,
     Endif,
-    String(String, usize),
-    CharLit(String, usize),
+    String(String),
+    CharLit(String),
     Ident(String),
     Newline,
     Whitespace(String),
-    Comment(String, usize),
+    Comment(String),
     Other(char),
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub column: i32,
+    pub line: i32,
+}
 impl Token {
-    pub fn get_newlines(&self) -> Option<i32> {
-        match self {
-            Token::String(_, newline) | Token::Comment(_, newline) | Token::CharLit(_, newline) => {
-                Some(*newline as i32)
-            }
-            _ => None,
+    pub fn len(&self) -> usize {
+        match &self.kind {
+            TokenKind::Newline => 0,
+            TokenKind::Hash | TokenKind::Other(_) => 1,
+            TokenKind::If => 2,
+            TokenKind::Else | TokenKind::Elif => 4,
+            TokenKind::Undef | TokenKind::Ifdef | TokenKind::Endif => 5,
+            TokenKind::Define | TokenKind::Ifndef => 6,
+            TokenKind::Include | TokenKind::Defined => 7,
+            TokenKind::String(s)
+            | TokenKind::CharLit(s)
+            | TokenKind::Ident(s)
+            | TokenKind::Whitespace(s)
+            | TokenKind::Comment(s) => s.len(),
         }
     }
+}
+impl TokenKind {
     // returns string of all valid identifiers
     pub fn as_ident(&self) -> Option<String> {
         match self {
-            Token::Ident(_)
-            | Token::Include
-            | Token::Define
-            | Token::Defined
-            | Token::Undef
-            | Token::Ifdef
-            | Token::Ifndef
-            | Token::If
-            | Token::Elif
-            | Token::Else
-            | Token::Endif => Some(self.to_string()),
+            TokenKind::Ident(_)
+            | TokenKind::Include
+            | TokenKind::Define
+            | TokenKind::Defined
+            | TokenKind::Undef
+            | TokenKind::Ifdef
+            | TokenKind::Ifndef
+            | TokenKind::If
+            | TokenKind::Elif
+            | TokenKind::Else
+            | TokenKind::Endif => Some(self.to_string()),
             _ => None,
         }
     }
 }
-impl ToString for Token {
+impl ToString for TokenKind {
     fn to_string(&self) -> String {
         match self {
-            Token::Hash => "#".to_string(),
-            Token::Include => "include".to_string(),
-            Token::Define => "define".to_string(),
-            Token::Defined => "defined".to_string(),
-            Token::Undef => "undef".to_string(),
-            Token::Ifdef => "ifdef".to_string(),
-            Token::Ifndef => "ifndef".to_string(),
-            Token::If => "if".to_string(),
-            Token::Elif => "elif".to_string(),
-            Token::Else => "else".to_string(),
-            Token::Endif => "endif".to_string(),
-            Token::Newline => "\n".to_string(),
-            Token::Comment(s, _)
-            | Token::String(s, _)
-            | Token::CharLit(s, _)
-            | Token::Ident(s)
-            | Token::Whitespace(s) => s.to_string(),
-            Token::Other(c) => c.to_string(),
+            TokenKind::Hash => "#".to_string(),
+            TokenKind::Include => "include".to_string(),
+            TokenKind::Define => "define".to_string(),
+            TokenKind::Defined => "defined".to_string(),
+            TokenKind::Undef => "undef".to_string(),
+            TokenKind::Ifdef => "ifdef".to_string(),
+            TokenKind::Ifndef => "ifndef".to_string(),
+            TokenKind::If => "if".to_string(),
+            TokenKind::Elif => "elif".to_string(),
+            TokenKind::Else => "else".to_string(),
+            TokenKind::Endif => "endif".to_string(),
+            TokenKind::Newline => "\n".to_string(),
+            TokenKind::Comment(s)
+            | TokenKind::String(s)
+            | TokenKind::CharLit(s)
+            | TokenKind::Ident(s)
+            | TokenKind::Whitespace(s) => s.to_string(),
+            TokenKind::Other(c) => c.to_string(),
         }
     }
 }
 
 pub struct Scanner<'a> {
     source: Peekable<Chars<'a>>,
-    directives: HashMap<&'static str, Token>,
+    directives: HashMap<&'static str, TokenKind>,
+    column: i32,
+    line: i32,
 }
 impl<'a> Scanner<'a> {
     pub fn new(source: &'a str) -> Scanner {
         Scanner {
+            column: 1,
+            line: 1,
             source: source.chars().peekable(),
             directives: HashMap::from([
-                ("include", Token::Include),
-                ("define", Token::Define),
-                ("defined", Token::Defined),
-                ("undef", Token::Undef),
-                ("ifdef", Token::Ifdef),
-                ("ifndef", Token::Ifndef),
-                ("if", Token::If),
-                ("elif", Token::Elif),
-                ("else", Token::Else),
-                ("endif", Token::Endif),
+                ("include", TokenKind::Include),
+                ("define", TokenKind::Define),
+                ("defined", TokenKind::Defined),
+                ("undef", TokenKind::Undef),
+                ("ifdef", TokenKind::Ifdef),
+                ("ifndef", TokenKind::Ifndef),
+                ("if", TokenKind::If),
+                ("elif", TokenKind::Elif),
+                ("else", TokenKind::Else),
+                ("endif", TokenKind::Endif),
             ]),
         }
     }
@@ -104,32 +125,44 @@ impl<'a> Scanner<'a> {
 
         while let Some(c) = self.source.next() {
             let token = match c {
-                '#' => Token::Hash,
-                '\n' => Token::Newline,
+                '#' => self.token(TokenKind::Hash, None),
+                '\n' => {
+                    let token = self.token(TokenKind::Newline, None);
+                    self.column = 1;
+                    self.line += 1;
+
+                    token
+                }
                 ' ' | '\t' => {
                     let more_whitespace =
                         consume_while(&mut self.source, |c| c == ' ' || c == '\t', false);
 
-                    Token::Whitespace(c.to_string() + &more_whitespace)
+                    self.token(
+                        TokenKind::Whitespace(c.to_string() + &more_whitespace),
+                        None,
+                    )
                 }
                 '"' => {
                     let (s, newlines) = self.string('"');
 
-                    Token::String(s, newlines)
+                    self.token(TokenKind::String(s), Some(newlines))
                 }
                 '\'' => {
                     let (s, newlines) = self.string('\'');
 
-                    Token::CharLit(s, newlines)
+                    self.token(TokenKind::CharLit(s), Some(newlines))
                 }
                 '/' => {
                     let (comment, newlines) = self.consume_comment();
 
-                    if comment.is_empty() {
-                        Token::Other('/')
-                    } else {
-                        Token::Comment(c.to_string() + &comment, newlines)
-                    }
+                    self.token(
+                        if comment.is_empty() {
+                            TokenKind::Other('/')
+                        } else {
+                            TokenKind::Comment(c.to_string() + &comment)
+                        },
+                        Some(newlines),
+                    )
                 }
                 _ if c.is_alphabetic() || c == '_' => {
                     let ident = c.to_string()
@@ -139,13 +172,16 @@ impl<'a> Scanner<'a> {
                             false,
                         );
 
-                    if let Some(directive) = self.directives.get(ident.as_str()) {
-                        directive.clone()
-                    } else {
-                        Token::Ident(ident)
-                    }
+                    self.token(
+                        if let Some(directive) = self.directives.get(ident.as_str()) {
+                            directive.clone()
+                        } else {
+                            TokenKind::Ident(ident)
+                        },
+                        None,
+                    )
                 }
-                _ => Token::Other(c),
+                _ => self.token(TokenKind::Other(c), None),
             };
 
             result.push(token);
@@ -218,6 +254,18 @@ impl<'a> Scanner<'a> {
 
         (result, newlines)
     }
+    fn token(&mut self, kind: TokenKind, newlines: Option<usize>) -> Token {
+        let token = Token {
+            column: self.column,
+            line: self.line,
+            kind,
+        };
+        self.column += token.len() as i32;
+        if let Some(newlines) = newlines {
+            self.line += newlines as i32;
+        }
+        token
+    }
 }
 
 #[cfg(test)]
@@ -228,16 +276,22 @@ mod tests {
     fn setup(input: &str) -> Vec<Token> {
         Scanner::new(input).scan_token()
     }
+    fn setup_tokenkind(input: &str) -> Vec<TokenKind> {
+        setup(input).into_iter().map(|t| t.kind).collect()
+    }
+    fn setup_tok_line(input: &str) -> Vec<(TokenKind, i32)> {
+        setup(input).into_iter().map(|t| (t.kind, t.line)).collect()
+    }
 
     #[test]
     fn simple_pp_directive() {
-        let actual = setup("#  include \"'some'\"");
+        let actual = setup_tokenkind("#  include \"'some'\"");
         let expected = vec![
-            Token::Hash,
-            Token::Whitespace("  ".to_string()),
-            Token::Include,
-            Token::Whitespace(" ".to_string()),
-            Token::String("\"'some'\"".to_string(), 0),
+            TokenKind::Hash,
+            TokenKind::Whitespace("  ".to_string()),
+            TokenKind::Include,
+            TokenKind::Whitespace(" ".to_string()),
+            TokenKind::String("\"'some'\"".to_string()),
         ];
 
         assert_eq!(actual, expected);
@@ -245,102 +299,102 @@ mod tests {
 
     #[test]
     fn string() {
-        let actual = setup("#define \"some/* #*/define\"");
+        let actual = setup_tokenkind("#define \"some/* #*/define\"");
         let expected = vec![
-            Token::Hash,
-            Token::Define,
-            Token::Whitespace(" ".to_string()),
-            Token::String("\"some/* #*/define\"".to_string(), 0),
+            TokenKind::Hash,
+            TokenKind::Define,
+            TokenKind::Whitespace(" ".to_string()),
+            TokenKind::String("\"some/* #*/define\"".to_string()),
         ];
 
         assert_eq!(actual, expected);
     }
     #[test]
     fn ident() {
-        let actual = setup("1first 2 some23: more");
+        let actual = setup_tokenkind("1first 2 some23: more");
         let expected = vec![
-            Token::Other('1'),
-            Token::Ident("first".to_string()),
-            Token::Whitespace(" ".to_string()),
-            Token::Other('2'),
-            Token::Whitespace(" ".to_string()),
-            Token::Ident("some23".to_string()),
-            Token::Other(':'),
-            Token::Whitespace(" ".to_string()),
-            Token::Ident("more".to_string()),
+            TokenKind::Other('1'),
+            TokenKind::Ident("first".to_string()),
+            TokenKind::Whitespace(" ".to_string()),
+            TokenKind::Other('2'),
+            TokenKind::Whitespace(" ".to_string()),
+            TokenKind::Ident("some23".to_string()),
+            TokenKind::Other(':'),
+            TokenKind::Whitespace(" ".to_string()),
+            TokenKind::Ident("more".to_string()),
         ];
 
         assert_eq!(actual, expected);
     }
     #[test]
     fn macro_name() {
-        let actual = setup("#define NULL((void *)0)");
+        let actual = setup_tokenkind("#define NULL((void *)0)");
         let expected = vec![
-            Token::Hash,
-            Token::Define,
-            Token::Whitespace(" ".to_string()),
-            Token::Ident("NULL".to_string()),
-            Token::Other('('),
-            Token::Other('('),
-            Token::Ident("void".to_string()),
-            Token::Whitespace(" ".to_string()),
-            Token::Other('*'),
-            Token::Other(')'),
-            Token::Other('0'),
-            Token::Other(')'),
+            TokenKind::Hash,
+            TokenKind::Define,
+            TokenKind::Whitespace(" ".to_string()),
+            TokenKind::Ident("NULL".to_string()),
+            TokenKind::Other('('),
+            TokenKind::Other('('),
+            TokenKind::Ident("void".to_string()),
+            TokenKind::Whitespace(" ".to_string()),
+            TokenKind::Other('*'),
+            TokenKind::Other(')'),
+            TokenKind::Other('0'),
+            TokenKind::Other(')'),
         ];
 
         assert_eq!(actual, expected);
     }
     #[test]
     fn multiline_string_escaped() {
-        let actual = setup(" \"some\\\n\\else\"");
+        let actual = setup_tok_line(" \"some\\\n\\else\"");
         let expected = vec![
-            Token::Whitespace(" ".to_string()),
-            Token::String("\"some\\else\"".to_string(), 1),
+            (TokenKind::Whitespace(" ".to_string()), 1),
+            (TokenKind::String("\"some\\else\"".to_string()), 1),
         ];
 
         assert_eq!(actual, expected);
     }
     #[test]
     fn multiline_string_multiple_escapes() {
-        let actual = setup(" \"some\\\n\nmore\"");
+        let actual = setup_tok_line(" \"some\\\n\nmore\"");
         let expected = vec![
-            Token::Whitespace(" ".to_string()),
-            Token::String("\"some".to_string(), 1),
-            Token::Newline,
-            Token::Ident("more".to_string()),
-            Token::String("\"".to_string(), 0),
+            (TokenKind::Whitespace(" ".to_string()), 1),
+            (TokenKind::String("\"some".to_string()), 1),
+            (TokenKind::Newline, 2),
+            (TokenKind::Ident("more".to_string()), 3),
+            (TokenKind::String("\"".to_string()), 3),
         ];
 
         assert_eq!(actual, expected);
     }
     #[test]
     fn multiline_string_unescaped() {
-        let actual = setup(" \"some\nmore\"");
+        let actual = setup_tok_line(" \"some\nmore\"");
         let expected = vec![
-            Token::Whitespace(" ".to_string()),
-            Token::String("\"some".to_string(), 0),
-            Token::Newline,
-            Token::Ident("more".to_string()),
-            Token::String("\"".to_string(), 0),
+            (TokenKind::Whitespace(" ".to_string()), 1),
+            (TokenKind::String("\"some".to_string()), 1),
+            (TokenKind::Newline, 1),
+            (TokenKind::Ident("more".to_string()), 2),
+            (TokenKind::String("\"".to_string()), 2),
         ];
 
         assert_eq!(actual, expected);
     }
     #[test]
     fn if_const_expr() {
-        let actual = setup("#if 1 < num\n");
+        let actual = setup_tokenkind("#if 1 < num\n");
         let expected = vec![
-            Token::Hash,
-            Token::If,
-            Token::Whitespace(" ".to_string()),
-            Token::Other('1'),
-            Token::Whitespace(" ".to_string()),
-            Token::Other('<'),
-            Token::Whitespace(" ".to_string()),
-            Token::Ident("num".to_string()),
-            Token::Newline,
+            TokenKind::Hash,
+            TokenKind::If,
+            TokenKind::Whitespace(" ".to_string()),
+            TokenKind::Other('1'),
+            TokenKind::Whitespace(" ".to_string()),
+            TokenKind::Other('<'),
+            TokenKind::Whitespace(" ".to_string()),
+            TokenKind::Ident("num".to_string()),
+            TokenKind::Newline,
         ];
 
         assert_eq!(actual, expected);

@@ -89,6 +89,7 @@ pub enum ErrorKind {
     UnterminatedIf(String),
     DuplicateElse,
     MissingIf(String),
+    MissingExpression(String),
     ElifAfterElse,
 
     Regular(&'static str), // generic error message when message only used once
@@ -374,6 +375,9 @@ impl ErrorKind {
             ErrorKind::InvalidMacroName => "Macro name must be valid identifier".to_string(),
             ErrorKind::DuplicateElse => {
                 "Can only have single '#else' in '#if'-directive".to_string()
+            }
+            ErrorKind::MissingExpression(kind) => {
+                format!("'#{}' directive expects expression", kind)
             }
             ErrorKind::MissingIf(kind) => {
                 format!("Found '#{}' without matching '#if'", kind)

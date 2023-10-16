@@ -1,0 +1,16 @@
+error: Expected type-declaration, found identifier
+|  --> in b.c:8:2
+|
+8  o wie "gehts";
+|  ^
+error: Expect ';' after declaration
+|  --> in b.c:19:14
+|
+21 2ö;
+|   ^
+error: Undeclared symbol 'num2'
+|  --> in b.c:25:39
+|
+26          some + num2);
+|                  ^
+3 errors generated.

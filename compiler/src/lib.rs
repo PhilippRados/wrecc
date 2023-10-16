@@ -32,9 +32,9 @@ pub fn compile(filename: &Path, source: &str, dump_ast: bool) -> Result<String, 
         Compiler::new(const_labels, env, switches).translate(statements);
 
     // Fill in physical registers
-    let ir = RegisterAllocation::new(env, live_intervals).generate(ir);
+    let asm = RegisterAllocation::new(env, live_intervals).generate(ir);
 
-    let output = ir
+    let output = asm
         .into_iter()
         .map(|instr| instr.to_string())
         .collect::<Vec<String>>()

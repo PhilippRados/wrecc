@@ -520,12 +520,12 @@ impl<'a> Preprocessor<'a> {
     pub fn start(mut self) -> Result<(String, HashMap<String, Vec<TokenKind>>), Vec<Error>> {
         let mut result = String::from("");
         let mut errors = Vec::new();
+        let mut prev_line = 1;
 
         while let Some(token) = self.tokens.next() {
             match token.kind {
                 TokenKind::Hash if is_first_line_token(&result) => {
                     let _ = self.skip_whitespace();
-                    let newlines = token.line;
 
                     let outcome = if let Some(directive) = self.tokens.next() {
                         match directive.kind {
@@ -561,25 +561,24 @@ impl<'a> Preprocessor<'a> {
                             errors.push(e)
                         }
                     } else {
-                        match self.tokens.peek() {
-                            Ok(token) if !matches!(token.kind, TokenKind::Newline) => {
+                        if let Ok(peeked) = self.tokens.peek() {
+                            if !matches!(peeked.kind, TokenKind::Newline) {
                                 errors.push(Error::new(
-                                    &self.location(token),
+                                    &self.location(peeked),
                                     ErrorKind::Regular(
                                         "Found trailing tokens after preprocessor directive",
                                     ),
                                 ))
                             }
-                            Ok(token) => {
-                                // if pp-directive more than one line, add marker for scanner
-                                let pp_lines = token.line - newlines;
-                                if pp_lines > 0 {
-                                    result.push_str(&format!("#line:{}\n", token.line));
-                                }
-                            }
-                            _ => (),
                         }
                     }
+                }
+                TokenKind::Newline => {
+                    if (token.line - prev_line) > 1 {
+                        result.push_str(&format!("#line:{}\n", token.line));
+                    }
+                    prev_line = token.line;
+                    result.push('\n');
                 }
                 _ => {
                     if let Some(identifier) = token.kind.as_ident() {
@@ -618,20 +617,13 @@ impl<'a> Preprocessor<'a> {
     // combines tokens until either an unescaped newline is reached or the token is found
     fn fold_until_token(&mut self, end: TokenKind) -> Vec<Token> {
         let mut result = Vec::new();
-        let mut prev_token = TokenKind::Newline;
 
         while let Ok(token) = self.tokens.peek() {
-            match (&prev_token, &token.kind) {
-                (TokenKind::Other('\\'), TokenKind::Newline) => {
-                    prev_token = self.tokens.next().unwrap().kind;
-                    result.pop();
-                }
-                (_, TokenKind::Newline) => break,
-                (_, token) if token == &end => break,
-                (..) => {
-                    let token = self.tokens.next().unwrap();
-                    prev_token = token.kind.clone();
-                    result.push(token);
+            match &token.kind {
+                TokenKind::Newline => break,
+                token if token == &end => break,
+                _ => {
+                    result.push(self.tokens.next().unwrap());
                 }
             }
         }
@@ -680,26 +672,12 @@ fn trim_trailing_whitespace(mut tokens: Vec<TokenKind>) -> Vec<TokenKind> {
 }
 
 fn skip_whitespace(tokens: &mut DoublePeek<Token>) -> bool {
-    let mut found = false;
-
-    while let Ok(token) = tokens.peek() {
-        match token.kind {
-            TokenKind::Whitespace(_) => {
-                tokens.next();
-                found = true;
-            }
-            TokenKind::Other('\\') => {
-                if let Ok(TokenKind::Newline) = tokens.double_peek().map(|t| &t.kind) {
-                    tokens.next();
-                    tokens.next();
-                } else {
-                    break;
-                }
-            }
-            _ => break,
-        }
+    if let Ok(Token { kind: TokenKind::Whitespace(_), .. }) = tokens.peek() {
+        tokens.next();
+        true
+    } else {
+        false
     }
-    found
 }
 
 struct Loc {

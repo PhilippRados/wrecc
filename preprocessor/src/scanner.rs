@@ -1,8 +1,5 @@
-use compiler::consume_while;
+use compiler::DoublePeek;
 use std::collections::HashMap;
-
-use std::iter::Peekable;
-use std::str::Chars;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenKind {
@@ -94,18 +91,18 @@ impl ToString for TokenKind {
     }
 }
 
-pub struct Scanner<'a> {
-    source: Peekable<Chars<'a>>,
+pub struct Scanner {
+    source: DoublePeek<char>,
     directives: HashMap<&'static str, TokenKind>,
     column: i32,
     line: i32,
 }
-impl<'a> Scanner<'a> {
-    pub fn new(source: &'a str) -> Scanner {
+impl Scanner {
+    pub fn new(source: &str) -> Scanner {
         Scanner {
             column: 1,
             line: 1,
-            source: source.chars().peekable(),
+            source: DoublePeek::new(source.chars().collect::<Vec<char>>()),
             directives: HashMap::from([
                 ("include", TokenKind::Include),
                 ("define", TokenKind::Define),
@@ -124,137 +121,130 @@ impl<'a> Scanner<'a> {
         let mut result = Vec::new();
 
         while let Some(c) = self.source.next() {
-            let token = match c {
-                '#' => self.token(TokenKind::Hash, None),
+            match c {
+                '#' => self.add_token(&mut result, TokenKind::Hash, None),
                 '\n' => {
-                    let token = self.token(TokenKind::Newline, None);
+                    let token = self.add_token(&mut result, TokenKind::Newline, None);
                     self.column = 1;
                     self.line += 1;
 
                     token
                 }
                 ' ' | '\t' => {
-                    let more_whitespace =
-                        consume_while(&mut self.source, |c| c == ' ' || c == '\t', false);
+                    let (whitespace, newlines) =
+                        self.consume_until(&c.to_string(), |ch| ch != ' ' && ch != '\t', false);
 
-                    self.token(
-                        TokenKind::Whitespace(c.to_string() + &more_whitespace),
-                        None,
-                    )
-                }
-                '"' => {
-                    let (s, newlines) = self.string('"');
-
-                    self.token(TokenKind::String(s), Some(newlines))
-                }
-                '\'' => {
-                    let (s, newlines) = self.string('\'');
-
-                    self.token(TokenKind::CharLit(s), Some(newlines))
-                }
-                '/' => {
-                    let (comment, newlines) = self.consume_comment();
-
-                    self.token(
-                        if comment.is_empty() {
-                            TokenKind::Other('/')
-                        } else {
-                            TokenKind::Comment(c.to_string() + &comment)
-                        },
+                    self.add_token(
+                        &mut result,
+                        TokenKind::Whitespace(whitespace),
                         Some(newlines),
                     )
                 }
-                _ if c.is_alphabetic() || c == '_' => {
-                    let ident = c.to_string()
-                        + &consume_while(
-                            &mut self.source,
-                            |c| c.is_alphabetic() || c == '_' || c.is_ascii_digit(),
-                            false,
-                        );
+                '"' => {
+                    let (s, newlines) = self.consume_until("\"", |ch| ch == '"', true);
 
-                    self.token(
-                        if let Some(directive) = self.directives.get(ident.as_str()) {
-                            directive.clone()
-                        } else {
-                            TokenKind::Ident(ident)
-                        },
-                        None,
-                    )
+                    self.add_token(&mut result, TokenKind::String(s), Some(newlines))
                 }
-                _ => self.token(TokenKind::Other(c), None),
-            };
+                '\'' => {
+                    let (s, newlines) = self.consume_until("'", |ch| ch == '\'', true);
 
-            result.push(token);
+                    self.add_token(&mut result, TokenKind::CharLit(s), Some(newlines))
+                }
+                '/' if matches!(self.source.peek(), Ok('/')) => {
+                    self.source.next();
+                    let (comment, newlines) =
+                        self.consume_until("//", |ch| ch == '\n' && ch == '\0', false);
+
+                    self.add_token(&mut result, TokenKind::Comment(comment), Some(newlines))
+                }
+                '/' if matches!(self.source.peek(), Ok('*')) => {
+                    self.source.next();
+                    let (comment, newlines) = self.multiline_comment();
+
+                    self.add_token(&mut result, TokenKind::Comment(comment), Some(newlines))
+                }
+                _ if c.is_alphabetic() || c == '_' => {
+                    let (ident, newlines) = self.consume_until(
+                        &c.to_string(),
+                        |c| !c.is_alphabetic() && c != '_' && !c.is_ascii_digit(),
+                        false,
+                    );
+                    let ident = if let Some(directive) = self.directives.get(ident.as_str()) {
+                        directive.clone()
+                    } else {
+                        TokenKind::Ident(ident)
+                    };
+
+                    self.add_token(&mut result, ident, Some(newlines))
+                }
+                '\\' if matches!(self.source.peek(), Ok('\n')) => {
+                    // skip over escaped newline
+                    self.source.next();
+                    self.line += 1;
+                    self.column = 1;
+                }
+                _ => self.add_token(&mut result, TokenKind::Other(c), None),
+            }
         }
         result
     }
-    fn string(&mut self, c: char) -> (String, usize) {
-        let mut result = String::from(c);
+    fn consume_until<F>(
+        &mut self,
+        start: &str,
+        mut predicate: F,
+        is_string: bool,
+    ) -> (String, usize)
+    where
+        F: FnMut(char) -> bool,
+    {
+        let mut result = String::from(start);
         let mut newlines = 0;
-        let mut prev_char = '\0';
 
-        while let Some(peeked) = self.source.peek() {
-            match (prev_char, peeked) {
-                ('\\', '\n') => {
-                    let token = self.source.next().unwrap();
-                    result.pop();
+        while let Ok(peeked) = self.source.peek() {
+            match peeked {
+                '\\' if matches!(self.source.double_peek(), Ok('\n')) => {
+                    self.source.next();
+                    self.source.next();
+                    self.column = 1;
                     newlines += 1;
-                    prev_char = token;
                 }
-                (_, '\n') => break,
-                (..) if *peeked == c => {
+                '\n' => break,
+                _ if predicate(*peeked) => {
+                    if is_string {
+                        result.push(self.source.next().unwrap());
+                    }
+                    break;
+                }
+                _ => {
+                    result.push(self.source.next().unwrap());
+                }
+            }
+        }
+        (result, newlines)
+    }
+    fn multiline_comment(&mut self) -> (String, usize) {
+        let mut result = String::from("/*");
+        let mut newlines = 0;
+
+        while let Ok(peeked) = self.source.peek() {
+            match peeked {
+                '*' if matches!(self.source.double_peek(), Ok('/')) => {
+                    result.push(self.source.next().unwrap());
                     result.push(self.source.next().unwrap());
                     break;
                 }
-                (..) => {
-                    let token = self.source.next().unwrap();
-                    result.push_str(&token.to_string());
-                    prev_char = token;
-                }
-            }
-        }
-        (result, newlines)
-    }
-    fn consume_comment(&mut self) -> (String, usize) {
-        let mut result = String::new();
-        let mut newlines = 0;
-
-        match self.source.next() {
-            Some(c @ '/') => {
-                result.push(c);
-                result.push_str(&consume_while(
-                    &mut self.source,
-                    |c| c != '\n' && c != '\0',
-                    false,
-                ));
-            }
-            Some(c @ '*') => {
-                result.push(c);
-                while let Some(c) = self.source.next() {
-                    result.push(c);
-                    match c {
-                        '\n' => {
-                            newlines += 1;
-                        }
-                        '*' => match self.source.next() {
-                            Some(c @ '/') => {
-                                result.push(c);
-                                break;
-                            }
-                            Some(c) => result.push(c),
-                            None => (),
-                        },
-                        _ => (),
+                _ => {
+                    if *peeked == '\n' {
+                        newlines += 1;
+                        self.column = 1;
                     }
+                    result.push(self.source.next().unwrap());
                 }
             }
-            Some(c) => result.push(c),
-            None => (),
         }
-
         (result, newlines)
     }
-    fn token(&mut self, kind: TokenKind, newlines: Option<usize>) -> Token {
+    fn add_token(&mut self, result: &mut Vec<Token>, kind: TokenKind, newlines: Option<usize>) {
         let token = Token {
             column: self.column,
             line: self.line,
@@ -264,7 +254,7 @@ impl<'a> Scanner<'a> {
         if let Some(newlines) = newlines {
             self.line += newlines as i32;
         }
-        token
+        result.push(token);
     }
 }
 

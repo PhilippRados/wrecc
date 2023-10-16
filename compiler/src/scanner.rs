@@ -4,6 +4,7 @@ use std::iter::Peekable;
 use std::path::{Path, PathBuf};
 use std::str::Chars;
 
+// Takes a preprocessed string and returns a stream of tokens
 pub struct Scanner<'a> {
     // source used for iterating
     source: Peekable<Chars<'a>>,
@@ -434,7 +435,6 @@ impl<'a> Location for Scanner<'a> {
     fn line_string(&self) -> String {
         self.raw_source[(self.actual_line - 1) as usize].clone()
     }
-
     fn filename(&self) -> PathBuf {
         self.filenames.last().unwrap().clone()
     }

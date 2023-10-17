@@ -3,20 +3,12 @@
 version = 3
 
 [[package]]
-name = "compiler"
-version = "0.1.0"
-
-[[package]]
-name = "preprocessor"
-version = "0.1.0"
-dependencies = [
- "compiler",
-]
-
-[[package]]
 name = "wrecc"
 version = "0.1.0"
 dependencies = [
- "compiler",
- "preprocessor",
+ "wrecc_compiler",
 ]
+
+[[package]]
+name = "wrecc_compiler"
+version = "0.1.0"

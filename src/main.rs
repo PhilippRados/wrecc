@@ -1,9 +1,8 @@
 mod cli_options;
 
 use cli_options::*;
-use compiler::compile;
-use compiler::Error as CompilerError;
-use preprocessor::*;
+use wrecc_compiler::compiler::common::error::Error as CompilerError;
+use wrecc_compiler::*;
 
 use std::fs;
 use std::io::Write;

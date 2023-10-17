@@ -1,5 +1,5 @@
-use crate::common::{token::*, types::*};
-use crate::wrecc_codegen::register::*;
+use crate::compiler::common::{token::*, types::*};
+use crate::compiler::wrecc_codegen::register::*;
 use std::fmt::Display;
 
 // Intermediate representation as an assembly instruction abstraction to simplify register allocation.
@@ -131,7 +131,7 @@ impl Display for Ir {
                     if *stack_size > 0 {
                         let size = format!(
                             "\tsubq    ${},%rsp\n",
-                            crate::typechecker::align_by(*stack_size, 16)
+                            crate::compiler::typechecker::align_by(*stack_size, 16)
                         );
                         result.push_str(&size);
                     }
@@ -142,7 +142,7 @@ impl Display for Ir {
                         0 => String::from("\tpopq    %rbp\n\tret"),
                         n => format!(
                             "\taddq    ${},%rsp\n\tpopq    %rbp\n\tret",
-                            crate::typechecker::align_by(*n, 16)
+                            crate::compiler::typechecker::align_by(*n, 16)
                         ),
                     }
                 }

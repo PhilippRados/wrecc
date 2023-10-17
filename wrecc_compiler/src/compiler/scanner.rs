@@ -1,4 +1,4 @@
-use crate::common::{error::*, token::*};
+use crate::compiler::common::{error::*, token::*};
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::path::{Path, PathBuf};

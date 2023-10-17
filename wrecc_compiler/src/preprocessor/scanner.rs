@@ -1,4 +1,4 @@
-use compiler::DoublePeek;
+use crate::compiler::wrecc_parser::double_peek::DoublePeek;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq)]

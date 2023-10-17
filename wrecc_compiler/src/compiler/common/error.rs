@@ -1,4 +1,4 @@
-use crate::common::{token::*, types::*};
+use crate::compiler::common::{token::*, types::*};
 use std::num::IntErrorKind;
 use std::path::PathBuf;
 

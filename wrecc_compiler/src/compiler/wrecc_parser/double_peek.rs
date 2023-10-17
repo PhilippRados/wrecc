@@ -1,4 +1,4 @@
-use crate::common::error::*;
+use crate::compiler::common::error::*;
 use std::collections::VecDeque;
 
 pub struct DoublePeek<T>(VecDeque<T>);

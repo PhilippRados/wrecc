@@ -1,8 +1,7 @@
 #[macro_use]
 extern crate afl;
-use compiler::compile;
-use preprocessor::preprocess;
 use std::path::Path;
+use wrecc_compiler::*;
 
 fn main() {
     fuzz!(|data: &[u8]| {

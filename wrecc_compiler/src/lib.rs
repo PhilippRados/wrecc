@@ -1,17 +1,22 @@
-mod common;
-mod scanner;
-mod typechecker;
-mod wrecc_codegen;
-mod wrecc_parser;
+pub mod compiler;
+pub mod preprocessor;
 
-// All necessary modules used for preprocessor
-pub use common::error::*;
-pub use scanner::*;
-pub use wrecc_parser::{double_peek::*, parser::*};
+use compiler::{
+    common::error::*, scanner::*, typechecker::*, wrecc_codegen::codegen::*,
+    wrecc_codegen::register_allocation::*, wrecc_parser::parser::*,
+};
+use preprocessor::{preprocessor::Preprocessor, scanner::Scanner as PPScanner};
 
 use std::path::Path;
-use typechecker::*;
-use wrecc_codegen::{codegen::*, register_allocation::*};
+
+// Preprocesses given input file
+pub fn preprocess(filename: &Path, source: &str) -> Result<String, Vec<Error>> {
+    let tokens = PPScanner::new(source).scan_token();
+
+    Preprocessor::new(filename, source, tokens, None)
+        .start()
+        .map(|(source, _)| source)
+}
 
 pub fn compile(filename: &Path, source: &str, dump_ast: bool) -> Result<String, Vec<Error>> {
     // Scan input

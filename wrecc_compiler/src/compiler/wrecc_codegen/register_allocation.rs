@@ -1,5 +1,5 @@
-use crate::common::{environment::*, types::*};
-use crate::wrecc_codegen::{ir::*, register::*};
+use crate::compiler::common::{environment::*, types::*};
+use crate::compiler::wrecc_codegen::{ir::*, register::*};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -482,7 +482,7 @@ impl ScratchRegisters {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::expr::ValueKind;
+    use crate::compiler::common::expr::ValueKind;
     use std::mem;
 
     fn setup(

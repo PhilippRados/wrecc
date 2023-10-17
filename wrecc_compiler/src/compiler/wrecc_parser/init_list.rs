@@ -1,5 +1,5 @@
-use crate::common::{expr::*, token::*, types::*};
-use crate::wrecc_parser::parser::*;
+use crate::compiler::common::{expr::*, token::*, types::*};
+use crate::compiler::wrecc_parser::parser::*;
 
 // int a[3] = {1,2,3};
 // equivalent to:

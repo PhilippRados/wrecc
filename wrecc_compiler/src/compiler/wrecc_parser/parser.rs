@@ -1,7 +1,7 @@
-use crate::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
+use crate::compiler::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
+use crate::compiler::wrecc_codegen::register::*;
+use crate::compiler::wrecc_parser::{double_peek::*, init_list::init_list_types::*, init_list::*};
 use crate::into_newtype;
-use crate::wrecc_codegen::register::*;
-use crate::wrecc_parser::{double_peek::*, init_list::init_list_types::*, init_list::*};
 
 pub struct Parser {
     tokens: DoublePeek<Token>,
@@ -1668,7 +1668,7 @@ pub fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scanner::Scanner;
+    use crate::compiler::scanner::Scanner;
     use std::path::Path;
     use std::path::PathBuf;
 

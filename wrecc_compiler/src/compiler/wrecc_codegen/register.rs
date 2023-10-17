@@ -1,6 +1,6 @@
-use crate::common::expr::ValueKind;
-use crate::common::token::TokenType;
-use crate::common::types::*;
+use crate::compiler::common::expr::ValueKind;
+use crate::compiler::common::token::TokenType;
+use crate::compiler::common::types::*;
 
 pub static ARG_REGS: &[[&str; 3]; 6] = &[
     ["%rdi", "%edi", "%dil"],
@@ -167,7 +167,7 @@ pub struct StackRegister {
 impl StackRegister {
     pub fn new(bp_offset: &mut usize, type_decl: NEWTypes) -> Self {
         *bp_offset += type_decl.size();
-        *bp_offset = crate::wrecc_codegen::codegen::align(*bp_offset, &type_decl);
+        *bp_offset = crate::compiler::wrecc_codegen::codegen::align(*bp_offset, &type_decl);
 
         StackRegister {
             bp_offset: *bp_offset,

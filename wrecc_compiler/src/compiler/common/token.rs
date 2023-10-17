@@ -1,5 +1,5 @@
-use crate::common::error::Location;
-use crate::common::types::*;
+use crate::compiler::common::error::Location;
+use crate::compiler::common::types::*;
 use std::fmt::Display;
 use std::path::PathBuf;
 

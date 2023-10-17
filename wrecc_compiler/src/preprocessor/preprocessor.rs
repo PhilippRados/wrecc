@@ -1,13 +1,9 @@
-use compiler::DoublePeek;
-use compiler::Error;
-use compiler::ErrorKind;
-use compiler::Location;
-use compiler::Parser;
-use compiler::Scanner;
+use crate::compiler::common::error::*;
+use crate::compiler::scanner::*;
+use crate::compiler::wrecc_parser::{double_peek::*, parser::*};
 
-use crate::preprocess_included;
-use crate::Token;
-use crate::TokenKind;
+use crate::preprocessor::scanner::{Token, TokenKind};
+use crate::PPScanner;
 
 use std::collections::HashMap;
 use std::fs;
@@ -166,10 +162,12 @@ impl<'a> Preprocessor<'a> {
             match token.kind.as_ident() {
                 Some(identifier) => {
                     let _ = self.skip_whitespace();
-                    let replace_with = self.fold_until_token(TokenKind::Newline);
-                    let replace_with = trim_trailing_whitespace(
-                        replace_with.into_iter().map(|t| t.kind).collect(),
-                    );
+                    let replace_with = self
+                        .fold_until_token(TokenKind::Newline)
+                        .into_iter()
+                        .map(|t| t.kind)
+                        .collect();
+                    let replace_with = trim_trailing_whitespace(replace_with);
 
                     // same macro already exists but with different replacement-list
                     if let Some(existing_replacement) = self.defines.get(&identifier) {
@@ -656,6 +654,17 @@ impl<'a> Preprocessor<'a> {
     }
 }
 
+// Preprocesses given input file if input file nested inside root-file
+fn preprocess_included(
+    filename: &Path,
+    source: &str,
+    defines: HashMap<String, Vec<TokenKind>>,
+) -> Result<(String, HashMap<String, Vec<TokenKind>>), Vec<Error>> {
+    let tokens = PPScanner::new(source).scan_token();
+
+    Preprocessor::new(filename, source, tokens, Some(defines)).start()
+}
+
 // surrounds a list of tokens with additional whitespace to avoid them being glued together during stringification
 fn pad_whitespace(tokens: Vec<TokenKind>) -> Vec<TokenKind> {
     let mut replaced = vec![TokenKind::Whitespace(" ".to_string())];
@@ -716,10 +725,9 @@ fn is_first_line_token(prev_tokens: &str) -> bool {
 #[allow(unused_variables)]
 mod tests {
     use super::*;
-    use crate::Scanner;
 
     fn scan(input: &str) -> Vec<TokenKind> {
-        Scanner::new(input)
+        PPScanner::new(input)
             .scan_token()
             .into_iter()
             .map(|t| t.kind)
@@ -727,7 +735,7 @@ mod tests {
     }
 
     fn setup(input: &str) -> Preprocessor {
-        let tokens = Scanner::new(input).scan_token();
+        let tokens = PPScanner::new(input).scan_token();
 
         Preprocessor::new(Path::new(""), input, tokens, None)
     }

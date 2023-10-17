@@ -1,6 +1,6 @@
-use crate::common::{environment::*, expr::*, stmt::*, token::*, types::*};
-use crate::typechecker::{align_by, create_label};
-use crate::wrecc_codegen::{ir::*, register::*, register_allocation::*};
+use crate::compiler::common::{environment::*, expr::*, stmt::*, token::*, types::*};
+use crate::compiler::typechecker::{align_by, create_label};
+use crate::compiler::wrecc_codegen::{ir::*, register::*, register_allocation::*};
 use std::collections::{HashMap, VecDeque};
 
 // converts a register into a scratch-register if it matches the pattern

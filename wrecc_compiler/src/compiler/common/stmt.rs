@@ -1,5 +1,5 @@
-use crate::common::expr::*;
-use crate::common::{token::Token, types::NEWTypes};
+use crate::compiler::common::expr::*;
+use crate::compiler::common::{token::Token, types::NEWTypes};
 
 use super::expr::PrintIndent;
 

@@ -1,4 +1,4 @@
-use crate::common::token::*;
+use crate::compiler::common::token::*;
 use std::fmt::Display;
 use std::rc::Rc;
 pub use struct_ref::StructRef;

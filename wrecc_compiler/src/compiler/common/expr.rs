@@ -1,4 +1,4 @@
-use crate::common::{token::*, types::*};
+use crate::compiler::common::{token::*, types::*};
 use std::fmt;
 
 #[derive(Debug, PartialEq, Clone)]

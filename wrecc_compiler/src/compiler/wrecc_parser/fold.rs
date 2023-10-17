@@ -1,5 +1,5 @@
-use crate::common::{environment::*, error::*, expr::*, token::*, types::*};
-use crate::wrecc_codegen::register::*;
+use crate::compiler::common::{environment::*, error::*, expr::*, token::*, types::*};
+use crate::compiler::wrecc_codegen::register::*;
 
 impl Expr {
     pub fn new_literal(value: i64, primitive_type: Types) -> Self {
@@ -158,16 +158,19 @@ impl Expr {
                 left.type_decl.clone().unwrap(),
                 right.type_decl.clone().unwrap(),
             );
-            if !crate::typechecker::is_valid_bin(&token, &left_type, &right_type) {
+            if !crate::compiler::typechecker::is_valid_bin(&token, &left_type, &right_type) {
                 return Err(Error::new(
                     &token,
                     ErrorKind::InvalidBinary(token.token.clone(), left_type, right_type),
                 ));
             }
 
-            if let Some((literal, amount)) =
-                crate::typechecker::maybe_scale(&left_type, &right_type, &mut left_n, &mut right_n)
-            {
+            if let Some((literal, amount)) = crate::compiler::typechecker::maybe_scale(
+                &left_type,
+                &right_type,
+                &mut left_n,
+                &mut right_n,
+            ) {
                 *literal *= amount as i64;
             }
 
@@ -458,8 +461,8 @@ impl Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scanner::Scanner;
-    use crate::wrecc_parser::parser::Parser;
+    use crate::compiler::scanner::Scanner;
+    use crate::compiler::wrecc_parser::parser::Parser;
     use std::path::Path;
 
     fn assert_fold(input: &str, expected: &str) -> Option<NEWTypes> {

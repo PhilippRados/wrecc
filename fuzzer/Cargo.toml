@@ -7,5 +7,4 @@ edition = "2021"
 
 [dependencies]
 afl = "*"
-preprocessor = { path = "../preprocessor/" }
-compiler = { path = "../compiler/" }
+wrecc_compiler = { path = "../wrecc_compiler/" }

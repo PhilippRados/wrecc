@@ -1,15 +1,15 @@
 error: Expected type-declaration, found identifier
-|  --> in b.c:8:2
+|  --> in tests/fixtures/multiline_err.c:8:2
 |
 8  o wie "gehts";
 |  ^
 error: Expect ';' after declaration
-|  --> in b.c:19:14
+|  --> in tests/fixtures/multiline_err.c:21:2
 |
 21 2ö;
 |   ^
 error: Undeclared symbol 'num2'
-|  --> in b.c:25:39
+|  --> in tests/fixtures/multiline_err.c:26:17
 |
 26          some + num2);
 |                  ^

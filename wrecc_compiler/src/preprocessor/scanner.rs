@@ -14,12 +14,12 @@ pub enum TokenKind {
     Elif,
     Else,
     Endif,
+    Newline,
     String(String),
     CharLit(String),
     Ident(String),
-    Newline,
+    Number(String),
     Whitespace(String),
-    Comment(String),
     Other(char),
 }
 
@@ -28,8 +28,17 @@ pub struct Token {
     pub kind: TokenKind,
     pub column: i32,
     pub line: i32,
+    pub line_string: String,
 }
 impl Token {
+    pub fn placeholder_whitespace() -> Self {
+        Token {
+            kind: TokenKind::Whitespace(" ".to_string()),
+            column: 1,
+            line: 1,
+            line_string: "".to_string(),
+        }
+    }
     pub fn len(&self) -> usize {
         match &self.kind {
             TokenKind::Newline => 0,
@@ -40,10 +49,10 @@ impl Token {
             TokenKind::Define | TokenKind::Ifndef => 6,
             TokenKind::Include | TokenKind::Defined => 7,
             TokenKind::String(s)
+            | TokenKind::Number(s)
             | TokenKind::CharLit(s)
             | TokenKind::Ident(s)
-            | TokenKind::Whitespace(s)
-            | TokenKind::Comment(s) => s.len(),
+            | TokenKind::Whitespace(s) => s.len(),
         }
     }
 }
@@ -81,7 +90,7 @@ impl ToString for TokenKind {
             TokenKind::Else => "else".to_string(),
             TokenKind::Endif => "endif".to_string(),
             TokenKind::Newline => "\n".to_string(),
-            TokenKind::Comment(s)
+            TokenKind::Number(s)
             | TokenKind::String(s)
             | TokenKind::CharLit(s)
             | TokenKind::Ident(s)
@@ -96,12 +105,17 @@ pub struct Scanner {
     directives: HashMap<&'static str, TokenKind>,
     column: i32,
     line: i32,
+    raw_source: Vec<String>,
 }
 impl Scanner {
     pub fn new(source: &str) -> Scanner {
         Scanner {
             column: 1,
             line: 1,
+            raw_source: source
+                .split('\n')
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>(),
             source: DoublePeek::new(source.chars().collect::<Vec<char>>()),
             directives: HashMap::from([
                 ("include", TokenKind::Include),
@@ -131,40 +145,38 @@ impl Scanner {
                     token
                 }
                 ' ' | '\t' => {
-                    let (whitespace, newlines) =
+                    let (whitespace, loc) =
                         self.consume_until(&c.to_string(), |ch| ch != ' ' && ch != '\t', false);
 
-                    self.add_token(
-                        &mut result,
-                        TokenKind::Whitespace(whitespace),
-                        Some(newlines),
-                    )
+                    self.add_token(&mut result, TokenKind::Whitespace(whitespace), Some(loc))
                 }
                 '"' => {
-                    let (s, newlines) = self.consume_until("\"", |ch| ch == '"', true);
+                    let (s, loc) = self.consume_until("\"", |ch| ch == '"', true);
 
-                    self.add_token(&mut result, TokenKind::String(s), Some(newlines))
+                    self.add_token(&mut result, TokenKind::String(s), Some(loc))
                 }
                 '\'' => {
-                    let (s, newlines) = self.consume_until("'", |ch| ch == '\'', true);
+                    let (s, loc) = self.consume_until("'", |ch| ch == '\'', true);
 
-                    self.add_token(&mut result, TokenKind::CharLit(s), Some(newlines))
+                    self.add_token(&mut result, TokenKind::CharLit(s), Some(loc))
                 }
                 '/' if matches!(self.source.peek(), Ok('/')) => {
                     self.source.next();
-                    let (comment, newlines) =
+                    let (_, (newlines, col)) =
                         self.consume_until("//", |ch| ch == '\n' && ch == '\0', false);
 
-                    self.add_token(&mut result, TokenKind::Comment(comment), Some(newlines))
+                    self.line += newlines;
+                    self.column = col;
                 }
                 '/' if matches!(self.source.peek(), Ok('*')) => {
                     self.source.next();
-                    let (comment, newlines) = self.multiline_comment();
+                    let (newlines, col) = self.multiline_comment();
 
-                    self.add_token(&mut result, TokenKind::Comment(comment), Some(newlines))
+                    self.line += newlines;
+                    self.column = col;
                 }
                 _ if c.is_alphabetic() || c == '_' => {
-                    let (ident, newlines) = self.consume_until(
+                    let (ident, loc) = self.consume_until(
                         &c.to_string(),
                         |c| !c.is_alphabetic() && c != '_' && !c.is_ascii_digit(),
                         false,
@@ -175,7 +187,13 @@ impl Scanner {
                         TokenKind::Ident(ident)
                     };
 
-                    self.add_token(&mut result, ident, Some(newlines))
+                    self.add_token(&mut result, ident, Some(loc))
+                }
+                _ if c.is_ascii_digit() => {
+                    let (number, loc) =
+                        self.consume_until(&c.to_string(), |c| !c.is_ascii_digit(), false);
+
+                    self.add_token(&mut result, TokenKind::Number(number), Some(loc))
                 }
                 '\\' if matches!(self.source.peek(), Ok('\n')) => {
                     // skip over escaped newline
@@ -193,66 +211,78 @@ impl Scanner {
         start: &str,
         mut predicate: F,
         is_string: bool,
-    ) -> (String, usize)
+    ) -> (String, (i32, i32))
     where
         F: FnMut(char) -> bool,
     {
         let mut result = String::from(start);
-        let mut newlines = 0;
+        let (mut newlines, mut column) = (0, self.column + start.len() as i32);
 
         while let Ok(peeked) = self.source.peek() {
             match peeked {
                 '\\' if matches!(self.source.double_peek(), Ok('\n')) => {
                     self.source.next();
                     self.source.next();
-                    self.column = 1;
+                    column = 1;
                     newlines += 1;
                 }
                 '\n' => break,
                 _ if predicate(*peeked) => {
                     if is_string {
+                        column += 1;
                         result.push(self.source.next().unwrap());
                     }
                     break;
                 }
                 _ => {
+                    column += 1;
                     result.push(self.source.next().unwrap());
                 }
             }
         }
-        (result, newlines)
+        (result, (newlines, column))
     }
-    fn multiline_comment(&mut self) -> (String, usize) {
-        let mut result = String::from("/*");
-        let mut newlines = 0;
+    fn multiline_comment(&mut self) -> (i32, i32) {
+        let (mut newlines, mut column) = (0, self.column + 2);
 
         while let Ok(peeked) = self.source.peek() {
             match peeked {
                 '*' if matches!(self.source.double_peek(), Ok('/')) => {
-                    result.push(self.source.next().unwrap());
-                    result.push(self.source.next().unwrap());
+                    self.source.next();
+                    self.source.next();
+                    column += 2;
                     break;
                 }
                 _ => {
                     if *peeked == '\n' {
                         newlines += 1;
-                        self.column = 1;
+                        column = 1;
+                    } else {
+                        column += 1;
                     }
-                    result.push(self.source.next().unwrap());
+                    self.source.next();
                 }
             }
         }
-        (result, newlines)
+        (newlines, column)
     }
-    fn add_token(&mut self, result: &mut Vec<Token>, kind: TokenKind, newlines: Option<usize>) {
+    fn add_token(
+        &mut self,
+        result: &mut Vec<Token>,
+        kind: TokenKind,
+        location: Option<(i32, i32)>,
+    ) {
         let token = Token {
             column: self.column,
             line: self.line,
+            line_string: self.raw_source[(self.line - 1) as usize].clone(),
             kind,
         };
-        self.column += token.len() as i32;
-        if let Some(newlines) = newlines {
-            self.line += newlines as i32;
+        if let Some((newlines, column)) = location {
+            self.column = column;
+            self.line += newlines;
+        } else {
+            self.column += token.len() as i32;
         }
         result.push(token);
     }
@@ -303,10 +333,10 @@ mod tests {
     fn ident() {
         let actual = setup_tokenkind("1first 2 some23: more");
         let expected = vec![
-            TokenKind::Other('1'),
+            TokenKind::Number("1".to_string()),
             TokenKind::Ident("first".to_string()),
             TokenKind::Whitespace(" ".to_string()),
-            TokenKind::Other('2'),
+            TokenKind::Number("2".to_string()),
             TokenKind::Whitespace(" ".to_string()),
             TokenKind::Ident("some23".to_string()),
             TokenKind::Other(':'),
@@ -330,7 +360,7 @@ mod tests {
             TokenKind::Whitespace(" ".to_string()),
             TokenKind::Other('*'),
             TokenKind::Other(')'),
-            TokenKind::Other('0'),
+            TokenKind::Number("0".to_string()),
             TokenKind::Other(')'),
         ];
 
@@ -379,13 +409,77 @@ mod tests {
             TokenKind::Hash,
             TokenKind::If,
             TokenKind::Whitespace(" ".to_string()),
-            TokenKind::Other('1'),
+            TokenKind::Number("1".to_string()),
             TokenKind::Whitespace(" ".to_string()),
             TokenKind::Other('<'),
             TokenKind::Whitespace(" ".to_string()),
             TokenKind::Ident("num".to_string()),
             TokenKind::Newline,
         ];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn skips_multiline_whitespace() {
+        let actual = setup_tok_line("  \\\n \n#include");
+        let expected = vec![
+            (TokenKind::Whitespace("   ".to_string()), 1),
+            (TokenKind::Newline, 2),
+            (TokenKind::Hash, 3),
+            (TokenKind::Include, 3),
+        ];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn skips_multiline_whitespace2() {
+        let actual = setup_tokenkind("\\\n  \\\n\n#include");
+        let expected = vec![
+            TokenKind::Whitespace("  ".to_string()),
+            TokenKind::Newline,
+            TokenKind::Hash,
+            TokenKind::Include,
+        ];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn skips_multiline_whitespace_error2() {
+        let actual = setup_tokenkind("\\some\n#include");
+        let expected = vec![
+            TokenKind::Other('\\'),
+            TokenKind::Ident("some".to_string()),
+            TokenKind::Newline,
+            TokenKind::Hash,
+            TokenKind::Include,
+        ];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn escpaped_newline() {
+        let actual = setup_tokenkind("1 2   \\\n\\3\n   \\\nwhat");
+        let expected = setup_tokenkind("1 2   \\3\n   what");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn multiline_comment() {
+        let actual = setup_tokenkind("1 /*2   \\\n\\\n3\n   \\*/\nwhat");
+        let expected = setup_tokenkind("1 \nwhat");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn escaped_newline_single_comment() {
+        let actual = setup_tokenkind("hello # // what is \\\n this 3\n  end");
+        let expected = setup_tokenkind("hello # \n  end");
 
         assert_eq!(actual, expected);
     }

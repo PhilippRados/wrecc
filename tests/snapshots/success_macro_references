@@ -1,11 +1,11 @@
 error: Undeclared symbol 'foo2'
-|  --> in tests/fixtures/macro_references.c:11:5
+|  --> in tests/fixtures/macro_references.c:11:3
 |
-11     foo2  ;
-|      ^
+11   foo1;
+|    ^
 error: Undeclared symbol 'test'
-|  --> in tests/fixtures/macro_references.c:12:6
+|  --> in tests/fixtures/macro_references.c:12:3
 |
-12      test    test  ;
-|       ^
+12   ahmed;
+|    ^
 2 errors generated.

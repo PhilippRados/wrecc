@@ -45,8 +45,8 @@ impl Parser {
             Err(errors)
         }
     }
-    pub fn is_empty(&self) -> bool {
-        self.tokens.len() == 0
+    pub fn has_elements(&self) -> Option<&Token> {
+        self.tokens.peek().ok()
     }
 
     // skips to next valid declaration/statement
@@ -1669,6 +1669,7 @@ pub fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
 mod tests {
     use super::*;
     use crate::compiler::scanner::Scanner;
+    use crate::preprocess;
     use std::path::Path;
     use std::path::PathBuf;
 
@@ -1679,7 +1680,8 @@ mod tests {
     }
 
     fn setup(input: &str) -> Parser {
-        let mut scanner = Scanner::new(Path::new(""), input);
+        let pp_tokens = preprocess(Path::new(""), input).unwrap();
+        let mut scanner = Scanner::new(pp_tokens);
         let tokens = scanner.scan_token().unwrap();
 
         Parser::new(tokens)

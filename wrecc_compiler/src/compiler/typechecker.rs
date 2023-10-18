@@ -1256,11 +1256,13 @@ mod tests {
     use super::*;
     use crate::compiler::scanner::Scanner;
     use crate::compiler::wrecc_parser::parser::Parser;
+    use crate::preprocess;
     use std::path::Path;
 
     macro_rules! assert_type {
         ($input:expr,$expected_type:pat) => {
-            let mut scanner = Scanner::new(Path::new(""), $input);
+            let pp_tokens = preprocess(Path::new(""), $input).unwrap();
+            let mut scanner = Scanner::new(pp_tokens);
             let tokens = scanner.scan_token().unwrap();
 
             let mut parser = Parser::new(tokens);
@@ -1280,7 +1282,8 @@ mod tests {
 
     macro_rules! assert_type_err {
         ($input:expr,$expected_err:pat) => {
-            let mut scanner = Scanner::new(Path::new(""), $input);
+            let pp_tokens = preprocess(Path::new(""), $input).unwrap();
+            let mut scanner = Scanner::new(pp_tokens);
             let tokens = scanner.scan_token().unwrap();
 
             let mut parser = Parser::new(tokens);
@@ -1300,7 +1303,9 @@ mod tests {
 
     macro_rules! assert_const_expr {
         ($input: expr, $expected: expr, $symbols: expr) => {
-            let mut scanner = Scanner::new(Path::new(""), $input);
+            let pp_tokens = preprocess(Path::new(""), $input).unwrap();
+            let mut scanner = Scanner::new(pp_tokens);
+
             let tokens = scanner.scan_token().unwrap();
 
             let mut parser = Parser::new(tokens);

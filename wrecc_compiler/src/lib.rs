@@ -5,22 +5,22 @@ use compiler::{
     common::error::*, scanner::*, typechecker::*, wrecc_codegen::codegen::*,
     wrecc_codegen::register_allocation::*, wrecc_parser::parser::*,
 };
-use preprocessor::{preprocessor::Preprocessor, scanner::Scanner as PPScanner};
+use preprocessor::{preprocessor::*, scanner::Scanner as PPScanner};
 
 use std::path::Path;
 
 // Preprocesses given input file
-pub fn preprocess(filename: &Path, source: &str) -> Result<String, Vec<Error>> {
+pub fn preprocess(filename: &Path, source: &str) -> Result<Vec<PPToken>, Vec<Error>> {
     let tokens = PPScanner::new(source).scan_token();
 
-    Preprocessor::new(filename, source, tokens, None)
+    Preprocessor::new(filename, tokens, None)
         .start()
         .map(|(source, _)| source)
 }
 
-pub fn compile(filename: &Path, source: &str, dump_ast: bool) -> Result<String, Vec<Error>> {
+pub fn compile(source: Vec<PPToken>, dump_ast: bool) -> Result<String, Vec<Error>> {
     // Scan input
-    let tokens = Scanner::new(filename, source).scan_token()?;
+    let tokens = Scanner::new(source).scan_token()?;
 
     // Parse statements and return Abstract Syntax Tree and symbol table
     let (mut statements, env) = Parser::new(tokens).parse()?;

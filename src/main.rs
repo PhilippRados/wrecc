@@ -150,11 +150,12 @@ fn run() -> Result<(), Error> {
     let pp_source = preprocess(&options.file_path, &source).map_err(|e| (e, options.no_color))?;
 
     if options.preprocess_only {
-        return Ok(eprintln!("{}", &pp_source));
+        return Ok(pp_source
+            .iter()
+            .for_each(|s| eprint!("{}", s.kind.to_string())));
     }
 
-    let asm_source = compile(&options.file_path, &pp_source, options.dump_ast)
-        .map_err(|e| (e, options.no_color))?;
+    let asm_source = compile(pp_source, options.dump_ast).map_err(|e| (e, options.no_color))?;
 
     let asm_file = generate_asm_file(&options, asm_source)?;
 

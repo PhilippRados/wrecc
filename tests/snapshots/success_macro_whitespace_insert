@@ -1,16 +1,16 @@
 error: Expected expression found: '='
-|  --> in tests/fixtures/macro_whitespace_insert.c:9:6
+|  --> in tests/fixtures/macro_whitespace_insert.c:9:3
 |
-9    + =  ;
-|      ^
+9   foo;
+|   ^
 error: Expect ';' after declaration
-|  --> in tests/fixtures/macro_whitespace_insert.c:11:13
+|  --> in tests/fixtures/macro_whitespace_insert.c:11:12
 |
-11   int b = 1 12 ;
-|              ^
+11   int b = 1more;
+|             ^
 error: Expected expression found: '>'
-|  --> in tests/fixtures/macro_whitespace_insert.c:14:7
+|  --> in tests/fixtures/macro_whitespace_insert.c:14:6
 |
-14   a > > = 2;
-|        ^
+14   a >bar= 2;
+|       ^
 3 errors generated.

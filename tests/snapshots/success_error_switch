@@ -4,10 +4,10 @@ error: 'default'-statements have to be inside a 'switch'-statement
 3   default: x = 1;
 |   ^
 error: Duplicate 'case'-statement with value 3
-|  --> in tests/fixtures/error_switch.c:8:10
+|  --> in tests/fixtures/error_switch.c:8:13
 |
 8     case 3: case 3: break;
-|          ^
+|             ^
 error: Duplicate 'case'-statement with value 2
 |  --> in tests/fixtures/error_switch.c:9:5
 |

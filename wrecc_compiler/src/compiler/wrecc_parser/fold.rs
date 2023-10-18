@@ -463,17 +463,20 @@ mod tests {
     use super::*;
     use crate::compiler::scanner::Scanner;
     use crate::compiler::wrecc_parser::parser::Parser;
+    use crate::preprocess;
     use std::path::Path;
 
     fn assert_fold(input: &str, expected: &str) -> Option<NEWTypes> {
-        let mut scanner = Scanner::new(Path::new(""), input);
+        let pp_tokens = preprocess(Path::new(""), input).unwrap();
+        let mut scanner = Scanner::new(pp_tokens);
         let tokens = scanner.scan_token().unwrap();
 
         let mut parser = Parser::new(tokens);
         let mut actual = parser.expression().unwrap();
         actual.integer_const_fold(&Vec::new()).unwrap();
 
-        let mut scanner = Scanner::new(Path::new(""), expected);
+        let pp_tokens = preprocess(Path::new(""), expected).unwrap();
+        let mut scanner = Scanner::new(pp_tokens);
         let tokens = scanner.scan_token().unwrap();
 
         let mut parser = Parser::new(tokens);
@@ -498,7 +501,8 @@ mod tests {
     }
     macro_rules! assert_fold_error {
         ($input:expr,$expected_err:pat) => {
-            let mut scanner = Scanner::new(Path::new(""),$input);
+            let pp_tokens = preprocess(Path::new(""),$input).unwrap();
+            let mut scanner = Scanner::new(pp_tokens);
             let tokens = scanner.scan_token().unwrap();
 
             let mut parser = Parser::new(tokens);

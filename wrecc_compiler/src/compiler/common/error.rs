@@ -91,6 +91,7 @@ pub enum ErrorKind {
     MissingIf(String),
     MissingExpression(String),
     ElifAfterElse,
+    TrailingTokens(&'static str),
 
     Regular(&'static str), // generic error message when message only used once
     Multiple(Vec<Error>),
@@ -383,6 +384,7 @@ impl ErrorKind {
                 format!("Found '#{}' without matching '#if'", kind)
             }
             ErrorKind::ElifAfterElse => "Found '#elif' after '#else'".to_string(),
+            ErrorKind::TrailingTokens(msg) => format!("Found trailing tokens after {}", msg),
 
             ErrorKind::Regular(s) => s.to_string(),
             ErrorKind::Multiple(_) => {

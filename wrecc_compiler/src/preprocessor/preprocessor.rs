@@ -277,7 +277,11 @@ impl<'a> Preprocessor<'a> {
                 Some(identifier) => match (&if_kind.kind, self.defines.contains_key(&identifier)) {
                     (TokenKind::Ifdef, true) | (TokenKind::Ifndef, false) => Ok(()),
                     (TokenKind::Ifdef, false) | (TokenKind::Ifndef, true) => {
-                        self.eval_else_branch()
+                        match (self.has_trailing_tokens(), self.eval_else_branch()) {
+                            (Err(e1), Err(e2)) => Err(Error::new_multiple(vec![e1, e2])),
+                            (Err(e), _) | (_, Err(e)) => Err(e),
+                            (..) => Ok(()),
+                        }
                     }
                     _ => unreachable!(),
                 },
@@ -348,9 +352,7 @@ impl<'a> Preprocessor<'a> {
                         return Ok(());
                     }
                 }
-                TokenKind::Else | TokenKind::Endif => {
-                    return Ok(());
-                }
+                TokenKind::Else | TokenKind::Endif => return self.has_trailing_tokens(),
                 _ => unreachable!("not #if token"),
             }
         }
@@ -396,7 +398,7 @@ impl<'a> Preprocessor<'a> {
         if let Some(token) = parser.has_elements() {
             return Err(Error::new(
                 token,
-                ErrorKind::Regular("Trailing tokens in preprocessor expression"),
+                ErrorKind::TrailingTokens("preprocessor expression"),
             ));
         }
 
@@ -601,15 +603,8 @@ impl<'a> Preprocessor<'a> {
                             errors.push(e)
                         }
                     } else {
-                        if let Ok(peeked) = self.tokens.peek() {
-                            if !matches!(peeked.kind, TokenKind::Newline) {
-                                errors.push(Error::new(
-                                    &PPToken::from(&peeked, self.filename),
-                                    ErrorKind::Regular(
-                                        "Found trailing tokens after preprocessor directive",
-                                    ),
-                                ))
-                            }
+                        if let Err(e) = self.has_trailing_tokens() {
+                            errors.push(e);
                         }
                     }
                 }
@@ -673,6 +668,22 @@ impl<'a> Preprocessor<'a> {
             }
         } else {
             Ok(())
+        }
+    }
+    fn has_trailing_tokens(&mut self) -> Result<(), Error> {
+        let trailing = self.fold_until_token(TokenKind::Newline);
+        let trailing: Vec<&Token> = trailing
+            .iter()
+            .filter(|t| !matches!(t.kind, TokenKind::Whitespace(_)))
+            .collect();
+
+        if trailing.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::new(
+                &PPToken::from(&trailing[0], self.filename),
+                ErrorKind::TrailingTokens("preprocessor directive"),
+            ))
         }
     }
 }
@@ -1085,5 +1096,51 @@ int only_this;
         let expected = "\n\nint only_this;\n\n";
 
         assert_eq!(actual, expected);
+    }
+    #[test]
+    fn trailing_tokens() {
+        let actual = setup_complete(
+            "
+#ifdef some   /* hallo */
+if_branch
+#else   \\
+    // doesnt matter
+else_branch
+#endif
+",
+        );
+        let expected = "\n\nelse_branch\n\n";
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn trailing_tokens_err() {
+        let actual = setup_complete_err(
+            "
+        #ifdef some    12
+        #elif 1 +
+        #endif",
+        );
+
+        assert!(matches!(
+            actual[..],
+            [
+                ErrorKind::TrailingTokens("preprocessor directive"),
+                ErrorKind::Regular("Expected expression"),
+            ]
+        ));
+    }
+    #[test]
+    fn trailing_tokens_skipped_branch() {
+        let actual = setup_complete_err(
+            r#"
+        #ifdef some    12
+        #endif"#,
+        );
+
+        assert!(matches!(
+            actual[..],
+            [ErrorKind::TrailingTokens("preprocessor directive")]
+        ));
     }
 }

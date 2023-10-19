@@ -447,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn skips_multiline_whitespace_error2() {
+    fn backslash_without_escape() {
         let actual = setup_tokenkind("\\some\n#include");
         let expected = vec![
             TokenKind::Other('\\'),
@@ -480,6 +480,44 @@ mod tests {
     fn escaped_newline_single_comment() {
         let actual = setup_tokenkind("hello # // what is \\\n this 3\n  end");
         let expected = setup_tokenkind("hello # \n  end");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn numbers_and_idents() {
+        let actual = setup_tokenkind("12323_hello12_2;");
+        let expected = vec![
+            TokenKind::Number("12323".to_string()),
+            TokenKind::Ident("_hello12_2".to_string()),
+            TokenKind::Other(';'),
+        ];
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn multiline_ident() {
+        let actual = setup_tok_line("He\\\n12lo\\\n what \\\nit");
+        let expected = vec![
+            (TokenKind::Ident("He12lo".to_string()), 1),
+            (TokenKind::Whitespace(" ".to_string()), 3),
+            (TokenKind::Ident("what".to_string()), 3),
+            (TokenKind::Whitespace(" ".to_string()), 3),
+            (TokenKind::Ident("it".to_string()), 4),
+        ];
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn multiline_number() {
+        let actual = setup_tok_line("123\\\n32\n12\\3\\\n4");
+        let expected = vec![
+            (TokenKind::Number("12332".to_string()), 1),
+            (TokenKind::Newline, 2),
+            (TokenKind::Number("12".to_string()), 3),
+            (TokenKind::Other('\\'), 3),
+            (TokenKind::Number("34".to_string()), 3),
+        ];
 
         assert_eq!(actual, expected);
     }

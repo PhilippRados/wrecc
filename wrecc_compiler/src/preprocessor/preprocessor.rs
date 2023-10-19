@@ -263,26 +263,24 @@ impl<'a> Preprocessor<'a> {
             ))
         }
     }
+
     fn ifdef(&mut self, if_kind: Token) -> Result<(), Error> {
+        self.ifs.push(IfDirective::new(Error::new(
+            &PPToken::from(&if_kind, self.filename),
+            ErrorKind::UnterminatedIf(if_kind.kind.to_string()),
+        )));
+
         self.skip_whitespace()?;
 
         if let Some(token) = self.tokens.next() {
             match token.kind.as_ident() {
-                Some(identifier) => {
-                    // TODO: should this be prior to whitespace check so that #endif still has matching #if?
-                    self.ifs.push(IfDirective::new(Error::new(
-                        &PPToken::from(&if_kind, self.filename),
-                        ErrorKind::UnterminatedIf(if_kind.kind.to_string()),
-                    )));
-
-                    match (&if_kind.kind, self.defines.contains_key(&identifier)) {
-                        (TokenKind::Ifdef, true) | (TokenKind::Ifndef, false) => Ok(()),
-                        (TokenKind::Ifdef, false) | (TokenKind::Ifndef, true) => {
-                            self.eval_else_branch()
-                        }
-                        _ => unreachable!(),
+                Some(identifier) => match (&if_kind.kind, self.defines.contains_key(&identifier)) {
+                    (TokenKind::Ifdef, true) | (TokenKind::Ifndef, false) => Ok(()),
+                    (TokenKind::Ifdef, false) | (TokenKind::Ifndef, true) => {
+                        self.eval_else_branch()
                     }
-                }
+                    _ => unreachable!(),
+                },
                 _ => Err(Error::new(
                     &PPToken::from(&token, self.filename),
                     ErrorKind::InvalidMacroName,
@@ -388,7 +386,12 @@ impl<'a> Preprocessor<'a> {
             .scan_token()
             .map_err(Error::new_multiple)?;
         let mut parser = Parser::new(tokens);
-        let mut expr = parser.expression()?;
+        let mut expr = parser.expression().map_err(|mut e| {
+            if let ErrorKind::Eof(msg) = e.kind {
+                e.kind = ErrorKind::Regular(msg)
+            }
+            e
+        })?;
 
         if let Some(token) = parser.has_elements() {
             return Err(Error::new(
@@ -657,13 +660,16 @@ impl<'a> Preprocessor<'a> {
     // wrapper for easier access
     fn skip_whitespace(&mut self) -> Result<(), Error> {
         if !skip_whitespace(&mut self.tokens) {
-            if let Ok(token) = self.tokens.peek() {
-                Err(Error::new(
+            match self.tokens.peek() {
+                Ok(token) => Err(Error::new(
                     &PPToken::from(&token, self.filename),
                     ErrorKind::Regular("Expect whitespace after preprocessing directive"),
-                ))
-            } else {
-                Err(Error::eof("Expected whitespace"))
+                )),
+                Err((Some(eof_token), _)) => Err(Error::new(
+                    &PPToken::from(&eof_token, self.filename),
+                    ErrorKind::Eof("Expected whitespace, "),
+                )),
+                _ => Err(Error::eof("Expected whitespace")),
             }
         } else {
             Ok(())

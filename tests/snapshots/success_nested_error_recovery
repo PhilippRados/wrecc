@@ -19,4 +19,8 @@ error: Undeclared symbol 'foo'
 11   for (;;foo-{) {
 |           ^
 error: Expected closing '}' after Block, found end of file
+|  --> in tests/fixtures/nested_error_recovery.c:17:1
+|
+17 }
+|  ^
 5 errors generated.

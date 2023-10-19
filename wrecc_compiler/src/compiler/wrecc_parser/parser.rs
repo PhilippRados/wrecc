@@ -1479,6 +1479,7 @@ impl Parser {
                     Ok(self.tokens.next().unwrap())
                 }
             }
+            Err((Some(token), _)) => Err(Error::new(&token, ErrorKind::Eof(msg))),
             Err(_) => Err(Error::eof(msg)),
         }
     }
@@ -1539,6 +1540,16 @@ impl Parser {
     fn matches_specifier(&mut self) -> Result<NEWTypes, Error> {
         let t = self.matches_type()?;
         Ok(self.parse_ptr(t))
+    }
+}
+
+impl From<(Option<Token>, ErrorKind)> for Error {
+    fn from((eof_token, kind): (Option<Token>, ErrorKind)) -> Self {
+        if let Some(eof_token) = eof_token {
+            Error::new(&eof_token, kind)
+        } else {
+            Error::eof("Expected expression")
+        }
     }
 }
 

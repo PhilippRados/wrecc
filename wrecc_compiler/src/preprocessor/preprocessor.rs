@@ -579,7 +579,11 @@ impl<'a> Preprocessor<'a> {
                             TokenKind::Undef => self.undef(directive),
                             TokenKind::Ifdef | TokenKind::Ifndef => self.ifdef(directive),
                             TokenKind::If => self.if_expr(directive),
-                            TokenKind::Elif | TokenKind::Else | TokenKind::Endif => {
+                            TokenKind::Elif => self.conditional_block(directive),
+                            TokenKind::Else | TokenKind::Endif => {
+                                if let Err(e) = self.has_trailing_tokens() {
+                                    errors.push(e);
+                                }
                                 self.conditional_block(directive)
                             }
                             _ => Err(Error::new(

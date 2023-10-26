@@ -32,7 +32,6 @@ pub enum NEWTypes {
     Enum(Option<String>, Vec<(Token, i32)>),
 }
 
-// this code is shamelessly copied from the more sophisticated saltwater compiler
 mod struct_ref {
     use super::NEWTypes;
     use super::Token;

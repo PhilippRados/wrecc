@@ -50,6 +50,9 @@ pub enum Ir {
 
     Set(&'static str),
 
+    // repeatedly store value
+    Rep,
+
     // bit operations
     Xor(Register, Register),
     Or(Register, Register),
@@ -236,6 +239,9 @@ impl Display for Ir {
                     left.name(),
                     right.name(),
                 ),
+                Ir::Rep => {
+                    "\trep     stosb".to_string()
+                }
                 Ir::Not(reg) => format!("\tnot{}    {}", reg.get_type().suffix(), reg.name()),
                 Ir::Neg(reg) => format!("\tneg{}    {}", reg.get_type().suffix(), reg.name()),
                 Ir::SaveRegs | Ir::RestoreRegs =>

@@ -588,16 +588,8 @@ impl Parser {
         is_global: bool,
     ) -> Result<DeclarationKind, Error> {
         match self.initializers(&type_decl)? {
-            Some(mut elements) => {
-                // WARN: takes way too long on big arrays > 4096
-                // since it generates syntax sugar for every element
-                let assign_sugar = init_list_sugar(
-                    name.clone(),
-                    &mut elements,
-                    type_decl.clone(),
-                    true,
-                    Expr::new(ExprKind::Ident(name.clone()), ValueKind::Lvalue),
-                );
+            Some(elements) => {
+                let assign_sugar = init_list_sugar(name.clone(), &type_decl, elements);
 
                 Ok(DeclarationKind::InitList(
                     type_decl,
@@ -714,9 +706,8 @@ impl Parser {
             }
         };
 
-        let mut elements = fill_default(type_decl);
-        assert_eq!(elements.len(), type_element_count(type_decl));
-
+        let mut elements =
+            vec![Expr::new(ExprKind::Nop, ValueKind::Rvalue); type_element_count(type_decl)];
         let mut element_index = 0;
         let mut depth;
         let mut found_des;
@@ -1904,8 +1895,7 @@ Func: 'main'
         let input = "int a[3] = {1,2};";
         let expected = r#"
     a[0] = 1;
-    a[1] = 2;
-    a[2] = 0"#;
+    a[1] = 2"#;
 
         assert_init_list(input, expected);
     }
@@ -1921,8 +1911,7 @@ Func: 'main'
     a.name[1] = 'e';
     a.name[2] = 'i';
     a.name[3] = 0;
-    a.name[4] = 0;
-    a.self = 0"#;
+    a.name[4] = 0"#;
 
         assert_init_list(input, expected);
     }
@@ -1932,11 +1921,8 @@ Func: 'main'
         let input = "int a[2][3] = {{1},1,2};";
         let expected = r#"
     a[0][0] = 1;
-    a[0][1] = 0;
-    a[0][2] = 0;
     a[1][0] = 1;
-    a[1][1] = 2;
-    a[1][2] = 0"#;
+    a[1][1] = 2"#;
 
         assert_init_list(input, expected);
     }
@@ -1953,14 +1939,10 @@ Func: 'main'
         let expected = r#"
 a.other[0].age = 1;
 a.other[0].number[0] = 2;
-a.other[0].number[1] = 0;
-a.other[0].number[2] = 0;
 a.other[1].age = 21;
-a.other[1].number[0] = 0;
 a.other[1].number[1] = 3;
 a.other[1].number[2] = 4;
 a.arr[0] = 1;
-a.arr[1] = 0;
 a.arr[2] = 2"#;
 
         assert_init_list(input, expected);

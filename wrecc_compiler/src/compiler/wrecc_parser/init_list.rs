@@ -7,99 +7,86 @@ use crate::compiler::wrecc_parser::parser::*;
 // a[0] = 1;
 // a[1] = 2;
 // a[2] = 3;
-pub fn init_list_sugar(
-    token: Token,
-    list: &mut Vec<Expr>,
-    type_decl: NEWTypes,
-    is_outer: bool,
-    left: Expr,
-) -> Vec<Expr> {
-    if let NEWTypes::Array { amount, of } = type_decl.clone() {
-        let mut result = Vec::new();
-        for ((i, _), arr_i) in list
-            .iter()
-            .enumerate()
-            .step_by(type_element_count(&of))
-            .zip(0..amount)
-        {
-            for (offset, l_expr) in init_list_sugar(
-                token.clone(),
-                &mut list[i..list.len()].to_vec(),
-                *of.clone(),
-                false,
-                index_sugar(
-                    token.clone(),
-                    left.clone(),
-                    Expr::new_literal(arr_i as i64, Types::Int),
-                ),
-            )
-            .into_iter()
-            .enumerate()
-            {
-                let value = replace_default(&list[i + offset]);
-                result.push(match is_outer {
-                    true => Expr::new(
-                        ExprKind::Assign {
-                            l_expr: Box::new(l_expr),
-                            token: token.clone(),
-                            r_expr: Box::new(value),
-                        },
-                        ValueKind::Rvalue,
-                    ),
-                    false => l_expr,
-                })
-            }
-        }
-        result
-    } else if let NEWTypes::Struct(s) | NEWTypes::Union(s) = type_decl.clone() {
-        let mut result = Vec::new();
-        let mut members = s.members().to_vec();
+pub fn init_list_sugar(token: Token, type_decl: &NEWTypes, list: Vec<Expr>) -> Vec<Expr> {
+    let mut result = Vec::new();
+    for (i, expr) in list
+        .into_iter()
+        .enumerate()
+        .filter(|(_, expr)| !matches!(expr.kind, ExprKind::Nop))
+    {
+        let l_expr = access_sugar(
+            &token,
+            type_decl,
+            i,
+            Expr::new(ExprKind::Ident(token.clone()), ValueKind::Lvalue),
+        );
 
-        if let NEWTypes::Union(_) = type_decl {
-            remove_unused_members(&mut members, list);
-        }
+        result.push(Expr::new(
+            ExprKind::Assign {
+                l_expr: Box::new(l_expr),
+                token: token.clone(),
+                r_expr: Box::new(expr),
+            },
+            ValueKind::Rvalue,
+        ))
+    }
+    result
+}
 
-        for member_i in 0..members.len() {
-            let i = members
-                .iter()
-                .take(member_i)
-                .fold(0, |acc, (t, _)| acc + type_element_count(t));
-            for (offset, l_expr) in init_list_sugar(
-                token.clone(),
-                &mut list[i..list.len()].to_vec(),
-                members[member_i].clone().0,
-                false,
+// recursively generates the syntax sugar to index an array or struct/union
+// given this type: int a[2][3] and index 4
+// it generates the nested accesses to get to the element at index 3
+// => a[1][1]
+fn access_sugar(name: &Token, type_decl: &NEWTypes, i: usize, left: Expr) -> Expr {
+    match type_decl {
+        NEWTypes::Array { amount, of } => {
+            let divisor = type_element_count(type_decl) / amount;
+            let current_i = i / divisor;
+            let new_i = i % divisor;
+
+            let current_i = Expr::new_literal(current_i as i64, Types::Int);
+
+            access_sugar(name, of, new_i, index_sugar(name.clone(), left, current_i))
+        }
+        NEWTypes::Struct(s) | NEWTypes::Union(s) => {
+            let members = s.members();
+            let (member_index, new_i) = get_member_index(&members, i);
+            let (member_type, member) = members[member_index].clone();
+
+            access_sugar(
+                name,
+                &member_type,
+                new_i,
                 Expr::new(
                     ExprKind::MemberAccess {
-                        token: token.clone(),
-                        member: members[member_i].clone().1,
-                        expr: Box::new(left.clone()),
+                        member,
+                        token: name.clone(),
+                        expr: Box::new(left),
                     },
                     ValueKind::Lvalue,
                 ),
             )
-            .into_iter()
-            .enumerate()
-            {
-                let value = replace_default(&list[i + offset]);
-                result.push(match is_outer {
-                    true => Expr::new(
-                        ExprKind::Assign {
-                            l_expr: Box::new(l_expr),
-                            token: token.clone(),
-                            r_expr: Box::new(value),
-                        },
-                        ValueKind::Rvalue,
-                    ),
-                    false => l_expr,
-                })
-            }
         }
-        result
-    } else {
-        vec![left]
+        _ => left,
     }
 }
+fn get_member_index(members: &Vec<(NEWTypes, Token)>, i: usize) -> (usize, usize) {
+    let mut acc = 0;
+    let mut index = 0;
+
+    for (ty, _) in members {
+        if (acc + type_element_count(ty)) <= i {
+            acc += type_element_count(ty);
+            index += 1;
+        } else {
+            break;
+        }
+    }
+
+    let new_index = i - acc;
+    (index, new_index)
+}
+
 // returns the length of the flattened type
 pub fn type_element_count(type_decl: &NEWTypes) -> usize {
     match type_decl {
@@ -113,75 +100,6 @@ pub fn type_element_count(type_decl: &NEWTypes) -> usize {
         }
         _ => 1,
     }
-}
-
-// creates the flattened list with all the aggregate types broken down in its primitives default types
-pub fn fill_default(type_decl: &NEWTypes) -> Vec<Expr> {
-    match type_decl {
-        NEWTypes::Primitive(_) | NEWTypes::Enum(..) => vec![Expr {
-            kind: ExprKind::Nop,
-            value_kind: ValueKind::Rvalue,
-            type_decl: Some(NEWTypes::default()),
-        }],
-        NEWTypes::Array { amount, of } => {
-            let mut result = Vec::with_capacity(*amount);
-            for _ in 0..*amount {
-                result.append(&mut fill_default(of))
-            }
-            result
-        }
-        NEWTypes::Pointer(_) => vec![Expr {
-            kind: ExprKind::Nop,
-            value_kind: ValueKind::Rvalue,
-            type_decl: Some(NEWTypes::Pointer(Box::new(NEWTypes::Primitive(
-                Types::Void,
-            )))),
-        }],
-        NEWTypes::Struct(s) | NEWTypes::Union(s) => {
-            let mut result = Vec::new();
-            for (member_type, _) in s.members().iter() {
-                result.append(&mut fill_default(member_type))
-            }
-            result
-        }
-    }
-}
-
-fn replace_default(expr: &Expr) -> Expr {
-    if let ExprKind::Nop = expr.kind {
-        Expr {
-            kind: ExprKind::Literal(0),
-            value_kind: ValueKind::Rvalue,
-            type_decl: expr.type_decl.clone(), // is filled in by fill_default()
-        }
-    } else {
-        expr.clone()
-    }
-}
-
-// remove unused members so they don't overwrite existing ones
-fn remove_unused_members(members: &mut Vec<(NEWTypes, Token)>, list: &mut Vec<Expr>) {
-    let old_members = members.clone();
-    let mut new_members = vec![];
-    let mut new_list = vec![];
-    let mut i = 0;
-
-    for m in old_members.iter() {
-        let type_len = type_element_count(&m.0);
-        if !list[i..i + type_len]
-            .iter()
-            .all(|e| matches!(e.kind, ExprKind::Nop))
-        {
-            new_members.push(m.clone());
-            for e in list[i..i + type_len].iter() {
-                new_list.push(e.clone())
-            }
-        }
-        i += type_len;
-    }
-
-    *list = new_list;
-    *members = new_members;
 }
 
 // TODO: this definitely needs a cleanup/rewrite

@@ -151,6 +151,13 @@ impl StaticRegister {
             StaticRegister::Literal(n) => format!("{n}"),
         }
     }
+    pub fn get_offset(&self) -> i64 {
+        match self {
+            StaticRegister::LabelOffset(_, offset, _) => *offset,
+            StaticRegister::Label(_) => 0, // TODO: is this even possible?
+            _ => unreachable!("not a offset-register"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -446,25 +446,94 @@ impl Compiler {
             .unwrap_var_mut()
             .set_reg(Register::Label(LabelRegister::Var(
                 name.unwrap_string(),
-                type_decl,
+                type_decl.clone(),
             )));
 
+        let mut size = type_decl.size() as i64;
+        let mut prev_offset: i64 = 0;
+
         for expr in exprs {
-            if let ExprKind::Assign { r_expr, .. } = expr.kind {
-                let type_decl = r_expr.type_decl.clone().unwrap();
+            if let ExprKind::Assign { r_expr, l_expr, .. } = expr.kind {
+                let offset = self.execute_global_expr(*l_expr).get_offset();
+                let expr_type = expr.type_decl.clone().unwrap();
                 let r_value = self.execute_global_expr(*r_expr);
 
-                self.write_out(Ir::GlobalInit(type_decl, r_value));
+                let diff = offset - prev_offset;
+                if diff != 0 {
+                    self.write_out(Ir::GlobalInit(
+                        NEWTypes::Primitive(Types::Void),
+                        StaticRegister::Literal(diff),
+                    ));
+                    size -= diff;
+                }
+
+                size -= expr_type.size() as i64;
+                prev_offset = offset + expr_type.size() as i64;
+
+                self.write_out(Ir::GlobalInit(expr_type, r_value));
             }
+        }
+        if size > 0 {
+            self.write_out(Ir::GlobalInit(
+                NEWTypes::Primitive(Types::Void),
+                StaticRegister::Literal(size as i64),
+            ));
         }
     }
     fn init_list(&mut self, type_decl: NEWTypes, name: Token, exprs: Vec<Expr>) {
+        let size = align(type_decl.size(), &type_decl);
+
         self.declare_var(type_decl, &name);
 
+        // first overwrite all entries with 0
+        self.clear_mem(name, size);
+
+        // then execute all assignments
         for e in exprs.into_iter() {
             let reg = self.execute_expr(e);
             self.free(reg);
         }
+    }
+    fn clear_mem(&mut self, var_name: Token, amount: usize) {
+        // writes 0 to stack until amount == 0
+        // eax value that gets written
+        // ecx amount
+        // rdi at memory pos
+        let var = self
+            .env
+            .get(var_name.token.get_index())
+            .unwrap()
+            .unwrap_var()
+            .get_reg();
+        // TODO: can be optimized by writing 8Bytes (instead of 1) per repetition but that requires extra logic when amount and size don't align
+        let eax_reg = Register::Return(NEWTypes::Primitive(Types::Char));
+        let ecx_reg = Register::Arg(ArgRegister::new(
+            3,
+            NEWTypes::default(),
+            &mut self.interval_counter,
+            self.instr_counter,
+        ));
+        let rdi_reg = Register::Arg(ArgRegister::new(
+            0,
+            NEWTypes::Primitive(Types::Long),
+            &mut self.interval_counter,
+            self.instr_counter,
+        ));
+
+        self.write_out(Ir::Mov(
+            Register::Literal(0, NEWTypes::default()),
+            eax_reg.clone(),
+        ));
+        self.write_out(Ir::Mov(
+            Register::Literal(amount as i64, NEWTypes::default()),
+            ecx_reg.clone(),
+        ));
+        self.write_out(Ir::Load(var, rdi_reg.clone()));
+        self.write_out(Ir::Rep);
+
+        self.free(eax_reg);
+        self.free(ecx_reg);
+        self.free(rdi_reg);
     }
 
     fn function_definition(&mut self, name: Token, body: Vec<Stmt>) {
@@ -589,12 +658,14 @@ impl Compiler {
                 reg
             }
             ExprKind::MemberAccess { expr, member, .. } => {
-                let reg = self.execute_global_expr(*expr);
+                let mut reg = self.execute_global_expr(*expr);
 
                 match reg.get_type() {
                     NEWTypes::Struct(s) => {
                         let offset = s.member_offset(&member.unwrap_string());
+                        let member_type = s.member_type(&member.unwrap_string());
 
+                        reg.set_type(member_type);
                         match reg {
                             StaticRegister::Label(label_reg) => StaticRegister::LabelOffset(
                                 label_reg,
@@ -612,7 +683,11 @@ impl Compiler {
                             _ => unreachable!("Literal can't be struct address"),
                         }
                     }
-                    NEWTypes::Union(_) => reg,
+                    NEWTypes::Union(s) => {
+                        let member_type = s.member_type(&member.unwrap_string());
+                        reg.set_type(member_type);
+                        reg
+                    }
                     _ => unreachable!("{:?}", reg.get_type()),
                 }
             }

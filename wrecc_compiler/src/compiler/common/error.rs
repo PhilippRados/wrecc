@@ -33,7 +33,7 @@ pub enum ErrorKind {
     InvalidArrayDesignator(NEWTypes),
     TooLong(&'static str, usize, usize),
     NonAggregateInitializer(NEWTypes, NEWTypes),
-    InitializerOverflow(usize, usize),
+    InitializerOverflow(usize, i64),
     ExpectedExpression(TokenType),
     NotType(TokenType),
     UndeclaredType(String),
@@ -73,6 +73,8 @@ pub enum ErrorKind {
     MismatchedFunctionReturn(NEWTypes, NEWTypes),
     InvalidUnary(TokenType, NEWTypes, &'static str),
     UnnamedFuncParams,
+    ScalarDesignator(NEWTypes),
+    DesignatorOverflow(usize, i64),
 
     // environment errors
     MismatchedFuncDeclReturn(NEWTypes, NEWTypes),
@@ -177,6 +179,18 @@ impl ErrorKind {
                 "Can only use array designator on type 'array' not '{}'",
                 type_decl
             ),
+            ErrorKind::DesignatorOverflow(expected, actual) => {
+                format!(
+                    "Array designator index '{}' exceeds type-size: '{}'",
+                    actual, expected
+                )
+            }
+            ErrorKind::ScalarDesignator(type_decl) => {
+                format!(
+                    "Can only use designator when initializing aggregate types, not: {}",
+                    type_decl
+                )
+            }
             ErrorKind::TooLong(s, expected, actual) => format!(
                 "{} is too long. Expected: {}, Actual: {}",
                 s, expected, actual

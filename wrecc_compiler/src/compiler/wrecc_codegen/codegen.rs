@@ -357,17 +357,11 @@ impl Compiler {
                     self.declare_global_var(type_decl, name)
                 }
                 DeclarationKind::Decl(type_decl, name, false) => self.declare_var(type_decl, &name),
-                DeclarationKind::Init(type_decl, name, expr, true) => {
-                    self.init_global_var(type_decl, name, expr)
+                DeclarationKind::Initializer(type_decl, name, init, true) => {
+                    self.init_global_var(type_decl, name, init)
                 }
-                DeclarationKind::Init(type_decl, name, expr, false) => {
-                    self.init_var(type_decl, name, expr)
-                }
-                DeclarationKind::InitList(type_decl, name, exprs, true) => {
-                    self.init_global_list(type_decl, name, exprs)
-                }
-                DeclarationKind::InitList(type_decl, name, exprs, false) => {
-                    self.init_list(type_decl, name, exprs)
+                DeclarationKind::Initializer(type_decl, name, init, false) => {
+                    self.init_var(type_decl, name, init)
                 }
                 DeclarationKind::FuncDecl(..) => (),
             }
@@ -395,18 +389,18 @@ impl Compiler {
             .unwrap_var_mut()
             .set_reg(reg);
     }
-    fn init_global_var(&mut self, type_decl: NEWTypes, var_name: Token, expr: Expr) {
+    fn init_global_var(&mut self, type_decl: NEWTypes, var_name: Token, init: Init) {
         let name = var_name.unwrap_string();
-        self.write_out(Ir::GlobalDeclaration(name.clone()));
+        // self.write_out(Ir::GlobalDeclaration(name.clone()));
 
-        self.env
-            .get_mut(var_name.token.get_index())
-            .unwrap()
-            .unwrap_var_mut()
-            .set_reg(Register::Label(LabelRegister::Var(name, type_decl.clone())));
+        // self.env
+        //     .get_mut(var_name.token.get_index())
+        //     .unwrap()
+        //     .unwrap_var_mut()
+        //     .set_reg(Register::Label(LabelRegister::Var(name, type_decl.clone())));
 
-        let value_reg = self.execute_global_expr(expr);
-        self.write_out(Ir::GlobalInit(type_decl, value_reg));
+        // let value_reg = self.execute_global_expr(expr);
+        // self.write_out(Ir::GlobalInit(type_decl, value_reg));
     }
     fn init_arg(&mut self, type_decl: NEWTypes, var_name: Token, arg_reg: Register) {
         self.declare_var(type_decl, &var_name);
@@ -422,19 +416,19 @@ impl Compiler {
         self.free(reg);
     }
 
-    fn init_var(&mut self, type_decl: NEWTypes, var_name: Token, expr: Expr) {
+    fn init_var(&mut self, type_decl: NEWTypes, var_name: Token, init: Init) {
         self.declare_var(type_decl, &var_name);
-        let value_reg = self.execute_expr(expr);
+        // let value_reg = self.execute_expr(expr);
 
-        let reg = self.cg_assign(
-            self.env
-                .get(var_name.token.get_index())
-                .unwrap()
-                .unwrap_var()
-                .get_reg(),
-            value_reg,
-        );
-        self.free(reg);
+        // let reg = self.cg_assign(
+        //     self.env
+        //         .get(var_name.token.get_index())
+        //         .unwrap()
+        //         .unwrap_var()
+        //         .get_reg(),
+        //     value_reg,
+        // );
+        // self.free(reg);
     }
 
     fn init_global_list(&mut self, type_decl: NEWTypes, name: Token, exprs: Vec<Expr>) {
@@ -773,7 +767,7 @@ impl Compiler {
             }
             ExprKind::MemberAccess { expr, member, .. } => {
                 let reg = self.execute_expr(*expr);
-                self.cg_member_access(reg, &member, true)
+                self.cg_member_access(reg, &member.unwrap_string(), true)
             }
             ExprKind::Ternary { cond, true_expr, false_expr, .. } => {
                 self.cg_ternary(*cond, *true_expr, *false_expr)
@@ -830,9 +824,7 @@ impl Compiler {
 
         result
     }
-    fn cg_member_access(&mut self, reg: Register, member: &Token, free: bool) -> Register {
-        let member = member.unwrap_string();
-
+    fn cg_member_access(&mut self, reg: Register, member: &str, free: bool) -> Register {
         if let NEWTypes::Struct(s) = reg.get_type() {
             let offset = s.member_offset(&member);
             let member_type = s.member_type(&member);
@@ -996,10 +988,11 @@ impl Compiler {
     fn cg_assign(&mut self, l_value: Register, r_value: Register) -> Register {
         if let NEWTypes::Struct(s) = l_value.get_type() {
             // when assigning structs have to assign each member
-            for m in s.members().iter() {
-                let member_token = Token::default(TokenType::Ident(m.1.unwrap_string(), 0));
-                let member_lvalue = self.cg_member_access(l_value.clone(), &member_token, false);
-                let member_rvalue = self.cg_member_access(r_value.clone(), &member_token, false);
+            for (_, member) in s.members().iter() {
+                let member_lvalue =
+                    self.cg_member_access(l_value.clone(), &member.unwrap_string(), false);
+                let member_rvalue =
+                    self.cg_member_access(r_value.clone(), &member.unwrap_string(), false);
 
                 let reg = self.cg_assign(member_lvalue, member_rvalue);
                 self.free(reg);

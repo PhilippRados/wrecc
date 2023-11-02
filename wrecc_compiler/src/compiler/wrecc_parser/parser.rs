@@ -1,7 +1,9 @@
 use crate::compiler::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
 use crate::compiler::wrecc_codegen::register::*;
-use crate::compiler::wrecc_parser::{double_peek::*, init_list::init_list_types::*, init_list::*};
+use crate::compiler::wrecc_parser::double_peek::*;
 use crate::into_newtype;
+
+use std::collections::VecDeque;
 
 pub struct Parser {
     tokens: DoublePeek<Token>,
@@ -587,24 +589,34 @@ impl Parser {
         type_decl: NEWTypes,
         is_global: bool,
     ) -> Result<DeclarationKind, Error> {
-        match self.initializers(&type_decl)? {
-            Some(elements) => {
-                let assign_sugar = init_list_sugar(name.clone(), &type_decl, elements);
+        let init = self.initializers(&name, None)?;
 
-                Ok(DeclarationKind::InitList(
-                    type_decl,
-                    name,
-                    assign_sugar,
-                    is_global,
-                ))
-            }
-            None => {
-                let r_value = self.var_assignment()?;
+        Ok(DeclarationKind::Initializer(
+            type_decl, name, init, is_global,
+        ))
+    }
+    fn initializers(
+        &mut self,
+        token: &Token,
+        designator: Option<VecDeque<Designator>>,
+    ) -> Result<Init, Error> {
+        if self.matches(&[TokenKind::LeftBrace]).is_some() {
+            self.nest_level += 1;
+            let init_list = self.initializer_list(&token, designator)?;
+            self.nest_level -= 1;
 
-                Ok(DeclarationKind::Init(type_decl, name, r_value, is_global))
-            }
+            Ok(init_list)
+        } else {
+            let r_value = self.var_assignment()?;
+
+            Ok(Init {
+                token: token.clone(),
+                designator,
+                kind: InitKind::Scalar(r_value),
+            })
         }
     }
+
     fn compare_existing(
         &mut self,
         name: &Token,
@@ -648,114 +660,24 @@ impl Parser {
         Ok(())
     }
 
-    fn initializers(&mut self, type_decl: &NEWTypes) -> Result<Option<Vec<Expr>>, Error> {
-        let token = self.tokens.peek()?.clone();
-
-        match (token.token.clone(), type_decl.clone()) {
-            (TokenType::LeftBrace, _) => {
-                self.tokens.next();
-                self.nest_level += 1;
-                let init_list = self.initializer_list(type_decl, token)?;
-                self.nest_level -= 1;
-
-                Ok(Some(init_list))
-            }
-            (TokenType::String(mut s), NEWTypes::Array { amount, of })
-                if matches!(*of, NEWTypes::Primitive(Types::Char)) =>
-            {
-                // char s[] = "abc" identical to char s[] = {'a','b','c','\0'} (6.7.8)
-                self.tokens.next();
-                if amount < s.len() {
-                    return Err(Error::new(
-                        &token,
-                        ErrorKind::TooLong("Initializer-string", amount, s.len()),
-                    ));
-                }
-                let mut diff = amount - s.len();
-                while diff > 0 {
-                    diff -= 1;
-                    s.push('\0'); // append implicit NULL terminator to string
-                }
-
-                Ok(Some(
-                    s.as_bytes()
-                        .iter()
-                        .map(|c| Expr::new_literal(*c as i64, Types::Char))
-                        .collect(),
-                ))
-            }
-            _ => Ok(None),
-        }
-    }
-
-    fn initializer_list(&mut self, type_decl: &NEWTypes, token: Token) -> Result<Vec<Expr>, Error> {
-        let element_types = match init_default(type_decl) {
-            ElementType::Multiple(mut m) => match m.clone()[0].clone() {
-                ElementType::Multiple(mut v) => {
-                    v.remove(0);
-                    m[0] = ElementType::Multiple(v);
-                    m
-                }
-                _ => m,
-            },
-            ElementType::Single(s) => {
-                return Err(Error::new(
-                    &token,
-                    ErrorKind::NonAggregateInitializer(type_decl.clone(), s),
-                ))
-            }
-        };
-
-        let mut elements =
-            vec![Expr::new(ExprKind::Nop, ValueKind::Rvalue); type_element_count(type_decl)];
-        let mut element_index = 0;
-        let mut depth;
-        let mut found_des;
+    fn initializer_list(
+        &mut self,
+        token: &Token,
+        designator: Option<VecDeque<Designator>>,
+    ) -> Result<Init, Error> {
+        let mut init_list = Vec::new();
 
         while !self.check(TokenKind::RightBrace) {
-            depth = 0;
-            ((element_index, depth), found_des) = match self.parse_designator(type_decl)? {
-                (_, false) => ((element_index, depth), false),
-                (result, true) => {
-                    self.consume(TokenKind::Equal, "Expect '=' after array designator")?;
-                    ((result), true)
-                }
-            };
-            if let Some((actual, expected)) =
-                init_overflow(type_decl, found_des, element_index + 1, elements.len())
-            {
-                return Err(Error::new(
-                    &token,
-                    ErrorKind::InitializerOverflow(expected, actual),
-                ));
+            let designator = self.parse_designator()?;
+            if designator.is_some() {
+                self.consume(TokenKind::Equal, "Expect '=' after array designator")?;
             }
-            // this is really verbose but i have to check for a valid index beforehand
-            match self.tokens.peek()?.token {
-                TokenType::LeftBrace => {
-                    for e in self
-                        .initializers(&element_types[element_index].at(depth))?
-                        .unwrap()
-                    {
-                        elements[element_index] = e;
-                        element_index += 1;
-                    }
-                }
-                TokenType::String(..)
-                    if element_types[element_index].contains_char_arr().is_some() =>
-                {
-                    for e in self
-                        .initializers(&element_types[element_index].contains_char_arr().unwrap())?
-                        .unwrap()
-                    {
-                        elements[element_index] = e;
-                        element_index += 1;
-                    }
-                }
-                _ => {
-                    elements[element_index] = self.var_assignment()?;
-                    element_index += 1;
-                }
-            }
+
+            let token = self.tokens.peek()?.clone();
+            let init = self.initializers(&token, designator)?;
+
+            init_list.push(Box::new(init));
+
             if !self.check(TokenKind::RightBrace) {
                 self.consume(
                     TokenKind::Comma,
@@ -768,43 +690,20 @@ impl Parser {
             "Expected closing '}' after initializer-list",
         )?;
 
-        Ok(elements)
+        Ok(Init {
+            token: token.clone(),
+            designator,
+            kind: InitKind::Aggr(init_list),
+        })
     }
 
-    fn parse_designator(&mut self, type_decl: &NEWTypes) -> Result<((usize, usize), bool), Error> {
-        let mut result = (0, 0);
-        let mut found = false;
-        if let Some(t) = self.matches(&[TokenKind::Dot]) {
-            // parse member-designator {.member = value}
-            if let NEWTypes::Struct(s) | NEWTypes::Union(s) = type_decl {
+    fn parse_designator(&mut self) -> Result<Option<VecDeque<Designator>>, Error> {
+        let mut result = VecDeque::new();
+
+        while let Some(t) = self.matches(&[TokenKind::Dot, TokenKind::LeftBracket]) {
+            if let TokenType::Dot = t.token {
                 if let Some(ident) = self.matches(&[TokenKind::Ident]) {
-                    let member = ident.unwrap_string();
-                    let index = if let Some(i) = s
-                        .members()
-                        .iter()
-                        .position(|(_, name)| name.unwrap_string() == member)
-                    {
-                        i
-                    } else {
-                        return Err(Error::new(
-                            &ident,
-                            ErrorKind::NonExistantMember(member, type_decl.clone()),
-                        ));
-                    };
-                    result.0 = s
-                        .members()
-                        .iter()
-                        .take_while(|(_, name)| name.unwrap_string() != member)
-                        .fold(0, |acc, (t, _)| acc + type_element_count(t));
-                    found = true;
-                    // parse chained designators
-                    let (index_inc, depth_inc) =
-                        match self.parse_designator(&s.members()[index].0)? {
-                            (_, false) => (0, result.1),
-                            (n, true) => n,
-                        };
-                    result.0 += index_inc;
-                    result.1 += depth_inc;
+                    result.push_back(Designator::Member(ident.unwrap_string()));
                 } else {
                     return Err(Error::new(
                         &t,
@@ -812,52 +711,30 @@ impl Parser {
                     ));
                 }
             } else {
-                return Err(Error::new(
-                    &t,
-                    ErrorKind::Regular(
-                        "Can only use member designator on type 'struct' and 'union' not 'array'",
-                    ),
-                ));
-            }
-        } else if let Some(t) = self.matches(&[TokenKind::LeftBracket]) {
-            // parse array-designator {[3] = value}
-            if let NEWTypes::Array { of, .. } = type_decl {
                 let mut designator_expr = self.var_assignment()?;
-                let designator_constant =
+                let literal =
                     designator_expr.get_literal_constant(&t, &self.env, "Array designator")?;
 
-                if designator_constant < 0 {
+                if literal < 0 {
                     return Err(Error::new(
                         &t,
                         ErrorKind::Regular("Array designator must be positive number"),
                     ));
                 }
-
-                result.0 = designator_constant as usize * type_element_count(of);
-
                 self.consume(
                     TokenKind::RightBracket,
                     "Expect closing ']' after array designator",
                 )?;
 
-                found = true;
-                // parse chained designators
-                let (inc, new_type) = match self.parse_designator(of)? {
-                    (_, false) => (0, result.1),
-                    (n, true) => n,
-                };
-                result.0 += inc;
-                result.1 = new_type;
-            } else {
-                return Err(Error::new(
-                    &t,
-                    ErrorKind::InvalidArrayDesignator(type_decl.clone()),
-                ));
+                result.push_back(Designator::Array(literal))
             }
         }
-        Ok((result, found))
+        if result.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(result))
+        }
     }
-
     fn parse_params(&mut self) -> Result<(Vec<(NEWTypes, Option<Token>)>, bool), Error> {
         let mut params = Vec::new();
         let mut variadic = false;
@@ -1544,26 +1421,6 @@ impl From<(Option<Token>, ErrorKind)> for Error {
     }
 }
 
-// checks that a given element index is still in bound of the flattened init list
-// and returns Some((index,max len of flat list)) if not
-fn init_overflow(
-    type_decl: &NEWTypes,
-    found_designator: bool,
-    element_index: usize,
-    mut len: usize,
-) -> Option<(usize, usize)> {
-    // union intializer can only have single element if no designator used
-    if let (NEWTypes::Union(s), false) = (type_decl, found_designator) {
-        len = type_element_count(&s.members()[0].0);
-    }
-
-    if element_index > len {
-        Some((element_index, len))
-    } else {
-        None
-    }
-}
-
 // get ident from an expression passed to a member access so:
 // expr.member or expr->member
 fn get_ident(expr: &Expr) -> Option<&Token> {
@@ -1778,30 +1635,21 @@ end:
 }
 "#,
         );
-        let expected = r#"Decl: 'printf'
+        let expected = r#"FuncDecl: 'printf'
 Expr:
 -Nop
-InitList: 'a'
--Assignment:
---MemberAccess: 'age'
----Unary: '*'
-----Grouping:
------Binary: '+'
-------Ident: 'a'
-------Literal: 0
---Literal: 21
--Assignment:
---MemberAccess: 'age'
----Unary: '*'
-----Grouping:
------Binary: '+'
-------Ident: 'a'
-------Literal: 1
---Literal: 33
+Init: 'a'
+-Aggregate:
+--Aggregate:
+---Scalar:
+----Literal: 21
+--Scalar:
+---Literal: 33
 Func: 'main'
 -Init: 'i'
---Literal: 0
--Decl: 'b'
+--Scalar:
+---Literal: 0
+-VarDecl: 'b'
 -If:
 --Literal: 1
 --Block:
@@ -1822,7 +1670,8 @@ Func: 'main'
 --Block:
 ---For:
 ----Init: 'i'
------Literal: 5
+-----Scalar:
+------Literal: 5
 ----CompoundAssign: '-='
 -----Ident: 'i'
 -----Literal: 2
@@ -1837,7 +1686,7 @@ Func: 'main'
 ----Ident: 'i'
 ----Literal: 1
 ---Ident: 'b'
--Decl: 'a'
+-VarDecl: 'a'
 -Label: 'end'
 --Return:
 ---Literal: 1"#;
@@ -1859,110 +1708,110 @@ Func: 'main'
         assert_eq!(result, expected);
     }
 
-    fn assert_init_list(input: &str, expected: &str) {
-        let Stmt::Declaration(v) =
-            setup(input).external_declaration().unwrap() else {unreachable!("only passing type")};
+    //     fn assert_init_list(input: &str, expected: &str) {
+    //         let Stmt::Declaration(v) =
+    //             setup(input).external_declaration().unwrap() else {unreachable!("only passing type")};
 
-        let DeclarationKind::InitList(.., actual, _) = v[0].clone() else {unreachable!()};
+    //         let DeclarationKind::Initializer(.., actual, _) = v[0].clone() else {unreachable!()};
 
-        let display_expr = |input| {
-            let mut parser = setup(input);
-            let _ = parser.env.declare_symbol(
-                &token_default!(TokenType::Ident("a".to_string(), 0)),
-                Symbols::TypeDef(NEWTypes::default()),
-            );
+    //         let display_expr = |input| {
+    //             let mut parser = setup(input);
+    //             let _ = parser.env.declare_symbol(
+    //                 &token_default!(TokenType::Ident("a".to_string(), 0)),
+    //                 Symbols::TypeDef(NEWTypes::default()),
+    //             );
 
-            parser.var_assignment().unwrap().to_string()
-        };
-        let expected = expected
-            .split(";\n")
-            .map(display_expr)
-            .collect::<Vec<_>>()
-            .join("\n");
+    //             parser.var_assignment().unwrap().to_string()
+    //         };
+    //         let expected = expected
+    //             .split(";\n")
+    //             .map(display_expr)
+    //             .collect::<Vec<_>>()
+    //             .join("\n");
 
-        assert_eq!(
-            actual
-                .into_iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<_>>()
-                .join("\n"),
-            expected
-        );
-    }
+    //         assert_eq!(
+    //             actual
+    //                 .into_iter()
+    //                 .map(|e| e.to_string())
+    //                 .collect::<Vec<_>>()
+    //                 .join("\n"),
+    //             expected
+    //         );
+    //     }
 
-    #[test]
-    fn array_init_list() {
-        let input = "int a[3] = {1,2};";
-        let expected = r#"
-    a[0] = 1;
-    a[1] = 2"#;
+    //     #[test]
+    //     fn array_init_list() {
+    //         let input = "int a[3] = {1,2};";
+    //         let expected = r#"
+    //     a[0] = 1;
+    //     a[1] = 2"#;
 
-        assert_init_list(input, expected);
-    }
+    //         assert_init_list(input, expected);
+    //     }
 
-    #[test]
-    fn struct_init_list() {
-        let input = r#"struct Foo {
-            char name[5];
-            int* self;
-        } a = {"hei"};"#;
-        let expected = r#"
-    a.name[0] = 'h';
-    a.name[1] = 'e';
-    a.name[2] = 'i';
-    a.name[3] = 0;
-    a.name[4] = 0"#;
+    //     #[test]
+    //     fn struct_init_list() {
+    //         let input = r#"struct Foo {
+    //             char name[5];
+    //             int* self;
+    //         } a = {"hei"};"#;
+    //         let expected = r#"
+    //     a.name[0] = 'h';
+    //     a.name[1] = 'e';
+    //     a.name[2] = 'i';
+    //     a.name[3] = 0;
+    //     a.name[4] = 0"#;
 
-        assert_init_list(input, expected);
-    }
+    //         assert_init_list(input, expected);
+    //     }
 
-    #[test]
-    fn nested_arr_init_list() {
-        let input = "int a[2][3] = {{1},1,2};";
-        let expected = r#"
-    a[0][0] = 1;
-    a[1][0] = 1;
-    a[1][1] = 2"#;
+    //     #[test]
+    //     fn nested_arr_init_list() {
+    //         let input = "int a[2][3] = {{1},1,2};";
+    //         let expected = r#"
+    //     a[0][0] = 1;
+    //     a[1][0] = 1;
+    //     a[1][1] = 2"#;
 
-        assert_init_list(input, expected);
-    }
+    //         assert_init_list(input, expected);
+    //     }
 
-    #[test]
-    fn nested_arr_struct_init() {
-        let input = r#"struct Foo { 
-            struct Bar {
-                int age;
-                long number[3];
-            } other[2]; 
-            int arr[3];
-        } a = {{1,2,[1].age = 21,[1].number[1] = 3,4},.arr = {1,[2] = 2}};"#;
-        let expected = r#"
-a.other[0].age = 1;
-a.other[0].number[0] = 2;
-a.other[1].age = 21;
-a.other[1].number[1] = 3;
-a.other[1].number[2] = 4;
-a.arr[0] = 1;
-a.arr[2] = 2"#;
+    //     #[test]
+    //     fn nested_arr_struct_init() {
+    //         let input = r#"struct Foo {
+    //             struct Bar {
+    //                 int age;
+    //                 long number[3];
+    //             } other[2];
+    //             int arr[3];
+    //         } a = {{1,2,[1].age = 21,[1].number[1] = 3,4},.arr = {1,[2] = 2}};"#;
+    //         let expected = r#"
+    // a.other[0].age = 1;
+    // a.other[0].number[0] = 2;
+    // a.other[1].age = 21;
+    // a.other[1].number[1] = 3;
+    // a.other[1].number[2] = 4;
+    // a.arr[0] = 1;
+    // a.arr[2] = 2"#;
 
-        assert_init_list(input, expected);
-    }
+    //         assert_init_list(input, expected);
+    //     }
 
-    #[test]
-    fn struct_string_init() {
-        let input = r#"struct Foo {
-            char c;
-            char name[3];
-            int arr[2];
-        } a = {2,"me",{1,[0] = 2,4}};"#;
-        let expected = r#"
-    a.c = 2;
-    a.name[0] = 109;
-    a.name[1] = 101;
-    a.name[2] = 0;
-    a.arr[0] = 2;
-    a.arr[1] = 4"#;
+    //     #[test]
+    //     fn struct_string_init() {
+    //         let input = r#"struct Foo {
+    //             char c;
+    //             char name[3];
+    //             int arr[2];
+    //         } a = {2,"me",{1,[0] = 2,4}};"#;
+    //         let expected = r#"
+    //     a.c = 2;
+    //     a.name[0] = 109;
+    //     a.name[1] = 101;
+    //     a.name[2] = 0;
+    //     a.arr[0] = 2;
+    //     a.arr[1] = 4"#;
 
-        assert_init_list(input, expected);
-    }
+    //         assert_init_list(input, expected);
+    //     }
 }

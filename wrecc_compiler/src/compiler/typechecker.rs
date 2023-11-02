@@ -2,6 +2,7 @@ use crate::compiler::common::{environment::*, error::*, expr::*, stmt::*, token:
 use crate::compiler::wrecc_codegen::codegen::align;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 
 #[derive(PartialEq, Debug)]
 enum ScopeKind {
@@ -85,15 +86,24 @@ impl ScopeLevel {
     }
 }
 pub struct TypeChecker {
+    // keeps track of current scope-kind
     scope: ScopeLevel,
+
+    // symbol table, can be indexed via token-index
     env: Vec<Symbols>,
+
+    // TODO: this should be done via control-flow-graph
+    // checks if all paths return from a function
     returns_all_paths: bool,
+
+    // label with its associated label index
     const_labels: HashMap<String, usize>,
+
+    // label index counter
     const_label_count: usize,
 
-    // save encountered switch-statements together with
-    // with info about their cases and defaults, so that
-    // codegen is simpler
+    // save encountered switch-statements together with with info about their cases and defaults,
+    // so that codegen is simpler
     switches: Vec<Vec<Option<i64>>>,
 }
 macro_rules! cast {
@@ -350,11 +360,8 @@ impl TypeChecker {
                 DeclarationKind::Decl(type_decl, _, is_global) => {
                     self.declare_var(type_decl, *is_global)?
                 }
-                DeclarationKind::Init(type_decl, name, expr, is_global) => {
-                    self.init_var(type_decl, name, expr, *is_global)?
-                }
-                DeclarationKind::InitList(type_decl, name, exprs, is_global) => {
-                    self.init_list(type_decl, name, exprs, *is_global)?
+                DeclarationKind::Initializer(type_decl, _, init, is_global) => {
+                    self.init_var(type_decl, init, *is_global)?
                 }
                 DeclarationKind::FuncDecl(..) => (),
             }
@@ -372,58 +379,287 @@ impl TypeChecker {
     fn init_var(
         &mut self,
         type_decl: &mut NEWTypes,
-        var_name: &Token,
-        expr: &mut Expr,
+        init: &mut Init,
         is_global: bool,
     ) -> Result<(), Error> {
-        let mut value_type = self.expr_type(expr)?;
+        self.init_check(type_decl, init, is_global)?;
 
-        crate::arr_decay!(value_type, expr, var_name);
-        self.check_type_compatibility(var_name, type_decl, &value_type)?;
-        self.maybe_cast(type_decl, &value_type, expr);
-
-        if is_global {
-            if !is_constant(expr) {
-                return Err(Error::new(
-                    var_name,
-                    ErrorKind::NotConstantInit("Global variables"),
-                ));
-            }
-        } else {
+        if !is_global {
             self.scope.increment_stack_size(type_decl, &mut self.env);
         }
 
         Ok(())
     }
-
-    fn init_list(
+    fn init_check(
         &mut self,
-        type_decl: &mut NEWTypes,
-        var_name: &Token,
-        assign_exprs: &mut [Expr],
+        type_decl: &NEWTypes,
+        init: &mut Init,
         is_global: bool,
     ) -> Result<(), Error> {
-        // type-check all assigns
-        for e in assign_exprs.iter_mut() {
-            self.expr_type(e)?;
+        if let Some((amount, s)) = Self::is_string_init(&type_decl, init) {
+            init.kind = Self::char_array(init.token.clone(), s, amount)?;
         }
-        // check if every expression is constant if global
-        if is_global {
-            for e in assign_exprs.iter().by_ref() {
-                let ExprKind::Assign { r_expr, .. } = &e.kind else {unreachable!()};
 
-                if !is_constant(r_expr) {
-                    return Err(Error::new(
-                        var_name,
-                        ErrorKind::NotConstantInit("Global variables"),
-                    ));
+        match &mut init.kind {
+            InitKind::Scalar(expr) => self.init_scalar(type_decl, &init.token, expr, is_global),
+            InitKind::Aggr(list) => {
+                if let Some(designator) = &mut init.designator {
+                    let (_, type_decl) =
+                        Self::designator_index(&init.token, type_decl, designator)?;
+
+                    self.init_aggregate(&type_decl, &init.token, list, is_global)
+                } else {
+                    self.init_aggregate(type_decl, &init.token, list, is_global)
                 }
             }
-        } else {
-            self.scope.increment_stack_size(type_decl, &mut self.env);
+        }
+    }
+    fn init_scalar(
+        &mut self,
+        type_decl: &NEWTypes,
+        token: &Token,
+        expr: &mut Expr,
+        is_global: bool,
+    ) -> Result<(), Error> {
+        let mut value_type = self.expr_type(expr)?;
+
+        crate::arr_decay!(value_type, expr, token);
+        self.check_type_compatibility(token, type_decl, &value_type)?;
+        self.maybe_cast(type_decl, &value_type, expr);
+
+        if is_global {
+            if !is_constant(expr) {
+                return Err(Error::new(
+                    token,
+                    ErrorKind::NotConstantInit("Global variables"),
+                ));
+            }
         }
 
         Ok(())
+    }
+    fn init_aggregate(
+        &mut self,
+        type_decl: &NEWTypes,
+        token: &Token,
+        list: &mut Vec<Box<Init>>,
+        is_global: bool,
+    ) -> Result<(), Error> {
+        match type_decl {
+            NEWTypes::Array { .. } | NEWTypes::Struct(_) | NEWTypes::Union(_) => {
+                let mut new_list = Vec::new();
+                let mut i: i64 = 0;
+
+                while !list.is_empty() {
+                    let first = list.first_mut().unwrap();
+
+                    // WARN: problem for codegen bc all designators get popped in typechecker
+                    let (sub_type, mut len) = if let Some(designator) = &mut first.designator {
+                        let (designator_index, sub_type) =
+                            Self::designator_index(&first.token, type_decl, designator)?;
+                        i = designator_index;
+
+                        let len = sub_type.element_amount()
+                            - Self::next_designator(
+                                &first.token,
+                                sub_type.clone(),
+                                designator.clone(),
+                            )? as usize;
+
+                        if designator.is_empty() {
+                            first.designator = None;
+                        }
+
+                        (sub_type, len)
+                    } else {
+                        let sub_type = type_decl.at(i as usize).ok_or_else(|| {
+                            Error::new(
+                                &first.token,
+                                ErrorKind::InitializerOverflow(type_decl.len(), i + 1),
+                            )
+                        })?;
+                        let len = sub_type.element_amount();
+                        (sub_type, len)
+                    };
+
+                    let first = list.first().unwrap().clone();
+
+                    let mut init = if matches!(first.kind, InitKind::Scalar(_))
+                        && !sub_type.is_scalar()
+                        && Self::is_string_init(&sub_type, &first).is_none()
+                    {
+                        if len > list.len() {
+                            len = list.len();
+                        }
+                        if let Some(n) = list[1..len]
+                            .iter()
+                            .position(|init| init.designator.is_some())
+                        {
+                            len = n + 1;
+                        }
+                        let sub_list = list.drain(0..len).collect::<Vec<_>>();
+
+                        Box::new(Init {
+                            kind: InitKind::Aggr(sub_list),
+                            token: first.token,
+                            designator: None,
+                        })
+                    } else {
+                        list.remove(0)
+                    };
+
+                    self.init_check(&sub_type, &mut init, is_global)?;
+                    new_list.push((i, init));
+                    i += 1;
+                }
+
+                *list = Self::remove_duplicate_inits(new_list);
+                Ok(())
+            }
+            _ => match list.as_mut_slice() {
+                [single_init] if matches!(single_init.kind, InitKind::Scalar(_)) => {
+                    self.init_check(type_decl, single_init, is_global)
+                }
+                [single_init] => {
+                    return Err(Error::new(
+                        &single_init.token,
+                        ErrorKind::Regular("Too many braces around scalar initializer"),
+                    ));
+                }
+                [_, second_init, ..] => {
+                    return Err(Error::new(
+                        &second_init.token,
+                        ErrorKind::Regular("Excess elements in scalar initializer"),
+                    ));
+                }
+                [] => {
+                    return Err(Error::new(
+                        token,
+                        ErrorKind::Regular("Scalar initializer cannot be empty"),
+                    ));
+                }
+            },
+        }
+    }
+    // only keeps last instance of an init in list
+    // eg: int a[3] = {0,1,4,[1] = 3} => {0,3,4}
+    fn remove_duplicate_inits(mut list: Vec<(i64, Box<Init>)>) -> Vec<Box<Init>> {
+        list.reverse();
+        list.sort_by(|(i1, _), (i2, _)| i1.cmp(i2));
+        list.dedup_by(|(i1, _), (i2, _)| i1 == i2);
+
+        list.into_iter().map(|(_, init)| init).collect()
+    }
+    fn next_designator<'a>(
+        token: &'a Token,
+        mut type_decl: NEWTypes,
+        mut designator: VecDeque<Designator>,
+    ) -> Result<i64, Error> {
+        // let mut i = 0;
+        // match (designator.pop_front(), type_decl) {
+        //     (Some(Designator::Array(n)), NEWTypes::Array { of, .. }) => {
+        //         i += (n as usize * of.element_amount()) + Self::next_designator(of, designator);
+        //     }
+        //     _ => (),
+        // }
+        // i
+        let mut i = 0;
+        let mut offset;
+        while !designator.is_empty() {
+            (offset, type_decl) = Self::designator_index(token, &type_decl, &mut designator)?;
+            i += offset * type_decl.element_amount() as i64;
+        }
+        Ok(i)
+    }
+    fn designator_index<'a>(
+        token: &'a Token,
+        type_decl: &'a NEWTypes,
+        designator: &mut VecDeque<Designator>,
+    ) -> Result<(i64, NEWTypes), Error> {
+        match (designator.pop_front(), type_decl) {
+            (Some(Designator::Array(n)), NEWTypes::Array { amount, of }) => {
+                if n >= *amount as i64 {
+                    Err(Error::new(token, ErrorKind::DesignatorOverflow(*amount, n)))
+                } else {
+                    Ok((n, *of.clone()))
+                }
+            }
+            (Some(Designator::Member(_)), NEWTypes::Array { .. }) => {
+                return Err(Error::new(
+                    token,
+                    ErrorKind::Regular(
+                        "Can only use member designator on type 'struct' and 'union' not 'array'",
+                    ),
+                ))
+            }
+
+            (Some(Designator::Array(_)), NEWTypes::Struct(_) | NEWTypes::Union(_)) => Err(
+                Error::new(token, ErrorKind::InvalidArrayDesignator(type_decl.clone())),
+            ),
+            (Some(Designator::Member(m)), NEWTypes::Struct(s) | NEWTypes::Union(s)) => {
+                if let Some(i) = s
+                    .members()
+                    .iter()
+                    .position(|(_, m_token)| m == m_token.unwrap_string())
+                {
+                    // unions only have single index
+                    if let NEWTypes::Union(_) = type_decl {
+                        Ok((0, s.member_type(&m)))
+                    } else {
+                        Ok((i as i64, s.member_type(&m)))
+                    }
+                } else {
+                    Err(Error::new(
+                        token,
+                        ErrorKind::NonExistantMember(m, type_decl.clone()),
+                    ))
+                }
+            }
+
+            (None, _) => {
+                unreachable!("designator should only be popped if still holds elements");
+                // Ok((0, type_decl.clone()))
+            }
+            (Some(_), _) => Err(Error::new(
+                token,
+                ErrorKind::ScalarDesignator(type_decl.clone()),
+            )),
+        }
+    }
+    fn is_string_init(type_decl: &NEWTypes, init: &Init) -> Option<(usize, String)> {
+        if let Some(amount) = type_decl.is_char_array() {
+            if let InitKind::Scalar(Expr { kind: ExprKind::String(s), .. }) = &init.kind {
+                return Some((amount, s.unwrap_string()));
+            }
+        }
+        None
+    }
+    fn char_array(token: Token, mut s: String, amount: usize) -> Result<InitKind, Error> {
+        // char s[] = "abc" identical to char s[] = {'a','b','c','\0'} (6.7.8)
+        if amount < s.len() {
+            return Err(Error::new(
+                &token,
+                ErrorKind::TooLong("Initializer-string", amount, s.len()),
+            ));
+        }
+        let mut diff = amount - s.len();
+        while diff > 0 {
+            diff -= 1;
+            s.push('\0'); // append implicit NULL terminator to string
+        }
+
+        Ok(InitKind::Aggr(
+            s.as_bytes()
+                .iter()
+                .map(|c| {
+                    Box::new(Init {
+                        token: token.clone(),
+                        kind: InitKind::Scalar(Expr::new_literal(*c as i64, Types::Char)),
+                        designator: None,
+                    })
+                })
+                .collect(),
+        ))
     }
 
     fn check_type_compatibility(

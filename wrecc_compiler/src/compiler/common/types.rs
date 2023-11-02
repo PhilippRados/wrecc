@@ -32,113 +32,6 @@ pub enum NEWTypes {
     Enum(Option<String>, Vec<(Token, i32)>),
 }
 
-mod struct_ref {
-    use super::NEWTypes;
-    use super::Token;
-    use super::TokenType;
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    type IsComplete = bool;
-    type InDefinition = bool;
-
-    thread_local! {
-        static CUSTOMS: RefCell<Vec<Rc<Vec<(NEWTypes, Token)>>>> = Default::default();
-        static CUSTOMS_INFO: RefCell<Vec<(IsComplete,InDefinition)>> = Default::default();
-    }
-
-    #[derive(Clone, PartialEq, Debug)]
-    pub struct StructRef {
-        index: usize,
-        kind: TokenType,
-    }
-
-    impl StructRef {
-        pub fn new(kind: TokenType, is_definition: bool) -> StructRef {
-            CUSTOMS_INFO.with(|list| {
-                list.borrow_mut().push((false, is_definition));
-            });
-            CUSTOMS.with(|list| {
-                let mut types = list.borrow_mut();
-                let index = types.len();
-                types.push(Rc::new(vec![]));
-
-                StructRef { index, kind }
-            })
-        }
-        pub fn get_kind(&self) -> &TokenType {
-            &self.kind
-        }
-
-        pub fn get(&self) -> Rc<Vec<(NEWTypes, Token)>> {
-            CUSTOMS.with(|list| list.borrow()[self.index].clone())
-        }
-        pub(crate) fn update(&self, members: Vec<(NEWTypes, Token)>) {
-            CUSTOMS_INFO.with(|list| {
-                let mut types = list.borrow_mut();
-                types[self.index].0 = true;
-            });
-            CUSTOMS_INFO.with(|list| {
-                let mut types = list.borrow_mut();
-                types[self.index].1 = false;
-            });
-            CUSTOMS.with(|list| {
-                let mut types = list.borrow_mut();
-                types[self.index] = members.into();
-            });
-        }
-        pub fn is_complete(&self) -> bool {
-            CUSTOMS_INFO.with(|list| list.borrow()[self.index].0)
-        }
-        pub fn in_definition(&self) -> bool {
-            CUSTOMS_INFO.with(|list| list.borrow()[self.index].1)
-        }
-
-        pub fn being_defined(&self) {
-            CUSTOMS_INFO.with(|list| list.borrow_mut()[self.index].1 = true)
-        }
-    }
-}
-#[derive(Clone, PartialEq, Debug)]
-pub enum StructInfo {
-    Named(String, StructRef),
-    Anonymous(Vec<(NEWTypes, Token)>),
-}
-impl StructInfo {
-    pub fn members(&self) -> Rc<Vec<(NEWTypes, Token)>> {
-        match self {
-            StructInfo::Named(_, s) => s.get(),
-            StructInfo::Anonymous(m) => Rc::new(m.clone()),
-        }
-    }
-    pub fn member_offset(&self, member_to_find: &str) -> usize {
-        self.members()
-            .iter()
-            .take_while(|(_, name)| name.unwrap_string() != member_to_find)
-            .fold(0, |acc, (t, _)| acc + t.size())
-    }
-    pub fn member_type(&self, member_to_find: &str) -> NEWTypes {
-        self.members()
-            .iter()
-            .find(|(_, name)| name.unwrap_string() == member_to_find)
-            .unwrap()
-            .0
-            .clone()
-    }
-    fn name(&self) -> &str {
-        match self {
-            StructInfo::Named(name, _) => name,
-            StructInfo::Anonymous(_) => "<anonymous>",
-        }
-    }
-    pub fn is_complete(&self) -> bool {
-        match self {
-            Self::Named(_, s) => s.is_complete(),
-            Self::Anonymous(_) => true,
-        }
-    }
-}
-
 impl TypeInfo for NEWTypes {
     fn size(&self) -> usize {
         match self {
@@ -209,19 +102,7 @@ impl Display for NEWTypes {
         )
     }
 }
-#[macro_export]
-macro_rules! arr_decay {
-    ($arr:expr,$ast:expr,$token:expr) => {
-        if let NEWTypes::Array { of, .. } = $arr {
-            $arr = NEWTypes::Pointer(of);
 
-            $ast.kind = ExprKind::Unary {
-                token: Token { token: TokenType::Amp, ..$token.clone() },
-                right: Box::new($ast.clone()),
-            };
-        }
-    };
-}
 impl NEWTypes {
     pub fn default() -> NEWTypes {
         NEWTypes::Primitive(Types::Int)
@@ -353,29 +234,64 @@ impl NEWTypes {
             None
         }
     }
-}
+    pub fn is_char_array(&self) -> Option<usize> {
+        if let NEWTypes::Array { amount, of } = self {
+            if let NEWTypes::Primitive(Types::Char) = **of {
+                return Some(*amount);
+            }
+        }
+        None
+    }
+    // returns the amount of scalar elements in a type
+    pub fn element_amount(&self) -> usize {
+        match self {
+            NEWTypes::Array { amount, of } => amount * of.element_amount(),
+            NEWTypes::Struct(s) => {
+                let mut result = 0;
+                for (member_type, _) in s.members().iter() {
+                    result += member_type.element_amount();
+                }
+                result
+            }
+            NEWTypes::Union(s) => {
+                if let Some((member_type, _)) = s.members().first() {
+                    member_type.element_amount()
+                } else {
+                    0
+                }
+            }
+            _ => 1,
+        }
+    }
+    pub fn len(&self) -> usize {
+        match self {
+            NEWTypes::Array { amount, .. } => *amount,
+            NEWTypes::Struct(s) => s.members().len(),
+            _ => 1,
+        }
+    }
 
-// converts token of aggregate type into its corresponding type
-#[macro_export]
-macro_rules! into_newtype {
-    ($token:expr,$name:expr,$value:expr) => {
-        match $token {
-            TokenType::Struct => NEWTypes::Struct(StructInfo::Named($name, $value.unwrap_aggr())),
-            TokenType::Union => NEWTypes::Union(StructInfo::Named($name, $value.unwrap_aggr())),
-            TokenType::Enum => NEWTypes::Enum(Some($name), $value.unwrap_enum()),
-            _ => unreachable!("should only be used for aggregate types"),
+    // returns the type of the field at index
+    pub fn at(&self, index: usize) -> Option<NEWTypes> {
+        match self {
+            NEWTypes::Array { of, amount } => {
+                if index >= *amount {
+                    None
+                } else {
+                    Some(of.as_ref().clone())
+                }
+            }
+            NEWTypes::Struct(s) => s.members().get(index).map(|(ty, _)| ty.clone()),
+            NEWTypes::Union(s) => {
+                if index > 0 {
+                    None
+                } else {
+                    s.members().first().map(|(ty, _)| ty.clone())
+                }
+            }
+            _ => Some(self.clone()),
         }
-    };
-    ($token:expr,$value:expr) => {
-        match $token {
-            TokenType::Struct => NEWTypes::Struct(StructInfo::Anonymous($value)),
-            TokenType::Union => NEWTypes::Union(StructInfo::Anonymous($value)),
-            _ => unreachable!("should only be used for aggregate types"),
-        }
-    };
-    ($value:expr) => {
-        NEWTypes::Enum(None, $value)
-    };
+    }
 }
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Types {
@@ -464,5 +380,168 @@ pub fn integer_type(n: i64) -> Types {
         Types::Int
     } else {
         Types::Long
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum StructInfo {
+    Named(String, StructRef),
+    Anonymous(Vec<(NEWTypes, Token)>),
+}
+impl StructInfo {
+    pub fn members(&self) -> Rc<Vec<(NEWTypes, Token)>> {
+        match self {
+            StructInfo::Named(_, s) => s.get(),
+            StructInfo::Anonymous(m) => Rc::new(m.clone()),
+        }
+    }
+    pub fn member_offset(&self, member_to_find: &str) -> usize {
+        self.members()
+            .iter()
+            .take_while(|(_, name)| name.unwrap_string() != member_to_find)
+            .fold(0, |acc, (t, _)| acc + t.size())
+    }
+    pub fn member_type(&self, member_to_find: &str) -> NEWTypes {
+        self.members()
+            .iter()
+            .find(|(_, name)| name.unwrap_string() == member_to_find)
+            .unwrap()
+            .0
+            .clone()
+    }
+    fn name(&self) -> &str {
+        match self {
+            StructInfo::Named(name, _) => name,
+            StructInfo::Anonymous(_) => "<anonymous>",
+        }
+    }
+    pub fn is_complete(&self) -> bool {
+        match self {
+            Self::Named(_, s) => s.is_complete(),
+            Self::Anonymous(_) => true,
+        }
+    }
+}
+
+mod struct_ref {
+    use super::NEWTypes;
+    use super::Token;
+    use super::TokenType;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    type IsComplete = bool;
+    type InDefinition = bool;
+
+    thread_local! {
+        static CUSTOMS: RefCell<Vec<Rc<Vec<(NEWTypes, Token)>>>> = Default::default();
+        static CUSTOMS_INFO: RefCell<Vec<(IsComplete,InDefinition)>> = Default::default();
+    }
+
+    #[derive(Clone, PartialEq, Debug)]
+    pub struct StructRef {
+        index: usize,
+        kind: TokenType,
+    }
+
+    impl StructRef {
+        pub fn new(kind: TokenType, is_definition: bool) -> StructRef {
+            CUSTOMS_INFO.with(|list| {
+                list.borrow_mut().push((false, is_definition));
+            });
+            CUSTOMS.with(|list| {
+                let mut types = list.borrow_mut();
+                let index = types.len();
+                types.push(Rc::new(vec![]));
+
+                StructRef { index, kind }
+            })
+        }
+        pub fn get_kind(&self) -> &TokenType {
+            &self.kind
+        }
+
+        pub fn get(&self) -> Rc<Vec<(NEWTypes, Token)>> {
+            CUSTOMS.with(|list| list.borrow()[self.index].clone())
+        }
+        pub(crate) fn update(&self, members: Vec<(NEWTypes, Token)>) {
+            CUSTOMS_INFO.with(|list| {
+                let mut types = list.borrow_mut();
+                types[self.index].0 = true;
+            });
+            CUSTOMS_INFO.with(|list| {
+                let mut types = list.borrow_mut();
+                types[self.index].1 = false;
+            });
+            CUSTOMS.with(|list| {
+                let mut types = list.borrow_mut();
+                types[self.index] = members.into();
+            });
+        }
+        pub fn is_complete(&self) -> bool {
+            CUSTOMS_INFO.with(|list| list.borrow()[self.index].0)
+        }
+        pub fn in_definition(&self) -> bool {
+            CUSTOMS_INFO.with(|list| list.borrow()[self.index].1)
+        }
+
+        pub fn being_defined(&self) {
+            CUSTOMS_INFO.with(|list| list.borrow_mut()[self.index].1 = true)
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! arr_decay {
+    ($arr:expr,$ast:expr,$token:expr) => {
+        if let NEWTypes::Array { of, .. } = $arr {
+            $arr = NEWTypes::Pointer(of);
+
+            $ast.kind = ExprKind::Unary {
+                token: Token { token: TokenType::Amp, ..$token.clone() },
+                right: Box::new($ast.clone()),
+            };
+        }
+    };
+}
+// converts token of aggregate type into its corresponding type
+#[macro_export]
+macro_rules! into_newtype {
+    ($token:expr,$name:expr,$value:expr) => {
+        match $token {
+            TokenType::Struct => NEWTypes::Struct(StructInfo::Named($name, $value.unwrap_aggr())),
+            TokenType::Union => NEWTypes::Union(StructInfo::Named($name, $value.unwrap_aggr())),
+            TokenType::Enum => NEWTypes::Enum(Some($name), $value.unwrap_enum()),
+            _ => unreachable!("should only be used for aggregate types"),
+        }
+    };
+    ($token:expr,$value:expr) => {
+        match $token {
+            TokenType::Struct => NEWTypes::Struct(StructInfo::Anonymous($value)),
+            TokenType::Union => NEWTypes::Union(StructInfo::Anonymous($value)),
+            _ => unreachable!("should only be used for aggregate types"),
+        }
+    };
+    ($value:expr) => {
+        NEWTypes::Enum(None, $value)
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multidimensional_array_size() {
+        let input = NEWTypes::Array {
+            amount: 2,
+            of: Box::new(NEWTypes::Array {
+                amount: 2,
+                of: Box::new(NEWTypes::Primitive(Types::Int)),
+            }),
+        };
+        let actual = input.element_amount();
+
+        assert_eq!(actual, 4);
     }
 }

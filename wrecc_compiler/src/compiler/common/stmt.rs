@@ -2,6 +2,7 @@ use crate::compiler::common::expr::*;
 use crate::compiler::common::{token::Token, types::NEWTypes};
 
 use super::expr::PrintIndent;
+use std::collections::VecDeque;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Stmt {
@@ -33,8 +34,37 @@ pub enum Stmt {
 pub enum DeclarationKind {
     Decl(NEWTypes, Token, bool),
     FuncDecl(Token),
-    Init(NEWTypes, Token, Expr, bool),
-    InitList(NEWTypes, Token, Vec<Expr>, bool),
+    Initializer(NEWTypes, Token, Init, bool),
+}
+#[derive(PartialEq, Clone, Debug)]
+pub struct Init {
+    pub kind: InitKind,
+    pub designator: Option<VecDeque<Designator>>,
+    pub token: Token,
+}
+#[derive(PartialEq, Clone, Debug)]
+pub enum InitKind {
+    Scalar(Expr),
+    Aggr(Vec<Box<Init>>),
+}
+impl PrintIndent for InitKind {
+    fn print_indent(&self, indent_level: usize) -> String {
+        match self {
+            InitKind::Scalar(expr) => format!("Scalar:\n{}", indent_fmt(expr, indent_level + 1)),
+            InitKind::Aggr(list) => format!(
+                "Aggregate:\n{}",
+                list.iter()
+                    .map(|init| indent_fmt(&init.kind, indent_level + 1))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+        }
+    }
+}
+#[derive(PartialEq, Clone, Debug)]
+pub enum Designator {
+    Array(i64),
+    Member(String),
 }
 
 impl PrintIndent for Stmt {
@@ -44,23 +74,18 @@ impl PrintIndent for Stmt {
             Stmt::Declaration(decls) => decls
                 .iter()
                 .map(|d| match d {
-                    DeclarationKind::Init(_, t, expr, _) => {
+                    DeclarationKind::Initializer(_, t, init, _) => {
                         format!(
                             "Init: '{}'\n{}",
                             t.unwrap_string(),
-                            indent_fmt(expr, indent_level + 1)
+                            indent_fmt(&init.kind, indent_level + 1)
                         )
                     }
-                    DeclarationKind::InitList(_, t, exprs, _) => {
-                        let exprs: String = exprs
-                            .iter()
-                            .map(|e| indent_fmt(e, indent_level + 1))
-                            .collect::<Vec<String>>()
-                            .join("\n");
-                        format!("InitList: '{}'\n{}", t.unwrap_string(), exprs)
+                    DeclarationKind::Decl(_, t, _) => {
+                        format!("VarDecl: '{}'", t.unwrap_string())
                     }
-                    DeclarationKind::Decl(_, t, _) | DeclarationKind::FuncDecl(t) => {
-                        format!("Decl: '{}'", t.unwrap_string())
+                    DeclarationKind::FuncDecl(t) => {
+                        format!("FuncDecl: '{}'", t.unwrap_string())
                     }
                 })
                 .collect::<Vec<_>>()

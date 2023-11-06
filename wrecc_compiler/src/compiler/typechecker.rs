@@ -2,7 +2,6 @@ use crate::compiler::common::{environment::*, error::*, expr::*, stmt::*, token:
 use crate::compiler::wrecc_codegen::codegen::align;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::collections::VecDeque;
 
 #[derive(PartialEq, Debug)]
 enum ScopeKind {
@@ -402,16 +401,7 @@ impl TypeChecker {
 
         match &mut init.kind {
             InitKind::Scalar(expr) => self.init_scalar(type_decl, &init.token, expr, is_global),
-            InitKind::Aggr(list) => {
-                if let Some(designator) = &mut init.designator {
-                    let (_, type_decl) =
-                        Self::designator_index(&init.token, type_decl, designator)?;
-
-                    self.init_aggregate(&type_decl, &init.token, list, is_global)
-                } else {
-                    self.init_aggregate(type_decl, &init.token, list, is_global)
-                }
-            }
+            InitKind::Aggr(list) => self.init_aggregate(type_decl, &init.token, list, is_global),
         }
     }
     fn init_scalar(
@@ -448,39 +438,32 @@ impl TypeChecker {
         match type_decl {
             NEWTypes::Array { .. } | NEWTypes::Struct(_) | NEWTypes::Union(_) => {
                 let mut new_list = Vec::new();
-                let mut i: i64 = 0;
+                let mut objects = CurrentObjects::new(type_decl.clone());
 
                 while !list.is_empty() {
                     let first = list.first_mut().unwrap();
 
                     // WARN: problem for codegen bc all designators get popped in typechecker
-                    let (sub_type, mut len) = if let Some(designator) = &mut first.designator {
-                        let (designator_index, sub_type) =
-                            Self::designator_index(&first.token, type_decl, designator)?;
-                        i = designator_index;
+                    if let Some(designator) = &mut first.designator {
+                        objects.clear();
 
-                        let len = sub_type.element_amount()
-                            - Self::next_designator(
-                                &first.token,
-                                sub_type.clone(),
-                                designator.clone(),
-                            )? as usize;
-
-                        if designator.is_empty() {
-                            first.designator = None;
+                        while let Some(d) = designator.remove(0) {
+                            objects.update(Self::designator_index(token, &objects.current().1, d)?);
                         }
-
-                        (sub_type, len)
+                        first.designator = None;
                     } else {
-                        let sub_type = type_decl.at(i as usize).ok_or_else(|| {
+                        let (i, current_type) = objects.current();
+                        let sub_type = current_type.at(*i as usize).ok_or_else(|| {
                             Error::new(
                                 &first.token,
-                                ErrorKind::InitializerOverflow(type_decl.len(), i + 1),
+                                ErrorKind::InitializerOverflow(current_type.len(), i + 1),
                             )
                         })?;
-                        let len = sub_type.element_amount();
-                        (sub_type, len)
-                    };
+
+                        objects.0.push((0, sub_type));
+                    }
+                    let (i, sub_type) = objects.current();
+                    let mut len = sub_type.element_amount() - *i as usize;
 
                     let first = list.first().unwrap().clone();
 
@@ -509,8 +492,11 @@ impl TypeChecker {
                     };
 
                     self.init_check(&sub_type, &mut init, is_global)?;
-                    new_list.push((i, init));
-                    i += 1;
+                    new_list.push((objects.indices(), init));
+
+                    // pop off sub-type
+                    objects.0.pop();
+                    objects.update_current();
                 }
 
                 *list = Self::remove_duplicate_inits(new_list);
@@ -527,10 +513,7 @@ impl TypeChecker {
                     ));
                 }
                 [_, second_init, ..] => {
-                    return Err(Error::new(
-                        &second_init.token,
-                        ErrorKind::Regular("Excess elements in scalar initializer"),
-                    ));
+                    return Err(Error::new(&second_init.token, ErrorKind::ScalarOverflow));
                 }
                 [] => {
                     return Err(Error::new(
@@ -543,48 +526,27 @@ impl TypeChecker {
     }
     // only keeps last instance of an init in list
     // eg: int a[3] = {0,1,4,[1] = 3} => {0,3,4}
-    fn remove_duplicate_inits(mut list: Vec<(i64, Box<Init>)>) -> Vec<Box<Init>> {
+    fn remove_duplicate_inits(mut list: Vec<(Vec<i64>, Box<Init>)>) -> Vec<Box<Init>> {
         list.reverse();
         list.sort_by(|(i1, _), (i2, _)| i1.cmp(i2));
         list.dedup_by(|(i1, _), (i2, _)| i1 == i2);
 
         list.into_iter().map(|(_, init)| init).collect()
     }
-    fn next_designator<'a>(
-        token: &'a Token,
-        mut type_decl: NEWTypes,
-        mut designator: VecDeque<Designator>,
-    ) -> Result<i64, Error> {
-        // let mut i = 0;
-        // match (designator.pop_front(), type_decl) {
-        //     (Some(Designator::Array(n)), NEWTypes::Array { of, .. }) => {
-        //         i += (n as usize * of.element_amount()) + Self::next_designator(of, designator);
-        //     }
-        //     _ => (),
-        // }
-        // i
-        let mut i = 0;
-        let mut offset;
-        while !designator.is_empty() {
-            (offset, type_decl) = Self::designator_index(token, &type_decl, &mut designator)?;
-            i += offset * type_decl.element_amount() as i64;
-        }
-        Ok(i)
-    }
     fn designator_index<'a>(
         token: &'a Token,
         type_decl: &'a NEWTypes,
-        designator: &mut VecDeque<Designator>,
+        designator: Designator,
     ) -> Result<(i64, NEWTypes), Error> {
-        match (designator.pop_front(), type_decl) {
-            (Some(Designator::Array(n)), NEWTypes::Array { amount, of }) => {
+        match (designator, type_decl) {
+            (Designator::Array(n), NEWTypes::Array { amount, of }) => {
                 if n >= *amount as i64 {
                     Err(Error::new(token, ErrorKind::DesignatorOverflow(*amount, n)))
                 } else {
                     Ok((n, *of.clone()))
                 }
             }
-            (Some(Designator::Member(_)), NEWTypes::Array { .. }) => {
+            (Designator::Member(_), NEWTypes::Array { .. }) => {
                 return Err(Error::new(
                     token,
                     ErrorKind::Regular(
@@ -593,10 +555,11 @@ impl TypeChecker {
                 ))
             }
 
-            (Some(Designator::Array(_)), NEWTypes::Struct(_) | NEWTypes::Union(_)) => Err(
-                Error::new(token, ErrorKind::InvalidArrayDesignator(type_decl.clone())),
-            ),
-            (Some(Designator::Member(m)), NEWTypes::Struct(s) | NEWTypes::Union(s)) => {
+            (Designator::Array(_), NEWTypes::Struct(_) | NEWTypes::Union(_)) => Err(Error::new(
+                token,
+                ErrorKind::InvalidArrayDesignator(type_decl.clone()),
+            )),
+            (Designator::Member(m), NEWTypes::Struct(s) | NEWTypes::Union(s)) => {
                 if let Some(i) = s
                     .members()
                     .iter()
@@ -616,13 +579,9 @@ impl TypeChecker {
                 }
             }
 
-            (None, _) => {
-                unreachable!("designator should only be popped if still holds elements");
-                // Ok((0, type_decl.clone()))
-            }
-            (Some(_), _) => Err(Error::new(
+            (..) => Err(Error::new(
                 token,
-                ErrorKind::ScalarDesignator(type_decl.clone()),
+                ErrorKind::NonAggregateDesignator(type_decl.clone()),
             )),
         }
     }
@@ -1379,6 +1338,45 @@ impl TypeChecker {
         }
     }
 }
+struct CurrentObjects(Vec<(i64, NEWTypes)>);
+impl CurrentObjects {
+    fn new(type_decl: NEWTypes) -> Self {
+        CurrentObjects(vec![(0, type_decl)])
+    }
+    fn update(&mut self, (i, sub_type): (i64, NEWTypes)) {
+        self.0.last_mut().unwrap().0 = i;
+        self.0.push((0, sub_type));
+    }
+    fn current(&self) -> &(i64, NEWTypes) {
+        self.0.last().unwrap()
+    }
+    fn indices(&self) -> Vec<i64> {
+        self.0.iter().map(|(i, _)| *i).collect()
+    }
+    fn update_current(&mut self) {
+        let mut remove_idx = None;
+        for (obj_index, (i, type_decl)) in self.0.iter().enumerate().rev() {
+            if obj_index != 0 && (i + 1 >= type_decl.len() as i64) {
+                remove_idx = Some(obj_index);
+            } else {
+                break;
+            }
+        }
+
+        // if new current objects also full then remove too
+        if let Some(i) = remove_idx {
+            self.0.truncate(i);
+        }
+
+        // increment the index of the current object
+        self.0.last_mut().unwrap().0 += 1;
+    }
+    // removes all objects except base-type
+    fn clear(&mut self) {
+        self.0.truncate(1);
+    }
+}
+
 pub fn align_by(mut offset: usize, type_size: usize) -> usize {
     let remainder = offset % type_size;
     if remainder != 0 {
@@ -1495,13 +1493,16 @@ mod tests {
     use crate::preprocess;
     use std::path::Path;
 
+    fn setup(input: &str) -> Parser {
+        let pp_tokens = preprocess(Path::new(""), input).unwrap();
+        let mut scanner = Scanner::new(pp_tokens);
+        let tokens = scanner.scan_token().unwrap();
+
+        Parser::new(tokens)
+    }
     macro_rules! assert_type {
         ($input:expr,$expected_type:pat) => {
-            let pp_tokens = preprocess(Path::new(""), $input).unwrap();
-            let mut scanner = Scanner::new(pp_tokens);
-            let tokens = scanner.scan_token().unwrap();
-
-            let mut parser = Parser::new(tokens);
+            let mut parser = setup($input);
             let mut expr = parser.expression().unwrap();
 
             let mut typechecker = TypeChecker::new(vec![]);
@@ -1518,11 +1519,7 @@ mod tests {
 
     macro_rules! assert_type_err {
         ($input:expr,$expected_err:pat) => {
-            let pp_tokens = preprocess(Path::new(""), $input).unwrap();
-            let mut scanner = Scanner::new(pp_tokens);
-            let tokens = scanner.scan_token().unwrap();
-
-            let mut parser = Parser::new(tokens);
+            let mut parser = setup($input);
             let mut expr = parser.expression().unwrap();
 
             let mut typechecker = TypeChecker::new(vec![]);
@@ -1539,12 +1536,7 @@ mod tests {
 
     macro_rules! assert_const_expr {
         ($input: expr, $expected: expr, $symbols: expr) => {
-            let pp_tokens = preprocess(Path::new(""), $input).unwrap();
-            let mut scanner = Scanner::new(pp_tokens);
-
-            let tokens = scanner.scan_token().unwrap();
-
-            let mut parser = Parser::new(tokens);
+            let mut parser = setup($input);
             for (name, type_decl) in $symbols {
                 parser
                     .env
@@ -1571,6 +1563,17 @@ mod tests {
 
             assert_eq!(actual, $expected);
         };
+    }
+    fn setup_init_list(input: &str) -> Result<String, Error> {
+        // TODO: maybe be can parser.parse() so that external declaration doesnt have to be public
+        let Stmt::Declaration(mut init) =
+                setup(input).external_declaration().unwrap() else {unreachable!("only passing type")};
+
+        let DeclarationKind::Initializer(type_decl,_,mut init,_) = init.remove(0) else  {unreachable!("only passing type")};
+
+        TypeChecker::new(vec![]).init_check(&type_decl, &mut init, false)?;
+
+        Ok(init.kind.to_string())
     }
 
     #[test]
@@ -1816,5 +1819,235 @@ mod tests {
         labels.push(Some(3));
 
         assert_eq!(scopes, expected);
+    }
+
+    #[test]
+    fn array_init_list() {
+        let actual = setup_init_list("int a[3] = {1,2};");
+        let expected = "\
+Aggregate:
+-Scalar:
+--Literal: 1
+-Scalar:
+--Literal: 2"
+            .to_string();
+
+        assert_eq!(actual, Ok(expected));
+    }
+    #[test]
+    fn union_init() {
+        let actual = setup_init_list(
+            r#"union Foo {
+                long n;
+                int s[3];
+            } a = {3,.s = 1,2};"#,
+        );
+        let expected = "\
+Aggregate:
+-Aggregate:
+--Scalar:
+---Literal: 1
+--Scalar:
+---Literal: 2"
+            .to_string();
+
+        assert_eq!(actual, Ok(expected));
+    }
+    #[test]
+    fn union_overflow() {
+        let actual = setup_init_list(
+            r#"union Foo {
+                long n;
+                int s[3];
+            } a = {3,.s[2] = 1,2};"#,
+        );
+
+        assert!(matches!(
+            actual,
+            Err(Error {
+                kind: ErrorKind::InitializerOverflow(1, 2),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn struct_string_init() {
+        let actual = setup_init_list(
+            r#"struct Foo {
+                char name[5];
+                int* self;
+            } a = {"hei"};"#,
+        );
+        let expected = "\
+Aggregate:
+-Aggregate:
+--Scalar:
+---Literal: 104
+--Scalar:
+---Literal: 101
+--Scalar:
+---Literal: 105
+--Scalar:
+---Literal: 0
+--Scalar:
+---Literal: 0"
+            .to_string();
+
+        assert_eq!(actual, Ok(expected));
+    }
+
+    #[test]
+    fn multidimensional_array() {
+        let actual = setup_init_list("int a[2][3] = {{1},1,2};");
+        let expected = "\
+Aggregate:
+-Aggregate:
+--Scalar:
+---Literal: 1
+-Aggregate:
+--Scalar:
+---Literal: 1
+--Scalar:
+---Literal: 2"
+            .to_string();
+
+        assert_eq!(actual, Ok(expected));
+    }
+
+    #[test]
+    fn nested_arr_struct_init() {
+        let actual = setup_init_list(
+            r#"struct Foo {
+                struct Bar {
+                    int age;
+                    long number[3];
+                } other[2];
+                int arr[3];
+            } a = {{1,2,[1].age = 21,[1].number[1] = 3,4},.arr = {1,[2] = 2}};"#,
+        );
+        let expected = "\
+Aggregate:
+-Aggregate:
+--Aggregate:
+---Scalar:
+----Literal: 1
+---Aggregate:
+----Scalar:
+-----Cast: 'long'
+------Literal: 2
+--Scalar:
+---Literal: 21
+--Scalar:
+---Cast: 'long'
+----Literal: 3
+--Scalar:
+---Cast: 'long'
+----Literal: 4
+-Aggregate:
+--Scalar:
+---Literal: 1
+--Scalar:
+---Literal: 2"
+            .to_string();
+
+        assert_eq!(actual, Ok(expected));
+    }
+
+    #[test]
+    fn nested_struct_string_init() {
+        let actual = setup_init_list(
+            r#"struct Foo {
+                char c;
+                char name[3];
+                int arr[2];
+            } a = {2,"me",{1,[0] = 2,4}};"#,
+        );
+        let expected = "\
+Aggregate:
+-Scalar:
+--Cast: 'char'
+---Literal: 2
+-Aggregate:
+--Scalar:
+---Literal: 109
+--Scalar:
+---Literal: 101
+--Scalar:
+---Literal: 0
+-Aggregate:
+--Scalar:
+---Literal: 2
+--Scalar:
+---Literal: 4"
+            .to_string();
+
+        assert_eq!(actual, Ok(expected));
+    }
+    #[test]
+    fn nested_union_designators() {
+        let actual = setup_init_list(
+            "struct Outer {
+                struct {
+                  char s[2];
+                  union {
+                    long n;
+                    char arr[3];
+                  } inner_union;
+                } inner_struct;
+              } a = {.inner_struct.inner_union.arr = '1', '3'};",
+        );
+        let expected = "\
+Aggregate:
+-Aggregate:
+--Scalar:
+---Literal: 49
+--Scalar:
+---Literal: 51"
+            .to_string();
+
+        assert_eq!(actual, Ok(expected));
+    }
+    #[test]
+    fn scalar_designator_overflow() {
+        let actual = setup_init_list(
+            "struct Outer {
+                struct {
+                  char s[2];
+                  union {
+                    long n;
+                    char arr[3];
+                  } inner_union;
+                } inner_struct;
+              } a = {.inner_struct.inner_union.arr[0] = {1, 3}};",
+        );
+
+        assert!(matches!(
+            actual,
+            Err(Error { kind: ErrorKind::ScalarOverflow, .. })
+        ));
+    }
+    #[test]
+    fn partially_overrides_prev_init() {
+        let actual = setup_init_list(
+            "struct Outer {
+                struct {
+                  char s[2];
+                  union {
+                    long n;
+                    char arr[3];
+                  } inner_union;
+                } inner_struct;
+              } a = {.inner_struct.inner_union.arr = 1, 3,.inner_struct.inner_union.arr[1] = 5};",
+        );
+        let expected = "\
+Aggregate:
+-Scalar:
+--Literal: 1
+-Scalar:
+--Literal: 5"
+            .to_string();
+
+        assert_eq!(actual, Ok(expected));
     }
 }

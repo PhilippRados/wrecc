@@ -33,7 +33,6 @@ pub enum ErrorKind {
     InvalidArrayDesignator(NEWTypes),
     TooLong(&'static str, usize, usize),
     NonAggregateInitializer(NEWTypes, NEWTypes),
-    InitializerOverflow(usize, i64),
     ExpectedExpression(TokenType),
     NotType(TokenType),
     UndeclaredType(String),
@@ -73,8 +72,10 @@ pub enum ErrorKind {
     MismatchedFunctionReturn(NEWTypes, NEWTypes),
     InvalidUnary(TokenType, NEWTypes, &'static str),
     UnnamedFuncParams,
-    ScalarDesignator(NEWTypes),
+    NonAggregateDesignator(NEWTypes),
     DesignatorOverflow(usize, i64),
+    InitializerOverflow(usize, i64),
+    ScalarOverflow,
 
     // environment errors
     MismatchedFuncDeclReturn(NEWTypes, NEWTypes),
@@ -185,7 +186,13 @@ impl ErrorKind {
                     actual, expected
                 )
             }
-            ErrorKind::ScalarDesignator(type_decl) => {
+            ErrorKind::InitializerOverflow(expected, actual) => format!(
+                "Initializer overflow. Expected size: {}, Actual size: {}",
+                expected, actual
+            ),
+            ErrorKind::ScalarOverflow => "Excess elements in scalar initializer".to_string(),
+
+            ErrorKind::NonAggregateDesignator(type_decl) => {
                 format!(
                     "Can only use designator when initializing aggregate types, not: {}",
                     type_decl
@@ -197,10 +204,6 @@ impl ErrorKind {
             ),
             ErrorKind::NonAggregateInitializer(expected, actual) => format!(
                 "Can't initialize non-aggregate type '{}' with '{}'",
-                expected, actual
-            ),
-            ErrorKind::InitializerOverflow(expected, actual) => format!(
-                "Initializer overflow. Expected size: {}, Actual size: {}",
                 expected, actual
             ),
             ErrorKind::ExpectedExpression(token) => format!("Expected expression found: {}", token),

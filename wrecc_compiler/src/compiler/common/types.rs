@@ -246,13 +246,9 @@ impl NEWTypes {
     pub fn element_amount(&self) -> usize {
         match self {
             NEWTypes::Array { amount, of } => amount * of.element_amount(),
-            NEWTypes::Struct(s) => {
-                let mut result = 0;
-                for (member_type, _) in s.members().iter() {
-                    result += member_type.element_amount();
-                }
-                result
-            }
+            NEWTypes::Struct(s) => s.members().iter().fold(0, |acc, (member_type, _)| {
+                acc + member_type.element_amount()
+            }),
             NEWTypes::Union(s) => {
                 if let Some((member_type, _)) = s.members().first() {
                     member_type.element_amount()

@@ -61,6 +61,12 @@ impl PrintIndent for InitKind {
         }
     }
 }
+impl std::fmt::Display for InitKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", indent_fmt(self, 0))
+    }
+}
+
 #[derive(PartialEq, Clone, Debug)]
 pub enum Designator {
     Array(i64),

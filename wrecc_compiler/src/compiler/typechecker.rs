@@ -443,7 +443,6 @@ impl TypeChecker {
                 while !list.is_empty() {
                     let first = list.first_mut().unwrap();
 
-                    // WARN: problem for codegen bc all designators get popped in typechecker
                     if let Some(designator) = &mut first.designator {
                         objects.clear();
 
@@ -456,7 +455,7 @@ impl TypeChecker {
                         let sub_type = current_type.at(*i as usize).ok_or_else(|| {
                             Error::new(
                                 &first.token,
-                                ErrorKind::InitializerOverflow(current_type.len(), i + 1),
+                                ErrorKind::InitializerOverflow(current_type.clone()),
                             )
                         })?;
 
@@ -486,13 +485,14 @@ impl TypeChecker {
                             kind: InitKind::Aggr(sub_list),
                             token: first.token,
                             designator: None,
+                            offset: 0,
                         })
                     } else {
                         list.remove(0)
                     };
 
                     self.init_check(&sub_type, &mut init, is_global)?;
-                    new_list.push((objects.indices(), init));
+                    new_list.push(Box::new(Init { offset: objects.offset(), ..*init }));
 
                     // pop off sub-type
                     objects.0.pop();
@@ -526,12 +526,45 @@ impl TypeChecker {
     }
     // only keeps last instance of an init in list
     // eg: int a[3] = {0,1,4,[1] = 3} => {0,3,4}
-    fn remove_duplicate_inits(mut list: Vec<(Vec<i64>, Box<Init>)>) -> Vec<Box<Init>> {
-        list.reverse();
-        list.sort_by(|(i1, _), (i2, _)| i1.cmp(i2));
-        list.dedup_by(|(i1, _), (i2, _)| i1 == i2);
+    fn remove_duplicate_inits(list: Vec<Box<Init>>) -> Vec<Box<Init>> {
+        let mut flat_list = Vec::new();
+        // flatten
+        for init in list {
+            match init.kind {
+                InitKind::Scalar(_) => flat_list.push(init),
+                InitKind::Aggr(nested_list) => {
+                    let mut nested_list = Self::remove_duplicate_inits(nested_list);
 
-        list.into_iter().map(|(_, init)| init).collect()
+                    // for mut nested_init in nested_list {
+                    //     if let Some(to_replace) = flat_list
+                    //         .iter_mut()
+                    //         .find(|flat_init| flat_init.offset == init.offset)
+                    //     {
+                    //         nested_init.offset += init.offset;
+                    //         *to_replace = nested_init;
+                    //         // flat_list.replace(init.offset, nested_init)
+                    //     } else {
+                    //         nested_init.offset += init.offset;
+                    //         flat_list.push(nested_init)
+                    //     }
+                    // }
+                    nested_list
+                        .iter_mut()
+                        .for_each(|nested_init| nested_init.offset += init.offset);
+                    flat_list.append(&mut nested_list);
+                }
+            }
+        }
+        // reverse so that only last init of field is kept
+        flat_list.reverse();
+        // sort by offset
+        flat_list.sort_by(|init1, init2| init1.offset.cmp(&init2.offset));
+        // remove inits at same offset
+        flat_list.dedup_by(|init1, init2| init1.offset == init2.offset);
+
+        // dbg!(flat_list.iter().map(|ini| ini.offset).collect::<Vec<_>>());
+
+        flat_list
     }
     fn designator_index<'a>(
         token: &'a Token,
@@ -615,6 +648,7 @@ impl TypeChecker {
                         token: token.clone(),
                         kind: InitKind::Scalar(Expr::new_literal(*c as i64, Types::Char)),
                         designator: None,
+                        offset: 0,
                     })
                 })
                 .collect(),
@@ -1350,8 +1384,10 @@ impl CurrentObjects {
     fn current(&self) -> &(i64, NEWTypes) {
         self.0.last().unwrap()
     }
-    fn indices(&self) -> Vec<i64> {
-        self.0.iter().map(|(i, _)| *i).collect()
+    fn offset(&self) -> i64 {
+        self.0
+            .iter()
+            .fold(0, |acc, (i, type_decl)| acc + type_decl.offset(*i))
     }
     fn update_current(&mut self) {
         let mut remove_idx = None;
@@ -1564,7 +1600,7 @@ mod tests {
             assert_eq!(actual, $expected);
         };
     }
-    fn setup_init_list(input: &str) -> Result<String, Error> {
+    fn setup_init_list(input: &str) -> Result<InitKind, Error> {
         // TODO: maybe be can parser.parse() so that external declaration doesnt have to be public
         let Stmt::Declaration(mut init) =
                 setup(input).external_declaration().unwrap() else {unreachable!("only passing type")};
@@ -1573,7 +1609,19 @@ mod tests {
 
         TypeChecker::new(vec![]).init_check(&type_decl, &mut init, false)?;
 
-        Ok(init.kind.to_string())
+        Ok(init.kind)
+    }
+    fn assert_init(actual: InitKind, expected: Vec<(usize, &'static str)>) {
+        let InitKind::Aggr(actual) = actual else {unreachable!()};
+
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.into_iter().zip(expected) {
+            assert_eq!(actual.offset, expected.0 as i64);
+
+            let expr = setup(expected.1).expression().unwrap();
+            let InitKind::Scalar(actual_expr) = actual.kind else {unreachable!()};
+            assert_eq!(actual_expr.to_string(), expr.to_string());
+        }
     }
 
     #[test]
@@ -1823,16 +1871,10 @@ mod tests {
 
     #[test]
     fn array_init_list() {
-        let actual = setup_init_list("int a[3] = {1,2};");
-        let expected = "\
-Aggregate:
--Scalar:
---Literal: 1
--Scalar:
---Literal: 2"
-            .to_string();
+        let actual = setup_init_list("int a[3] = {1,2};").unwrap();
+        let expected = vec![(0, "1"), (4, "2")];
 
-        assert_eq!(actual, Ok(expected));
+        assert_init(actual, expected);
     }
     #[test]
     fn union_init() {
@@ -1841,17 +1883,11 @@ Aggregate:
                 long n;
                 int s[3];
             } a = {3,.s = 1,2};"#,
-        );
-        let expected = "\
-Aggregate:
--Aggregate:
---Scalar:
----Literal: 1
---Scalar:
----Literal: 2"
-            .to_string();
+        )
+        .unwrap();
+        let expected = vec![(0, "1"), (4, "2")];
 
-        assert_eq!(actual, Ok(expected));
+        assert_init(actual, expected);
     }
     #[test]
     fn union_overflow() {
@@ -1865,7 +1901,7 @@ Aggregate:
         assert!(matches!(
             actual,
             Err(Error {
-                kind: ErrorKind::InitializerOverflow(1, 2),
+                kind: ErrorKind::InitializerOverflow(NEWTypes::Union(_)),
                 ..
             })
         ));
@@ -1878,41 +1914,25 @@ Aggregate:
                 char name[5];
                 int* self;
             } a = {"hei"};"#,
-        );
-        let expected = "\
-Aggregate:
--Aggregate:
---Scalar:
----Literal: 104
---Scalar:
----Literal: 101
---Scalar:
----Literal: 105
---Scalar:
----Literal: 0
---Scalar:
----Literal: 0"
-            .to_string();
+        )
+        .unwrap();
+        let expected = vec![
+            (0, "'h'"),
+            (1, "'e'"),
+            (2, "'i'"),
+            (3, "'\\0'"),
+            (4, "'\\0'"),
+        ];
 
-        assert_eq!(actual, Ok(expected));
+        assert_init(actual, expected);
     }
 
     #[test]
     fn multidimensional_array() {
-        let actual = setup_init_list("int a[2][3] = {{1},1,2};");
-        let expected = "\
-Aggregate:
--Aggregate:
---Scalar:
----Literal: 1
--Aggregate:
---Scalar:
----Literal: 1
---Scalar:
----Literal: 2"
-            .to_string();
+        let actual = setup_init_list("int a[2][3] = {{1},1,2};").unwrap();
+        let expected = vec![(0, "1"), (12, "1"), (16, "2")];
 
-        assert_eq!(actual, Ok(expected));
+        assert_init(actual, expected);
     }
 
     #[test]
@@ -1925,33 +1945,19 @@ Aggregate:
                 } other[2];
                 int arr[3];
             } a = {{1,2,[1].age = 21,[1].number[1] = 3,4},.arr = {1,[2] = 2}};"#,
-        );
-        let expected = "\
-Aggregate:
--Aggregate:
---Aggregate:
----Scalar:
-----Literal: 1
----Aggregate:
-----Scalar:
------Cast: 'long'
-------Literal: 2
---Scalar:
----Literal: 21
---Scalar:
----Cast: 'long'
-----Literal: 3
---Scalar:
----Cast: 'long'
-----Literal: 4
--Aggregate:
---Scalar:
----Literal: 1
---Scalar:
----Literal: 2"
-            .to_string();
+        )
+        .unwrap();
+        let expected = vec![
+            (0, "1"),
+            (4, "(long)2"),
+            (28, "21"),
+            (40, "(long)3"),
+            (48, "(long)4"),
+            (56, "1"),
+            (64, "2"),
+        ];
 
-        assert_eq!(actual, Ok(expected));
+        assert_init(actual, expected);
     }
 
     #[test]
@@ -1962,27 +1968,18 @@ Aggregate:
                 char name[3];
                 int arr[2];
             } a = {2,"me",{1,[0] = 2,4}};"#,
-        );
-        let expected = "\
-Aggregate:
--Scalar:
---Cast: 'char'
----Literal: 2
--Aggregate:
---Scalar:
----Literal: 109
---Scalar:
----Literal: 101
---Scalar:
----Literal: 0
--Aggregate:
---Scalar:
----Literal: 2
---Scalar:
----Literal: 4"
-            .to_string();
+        )
+        .unwrap();
+        let expected = vec![
+            (0, "(char)2"),
+            (1, "'m'"),
+            (2, "'e'"),
+            (3, "'\\0'"),
+            (4, "2"),
+            (8, "4"),
+        ];
 
-        assert_eq!(actual, Ok(expected));
+        assert_init(actual, expected);
     }
     #[test]
     fn nested_union_designators() {
@@ -1996,17 +1993,11 @@ Aggregate:
                   } inner_union;
                 } inner_struct;
               } a = {.inner_struct.inner_union.arr = '1', '3'};",
-        );
-        let expected = "\
-Aggregate:
--Aggregate:
---Scalar:
----Literal: 49
---Scalar:
----Literal: 51"
-            .to_string();
+        )
+        .unwrap();
+        let expected = vec![(2, "'1'"), (3, "'3'")];
 
-        assert_eq!(actual, Ok(expected));
+        assert_init(actual, expected);
     }
     #[test]
     fn scalar_designator_overflow() {
@@ -2028,7 +2019,7 @@ Aggregate:
         ));
     }
     #[test]
-    fn partially_overrides_prev_init() {
+    fn partial_nested_arr_override() {
         let actual = setup_init_list(
             "struct Outer {
                 struct {
@@ -2039,15 +2030,29 @@ Aggregate:
                   } inner_union;
                 } inner_struct;
               } a = {.inner_struct.inner_union.arr = 1, 3,.inner_struct.inner_union.arr[1] = 5};",
-        );
-        let expected = "\
-Aggregate:
--Scalar:
---Literal: 1
--Scalar:
---Literal: 5"
-            .to_string();
+        )
+        .unwrap();
+        let expected = vec![(2, "(char)1"), (3, "(char)5")];
 
-        assert_eq!(actual, Ok(expected));
+        assert_init(actual, expected);
+    }
+    #[test]
+    fn partial_union_override() {
+        let actual = setup_init_list(
+            "struct Outer {
+                struct {
+                  char s[2];
+                  union {
+                    long n;
+                    char arr[3];
+                  } inner_union;
+                } inner_struct;
+              } a = {.inner_struct.inner_union.arr = {1, 3},.inner_struct.inner_union.n = 5,
+                     .inner_struct.inner_union.arr[1] = 8};",
+        )
+        .unwrap();
+        let expected = vec![(3, "(char)8")];
+
+        assert_init(actual, expected);
     }
 }

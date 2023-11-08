@@ -288,6 +288,17 @@ impl NEWTypes {
             _ => Some(self.clone()),
         }
     }
+    pub fn offset(&self, index: i64) -> i64 {
+        match self {
+            NEWTypes::Struct(s) => s
+                .members()
+                .iter()
+                .take(index as usize)
+                .fold(0, |acc, (m_type, _)| acc + m_type.size() as i64),
+            NEWTypes::Array { of, .. } => of.size() as i64 * index,
+            _ => 0,
+        }
+    }
 }
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Types {

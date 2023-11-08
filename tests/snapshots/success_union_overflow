@@ -1,6 +1,6 @@
-error: Initializer overflow. Expected size: 3, Actual size: 4
-|  --> in tests/fixtures/union_overflow.c:10:9
+error: Initializer overflow. Excess elements in 'union <anonymous>'
+|  --> in tests/fixtures/union_overflow.c:10:25
 |
 10   } b = {'u', 'w', 'e', 2};
-|          ^
+|                          ^
 1 error generated.

@@ -74,7 +74,7 @@ pub enum ErrorKind {
     UnnamedFuncParams,
     NonAggregateDesignator(NEWTypes),
     DesignatorOverflow(usize, i64),
-    InitializerOverflow(usize, i64),
+    InitializerOverflow(NEWTypes),
     ScalarOverflow,
 
     // environment errors
@@ -186,10 +186,9 @@ impl ErrorKind {
                     actual, expected
                 )
             }
-            ErrorKind::InitializerOverflow(expected, actual) => format!(
-                "Initializer overflow. Expected size: {}, Actual size: {}",
-                expected, actual
-            ),
+            ErrorKind::InitializerOverflow(type_decl) => {
+                format!("Initializer overflow. Excess elements in '{}'", type_decl)
+            }
             ErrorKind::ScalarOverflow => "Excess elements in scalar initializer".to_string(),
 
             ErrorKind::NonAggregateDesignator(type_decl) => {

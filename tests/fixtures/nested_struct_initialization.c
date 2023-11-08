@@ -1,5 +1,4 @@
 void printf(char* f,int d);
-void puts(char* s);
 
 struct Point {
     int x;

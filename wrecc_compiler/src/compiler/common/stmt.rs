@@ -41,6 +41,7 @@ pub struct Init {
     pub kind: InitKind,
     pub designator: Option<VecDeque<Designator>>,
     pub token: Token,
+    pub offset: i64,
 }
 #[derive(PartialEq, Clone, Debug)]
 pub enum InitKind {

@@ -361,7 +361,10 @@ impl Compiler {
                     self.init_global_var(type_decl, name, init)
                 }
                 DeclarationKind::Initializer(type_decl, name, init, false) => {
-                    self.init_var(type_decl, name, init)
+                    let size = align(type_decl.size(), &type_decl);
+                    self.declare_var(type_decl, &name);
+
+                    self.init_var(&name, init, size);
                 }
                 DeclarationKind::FuncDecl(..) => (),
             }
@@ -390,105 +393,95 @@ impl Compiler {
             .set_reg(reg);
     }
     fn init_global_var(&mut self, type_decl: NEWTypes, var_name: Token, init: Init) {
-        let name = var_name.unwrap_string();
-        // self.write_out(Ir::GlobalDeclaration(name.clone()));
-
-        // self.env
-        //     .get_mut(var_name.token.get_index())
-        //     .unwrap()
-        //     .unwrap_var_mut()
-        //     .set_reg(Register::Label(LabelRegister::Var(name, type_decl.clone())));
-
-        // let value_reg = self.execute_global_expr(expr);
-        // self.write_out(Ir::GlobalInit(type_decl, value_reg));
-    }
-    fn init_arg(&mut self, type_decl: NEWTypes, var_name: Token, arg_reg: Register) {
-        self.declare_var(type_decl, &var_name);
-
-        let reg = self.cg_assign(
-            self.env
-                .get(var_name.token.get_index())
-                .unwrap()
-                .unwrap_var()
-                .get_reg(),
-            arg_reg,
-        );
-        self.free(reg);
-    }
-
-    fn init_var(&mut self, type_decl: NEWTypes, var_name: Token, init: Init) {
-        self.declare_var(type_decl, &var_name);
-        // let value_reg = self.execute_expr(expr);
-
-        // let reg = self.cg_assign(
-        //     self.env
-        //         .get(var_name.token.get_index())
-        //         .unwrap()
-        //         .unwrap_var()
-        //         .get_reg(),
-        //     value_reg,
-        // );
-        // self.free(reg);
-    }
-
-    fn init_global_list(&mut self, type_decl: NEWTypes, name: Token, exprs: Vec<Expr>) {
-        self.write_out(Ir::GlobalDeclaration(name.unwrap_string()));
+        self.write_out(Ir::GlobalDeclaration(var_name.unwrap_string()));
 
         self.env
-            .get_mut(name.token.get_index())
+            .get_mut(var_name.token.get_index())
             .unwrap()
             .unwrap_var_mut()
             .set_reg(Register::Label(LabelRegister::Var(
-                name.unwrap_string(),
+                var_name.unwrap_string(),
                 type_decl.clone(),
             )));
 
-        let mut size = type_decl.size() as i64;
-        let mut prev_offset: i64 = 0;
+        match init.kind {
+            InitKind::Scalar(expr) => {
+                let value_reg = self.execute_global_expr(expr);
 
-        for expr in exprs {
-            if let ExprKind::Assign { r_expr, l_expr, .. } = expr.kind {
-                let offset = self.execute_global_expr(*l_expr).get_offset();
-                let expr_type = expr.type_decl.clone().unwrap();
-                let r_value = self.execute_global_expr(*r_expr);
+                self.write_out(Ir::GlobalInit(type_decl, value_reg));
+            }
+            InitKind::Aggr(list) => {
+                let mut size = type_decl.size() as i64;
+                let mut prev_offset: i64 = 0;
 
-                let diff = offset - prev_offset;
-                if diff != 0 {
-                    self.write_out(Ir::GlobalInit(
-                        NEWTypes::Primitive(Types::Void),
-                        StaticRegister::Literal(diff),
-                    ));
-                    size -= diff;
+                for init in list {
+                    if let InitKind::Scalar(expr) = init.kind {
+                        let value_type = expr.type_decl.clone().unwrap();
+                        let value_reg = self.execute_global_expr(expr);
+
+                        // fill gap in offset with zero
+                        let diff = init.offset - prev_offset;
+                        if diff != 0 {
+                            self.write_out(Ir::GlobalInit(
+                                NEWTypes::Primitive(Types::Void),
+                                StaticRegister::Literal(diff),
+                            ));
+                            size -= diff;
+                        }
+
+                        size -= value_type.size() as i64;
+                        prev_offset = init.offset + value_type.size() as i64;
+
+                        self.write_out(Ir::GlobalInit(value_type, value_reg));
+                    } else {
+                        unreachable!("aggregate list was flattened in typechecker")
+                    }
                 }
 
-                size -= expr_type.size() as i64;
-                prev_offset = offset + expr_type.size() as i64;
-
-                self.write_out(Ir::GlobalInit(expr_type, r_value));
+                // fill remaining fields in type
+                if size > 0 {
+                    self.write_out(Ir::GlobalInit(
+                        NEWTypes::Primitive(Types::Void),
+                        StaticRegister::Literal(size as i64),
+                    ));
+                }
             }
         }
-        if size > 0 {
-            self.write_out(Ir::GlobalInit(
-                NEWTypes::Primitive(Types::Void),
-                StaticRegister::Literal(size as i64),
-            ));
+    }
+
+    fn init_var(&mut self, var_name: &Token, init: Init, size: usize) {
+        match init.kind {
+            InitKind::Scalar(expr) => {
+                let value_reg = self.execute_expr(expr);
+                let mut var_reg = self
+                    .env
+                    .get(var_name.token.get_index())
+                    .unwrap()
+                    .unwrap_var()
+                    .get_reg();
+
+                var_reg.set_type(value_reg.get_type());
+                if let Register::Stack(stack_reg) = &mut var_reg {
+                    stack_reg.bp_offset -= init.offset as usize;
+
+                    let value_reg = self.cg_assign(var_reg, value_reg);
+                    self.free(value_reg);
+                } else {
+                    unreachable!("local variables can only be located on stack")
+                }
+            }
+            InitKind::Aggr(list) => {
+                // first overwrite all entries with 0
+                self.clear_mem(var_name, size);
+
+                for init in list {
+                    self.init_var(var_name, *init, size)
+                }
+            }
         }
     }
-    fn init_list(&mut self, type_decl: NEWTypes, name: Token, exprs: Vec<Expr>) {
-        let size = align(type_decl.size(), &type_decl);
 
-        self.declare_var(type_decl, &name);
-
-        // first overwrite all entries with 0
-        self.clear_mem(name, size);
-
-        // then execute all assignments
-        for e in exprs.into_iter() {
-            let reg = self.execute_expr(e);
-            self.free(reg);
-        }
-    }
-    fn clear_mem(&mut self, var_name: Token, amount: usize) {
+    fn clear_mem(&mut self, var_name: &Token, amount: usize) {
         // writes 0 to stack until amount == 0
         // eax value that gets written
         // ecx amount
@@ -528,6 +521,20 @@ impl Compiler {
         self.free(eax_reg);
         self.free(ecx_reg);
         self.free(rdi_reg);
+    }
+
+    fn init_arg(&mut self, type_decl: NEWTypes, var_name: Token, arg_reg: Register) {
+        self.declare_var(type_decl, &var_name);
+
+        let reg = self.cg_assign(
+            self.env
+                .get(var_name.token.get_index())
+                .unwrap()
+                .unwrap_var()
+                .get_reg(),
+            arg_reg,
+        );
+        self.free(reg);
     }
 
     fn function_definition(&mut self, name: Token, body: Vec<Stmt>) {

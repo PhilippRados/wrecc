@@ -613,6 +613,7 @@ impl Parser {
                 token: token.clone(),
                 designator,
                 kind: InitKind::Scalar(r_value),
+                offset: 0,
             })
         }
     }
@@ -694,6 +695,7 @@ impl Parser {
             token: token.clone(),
             designator,
             kind: InitKind::Aggr(init_list),
+            offset: 0,
         })
     }
 

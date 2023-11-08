@@ -105,7 +105,7 @@ pub struct SymbolInfo {
     pub type_decl: NEWTypes,
 
     // optional because info isn't known at moment of insertion
-    // stack-register that identifier resides in
+    // can be label-register or stack-register
     pub reg: Option<Register>,
 }
 

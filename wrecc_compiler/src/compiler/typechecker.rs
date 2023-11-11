@@ -447,11 +447,13 @@ impl TypeChecker {
                         objects.clear();
 
                         while let Some(d) = designator.remove(0) {
-                            objects.update(Self::designator_index(token, &objects.current().1, d)?);
+                            let (i, sub_type) =
+                                Self::designator_index(token, &objects.current().1, &d)?;
+                            objects.update((i, sub_type, Some(d)));
                         }
                         first.designator = None;
                     } else {
-                        let (i, current_type) = objects.current();
+                        let (i, current_type, _) = objects.current();
                         let sub_type = current_type.at(*i as usize).ok_or_else(|| {
                             Error::new(
                                 &first.token,
@@ -459,9 +461,9 @@ impl TypeChecker {
                             )
                         })?;
 
-                        objects.0.push((0, sub_type));
+                        objects.0.push((0, sub_type, None));
                     }
-                    let (i, sub_type) = objects.current();
+                    let (i, sub_type, _) = objects.current();
                     let mut len = sub_type.element_amount() - *i as usize;
 
                     let first = list.first().unwrap().clone();
@@ -492,14 +494,23 @@ impl TypeChecker {
                     };
 
                     self.init_check(&sub_type, &mut init, is_global)?;
-                    new_list.push(Box::new(Init { offset: objects.offset(), ..*init }));
+                    let init = (
+                        objects.clone(),
+                        Box::new(Init { offset: objects.offset(), ..*init }),
+                    );
+
+                    if let Some(to_remove) = new_list.iter_mut().find(|(obj, _)| obj == &objects) {
+                        *to_remove = init;
+                    } else {
+                        new_list.push(init);
+                    }
 
                     // pop off sub-type
                     objects.0.pop();
                     objects.update_current();
                 }
 
-                *list = Self::remove_duplicate_inits(new_list);
+                *list = Self::flatten_list(new_list);
                 Ok(())
             }
             _ => match list.as_mut_slice() {
@@ -524,59 +535,41 @@ impl TypeChecker {
             },
         }
     }
-    // only keeps last instance of an init in list
-    // eg: int a[3] = {0,1,4,[1] = 3} => {0,3,4}
-    fn remove_duplicate_inits(list: Vec<Box<Init>>) -> Vec<Box<Init>> {
-        let mut flat_list = Vec::new();
-        // flatten
-        for init in list {
+
+    fn flatten_list(list: Vec<(CurrentObjects, Box<Init>)>) -> Vec<Box<Init>> {
+        let mut flat_list = Vec::with_capacity(list.len());
+
+        for (_, init) in list {
             match init.kind {
                 InitKind::Scalar(_) => flat_list.push(init),
-                InitKind::Aggr(nested_list) => {
-                    let mut nested_list = Self::remove_duplicate_inits(nested_list);
-
-                    // for mut nested_init in nested_list {
-                    //     if let Some(to_replace) = flat_list
-                    //         .iter_mut()
-                    //         .find(|flat_init| flat_init.offset == init.offset)
-                    //     {
-                    //         nested_init.offset += init.offset;
-                    //         *to_replace = nested_init;
-                    //         // flat_list.replace(init.offset, nested_init)
-                    //     } else {
-                    //         nested_init.offset += init.offset;
-                    //         flat_list.push(nested_init)
-                    //     }
-                    // }
-                    nested_list
-                        .iter_mut()
+                InitKind::Aggr(mut list) => {
+                    list.iter_mut()
                         .for_each(|nested_init| nested_init.offset += init.offset);
-                    flat_list.append(&mut nested_list);
+                    flat_list.append(&mut list);
                 }
             }
         }
-        // reverse so that only last init of field is kept
-        flat_list.reverse();
-        // sort by offset
-        flat_list.sort_by(|init1, init2| init1.offset.cmp(&init2.offset));
-        // remove inits at same offset
-        flat_list.dedup_by(|init1, init2| init1.offset == init2.offset);
 
-        // dbg!(flat_list.iter().map(|ini| ini.offset).collect::<Vec<_>>());
+        flat_list.reverse();
+        flat_list.dedup_by(|init1, init2| init1.offset == init2.offset);
+        flat_list.sort_by(|init1, init2| init1.offset.cmp(&init2.offset));
 
         flat_list
     }
     fn designator_index<'a>(
         token: &'a Token,
         type_decl: &'a NEWTypes,
-        designator: Designator,
+        designator: &'a Designator,
     ) -> Result<(i64, NEWTypes), Error> {
         match (designator, type_decl) {
             (Designator::Array(n), NEWTypes::Array { amount, of }) => {
-                if n >= *amount as i64 {
-                    Err(Error::new(token, ErrorKind::DesignatorOverflow(*amount, n)))
+                if *n >= *amount as i64 {
+                    Err(Error::new(
+                        token,
+                        ErrorKind::DesignatorOverflow(*amount, *n),
+                    ))
                 } else {
-                    Ok((n, *of.clone()))
+                    Ok((*n, *of.clone()))
                 }
             }
             (Designator::Member(_), NEWTypes::Array { .. }) => {
@@ -596,7 +589,7 @@ impl TypeChecker {
                 if let Some(i) = s
                     .members()
                     .iter()
-                    .position(|(_, m_token)| m == m_token.unwrap_string())
+                    .position(|(_, m_token)| *m == m_token.unwrap_string())
                 {
                     // unions only have single index
                     if let NEWTypes::Union(_) = type_decl {
@@ -607,7 +600,7 @@ impl TypeChecker {
                 } else {
                     Err(Error::new(
                         token,
-                        ErrorKind::NonExistantMember(m, type_decl.clone()),
+                        ErrorKind::NonExistantMember(m.clone(), type_decl.clone()),
                     ))
                 }
             }
@@ -1372,26 +1365,28 @@ impl TypeChecker {
         }
     }
 }
-struct CurrentObjects(Vec<(i64, NEWTypes)>);
+#[derive(Clone)]
+struct CurrentObjects(Vec<(i64, NEWTypes, Option<Designator>)>);
 impl CurrentObjects {
     fn new(type_decl: NEWTypes) -> Self {
-        CurrentObjects(vec![(0, type_decl)])
+        CurrentObjects(vec![(0, type_decl, None)])
     }
-    fn update(&mut self, (i, sub_type): (i64, NEWTypes)) {
+    fn update(&mut self, (i, sub_type, designator): (i64, NEWTypes, Option<Designator>)) {
         self.0.last_mut().unwrap().0 = i;
-        self.0.push((0, sub_type));
+        self.0.last_mut().unwrap().2 = designator;
+        self.0.push((0, sub_type, None));
     }
-    fn current(&self) -> &(i64, NEWTypes) {
+    fn current(&self) -> &(i64, NEWTypes, Option<Designator>) {
         self.0.last().unwrap()
     }
     fn offset(&self) -> i64 {
         self.0
             .iter()
-            .fold(0, |acc, (i, type_decl)| acc + type_decl.offset(*i))
+            .fold(0, |acc, (i, type_decl, _)| acc + type_decl.offset(*i))
     }
     fn update_current(&mut self) {
         let mut remove_idx = None;
-        for (obj_index, (i, type_decl)) in self.0.iter().enumerate().rev() {
+        for (obj_index, (i, type_decl, _)) in self.0.iter().enumerate().rev() {
             if obj_index != 0 && (i + 1 >= type_decl.len() as i64) {
                 remove_idx = Some(obj_index);
             } else {
@@ -1410,6 +1405,27 @@ impl CurrentObjects {
     // removes all objects except base-type
     fn clear(&mut self) {
         self.0.truncate(1);
+    }
+}
+impl PartialEq for CurrentObjects {
+    // determines wether a designation overrides another
+    fn eq(&self, other: &Self) -> bool {
+        for (current, other) in self.0.iter().zip(&other.0) {
+            match (current, other) {
+                ((_, NEWTypes::Union(_), d1), (_, NEWTypes::Union(_), d2)) => {
+                    if d1 != d2 {
+                        return true;
+                    }
+                }
+                ((i1, ..), (i2, ..)) if *i1 != *i2 => return false,
+                _ => (),
+            }
+        }
+        match self.0.len().cmp(&other.0.len()) {
+            Ordering::Less => false,
+            Ordering::Greater => true,
+            Ordering::Equal => true,
+        }
     }
 }
 

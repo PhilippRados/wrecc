@@ -122,6 +122,7 @@ fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, Error> {
 
 fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), Error> {
     let mut cmd = Command::new("ld");
+    // WARN: first check where SDK is installed and if not emit error-message
     cmd.arg("-dynamic")
         .arg("-lSystem")
         .arg("-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib")

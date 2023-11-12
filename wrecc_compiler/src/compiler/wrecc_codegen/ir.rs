@@ -6,8 +6,8 @@ use std::fmt::Display;
 // Needs owned values so that later register transformations like type-casts don't change previous references
 #[derive(Debug)]
 pub enum Ir {
-    // name
-    GlobalDeclaration(String),
+    // name, if needs alignment
+    GlobalDeclaration(String, bool),
     // type, value
     GlobalInit(NEWTypes, StaticRegister),
     // label index, value
@@ -116,7 +116,11 @@ impl Display for Ir {
             f,
             "{}",
             match self {
-                Ir::GlobalDeclaration(name) => format!("\n\t.data\n_{}:", name),
+                Ir::GlobalDeclaration(name, is_pointer) => format!(
+                    "\n\t.data\n{}_{}:",
+                    if *is_pointer { "\t.align 4\n" } else { "" },
+                    name
+                ),
                 Ir::GlobalInit(type_decl, reg) =>
                     format!("\t.{} {}", type_decl.complete_suffix(), reg.name()),
                 Ir::StringDeclaration(label_index, s) =>

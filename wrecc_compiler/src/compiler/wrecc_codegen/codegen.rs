@@ -371,10 +371,13 @@ impl Compiler {
         }
     }
     fn declare_global_var(&mut self, type_decl: NEWTypes, name: Token) {
-        self.write_out(Ir::GlobalDeclaration(name.unwrap_string()));
+        self.write_out(Ir::GlobalDeclaration(
+            name.unwrap_string(),
+            type_decl.is_ptr(),
+        ));
         self.write_out(Ir::GlobalInit(
             NEWTypes::Primitive(Types::Void),
-            StaticRegister::Literal(type_decl.size() as i64),
+            StaticRegister::Literal(type_decl.size() as i64, NEWTypes::default()),
         ));
         let reg = Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl));
 
@@ -393,7 +396,10 @@ impl Compiler {
             .set_reg(reg);
     }
     fn init_global_var(&mut self, type_decl: NEWTypes, var_name: Token, init: Init) {
-        self.write_out(Ir::GlobalDeclaration(var_name.unwrap_string()));
+        self.write_out(Ir::GlobalDeclaration(
+            var_name.unwrap_string(),
+            type_decl.is_ptr(),
+        ));
 
         self.env
             .get_mut(var_name.token.get_index())
@@ -416,15 +422,15 @@ impl Compiler {
 
                 for init in list {
                     if let InitKind::Scalar(expr) = init.kind {
-                        let value_type = expr.type_decl.clone().unwrap();
                         let value_reg = self.execute_global_expr(expr);
+                        let value_type = value_reg.get_type();
 
                         // fill gap in offset with zero
                         let diff = init.offset - prev_offset;
                         if diff != 0 {
                             self.write_out(Ir::GlobalInit(
                                 NEWTypes::Primitive(Types::Void),
-                                StaticRegister::Literal(diff),
+                                StaticRegister::Literal(diff, NEWTypes::default()),
                             ));
                             size -= diff;
                         }
@@ -442,7 +448,7 @@ impl Compiler {
                 if size > 0 {
                     self.write_out(Ir::GlobalInit(
                         NEWTypes::Primitive(Types::Void),
-                        StaticRegister::Literal(size as i64),
+                        StaticRegister::Literal(size as i64, NEWTypes::default()),
                     ));
                 }
             }
@@ -636,15 +642,24 @@ impl Compiler {
                 let name = token.unwrap_string();
                 StaticRegister::Label(LabelRegister::String(self.const_labels[&name]))
             }
-            ExprKind::Literal(n) => StaticRegister::Literal(n),
+            ExprKind::Literal(n) => StaticRegister::Literal(n, ast.type_decl.unwrap()),
             ExprKind::Cast { new_type, expr, .. } => {
                 let mut reg = self.execute_global_expr(*expr);
                 reg.set_type(new_type);
                 reg
             }
             ExprKind::ScaleUp { by, expr } => {
-                if let StaticRegister::Literal(n) = self.execute_global_expr(*expr) {
-                    StaticRegister::Literal(n * by as i64)
+                if let StaticRegister::Literal(n, type_decl) = self.execute_global_expr(*expr) {
+                    let n = n * by as i64;
+                    let scaled_type = integer_type(n);
+
+                    let type_decl = if type_decl.size() < scaled_type.size() {
+                        NEWTypes::Primitive(scaled_type)
+                    } else {
+                        type_decl
+                    };
+
+                    StaticRegister::Literal(n, type_decl)
                 } else {
                     unreachable!("can only scale literal value")
                 }
@@ -697,13 +712,19 @@ impl Compiler {
                 let right = self.execute_global_expr(*right);
 
                 match (left, right) {
-                    (StaticRegister::Label(reg), StaticRegister::Literal(n))
-                    | (StaticRegister::Literal(n), StaticRegister::Label(reg)) => {
+                    (StaticRegister::Label(reg), StaticRegister::Literal(n, _))
+                    | (StaticRegister::Literal(n, _), StaticRegister::Label(reg)) => {
                         StaticRegister::LabelOffset(reg, n, token.token)
                     }
 
-                    (StaticRegister::LabelOffset(reg, offset, _), StaticRegister::Literal(n))
-                    | (StaticRegister::Literal(n), StaticRegister::LabelOffset(reg, offset, _)) => {
+                    (
+                        StaticRegister::LabelOffset(reg, offset, _),
+                        StaticRegister::Literal(n, _),
+                    )
+                    | (
+                        StaticRegister::Literal(n, _),
+                        StaticRegister::LabelOffset(reg, offset, _),
+                    ) => {
                         let offset = n + offset;
                         if offset < 0 {
                             StaticRegister::LabelOffset(reg, offset.abs(), TokenType::Minus)

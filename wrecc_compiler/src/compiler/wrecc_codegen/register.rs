@@ -119,20 +119,20 @@ impl LabelRegister {
 pub enum StaticRegister {
     Label(LabelRegister),
     LabelOffset(LabelRegister, i64, TokenType),
-    Literal(i64),
+    Literal(i64, NEWTypes),
 }
 impl StaticRegister {
     pub fn set_type(&mut self, new: NEWTypes) {
         match self {
             StaticRegister::Label(reg) | StaticRegister::LabelOffset(reg, ..) => reg.set_type(new),
-            StaticRegister::Literal(_) => (),
+            StaticRegister::Literal(_, type_decl) => *type_decl = new,
         }
     }
 
     pub fn get_type(&self) -> NEWTypes {
         match self {
             StaticRegister::Label(reg) | StaticRegister::LabelOffset(reg, ..) => reg.get_type(),
-            StaticRegister::Literal(n) => NEWTypes::Primitive(integer_type(*n)),
+            StaticRegister::Literal(_, type_decl) => type_decl.clone(),
         }
     }
     pub fn name(&self) -> String {
@@ -148,7 +148,7 @@ impl StaticRegister {
                 },
                 offset
             ),
-            StaticRegister::Literal(n) => format!("{n}"),
+            StaticRegister::Literal(n, _) => format!("{n}"),
         }
     }
 }

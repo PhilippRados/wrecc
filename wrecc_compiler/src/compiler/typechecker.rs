@@ -447,62 +447,57 @@ impl TypeChecker {
                         objects.clear();
 
                         while let Some(d) = designator.remove(0) {
-                            let (i, sub_type) =
-                                Self::designator_index(token, &objects.current().1, &d)?;
-                            objects.update((i, sub_type, Some(d)));
+                            let designator_info =
+                                Self::designator_index(token, objects.current_type(), d)?;
+                            objects.update(designator_info);
                         }
+
                         first.designator = None;
                     } else {
-                        let (i, current_type, _) = objects.current();
+                        let (i, _, current_type) = objects.current();
                         let sub_type = current_type.at(*i as usize).ok_or_else(|| {
                             Error::new(
                                 &first.token,
                                 ErrorKind::InitializerOverflow(current_type.clone()),
                             )
                         })?;
-
-                        objects.0.push((0, sub_type, None));
+                        objects.0.push((0, 0, sub_type))
                     }
-                    let (i, sub_type, _) = objects.current();
-                    let mut len = sub_type.element_amount() - *i as usize;
 
-                    let first = list.first().unwrap().clone();
-
-                    let mut init = if matches!(first.kind, InitKind::Scalar(_))
-                        && !sub_type.is_scalar()
-                        && Self::is_string_init(&sub_type, &first).is_none()
+                    while matches!(first.kind, InitKind::Scalar(_))
+                        && !objects.current_type().is_scalar()
+                        && Self::is_string_init(objects.current_type(), first).is_none()
                     {
-                        if len > list.len() {
-                            len = list.len();
-                        }
-                        if let Some(n) = list[1..len]
-                            .iter()
-                            .position(|init| init.designator.is_some())
-                        {
-                            len = n + 1;
-                        }
-                        let sub_list = list.drain(0..len).collect::<Vec<_>>();
+                        let sub_type = objects.current_type().at(0).unwrap();
+                        objects.0.push((0, 0, sub_type));
+                    }
+                    let sub_type = objects.current_type();
 
-                        Box::new(Init {
-                            kind: InitKind::Aggr(sub_list),
-                            token: first.token,
-                            designator: None,
-                            offset: 0,
-                        })
-                    } else {
-                        list.remove(0)
+                    let mut init = Init {
+                        offset: objects.offset(),
+                        ..*list.remove(0)
                     };
 
                     self.init_check(&sub_type, &mut init, is_global)?;
-                    let init = (
-                        objects.clone(),
-                        Box::new(Init { offset: objects.offset(), ..*init }),
-                    );
 
-                    if let Some(to_remove) = new_list.iter_mut().find(|(obj, _)| obj == &objects) {
-                        *to_remove = init;
+                    // remove overriding elements
+                    let init_interval =
+                        if let Some((offset, size)) = find_same_union(&new_list, &objects) {
+                            offset..offset + size as i64
+                        } else {
+                            init.offset..init.offset + sub_type.size() as i64
+                        };
+                    new_list.retain(|(_, init): &(_, Init)| !init_interval.contains(&init.offset));
+
+                    // push init elements into new_list
+                    if let InitKind::Aggr(mut list) = init.kind {
+                        list.iter_mut()
+                            .for_each(|nested_init| nested_init.offset += init.offset);
+                        for init in list {
+                            new_list.push((objects.clone(), *init))
+                        }
                     } else {
-                        new_list.push(init);
+                        new_list.push((objects.clone(), init))
                     }
 
                     // pop off sub-type
@@ -510,7 +505,11 @@ impl TypeChecker {
                     objects.update_current();
                 }
 
-                *list = Self::flatten_list(new_list);
+                new_list.sort_by(|(_, init1), (_, init2)| init1.offset.cmp(&init2.offset));
+                *list = new_list
+                    .into_iter()
+                    .map(|(_, init)| Box::new(init))
+                    .collect();
                 Ok(())
             }
             _ => match list.as_mut_slice() {
@@ -536,40 +535,17 @@ impl TypeChecker {
         }
     }
 
-    fn flatten_list(list: Vec<(CurrentObjects, Box<Init>)>) -> Vec<Box<Init>> {
-        let mut flat_list = Vec::with_capacity(list.len());
-
-        for (_, init) in list {
-            match init.kind {
-                InitKind::Scalar(_) => flat_list.push(init),
-                InitKind::Aggr(mut list) => {
-                    list.iter_mut()
-                        .for_each(|nested_init| nested_init.offset += init.offset);
-                    flat_list.append(&mut list);
-                }
-            }
-        }
-
-        flat_list.reverse();
-        flat_list.dedup_by(|init1, init2| init1.offset == init2.offset);
-        flat_list.sort_by(|init1, init2| init1.offset.cmp(&init2.offset));
-
-        flat_list
-    }
     fn designator_index<'a>(
         token: &'a Token,
         type_decl: &'a NEWTypes,
-        designator: &'a Designator,
-    ) -> Result<(i64, NEWTypes), Error> {
+        designator: Designator,
+    ) -> Result<(i64, i64, NEWTypes), Error> {
         match (designator, type_decl) {
             (Designator::Array(n), NEWTypes::Array { amount, of }) => {
-                if *n >= *amount as i64 {
-                    Err(Error::new(
-                        token,
-                        ErrorKind::DesignatorOverflow(*amount, *n),
-                    ))
+                if n >= *amount as i64 {
+                    Err(Error::new(token, ErrorKind::DesignatorOverflow(*amount, n)))
                 } else {
-                    Ok((*n, *of.clone()))
+                    Ok((n, n, *of.clone()))
                 }
             }
             (Designator::Member(_), NEWTypes::Array { .. }) => {
@@ -593,9 +569,9 @@ impl TypeChecker {
                 {
                     // unions only have single index
                     if let NEWTypes::Union(_) = type_decl {
-                        Ok((0, s.member_type(&m)))
+                        Ok((0, i as i64, s.member_type(&m)))
                     } else {
-                        Ok((i as i64, s.member_type(&m)))
+                        Ok((i as i64, i as i64, s.member_type(&m)))
                     }
                 } else {
                     Err(Error::new(
@@ -1366,34 +1342,40 @@ impl TypeChecker {
     }
 }
 #[derive(Clone)]
-struct CurrentObjects(Vec<(i64, NEWTypes, Option<Designator>)>);
+struct CurrentObjects(Vec<(i64, i64, NEWTypes)>);
 impl CurrentObjects {
     fn new(type_decl: NEWTypes) -> Self {
-        CurrentObjects(vec![(0, type_decl, None)])
+        CurrentObjects(vec![(0, 0, type_decl)])
     }
-    fn update(&mut self, (i, sub_type, designator): (i64, NEWTypes, Option<Designator>)) {
+    fn update(&mut self, (i, union_index, new_type): (i64, i64, NEWTypes)) {
         self.0.last_mut().unwrap().0 = i;
-        self.0.last_mut().unwrap().2 = designator;
-        self.0.push((0, sub_type, None));
+        self.0.last_mut().unwrap().1 = union_index;
+        self.0.push((0, 0, new_type));
     }
-    fn current(&self) -> &(i64, NEWTypes, Option<Designator>) {
+    fn current(&self) -> &(i64, i64, NEWTypes) {
         self.0.last().unwrap()
+    }
+    fn current_type(&self) -> &NEWTypes {
+        if let Some((.., type_decl)) = self.0.last() {
+            type_decl
+        } else {
+            unreachable!("always at least one current objects")
+        }
     }
     fn offset(&self) -> i64 {
         self.0
             .iter()
-            .fold(0, |acc, (i, type_decl, _)| acc + type_decl.offset(*i))
+            .fold(0, |acc, (i, _, type_decl)| acc + type_decl.offset(*i))
     }
     fn update_current(&mut self) {
         let mut remove_idx = None;
-        for (obj_index, (i, type_decl, _)) in self.0.iter().enumerate().rev() {
+        for (obj_index, (i, _, type_decl)) in self.0.iter().enumerate().rev() {
             if obj_index != 0 && (i + 1 >= type_decl.len() as i64) {
                 remove_idx = Some(obj_index);
             } else {
                 break;
             }
         }
-
         // if new current objects also full then remove too
         if let Some(i) = remove_idx {
             self.0.truncate(i);
@@ -1407,26 +1389,25 @@ impl CurrentObjects {
         self.0.truncate(1);
     }
 }
-impl PartialEq for CurrentObjects {
-    // determines wether a designation overrides another
-    fn eq(&self, other: &Self) -> bool {
-        for (current, other) in self.0.iter().zip(&other.0) {
-            match (current, other) {
-                ((_, NEWTypes::Union(_), d1), (_, NEWTypes::Union(_), d2)) => {
-                    if d1 != d2 {
-                        return true;
-                    }
+fn find_same_union(
+    new_list: &Vec<(CurrentObjects, Init)>,
+    current: &CurrentObjects,
+) -> Option<(i64, usize)> {
+    for (objects, _) in new_list {
+        let mut offset = 0;
+        for (other_obj, current_obj) in objects.0.iter().zip(&current.0) {
+            match (other_obj, current_obj) {
+                ((_, i1, type_decl @ NEWTypes::Union(_)), (_, i2, NEWTypes::Union(_)))
+                    if i1 != i2 =>
+                {
+                    return Some((offset, type_decl.size()))
                 }
-                ((i1, ..), (i2, ..)) if *i1 != *i2 => return false,
-                _ => (),
+                ((i1, ..), (i2, ..)) if *i1 != *i2 => break,
+                ((i, _, type_decl), ..) => offset += type_decl.offset(*i),
             }
         }
-        match self.0.len().cmp(&other.0.len()) {
-            Ordering::Less => false,
-            Ordering::Greater => true,
-            Ordering::Equal => true,
-        }
     }
+    None
 }
 
 pub fn align_by(mut offset: usize, type_size: usize) -> usize {
@@ -2068,6 +2049,20 @@ mod tests {
         )
         .unwrap();
         let expected = vec![(3, "(char)8")];
+
+        assert_init(actual, expected);
+    }
+    #[test]
+    fn partial_aggr_override() {
+        // also happens on structs
+        let actual = setup_init_list(
+            "union Foo {
+                int arr[3];
+                long n;
+              } my_union = {{1, 2}, .arr = 3};",
+        )
+        .unwrap();
+        let expected = vec![(0, "3"), (4, "2")];
 
         assert_init(actual, expected);
     }

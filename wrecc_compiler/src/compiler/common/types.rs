@@ -94,8 +94,8 @@ impl Display for NEWTypes {
                 NEWTypes::Primitive(t) => t.fmt().to_string(),
                 NEWTypes::Array { of, amount } => format!("{}[{}]", of, amount),
                 NEWTypes::Pointer(to) => format!("{}*", to),
-                NEWTypes::Union(s) => "union ".to_string() + s.name(),
-                NEWTypes::Struct(s) => "struct ".to_string() + s.name(),
+                NEWTypes::Union(s) => "union ".to_string() + &s.name(),
+                NEWTypes::Struct(s) => "struct ".to_string() + &s.name(),
                 NEWTypes::Enum(Some(name), ..) => "enum ".to_string() + name,
                 NEWTypes::Enum(None, ..) => "enum <anonymous>".to_string(),
             }
@@ -148,8 +148,8 @@ impl NEWTypes {
 
             // two structs/unions are compatible if they have the same name and members
             (NEWTypes::Struct(s_l), NEWTypes::Struct(s_r))
-            | (NEWTypes::Union(s_l), NEWTypes::Union(s_r)) => {
-                if let (StructInfo::Named(name_l, _), StructInfo::Named(name_r, _)) = (s_l, s_r) {
+            | (NEWTypes::Union(s_l), NEWTypes::Union(s_r)) => match (s_l, s_r) {
+                (StructInfo::Named(name_l, _), StructInfo::Named(name_r, _)) => {
                     let matching_members = s_l
                         .members()
                         .iter()
@@ -159,10 +159,12 @@ impl NEWTypes {
                     *name_l == *name_r
                         && matching_members == s_l.members().len()
                         && matching_members == s_r.members().len()
-                } else {
-                    false
                 }
-            }
+                (StructInfo::Anonymous(name_l, _), StructInfo::Anonymous(name_r, _)) => {
+                    name_l == name_r
+                }
+                _ => false,
+            },
             (NEWTypes::Enum(..), NEWTypes::Primitive(Types::Void))
             | (NEWTypes::Primitive(Types::Void), NEWTypes::Enum(..)) => false,
 
@@ -393,13 +395,13 @@ pub fn integer_type(n: i64) -> Types {
 #[derive(Clone, PartialEq, Debug)]
 pub enum StructInfo {
     Named(String, StructRef),
-    Anonymous(Vec<(NEWTypes, Token)>),
+    Anonymous(Token, Vec<(NEWTypes, Token)>),
 }
 impl StructInfo {
     pub fn members(&self) -> Rc<Vec<(NEWTypes, Token)>> {
         match self {
             StructInfo::Named(_, s) => s.get(),
-            StructInfo::Anonymous(m) => Rc::new(m.clone()),
+            StructInfo::Anonymous(_, m) => Rc::new(m.clone()),
         }
     }
     pub fn member_offset(&self, member_to_find: &str) -> usize {
@@ -416,16 +418,21 @@ impl StructInfo {
             .0
             .clone()
     }
-    fn name(&self) -> &str {
+    fn name(&self) -> String {
         match self {
-            StructInfo::Named(name, _) => name,
-            StructInfo::Anonymous(_) => "<anonymous>",
+            StructInfo::Named(name, _) => name.to_string(),
+            StructInfo::Anonymous(token, _) => format!(
+                "<anonymous> at {}:{}:{}",
+                token.filename.display(),
+                token.line_index,
+                token.column
+            ),
         }
     }
     pub fn is_complete(&self) -> bool {
         match self {
             Self::Named(_, s) => s.is_complete(),
-            Self::Anonymous(_) => true,
+            Self::Anonymous(..) => true,
         }
     }
 }
@@ -515,7 +522,7 @@ macro_rules! arr_decay {
 #[macro_export]
 macro_rules! into_newtype {
     ($token:expr,$name:expr,$value:expr) => {
-        match $token {
+        match $token.token {
             TokenType::Struct => NEWTypes::Struct(StructInfo::Named($name, $value.unwrap_aggr())),
             TokenType::Union => NEWTypes::Union(StructInfo::Named($name, $value.unwrap_aggr())),
             TokenType::Enum => NEWTypes::Enum(Some($name), $value.unwrap_enum()),
@@ -523,9 +530,9 @@ macro_rules! into_newtype {
         }
     };
     ($token:expr,$value:expr) => {
-        match $token {
-            TokenType::Struct => NEWTypes::Struct(StructInfo::Anonymous($value)),
-            TokenType::Union => NEWTypes::Union(StructInfo::Anonymous($value)),
+        match $token.token {
+            TokenType::Struct => NEWTypes::Struct(StructInfo::Anonymous($token.clone(), $value)),
+            TokenType::Union => NEWTypes::Union(StructInfo::Anonymous($token.clone(), $value)),
             _ => unreachable!("should only be used for aggregate types"),
         }
     };

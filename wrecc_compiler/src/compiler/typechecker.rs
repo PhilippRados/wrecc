@@ -1737,10 +1737,13 @@ mod tests {
             true,
             vec![(
                 "a",
-                NEWTypes::Struct(StructInfo::Anonymous(vec![(
-                    NEWTypes::default(),
-                    Token::default(TokenType::Ident("age".to_string(), 0))
-                )]))
+                NEWTypes::Struct(StructInfo::Anonymous(
+                    Token::default(TokenType::Comma),
+                    vec![(
+                        NEWTypes::default(),
+                        Token::default(TokenType::Ident("age".to_string(), 0))
+                    )]
+                ))
             )]
         );
 
@@ -1749,10 +1752,13 @@ mod tests {
             false,
             vec![(
                 "a",
-                NEWTypes::Struct(StructInfo::Anonymous(vec![(
-                    NEWTypes::default(),
-                    Token::default(TokenType::Ident("age".to_string(), 0))
-                )]))
+                NEWTypes::Struct(StructInfo::Anonymous(
+                    Token::default(TokenType::Comma),
+                    vec![(
+                        NEWTypes::default(),
+                        Token::default(TokenType::Ident("age".to_string(), 0))
+                    )]
+                ))
             )]
         );
         assert_const_expr!(
@@ -1809,10 +1815,13 @@ mod tests {
                 "a",
                 NEWTypes::Array {
                     amount: 4,
-                    of: Box::new(NEWTypes::Struct(StructInfo::Anonymous(vec![(
-                        NEWTypes::default(),
-                        Token::default(TokenType::Ident("age".to_string(), 0))
-                    )]))),
+                    of: Box::new(NEWTypes::Struct(StructInfo::Anonymous(
+                        Token::default(TokenType::Comma),
+                        vec![(
+                            NEWTypes::default(),
+                            Token::default(TokenType::Ident("age".to_string(), 0))
+                        )]
+                    ))),
                 },
             )]
         );

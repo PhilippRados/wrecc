@@ -445,7 +445,7 @@ impl Parser {
 
                         struct_ref.update(members);
 
-                        into_newtype!(&token.token, name.unwrap_string(), custom_type.clone())
+                        into_newtype!(&token, name.unwrap_string(), custom_type.clone())
                     }
                     TokenType::Enum => {
                         self.nest_level += 1;
@@ -492,11 +492,7 @@ impl Parser {
                     }
                 };
 
-                Ok(into_newtype!(
-                    &token.token,
-                    name.unwrap_string(),
-                    custom_type
-                ))
+                Ok(into_newtype!(&token, name.unwrap_string(), custom_type))
             }
             (None, Some(_)) => Ok(if token.token == TokenType::Enum {
                 self.nest_level += 1;
@@ -509,7 +505,7 @@ impl Parser {
                 let members = self.parse_members(token)?;
                 self.nest_level -= 1;
 
-                into_newtype!(token.token, members)
+                into_newtype!(token, members)
             }),
             (None, None) => Err(Error::new(
                 token,

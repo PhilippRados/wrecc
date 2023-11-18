@@ -482,11 +482,17 @@ impl TypeChecker {
                         let r_type = self.expr_type(expr)?;
                         let mut l_expr = Expr::new(ExprKind::Nop, ValueKind::Lvalue); // placeholder expression
 
-                        while self
-                            .assign_var(&mut l_expr, sub_type.clone(), token, expr, r_type.clone())
-                            .is_err()
-                            && !sub_type.is_scalar()
+                        while !sub_type.is_scalar()
                             && Self::is_string_init(sub_type, first).is_none()
+                            && self
+                                .assign_var(
+                                    &mut l_expr,
+                                    sub_type.clone(),
+                                    token,
+                                    expr,
+                                    r_type.clone(),
+                                )
+                                .is_err()
                         {
                             let new_sub_type = objects.current_type().at(0).unwrap();
                             objects.0.push((0, 0, new_sub_type));

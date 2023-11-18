@@ -464,14 +464,36 @@ impl TypeChecker {
                         objects.0.push((0, 0, sub_type))
                     }
 
-                    while matches!(first.kind, InitKind::Scalar(_))
-                        && !objects.current_type().is_scalar()
-                        && Self::is_string_init(objects.current_type(), first).is_none()
-                    {
-                        let sub_type = objects.current_type().at(0).unwrap();
-                        objects.0.push((0, 0, sub_type));
+                    // handles cases when incompatible aggregate type with scalar:
+                    //     struct {
+                    //         struct {
+                    //             int arr[3] a;
+                    //         } s;
+                    //     } = {1};
+                    //     => pushes 'struct s' and 'int[3]' to current objects and initializes 1 to int
+                    // or when aggregate is initialized with scalar of aggregate type
+                    //     struct X foo;
+                    //     struct {
+                    //         int a;
+                    //         struct X s;
+                    //     } = {.s = foo};
+                    let mut sub_type = objects.current_type();
+                    if let InitKind::Scalar(ref mut expr) = first.kind.clone() {
+                        let r_type = self.expr_type(expr)?;
+                        let mut l_expr = Expr::new(ExprKind::Nop, ValueKind::Lvalue); // placeholder expression
+
+                        while self
+                            .assign_var(&mut l_expr, sub_type.clone(), token, expr, r_type.clone())
+                            .is_err()
+                            && !sub_type.is_scalar()
+                            && Self::is_string_init(sub_type, first).is_none()
+                        {
+                            let new_sub_type = objects.current_type().at(0).unwrap();
+                            objects.0.push((0, 0, new_sub_type));
+
+                            sub_type = objects.current_type();
+                        }
                     }
-                    let sub_type = objects.current_type();
 
                     let mut init = Init {
                         offset: objects.offset(),

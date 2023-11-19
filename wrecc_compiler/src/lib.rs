@@ -10,12 +10,12 @@ use preprocessor::{preprocessor::*, scanner::Scanner as PPScanner};
 use std::path::Path;
 
 // Preprocesses given input file
-pub fn preprocess(filename: &Path, source: &str) -> Result<Vec<PPToken>, Vec<Error>> {
+pub fn preprocess(filename: &Path, source: String) -> Result<Vec<PPToken>, Vec<Error>> {
     let tokens = PPScanner::new(source).scan_token();
 
     Preprocessor::new(filename, tokens, None)
         .start()
-        .map(|(source, _)| source)
+        .map(|(tokens, _)| tokens)
 }
 
 pub fn compile(source: Vec<PPToken>, dump_ast: bool) -> Result<String, Vec<Error>> {

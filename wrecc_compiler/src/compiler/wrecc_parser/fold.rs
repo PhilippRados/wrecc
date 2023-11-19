@@ -467,7 +467,7 @@ mod tests {
     use std::path::Path;
 
     fn assert_fold(input: &str, expected: &str) -> Option<NEWTypes> {
-        let pp_tokens = preprocess(Path::new(""), input).unwrap();
+        let pp_tokens = preprocess(Path::new(""), input.to_string()).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         let tokens = scanner.scan_token().unwrap();
 
@@ -475,7 +475,7 @@ mod tests {
         let mut actual = parser.expression().unwrap();
         actual.integer_const_fold(&Vec::new()).unwrap();
 
-        let pp_tokens = preprocess(Path::new(""), expected).unwrap();
+        let pp_tokens = preprocess(Path::new(""), expected.to_string()).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         let tokens = scanner.scan_token().unwrap();
 
@@ -501,7 +501,7 @@ mod tests {
     }
     macro_rules! assert_fold_error {
         ($input:expr,$expected_err:pat) => {
-            let pp_tokens = preprocess(Path::new(""),$input).unwrap();
+            let pp_tokens = preprocess(Path::new(""),$input.to_string()).unwrap();
             let mut scanner = Scanner::new(pp_tokens);
             let tokens = scanner.scan_token().unwrap();
 

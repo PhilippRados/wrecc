@@ -306,7 +306,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     fn setup_generic(input: &str) -> Vec<Token> {
-        let pp_tokens = preprocess(Path::new(""), input).unwrap();
+        let pp_tokens = preprocess(Path::new(""), input.to_string()).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         if let Ok(tokens) = scanner.scan_token() {
             tokens
@@ -315,7 +315,7 @@ mod tests {
         }
     }
     fn setup_generic_err(input: &str) -> Vec<Error> {
-        let pp_tokens = preprocess(Path::new(""), input).unwrap();
+        let pp_tokens = preprocess(Path::new(""), input.to_string()).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         if let Err(errs) = scanner.scan_token() {
             errs
@@ -551,7 +551,7 @@ mod tests {
             .into_iter()
             .collect();
 
-        let pp_tokens = preprocess(Path::new(""), &input).unwrap();
+        let pp_tokens = preprocess(Path::new(""), input).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         let actual: Vec<TokenType> = scanner
             .scan_token()
@@ -571,7 +571,7 @@ mod tests {
             .into_iter()
             .collect();
 
-        let pp_tokens = preprocess(Path::new(""), &input).unwrap();
+        let pp_tokens = preprocess(Path::new(""), input).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         let actual: Vec<TokenType> = scanner
             .scan_token()

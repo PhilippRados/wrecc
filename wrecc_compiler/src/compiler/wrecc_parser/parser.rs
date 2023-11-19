@@ -1544,7 +1544,7 @@ mod tests {
     }
 
     fn setup(input: &str) -> Parser {
-        let pp_tokens = preprocess(Path::new(""), input).unwrap();
+        let pp_tokens = preprocess(Path::new(""), input.to_string()).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         let tokens = scanner.scan_token().unwrap();
 

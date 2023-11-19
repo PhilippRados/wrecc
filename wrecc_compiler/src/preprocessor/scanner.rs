@@ -108,11 +108,12 @@ pub struct Scanner {
     raw_source: Vec<String>,
 }
 impl Scanner {
-    pub fn new(source: &str) -> Scanner {
+    pub fn new(source: String) -> Scanner {
         Scanner {
             column: 1,
             line: 1,
             raw_source: source
+                .replace("\t", " ")
                 .split('\n')
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
@@ -294,7 +295,7 @@ mod tests {
     use super::*;
 
     fn setup(input: &str) -> Vec<Token> {
-        Scanner::new(input).scan_token()
+        Scanner::new(input.to_string()).scan_token()
     }
     fn setup_tokenkind(input: &str) -> Vec<TokenKind> {
         setup(input).into_iter().map(|t| t.kind).collect()

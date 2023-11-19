@@ -97,7 +97,7 @@ impl<'a> Preprocessor<'a> {
         &mut self,
         (file_path, data): (PathBuf, String),
     ) -> Result<Vec<PPToken>, Error> {
-        let (data, defines) = preprocess_included(&file_path, &data, self.defines.clone())
+        let (data, defines) = preprocess_included(&file_path, data, self.defines.clone())
             .map_err(Error::new_multiple)?;
 
         self.defines.extend(defines);
@@ -713,7 +713,7 @@ impl PPResult {
 // Preprocesses given input file if input file nested inside root-file
 fn preprocess_included(
     filename: &Path,
-    source: &str,
+    source: String,
     defines: HashMap<String, Vec<Token>>,
 ) -> Result<(Vec<PPToken>, HashMap<String, Vec<Token>>), Vec<Error>> {
     let tokens = PPScanner::new(source).scan_token();
@@ -773,11 +773,11 @@ mod tests {
     use super::*;
 
     fn scan(input: &str) -> Vec<Token> {
-        PPScanner::new(input).scan_token()
+        PPScanner::new(input.to_string()).scan_token()
     }
 
     fn setup(input: &str) -> Preprocessor {
-        let tokens = PPScanner::new(input).scan_token();
+        let tokens = PPScanner::new(input.to_string()).scan_token();
 
         Preprocessor::new(Path::new(""), tokens, None)
     }

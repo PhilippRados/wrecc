@@ -517,6 +517,7 @@ impl Parser {
     fn typedef(&mut self) -> Result<Stmt, Error> {
         let type_decl = self.matches_specifier()?;
         let name = self.consume(TokenKind::Ident, "Expect identifier following type")?;
+        let type_decl = self.parse_arr(type_decl)?;
 
         self.env
             .declare_symbol(&name, Symbols::TypeDef(type_decl))?;

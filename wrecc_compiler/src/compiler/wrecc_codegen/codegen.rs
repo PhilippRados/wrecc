@@ -154,13 +154,15 @@ impl Compiler {
             .map(|_| create_label(&mut self.label_index))
             .collect();
 
-        let cond_reg = self.execute_expr(cond);
+        let mut cond_reg = self.execute_expr(cond);
 
         let mut default_label = None;
         for (kind, label) in switch_labels.iter().zip(jump_labels.clone()) {
             match kind {
                 Some(case_value) => {
                     // WARN: literal can also be negative so needs type i64
+                    cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
+
                     self.write_out(Ir::Cmp(
                         Register::Literal(*case_value, NEWTypes::default()),
                         cond_reg.clone(),
@@ -207,6 +209,7 @@ impl Compiler {
         self.write_out(Ir::LabelDefinition(cond_label));
         let mut cond_reg = self.execute_expr(cond);
         cond_reg = self.convert_to_rval(cond_reg);
+        cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
         self.write_out(Ir::Cmp(
             Register::Literal(0, NEWTypes::default()),
@@ -259,6 +262,7 @@ impl Compiler {
             Some(cond) => {
                 let mut cond_reg = self.execute_expr(cond);
                 cond_reg = self.convert_to_rval(cond_reg);
+                cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
                 self.write_out(Ir::Cmp(
                     Register::Literal(0, NEWTypes::default()),
@@ -290,6 +294,7 @@ impl Compiler {
 
         let mut cond_reg = self.execute_expr(cond);
         cond_reg = self.convert_to_rval(cond_reg);
+        cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
         self.write_out(Ir::Cmp(
             Register::Literal(0, NEWTypes::default()),

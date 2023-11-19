@@ -395,7 +395,7 @@ impl TypeChecker {
         init: &mut Init,
         is_global: bool,
     ) -> Result<(), Error> {
-        if let Some((amount, s)) = Self::is_string_init(&type_decl, init) {
+        if let Some((amount, s)) = Self::is_string_init(&type_decl, init)? {
             init.kind = Self::char_array(init.token.clone(), s, amount)?;
         }
 
@@ -483,7 +483,7 @@ impl TypeChecker {
                         let mut l_expr = Expr::new(ExprKind::Nop, ValueKind::Lvalue); // placeholder expression
 
                         while !sub_type.is_scalar()
-                            && Self::is_string_init(sub_type, first).is_none()
+                            && Self::is_string_init(sub_type, first)?.is_none()
                             && self
                                 .assign_var(
                                     &mut l_expr,
@@ -615,13 +615,40 @@ impl TypeChecker {
             )),
         }
     }
-    fn is_string_init(type_decl: &NEWTypes, init: &Init) -> Option<(usize, String)> {
+    // detects if char-array is initialized with a string
+    // both valid:
+    // - char arr[4] = "foo";
+    // - char arr[4] = {"foo"};
+    fn is_string_init(type_decl: &NEWTypes, init: &Init) -> Result<Option<(usize, String)>, Error> {
         if let Some(amount) = type_decl.is_char_array() {
-            if let InitKind::Scalar(Expr { kind: ExprKind::String(s), .. }) = &init.kind {
-                return Some((amount, s.unwrap_string()));
+            match &init.kind {
+                InitKind::Scalar(Expr { kind: ExprKind::String(s), .. }) => {
+                    return Ok(Some((amount, s.unwrap_string())))
+                }
+                InitKind::Aggr(list) => match list.as_slice() {
+                    [single_init] if single_init.designator.is_none() => {
+                        if let InitKind::Scalar(Expr { kind: ExprKind::String(s), .. }) =
+                            &single_init.kind
+                        {
+                            return Ok(Some((amount, s.unwrap_string())));
+                        }
+                    }
+                    [first_init, second_init] if first_init.designator.is_none() => {
+                        if let InitKind::Scalar(Expr { kind: ExprKind::String(_), .. }) =
+                            &first_init.kind
+                        {
+                            return Err(Error::new(
+                                &second_init.token,
+                                ErrorKind::Regular("Excess elements in char array initializer"),
+                            ));
+                        }
+                    }
+                    _ => (),
+                },
+                _ => (),
             }
         }
-        None
+        Ok(None)
     }
     fn char_array(token: Token, mut s: String, amount: usize) -> Result<InitKind, Error> {
         // char s[] = "abc" identical to char s[] = {'a','b','c','\0'} (6.7.8)

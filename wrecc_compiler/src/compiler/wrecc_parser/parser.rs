@@ -702,7 +702,10 @@ impl Parser {
         while let Some(t) = self.matches(&[TokenKind::Dot, TokenKind::LeftBracket]) {
             if let TokenType::Dot = t.token {
                 if let Some(ident) = self.matches(&[TokenKind::Ident]) {
-                    result.push_back(Designator::Member(ident.unwrap_string()));
+                    result.push_back(Designator {
+                        token: ident.clone(),
+                        kind: DesignatorKind::Member(ident.unwrap_string()),
+                    });
                 } else {
                     return Err(Error::new(
                         &t,
@@ -725,7 +728,10 @@ impl Parser {
                     "Expect closing ']' after array designator",
                 )?;
 
-                result.push_back(Designator::Array(literal))
+                result.push_back(Designator {
+                    token: t,
+                    kind: DesignatorKind::Array(literal),
+                })
             }
         }
         if result.is_empty() {

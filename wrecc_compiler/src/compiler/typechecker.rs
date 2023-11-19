@@ -446,9 +446,9 @@ impl TypeChecker {
                     if let Some(designator) = &mut first.designator {
                         objects.clear();
 
-                        while let Some(d) = designator.remove(0) {
+                        while let Some(d) = designator.pop_front() {
                             let designator_info =
-                                Self::designator_index(token, objects.current_type(), d)?;
+                                Self::designator_index(objects.current_type(), d)?;
                             objects.update(designator_info);
                         }
 
@@ -564,32 +564,36 @@ impl TypeChecker {
     }
 
     fn designator_index<'a>(
-        token: &'a Token,
         type_decl: &'a NEWTypes,
         designator: Designator,
     ) -> Result<(i64, i64, NEWTypes), Error> {
-        match (designator, type_decl) {
-            (Designator::Array(n), NEWTypes::Array { amount, of }) => {
+        match (designator.kind, type_decl) {
+            (DesignatorKind::Array(n), NEWTypes::Array { amount, of }) => {
                 if n >= *amount as i64 {
-                    Err(Error::new(token, ErrorKind::DesignatorOverflow(*amount, n)))
+                    Err(Error::new(
+                        &designator.token,
+                        ErrorKind::DesignatorOverflow(*amount, n),
+                    ))
                 } else {
                     Ok((n, n, *of.clone()))
                 }
             }
-            (Designator::Member(_), NEWTypes::Array { .. }) => {
+            (DesignatorKind::Member(_), NEWTypes::Array { .. }) => {
                 return Err(Error::new(
-                    token,
+                    &designator.token,
                     ErrorKind::Regular(
                         "Can only use member designator on type 'struct' and 'union' not 'array'",
                     ),
                 ))
             }
 
-            (Designator::Array(_), NEWTypes::Struct(_) | NEWTypes::Union(_)) => Err(Error::new(
-                token,
-                ErrorKind::InvalidArrayDesignator(type_decl.clone()),
-            )),
-            (Designator::Member(m), NEWTypes::Struct(s) | NEWTypes::Union(s)) => {
+            (DesignatorKind::Array(_), NEWTypes::Struct(_) | NEWTypes::Union(_)) => {
+                Err(Error::new(
+                    &designator.token,
+                    ErrorKind::InvalidArrayDesignator(type_decl.clone()),
+                ))
+            }
+            (DesignatorKind::Member(m), NEWTypes::Struct(s) | NEWTypes::Union(s)) => {
                 if let Some(i) = s
                     .members()
                     .iter()
@@ -603,14 +607,14 @@ impl TypeChecker {
                     }
                 } else {
                     Err(Error::new(
-                        token,
+                        &designator.token,
                         ErrorKind::NonExistantMember(m.clone(), type_decl.clone()),
                     ))
                 }
             }
 
             (..) => Err(Error::new(
-                token,
+                &designator.token,
                 ErrorKind::NonAggregateDesignator(type_decl.clone()),
             )),
         }

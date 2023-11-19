@@ -193,7 +193,7 @@ impl ErrorKind {
 
             ErrorKind::NonAggregateDesignator(type_decl) => {
                 format!(
-                    "Can only use designator when initializing aggregate types, not: {}",
+                    "Can only use designator when initializing aggregate types, not '{}'",
                     type_decl
                 )
             }

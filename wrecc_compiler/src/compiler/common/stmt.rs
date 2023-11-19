@@ -69,7 +69,13 @@ impl std::fmt::Display for InitKind {
 }
 
 #[derive(PartialEq, Clone, Debug)]
-pub enum Designator {
+pub struct Designator {
+    pub kind: DesignatorKind,
+    pub token: Token,
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub enum DesignatorKind {
     Array(i64),
     Member(String),
 }

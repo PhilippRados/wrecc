@@ -1,0 +1,11 @@
+error: Expect ';' after declaration
+|  --> in tests/fixtures/tabs_error_locations.c:7:22
+|
+7  char s[5] = " hell" l;
+|                      ^
+error: Expect ';' after declaration
+|  --> in tests/fixtures/tabs_error_locations.c:8:14
+|
+8    int hello ls;
+|              ^
+2 errors generated.

@@ -927,35 +927,46 @@ impl Compiler {
         self.cg_assign(l_reg, bin_reg)
     }
     fn cg_postunary(&mut self, token: Token, expr: Expr, by_amount: usize) -> Register {
-        let type_decl = expr.type_decl.clone().unwrap();
-        let mut reg = self.execute_expr(expr);
+        let reg = self.execute_expr(expr);
 
-        let mut return_reg = Register::Temp(TempRegister::new(
-            type_decl,
+        let return_reg = Register::Temp(TempRegister::new(
+            reg.get_type(),
             &mut self.interval_counter,
             self.instr_counter,
         ));
 
         // Assign value to return-register before binary operation
-        // INFO: Have to do integer-promotion in codegen because if integer promotion in typechecker
-        // wouldn't have access to stack-reg because cast frees it
-        if return_reg.get_type().size() < Types::Int.size() {
-            return_reg.set_type(NEWTypes::Primitive(Types::Int));
-            self.write_out(Ir::Movs(reg.clone(), return_reg.clone()));
+        self.write_out(Ir::Mov(reg.clone(), return_reg.clone()));
 
-            // have to also set reg type so that ++/-- operations use at least 32bit
-            reg.set_type(NEWTypes::Primitive(Types::Int));
+        // Do binary operation with at least 4Byte register
+        let mut operation_reg = Register::Temp(TempRegister::new(
+            reg.get_type(),
+            &mut self.interval_counter,
+            self.instr_counter,
+        ));
+
+        if operation_reg.get_type().size() < Types::Int.size() {
+            operation_reg.set_type(NEWTypes::Primitive(Types::Int));
+            self.write_out(Ir::Movs(return_reg.clone(), operation_reg.clone()));
         } else {
-            self.write_out(Ir::Mov(reg.clone(), return_reg.clone()));
+            self.write_out(Ir::Mov(return_reg.clone(), operation_reg.clone()));
         }
 
         let by_amount = Register::Literal(by_amount as i64, NEWTypes::default());
         match token.token {
-            TokenType::PlusPlus => self.write_out(Ir::Add(by_amount, reg.clone())),
-            TokenType::MinusMinus => self.write_out(Ir::Sub(by_amount, reg.clone())),
+            TokenType::PlusPlus => self.write_out(Ir::Add(by_amount, operation_reg.clone())),
+            TokenType::MinusMinus => self.write_out(Ir::Sub(by_amount, operation_reg.clone())),
             _ => unreachable!(),
         };
+
+        // reset operation-regs type to type of original reg
+        operation_reg.set_type(reg.get_type());
+
+        // Write operation result back to original reg
+        self.write_out(Ir::Mov(operation_reg.clone(), reg.clone()));
+
         self.free(reg);
+        self.free(operation_reg);
 
         return_reg
     }
@@ -1055,8 +1066,8 @@ impl Compiler {
 
         // moving the arguments into their designated registers
         for (i, expr) in args.into_iter().enumerate().rev() {
-            let type_decl = expr.type_decl.clone().unwrap();
             let mut reg = self.execute_expr(expr);
+            let type_decl = reg.get_type();
 
             // put first six registers into designated argument-registers; others pushed onto stack
             if i < ARG_REGS.len() {

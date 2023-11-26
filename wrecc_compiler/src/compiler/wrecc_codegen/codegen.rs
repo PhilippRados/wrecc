@@ -445,7 +445,7 @@ impl Compiler {
                 if size > 0 {
                     self.write_out(Ir::GlobalInit(
                         NEWTypes::Primitive(Types::Void),
-                        StaticRegister::Literal(size as i64, NEWTypes::default()),
+                        StaticRegister::Literal(size, NEWTypes::default()),
                     ));
                 }
             }
@@ -858,8 +858,8 @@ impl Compiler {
     }
     fn cg_member_access(&mut self, reg: Register, member: &str, free: bool) -> Register {
         if let NEWTypes::Struct(s) = reg.get_type() {
-            let offset = s.member_offset(&member);
-            let member_type = s.member_type(&member);
+            let offset = s.member_offset(member);
+            let member_type = s.member_type(member);
 
             let address = self.cg_address_at(reg, free);
             let mut result = if offset != 0 {
@@ -875,7 +875,7 @@ impl Compiler {
             result.set_value_kind(ValueKind::Lvalue);
             result
         } else if let NEWTypes::Union(s) = reg.get_type() {
-            let member_type = s.member_type(&member);
+            let member_type = s.member_type(member);
 
             let mut result = self.cg_address_at(reg, free);
 

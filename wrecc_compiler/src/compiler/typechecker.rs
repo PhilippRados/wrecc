@@ -49,14 +49,23 @@ impl ScopeLevel {
 
         let func_symbol = func_name.token.get_symbol_entry();
 
-        if func_symbol.borrow().unwrap_func().labels.contains_key(&name) {
+        if func_symbol
+            .borrow()
+            .unwrap_func()
+            .labels
+            .contains_key(&name)
+        {
             return Err(Error::new(
                 name_token,
                 ErrorKind::Redefinition("Label", name_token.unwrap_string()),
             ));
         }
         let len = func_symbol.borrow().unwrap_func().labels.len();
-        func_symbol.borrow_mut().unwrap_func_mut().labels.insert(name, len);
+        func_symbol
+            .borrow_mut()
+            .unwrap_func_mut()
+            .labels
+            .insert(name, len);
 
         Ok(())
     }
@@ -75,7 +84,12 @@ impl ScopeLevel {
 
         for g in gotos {
             let label = g.unwrap_string();
-            if !func_symbol.borrow().unwrap_func().labels.contains_key(&label) {
+            if !func_symbol
+                .borrow()
+                .unwrap_func()
+                .labels
+                .contains_key(&label)
+            {
                 return Err(Error::new(
                     g,
                     ErrorKind::MissingLabel(label, func_name.unwrap_string()),
@@ -391,7 +405,7 @@ impl TypeChecker {
         init: &mut Init,
         is_global: bool,
     ) -> Result<(), Error> {
-        if let Some((amount, s)) = Self::is_string_init(&type_decl, init)? {
+        if let Some((amount, s)) = Self::is_string_init(type_decl, init)? {
             init.kind = Self::char_array(init.token.clone(), s, amount)?;
         }
 
@@ -413,13 +427,11 @@ impl TypeChecker {
         self.check_type_compatibility(token, type_decl, &value_type)?;
         self.maybe_cast(type_decl, &value_type, expr);
 
-        if is_global {
-            if !is_constant(expr) {
-                return Err(Error::new(
-                    token,
-                    ErrorKind::NotConstantInit("Global variables"),
-                ));
-            }
+        if is_global && !is_constant(expr) {
+            return Err(Error::new(
+                token,
+                ErrorKind::NotConstantInit("Global variables"),
+            ));
         }
 
         Ok(())
@@ -502,7 +514,7 @@ impl TypeChecker {
                         ..*list.remove(0)
                     };
 
-                    self.init_check(&sub_type, &mut init, is_global)?;
+                    self.init_check(sub_type, &mut init, is_global)?;
 
                     // remove overriding elements
                     let init_interval =
@@ -541,26 +553,26 @@ impl TypeChecker {
                     self.init_check(type_decl, single_init, is_global)
                 }
                 [single_init] => {
-                    return Err(Error::new(
+                    Err(Error::new(
                         &single_init.token,
                         ErrorKind::Regular("Too many braces around scalar initializer"),
-                    ));
+                    ))
                 }
                 [_, second_init, ..] => {
-                    return Err(Error::new(&second_init.token, ErrorKind::ScalarOverflow));
+                    Err(Error::new(&second_init.token, ErrorKind::ScalarOverflow))
                 }
                 [] => {
-                    return Err(Error::new(
+                    Err(Error::new(
                         token,
                         ErrorKind::Regular("Scalar initializer cannot be empty"),
-                    ));
+                    ))
                 }
             },
         }
     }
 
-    fn designator_index<'a>(
-        type_decl: &'a NEWTypes,
+    fn designator_index(
+        type_decl: &NEWTypes,
         designator: Designator,
     ) -> Result<(i64, i64, NEWTypes), Error> {
         match (designator.kind, type_decl) {
@@ -575,7 +587,7 @@ impl TypeChecker {
                 }
             }
             (DesignatorKind::Member(_), NEWTypes::Array { .. }) => {
-                return Err(Error::new(
+                Err(Error::new(
                     &designator.token,
                     ErrorKind::Regular(
                         "Can only use member designator on type 'struct' and 'union' not 'array'",
@@ -1082,7 +1094,7 @@ impl TypeChecker {
             arg_types.push((expr, t));
         }
 
-        match &* func_name.token.get_symbol_entry().borrow() {
+        match &*func_name.token.get_symbol_entry().borrow() {
             Symbols::Variable(_) | Symbols::TypeDef(..) => Err(Error::new(
                 left_paren,
                 ErrorKind::InvalidSymbol(func_name.unwrap_string(), "function"),

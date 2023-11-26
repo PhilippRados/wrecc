@@ -9,7 +9,7 @@ pub struct Parser {
     tokens: DoublePeek<Token>,
 
     // public so I can set it up in unit-tests
-    pub env: Scope,
+    pub env: Environment,
 
     // nest-depth to indicate matching synchronizing token
     nest_level: usize,
@@ -19,7 +19,7 @@ impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser {
             tokens: DoublePeek::new(tokens),
-            env: Scope::new(),
+            env: Environment::new(),
             nest_level: 0,
         }
     }
@@ -441,11 +441,11 @@ impl Parser {
                         let members = self.parse_members(token)?;
                         self.nest_level -= 1;
 
-                        if let Tags::Aggregate(struct_ref) = &* custom_type.borrow_mut() {
+                        if let Tags::Aggregate(struct_ref) = &*custom_type.borrow_mut() {
                             struct_ref.update(members);
                         }
 
-                        into_newtype!(&token, name.unwrap_string(), custom_type.borrow())
+                        into_newtype!(token, name.unwrap_string(), custom_type.borrow())
                     }
                     TokenType::Enum => {
                         self.nest_level += 1;
@@ -490,7 +490,7 @@ impl Parser {
                 };
 
                 Ok(into_newtype!(
-                    &token,
+                    token,
                     name.unwrap_string(),
                     custom_type.borrow()
                 ))
@@ -610,7 +610,7 @@ impl Parser {
     ) -> Result<Init, Error> {
         if self.matches(&[TokenKind::LeftBrace]).is_some() {
             self.nest_level += 1;
-            let init_list = self.initializer_list(&token, designator)?;
+            let init_list = self.initializer_list(token, designator)?;
             self.nest_level -= 1;
 
             Ok(init_list)
@@ -797,7 +797,7 @@ impl Parser {
     fn function_definition(&mut self, name: Token) -> Result<Stmt, Error> {
         let func_symbol = name.token.get_symbol_entry();
         let return_type = func_symbol.borrow().unwrap_func().return_type.clone();
-        
+
         if !return_type.is_complete() && !return_type.is_void() {
             return Err(Error::new(
                 &name,
@@ -1233,7 +1233,7 @@ impl Parser {
             if let Symbols::Variable(SymbolInfo { type_decl, .. })
             | Symbols::Func(Function { return_type: type_decl, .. }) = &*existing_symbol.borrow()
             {
-                complete_access(token, &type_decl)?
+                complete_access(token, type_decl)?
             }
         }
         Ok(())

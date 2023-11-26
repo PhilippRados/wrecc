@@ -113,7 +113,7 @@ impl Scanner {
             column: 1,
             line: 1,
             raw_source: source
-                .replace("\t", " ")
+                .replace('\t', " ")
                 .split('\n')
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
@@ -139,27 +139,25 @@ impl Scanner {
             match c {
                 '#' => self.add_token(&mut result, TokenKind::Hash, None),
                 '\n' => {
-                    let token = self.add_token(&mut result, TokenKind::Newline, None);
+                    self.add_token(&mut result, TokenKind::Newline, None);
                     self.column = 1;
                     self.line += 1;
-
-                    token
                 }
                 ' ' | '\t' => {
                     let (whitespace, loc) =
                         self.consume_until(&c.to_string(), |ch| ch != ' ' && ch != '\t', false);
 
-                    self.add_token(&mut result, TokenKind::Whitespace(whitespace), Some(loc))
+                    self.add_token(&mut result, TokenKind::Whitespace(whitespace), Some(loc));
                 }
                 '"' => {
                     let (s, loc) = self.consume_until("\"", |ch| ch == '"', true);
 
-                    self.add_token(&mut result, TokenKind::String(s), Some(loc))
+                    self.add_token(&mut result, TokenKind::String(s), Some(loc));
                 }
                 '\'' => {
                     let (s, loc) = self.consume_until("'", |ch| ch == '\'', true);
 
-                    self.add_token(&mut result, TokenKind::CharLit(s), Some(loc))
+                    self.add_token(&mut result, TokenKind::CharLit(s), Some(loc));
                 }
                 '/' if matches!(self.source.peek(), Ok('/')) => {
                     self.source.next();
@@ -188,13 +186,13 @@ impl Scanner {
                         TokenKind::Ident(ident)
                     };
 
-                    self.add_token(&mut result, ident, Some(loc))
+                    self.add_token(&mut result, ident, Some(loc));
                 }
                 _ if c.is_ascii_digit() => {
                     let (number, loc) =
                         self.consume_until(&c.to_string(), |c| !c.is_ascii_digit(), false);
 
-                    self.add_token(&mut result, TokenKind::Number(number), Some(loc))
+                    self.add_token(&mut result, TokenKind::Number(number), Some(loc));
                 }
                 '\\' if matches!(self.source.peek(), Ok('\n')) => {
                     // skip over escaped newline

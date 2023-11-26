@@ -48,7 +48,7 @@ impl Function {
     pub fn arity(&self) -> usize {
         self.params.len()
     }
-    pub fn cmp(&self, token: &Token, other: &Function) -> Result<(), Error> {
+    fn cmp(&self, token: &Token, other: &Function) -> Result<(), Error> {
         if self.return_type != other.return_type {
             Err(Error::new(
                 token,
@@ -332,14 +332,14 @@ impl<T: Clone + std::fmt::Debug> NameSpace<T> {
 }
 
 #[derive(Debug)]
-pub struct Scope {
+pub struct Environment {
     current_depth: usize,
     symbols: NameSpace<Symbols>,
     tags: NameSpace<Tags>,
 }
-impl Scope {
+impl Environment {
     pub fn new() -> Self {
-        Scope {
+        Environment {
             current_depth: 0,
             symbols: NameSpace::new(),
             tags: NameSpace::new(),
@@ -417,7 +417,7 @@ impl Scope {
         existing_symbol: Rc<RefCell<Symbols>>,
         depth: usize,
     ) -> Result<Rc<RefCell<Symbols>>, Error> {
-        symbol.cmp(var_name, &*existing_symbol.borrow())?;
+        symbol.cmp(var_name, &existing_symbol.borrow())?;
 
         if matches!(symbol, Symbols::Variable(_)) && depth != 0 {
             return Err(Error::new(

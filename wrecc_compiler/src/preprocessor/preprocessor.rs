@@ -191,7 +191,7 @@ impl<'a> Preprocessor<'a> {
 
                     // same macro already exists but with different replacement-list
                     if let Some(existing_replacement) = self.defines.get(&identifier) {
-                        if as_kind(&existing_replacement) != as_kind(&replace_with) {
+                        if as_kind(existing_replacement) != as_kind(&replace_with) {
                             return Err(Error::new(
                                 &PPToken::from(&token, self.filename),
                                 ErrorKind::Redefinition("macro", identifier),
@@ -225,7 +225,7 @@ impl<'a> Preprocessor<'a> {
                         if token_name != macro_name.kind.as_ident().unwrap() =>
                     {
                         let replacement = replacement
-                            .into_iter()
+                            .iter()
                             .map(|replace_t| Token {
                                 kind: replace_t.kind.clone(),
                                 ..macro_name.clone()
@@ -606,10 +606,8 @@ impl<'a> Preprocessor<'a> {
                         } else {
                             errors.push(e)
                         }
-                    } else {
-                        if let Err(e) = self.has_trailing_tokens() {
-                            errors.push(e);
-                        }
+                    } else if let Err(e) = self.has_trailing_tokens() {
+                        errors.push(e);
                     }
                 }
                 _ => {
@@ -661,7 +659,7 @@ impl<'a> Preprocessor<'a> {
         if !skip_whitespace(&mut self.tokens) {
             match self.tokens.peek() {
                 Ok(token) => Err(Error::new(
-                    &PPToken::from(&token, self.filename),
+                    &PPToken::from(token, self.filename),
                     ErrorKind::Regular("Expect whitespace after preprocessing directive"),
                 )),
                 Err((Some(eof_token), _)) => Err(Error::new(
@@ -685,7 +683,7 @@ impl<'a> Preprocessor<'a> {
             Ok(())
         } else {
             Err(Error::new(
-                &PPToken::from(&trailing[0], self.filename),
+                &PPToken::from(trailing[0], self.filename),
                 ErrorKind::TrailingTokens("preprocessor directive"),
             ))
         }
@@ -721,7 +719,7 @@ fn preprocess_included(
     Preprocessor::new(filename, tokens, Some(defines)).start()
 }
 
-fn as_kind(tokens: &Vec<Token>) -> Vec<&TokenKind> {
+fn as_kind(tokens: &[Token]) -> Vec<&TokenKind> {
     tokens.iter().map(|t| &t.kind).collect()
 }
 
@@ -756,7 +754,7 @@ fn pad_whitespace(mut tokens: Vec<Token>) -> Vec<Token> {
     tokens
 }
 
-fn is_first_line_token(prev_tokens: &Vec<PPToken>) -> bool {
+fn is_first_line_token(prev_tokens: &[PPToken]) -> bool {
     for token in prev_tokens.iter().rev() {
         match &token.kind {
             TokenKind::Newline => return true,
@@ -835,7 +833,7 @@ mod tests {
             scan(input)
                 .into_iter()
                 .map(|t| PPToken::from(&t, Path::new("")))
-                .collect()
+                .collect::<Vec<_>>()
         };
         assert_eq!(is_first_line_token(&to_pp_tok("")), true);
         assert_eq!(is_first_line_token(&to_pp_tok("\n  \t ")), true);

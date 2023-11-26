@@ -31,33 +31,33 @@ macro_rules! find_scope {
 #[derive(PartialEq, Debug)]
 struct ScopeLevel(Vec<ScopeKind>);
 impl ScopeLevel {
-    fn increment_stack_size(&mut self, type_decl: &NEWTypes, env: &mut [Symbols]) {
+    fn increment_stack_size(&mut self, type_decl: &NEWTypes) {
         let ScopeKind::Function(func_name, ..) = find_scope!(self, ScopeKind::Function(..))
             .expect("can only be called inside a function") else {unreachable!()};
-        let func_symbol = env
-            .get_mut(func_name.token.get_index())
-            .expect("valid table index");
+        let func_symbol = func_name.token.get_symbol_entry();
+        let stack_size = func_symbol.borrow().unwrap_func().stack_size;
 
-        let mut size = func_symbol.unwrap_func().stack_size + type_decl.size();
+        let mut size = stack_size + type_decl.size();
         size = align(size, type_decl);
 
-        func_symbol.unwrap_func().stack_size = size;
+        func_symbol.borrow_mut().unwrap_func_mut().stack_size = size;
     }
-    fn insert_label(&mut self, name_token: &Token, env: &mut [Symbols]) -> Result<(), Error> {
+    fn insert_label(&mut self, name_token: &Token) -> Result<(), Error> {
         let name = name_token.unwrap_string();
         let ScopeKind::Function(func_name, ..) = find_scope!(self,ScopeKind::Function(..))
             .expect("ensured by parser that label is always inside function") else {unreachable!()};
 
-        let func_symbol = env.get_mut(func_name.token.get_index()).unwrap();
+        let func_symbol = func_name.token.get_symbol_entry();
 
-        if func_symbol.unwrap_func().labels.contains_key(&name) {
+        if func_symbol.borrow().unwrap_func().labels.contains_key(&name) {
             return Err(Error::new(
                 name_token,
                 ErrorKind::Redefinition("Label", name_token.unwrap_string()),
             ));
         }
-        let len = func_symbol.unwrap_func().labels.len();
-        func_symbol.unwrap_func().labels.insert(name, len);
+        let len = func_symbol.borrow().unwrap_func().labels.len();
+        func_symbol.borrow_mut().unwrap_func_mut().labels.insert(name, len);
+
         Ok(())
     }
     fn insert_goto(&mut self, name_token: Token) -> Result<(), Error> {
@@ -67,14 +67,15 @@ impl ScopeLevel {
         gotos.push(name_token);
         Ok(())
     }
-    fn compare_gotos(&mut self, env: &mut [Symbols]) -> Result<(), Error> {
+    fn compare_gotos(&mut self) -> Result<(), Error> {
         let ScopeKind::Function(func_name, _,gotos) = find_scope!(self,ScopeKind::Function(..))
             .expect("ensured by parser that label is always inside function") else {unreachable!()};
 
-        let func_symbol = env.get_mut(func_name.token.get_index()).unwrap();
+        let func_symbol = func_name.token.get_symbol_entry();
+
         for g in gotos {
             let label = g.unwrap_string();
-            if !func_symbol.unwrap_func().labels.contains_key(&label) {
+            if !func_symbol.borrow().unwrap_func().labels.contains_key(&label) {
                 return Err(Error::new(
                     g,
                     ErrorKind::MissingLabel(label, func_name.unwrap_string()),
@@ -87,9 +88,6 @@ impl ScopeLevel {
 pub struct TypeChecker {
     // keeps track of current scope-kind
     scope: ScopeLevel,
-
-    // symbol table, can be indexed via token-index
-    env: Vec<Symbols>,
 
     // TODO: this should be done via control-flow-graph
     // checks if all paths return from a function
@@ -121,9 +119,8 @@ macro_rules! cast {
 }
 
 impl TypeChecker {
-    pub fn new(env: Vec<Symbols>) -> Self {
+    pub fn new() -> Self {
         TypeChecker {
-            env,
             scope: ScopeLevel(vec![ScopeKind::Global]),
             returns_all_paths: false,
             const_labels: HashMap::new(),
@@ -134,9 +131,9 @@ impl TypeChecker {
     pub fn check(
         mut self,
         statements: &mut Vec<Stmt>,
-    ) -> Result<(HashMap<String, usize>, Vec<Symbols>, Vec<Vec<Option<i64>>>), Vec<Error>> {
+    ) -> Result<(HashMap<String, usize>, Vec<Vec<Option<i64>>>), Vec<Error>> {
         match self.check_statements(statements) {
-            Ok(_) => Ok((self.const_labels, self.env, self.switches)),
+            Ok(_) => Ok((self.const_labels, self.switches)),
             Err(e) => Err(e.flatten_multiple()),
         }
     }
@@ -187,7 +184,7 @@ impl TypeChecker {
         Ok(())
     }
     fn label_statement(&mut self, name_token: &Token, body: &mut Stmt) -> Result<(), Error> {
-        self.scope.insert_label(name_token, &mut self.env)?;
+        self.scope.insert_label(name_token)?;
         self.visit(body)?;
         Ok(())
     }
@@ -216,7 +213,6 @@ impl TypeChecker {
         err?;
 
         // TODO: check returns in all paths
-        // self.self.returns_all_paths = false;
 
         Ok(())
     }
@@ -369,7 +365,7 @@ impl TypeChecker {
     }
     fn declare_var(&mut self, type_decl: &mut NEWTypes, is_global: bool) -> Result<(), Error> {
         if !is_global {
-            self.scope.increment_stack_size(type_decl, &mut self.env);
+            self.scope.increment_stack_size(type_decl);
         }
 
         Ok(())
@@ -384,7 +380,7 @@ impl TypeChecker {
         self.init_check(type_decl, init, is_global)?;
 
         if !is_global {
-            self.scope.increment_stack_size(type_decl, &mut self.env);
+            self.scope.increment_stack_size(type_decl);
         }
 
         Ok(())
@@ -760,51 +756,37 @@ impl TypeChecker {
         }
         Ok(())
     }
-    fn function_definition(
-        &mut self,
-        name_token: &Token,
-        body: &mut Vec<Stmt>,
-    ) -> Result<(), Error> {
-        let return_type = self
-            .env
-            .get_mut(name_token.token.get_index())
-            .unwrap()
-            .unwrap_func()
-            .return_type
-            .clone();
-        let params = self
-            .env
-            .get_mut(name_token.token.get_index())
-            .unwrap()
-            .unwrap_func()
-            .params
-            .clone();
+    fn function_definition(&mut self, name: &Token, body: &mut Vec<Stmt>) -> Result<(), Error> {
+        let func_symbol = name.token.get_symbol_entry();
+
+        let return_type = func_symbol.borrow().unwrap_func().return_type.clone();
+        let params = func_symbol.borrow().unwrap_func().params.clone();
 
         // have to push scope before declaring local variables
         self.scope.0.push(ScopeKind::Function(
-            name_token.clone(),
+            name.clone(),
             return_type.clone(),
             vec![],
         ));
         for (type_decl, _) in params.iter().by_ref() {
-            self.scope.increment_stack_size(type_decl, &mut self.env);
+            self.scope.increment_stack_size(type_decl);
         }
 
         // check function body
         let err = self.block(body);
-        self.scope.compare_gotos(&mut self.env)?;
+        self.scope.compare_gotos()?;
 
         self.scope.0.pop();
 
         err?;
 
-        self.main_returns_int(name_token, &return_type)?;
-        self.implicit_return_main(name_token, body);
+        self.main_returns_int(name, &return_type)?;
+        self.implicit_return_main(name, body);
 
         if !return_type.is_void() && !self.returns_all_paths {
             Err(Error::new(
-                name_token,
-                ErrorKind::NoReturnAllPaths(name_token.unwrap_string()),
+                name,
+                ErrorKind::NoReturnAllPaths(name.unwrap_string()),
             ))
         } else {
             self.returns_all_paths = false;
@@ -856,7 +838,7 @@ impl TypeChecker {
     }
 
     pub fn expr_type(&mut self, ast: &mut Expr) -> Result<NEWTypes, Error> {
-        ast.integer_const_fold(&self.env.iter().collect())?;
+        ast.integer_const_fold()?;
 
         ast.type_decl = Some(match &mut ast.kind {
             ExprKind::Binary { left, token, right } => {
@@ -966,7 +948,7 @@ impl TypeChecker {
         }
     }
     fn ident(&mut self, token: &Token) -> Result<NEWTypes, Error> {
-        match self.env.get(token.token.get_index()).unwrap() {
+        match &*token.token.get_symbol_entry().borrow() {
             Symbols::Variable(v) => Ok(v.get_type()),
             Symbols::TypeDef(..) | Symbols::Func(..) => Err(Error::new(
                 token,
@@ -1100,7 +1082,7 @@ impl TypeChecker {
             arg_types.push((expr, t));
         }
 
-        match self.env.get(func_name.token.get_index()).unwrap() {
+        match &* func_name.token.get_symbol_entry().borrow() {
             Symbols::Variable(_) | Symbols::TypeDef(..) => Err(Error::new(
                 left_paren,
                 ErrorKind::InvalidSymbol(func_name.unwrap_string(), "function"),
@@ -1597,7 +1579,7 @@ mod tests {
             let mut parser = setup($input);
             let mut expr = parser.expression().unwrap();
 
-            let mut typechecker = TypeChecker::new(vec![]);
+            let mut typechecker = TypeChecker::new();
             let actual = typechecker.expr_type(&mut expr).unwrap();
 
             assert!(
@@ -1614,7 +1596,7 @@ mod tests {
             let mut parser = setup($input);
             let mut expr = parser.expression().unwrap();
 
-            let mut typechecker = TypeChecker::new(vec![]);
+            let mut typechecker = TypeChecker::new();
             let actual = typechecker.expr_type(&mut expr).unwrap_err();
 
             assert!(
@@ -1633,14 +1615,14 @@ mod tests {
                 parser
                     .env
                     .declare_symbol(
-                        &Token::default(TokenType::Ident(name.to_string(), 0)),
+                        &Token::default(TokenType::new_ident(name.to_string())),
                         Symbols::Variable(SymbolInfo::new(type_decl)),
                     )
                     .unwrap();
             }
             let mut expr = parser.expression().unwrap();
 
-            let mut typechecker = TypeChecker::new(parser.env.get_symbols());
+            let mut typechecker = TypeChecker::new();
             let value_type = typechecker.expr_type(&mut expr).unwrap();
 
             // have to do manual array decay because is constant expects array to be decayed already
@@ -1663,7 +1645,7 @@ mod tests {
 
         let DeclarationKind::Initializer(type_decl,_,mut init,_) = init.remove(0) else  {unreachable!("only passing type")};
 
-        TypeChecker::new(vec![]).init_check(&type_decl, &mut init, false)?;
+        TypeChecker::new().init_check(&type_decl, &mut init, false)?;
 
         Ok(init.kind)
     }
@@ -1772,7 +1754,7 @@ mod tests {
                     Token::default(TokenType::Comma),
                     vec![(
                         NEWTypes::default(),
-                        Token::default(TokenType::Ident("age".to_string(), 0))
+                        Token::default(TokenType::new_ident("age".to_string())),
                     )]
                 ))
             )]
@@ -1787,7 +1769,7 @@ mod tests {
                     Token::default(TokenType::Comma),
                     vec![(
                         NEWTypes::default(),
-                        Token::default(TokenType::Ident("age".to_string(), 0))
+                        Token::default(TokenType::new_ident("age".to_string())),
                     )]
                 ))
             )]
@@ -1850,7 +1832,7 @@ mod tests {
                         Token::default(TokenType::Comma),
                         vec![(
                             NEWTypes::default(),
-                            Token::default(TokenType::Ident("age".to_string(), 0))
+                            Token::default(TokenType::new_ident("age".to_string())),
                         )]
                     ))),
                 },

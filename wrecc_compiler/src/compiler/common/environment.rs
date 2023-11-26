@@ -1,9 +1,11 @@
 use crate::compiler::common::{error::*, token::*, types::*};
 use crate::compiler::wrecc_codegen::register::*;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 #[derive(Clone, PartialEq, Debug)]
-pub enum FunctionKind {
+pub enum InitType {
     Declaration,
     Definition,
 }
@@ -12,6 +14,7 @@ pub struct Function {
     // parameters to a function with it's corresponding name
     // a parameter-name is optional in a function declaration
     pub params: Vec<(NEWTypes, Option<Token>)>,
+
     pub return_type: NEWTypes,
 
     // if function contains var-args
@@ -21,7 +24,7 @@ pub struct Function {
     pub stack_size: usize,
 
     // can either be definition/declaration
-    pub kind: FunctionKind,
+    pub kind: InitType,
 
     // all the goto-labels that are unique to that function
     pub labels: HashMap<String, usize>,
@@ -37,7 +40,7 @@ impl Function {
             epilogue_index: 0,
             variadic: false,
             return_type,
-            kind: FunctionKind::Declaration,
+            kind: InitType::Declaration,
             params: vec![],
             labels: HashMap::new(),
         }
@@ -104,6 +107,9 @@ pub struct SymbolInfo {
     // type of identifier given in declaration
     pub type_decl: NEWTypes,
 
+    // wether the variable is a declaration or initialization
+    pub kind: InitType,
+
     // optional because info isn't known at moment of insertion
     // can be label-register or stack-register
     pub reg: Option<Register>,
@@ -111,7 +117,11 @@ pub struct SymbolInfo {
 
 impl SymbolInfo {
     pub fn new(type_decl: NEWTypes) -> Self {
-        SymbolInfo { type_decl, reg: None }
+        SymbolInfo {
+            type_decl,
+            kind: InitType::Declaration,
+            reg: None,
+        }
     }
     pub fn get_type(&self) -> NEWTypes {
         self.type_decl.clone()
@@ -143,11 +153,67 @@ impl Symbols {
             _ => unreachable!("cant unwrap var on func"),
         }
     }
-    pub fn unwrap_func(&mut self) -> &mut Function {
+    pub fn unwrap_func_mut(&mut self) -> &mut Function {
         match self {
             Symbols::Func(f) => f,
             _ => unreachable!(),
         }
+    }
+    pub fn unwrap_func(&self) -> &Function {
+        match self {
+            Symbols::Func(f) => f,
+            _ => unreachable!(),
+        }
+    }
+    fn get_kind(&self) -> &InitType {
+        match self {
+            Symbols::Variable(v) => &v.kind,
+            Symbols::Func(f) => &f.kind,
+            Symbols::TypeDef(_) => &InitType::Declaration,
+        }
+    }
+    fn cmp(&self, name: &Token, other: &Symbols) -> Result<(), Error> {
+        match (self, other) {
+            (
+                Symbols::Variable(SymbolInfo { type_decl: t1, .. }),
+                Symbols::Variable(SymbolInfo { type_decl: t2, .. }),
+            )
+            | (Symbols::TypeDef(t1), Symbols::TypeDef(t2)) => {
+                if t1 != t2 {
+                    Err(Error::new(
+                        name,
+                        ErrorKind::RedefTypeMismatch(name.unwrap_string(), t1.clone(), t2.clone()),
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            (Symbols::Func(f1), Symbols::Func(f2)) => f1.cmp(name, f2),
+            _ => Err(Error::new(
+                name,
+                ErrorKind::RedefOtherSymbol(name.unwrap_string(), other.to_string()),
+            )),
+        }
+    }
+}
+
+impl PartialEq for Symbols {
+    fn eq(&self, other: &Symbols) -> bool {
+        let placeholder = Token::default(TokenType::Semicolon);
+        self.cmp(&placeholder, other).is_ok()
+    }
+}
+impl std::fmt::Display for Symbols {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Symbols::Variable(_) => "variable",
+                Symbols::Func(_) => "function",
+                Symbols::TypeDef(_) => "typedef",
+            }
+        )
     }
 }
 
@@ -194,44 +260,74 @@ impl Tags {
 }
 
 #[derive(Clone, Debug)]
+struct Element<T> {
+    name: String,
+    depth: usize,
+    kind: Rc<RefCell<T>>,
+}
+#[derive(Clone, Debug)]
 struct NameSpace<T> {
-    // (name, depth, index in table, element)
-    elems: Vec<(String, usize, usize, T)>,
+    elems: Vec<Element<T>>,
 }
 impl<T: Clone + std::fmt::Debug> NameSpace<T> {
     fn new() -> Self {
-        NameSpace { elems: vec![] }
+        NameSpace { elems: Vec::new() }
     }
     // return sub-array of elements that are in current scope
-    fn get_current(&self, depth: usize) -> Vec<&(String, usize, usize, T)> {
+    fn get_current(&self, depth: usize) -> Vec<&Element<T>> {
         self.elems
             .iter()
             .rev()
-            .take_while(|(_, d, ..)| *d >= depth)
-            .filter(|(_, d, ..)| *d == depth)
+            .take_while(|elem| elem.depth >= depth)
+            .filter(|elem| elem.depth == depth)
             .collect()
     }
 
     // checks if element is in current scope
-    fn contains_key(&self, expected: &String, depth: usize) -> Option<&(String, usize, usize, T)> {
+    fn contains_key(&self, expected: &String, depth: usize) -> Option<Rc<RefCell<T>>> {
         self.get_current(depth)
             .into_iter()
-            .find(|(name, ..)| name == expected)
+            .find(|elem| &elem.name == expected)
+            .map(|elem| Rc::clone(&elem.kind))
     }
-    fn declare(&mut self, name: String, depth: usize, element: T) -> Result<usize, Error> {
-        self.elems.push((name, depth, self.elems.len(), element));
-        Ok(self.elems.len() - 1)
+    fn declare(&mut self, name: String, depth: usize, kind: T) -> Rc<RefCell<T>> {
+        let kind = Rc::new(RefCell::new(kind));
+        self.elems
+            .push(Element { name, depth, kind: Rc::clone(&kind) });
+        Rc::clone(&kind)
     }
     // returns a specific element and its index in st from all valid scopes
-    fn get(&self, var_name: &Token, depth: usize) -> Result<(T, usize), Error> {
-        let name = var_name.unwrap_string();
+    fn get(&self, name: String, depth: usize) -> Option<Rc<RefCell<T>>> {
         for d in (0..=depth).rev() {
-            if let Some((_, _, i, v)) = self.get_current(d).iter().find(|(id, ..)| *id == name) {
-                return Ok((v.clone(), *i));
+            if let Some(elem) = self.get_current(d).iter().find(|elem| elem.name == name) {
+                return Some(Rc::clone(&elem.kind));
             }
         }
-        // can only be symbol because type throws a special error
-        Err(Error::new(var_name, ErrorKind::UndeclaredSymbol(name)))
+        None
+    }
+    // inserts an element in the last scope before the current
+    fn declare_prev(&mut self, name: String, last_depth: usize, kind: T) -> Rc<RefCell<T>> {
+        let kind = Rc::new(RefCell::new(kind));
+
+        let mut insert_pos = self.elems.len();
+        for elem in self.elems.iter().rev() {
+            if elem.depth > last_depth {
+                insert_pos -= 1;
+            } else {
+                break;
+            }
+        }
+
+        self.elems.insert(
+            insert_pos,
+            Element {
+                name,
+                depth: last_depth,
+                kind: Rc::clone(&kind),
+            },
+        );
+
+        Rc::clone(&kind)
     }
 }
 
@@ -259,7 +355,7 @@ impl Scope {
         self.current_depth -= 1;
 
         // TODO: clean this up
-        // hacky solution but need a way to indicate when current env ends
+        // hacky solution but need a way to indicate when current scope ends
         let _ = self.symbols.declare(
             "".to_string(),
             self.current_depth,
@@ -269,158 +365,237 @@ impl Scope {
             .tags
             .declare("".to_string(), self.current_depth, Tags::Enum(vec![]));
     }
-    pub fn declare_symbol(&mut self, var_name: &Token, symbol: Symbols) -> Result<usize, Error> {
-        let name = var_name.unwrap_string();
-        if self
+    pub fn declare_symbol(
+        &mut self,
+        var_name: &Token,
+        symbol: Symbols,
+    ) -> Result<Rc<RefCell<Symbols>>, Error> {
+        if let Some(existing_symbol) = self
             .symbols
-            .contains_key(&name, self.current_depth)
-            .is_some()
+            .contains_key(&var_name.unwrap_string(), self.current_depth)
+        {
+            return Self::check_redef(var_name, symbol, existing_symbol, self.current_depth);
+        }
+
+        Ok(self
+            .symbols
+            .declare(var_name.unwrap_string(), self.current_depth, symbol))
+    }
+
+    // only used for functions since they have to be inserted before params
+    pub fn declare_prev_scope(
+        &mut self,
+        var_name: &Token,
+        symbol: Symbols,
+    ) -> Result<Rc<RefCell<Symbols>>, Error> {
+        let last_depth = self.current_depth - 1;
+
+        if matches!(symbol, Symbols::Func(_))
+            && symbol.get_kind() == &InitType::Definition
+            && last_depth != 0
         {
             return Err(Error::new(
                 var_name,
-                ErrorKind::Redefinition("symbol", name),
+                ErrorKind::Regular("Can only define functions in global scope"),
             ));
         }
-        self.symbols.declare(name, self.current_depth, symbol)
+
+        if let Some(existing_symbol) = self
+            .symbols
+            .contains_key(&var_name.unwrap_string(), last_depth)
+        {
+            return Self::check_redef(var_name, symbol, existing_symbol, last_depth);
+        }
+
+        Ok(self
+            .symbols
+            .declare_prev(var_name.unwrap_string(), last_depth, symbol))
     }
-    // function has special checks for Redefinitions because
-    // there can be multiple declarations but only a single definition
-    pub fn declare_func(&mut self, var_name: &Token, symbol: Symbols) -> Result<usize, Error> {
-        self.symbols
-            .declare(var_name.unwrap_string(), self.current_depth, symbol)
+    fn check_redef(
+        var_name: &Token,
+        symbol: Symbols,
+        existing_symbol: Rc<RefCell<Symbols>>,
+        depth: usize,
+    ) -> Result<Rc<RefCell<Symbols>>, Error> {
+        symbol.cmp(var_name, &*existing_symbol.borrow())?;
+
+        if matches!(symbol, Symbols::Variable(_)) && depth != 0 {
+            return Err(Error::new(
+                var_name,
+                ErrorKind::Redefinition("symbol", var_name.unwrap_string()),
+            ));
+        }
+
+        let existing_kind = existing_symbol.borrow().get_kind().clone();
+
+        match (symbol.get_kind(), existing_kind) {
+            (InitType::Declaration, InitType::Declaration)
+            | (InitType::Declaration, InitType::Definition) => Ok(existing_symbol),
+
+            (InitType::Definition, InitType::Declaration) => {
+                *existing_symbol.borrow_mut() = symbol;
+                Ok(existing_symbol)
+            }
+            (InitType::Definition, InitType::Definition) => Err(Error::new(
+                var_name,
+                ErrorKind::Redefinition("symbol", var_name.unwrap_string()),
+            )),
+        }
     }
-    pub fn declare_type(&mut self, var_name: &Token, tag: Tags) -> Result<usize, Error> {
+
+    pub fn declare_type(
+        &mut self,
+        var_name: &Token,
+        tag: Tags,
+    ) -> Result<Rc<RefCell<Tags>>, Error> {
         let name = var_name.unwrap_string();
         match self.tags.contains_key(&name, self.current_depth) {
-            Some((.., other_tag)) if other_tag.is_complete() || other_tag.in_definition() => {
+            Some(existing_tag)
+                if existing_tag.borrow().is_complete() || existing_tag.borrow().in_definition() =>
+            {
                 return Err(Error::new(var_name, ErrorKind::Redefinition("type", name)));
             }
-            Some((.., index, Tags::Aggregate(other_s))) => {
+            Some(existing_tag) if matches!(*existing_tag.borrow(), Tags::Aggregate(_)) => {
                 // if tag is being defined then set other_tag to being defined
+                let Tags::Aggregate(other_s) = &*existing_tag.borrow_mut() else {
+                    unreachable!("just checked if match aggregate")
+                };
                 if let Tags::Aggregate(s) = tag {
                     if s.in_definition() {
                         other_s.being_defined();
                     }
                 }
-                return Ok(*index);
+                return Ok(Rc::clone(&existing_tag));
             }
-            Some((.., index, _)) => return Ok(*index),
+            Some(existing_tag) => return Ok(existing_tag),
             _ => (),
         }
-        self.tags.declare(name, self.current_depth, tag)
+        Ok(self.tags.declare(name, self.current_depth, tag))
     }
-    pub fn get_symbol(&self, var_name: &Token) -> Result<(Symbols, usize), Error> {
-        self.symbols.get(var_name, self.current_depth)
+    pub fn get_symbol(&self, var_name: &Token) -> Result<Rc<RefCell<Symbols>>, Error> {
+        self.symbols
+            .get(var_name.unwrap_string(), self.current_depth)
+            .ok_or_else(|| {
+                Error::new(
+                    var_name,
+                    ErrorKind::UndeclaredSymbol(var_name.unwrap_string()),
+                )
+            })
     }
-    pub fn remove_symbol(&mut self, index: usize) {
-        self.symbols.elems.remove(index);
-    }
-    pub fn get_type(&self, var_name: &Token) -> Result<(Tags, usize), Error> {
+    pub fn get_type(&self, var_name: &Token) -> Result<Rc<RefCell<Tags>>, Error> {
         self.tags
-            .get(var_name, self.current_depth)
-            .or(Err(Error::new(
-                var_name,
-                ErrorKind::UndeclaredType(var_name.unwrap_string()),
-            )))
-    }
-    pub fn get_mut_symbol(&mut self, index: usize) -> &mut Symbols {
-        &mut self.symbols.elems.get_mut(index).unwrap().3
-    }
-    pub fn get_mut_type(&mut self, index: usize) -> &mut Tags {
-        &mut self.tags.elems.get_mut(index).unwrap().3
-    }
-
-    pub fn get_symbols_ref(&self) -> Vec<&Symbols> {
-        self.symbols
-            .elems
-            .iter()
-            .map(|(.., symbol)| symbol)
-            .collect()
-    }
-
-    pub fn get_symbols(self) -> Vec<Symbols> {
-        self.symbols
-            .elems
-            .into_iter()
-            .map(|(.., symbol)| symbol)
-            .collect()
+            .get(var_name.unwrap_string(), self.current_depth)
+            .ok_or_else(|| {
+                Error::new(
+                    var_name,
+                    ErrorKind::UndeclaredType(var_name.unwrap_string()),
+                )
+            })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::compiler::scanner::Scanner;
+    use crate::compiler::wrecc_parser::parser::Parser;
+    use crate::preprocess;
+    use std::path::Path;
 
-    impl PartialEq for Symbols {
-        fn eq(&self, other: &Self) -> bool {
-            match (self, other) {
-                (Symbols::Variable(v1), Symbols::Variable(v2)) => v1.type_decl == v2.type_decl,
-                (Symbols::TypeDef(t1), Symbols::TypeDef(t2)) => t1 == t2,
-                (Symbols::Func(t1), Symbols::Func(t2)) => t1 == t2,
-                _ => false,
-            }
+    fn assert_namespace(input: &str, expected: Vec<(&str, &str,usize)>) {
+        let pp_tokens = preprocess(Path::new(""), input.to_string()).unwrap();
+        let mut scanner = Scanner::new(pp_tokens);
+        let tokens = scanner.scan_token().unwrap();
+
+        let mut parser = Parser::new(tokens);
+        while parser.external_declaration().is_ok() {}
+
+        let actual = parser.env.symbols.elems;
+
+        // remove environment indicators
+        let actual = actual
+            .iter()
+            .filter(|elem| !elem.name.is_empty())
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.into_iter().zip(expected) {
+            assert_eq!(actual.name, expected.0);
+            assert_eq!(actual.kind.borrow().to_string(), expected.1);
+            assert_eq!(actual.depth, expected.2);
         }
     }
 
     #[test]
-    fn get_current_env() {
-        let namespace = NameSpace {
-            elems: vec![
-                (
-                    "s".to_string(),
-                    1,
-                    0,
-                    Symbols::Variable(SymbolInfo {
-                        type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
-                        reg: None,
-                    }),
-                ),
-                (
-                    "foo".to_string(),
-                    2,
-                    1,
-                    Symbols::Variable(SymbolInfo {
-                        type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
-                        reg: None,
-                    }),
-                ),
-                (
-                    "n".to_string(),
-                    1,
-                    2,
-                    Symbols::Variable(SymbolInfo {
-                        type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
-                        reg: None,
-                    }),
-                ),
-            ],
-        };
+    fn builds_symbol_table() {
+        let input = "
+int main(){
+    char* s;
+    {
+        char* n;
+    }
+    char* n;
+}";
 
-        let actual = namespace
-            .get_current(1)
-            .into_iter()
-            .map(|e| e.clone())
-            .collect::<Vec<(String, usize, usize, Symbols)>>();
         let expected = vec![
-            (
-                "n".to_string(),
-                1,
-                2,
-                Symbols::Variable(SymbolInfo {
-                    type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
-                    reg: None,
-                }),
-            ),
-            (
-                "s".to_string(),
-                1,
-                0,
-                Symbols::Variable(SymbolInfo {
-                    type_decl: NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char))),
-                    reg: None,
-                }),
-            ),
+            ("main","function",0),
+            ("s","variable",1),
+            ("n","variable",2),
+            ("n","variable",1),
         ];
-        assert_eq!(actual, expected);
+
+        assert_namespace(input, expected);
+    }
+    #[test]
+    fn func_args() {
+        let input = "
+int foo(int a, int b) {
+    {
+        {
+            long some;
+        }
+    }
+	return 2 + a - b;
+}
+
+int main() {
+	return foo(1, 3);
+}";
+
+        let expected = vec![
+            ("foo","function",0),
+            ("a","variable",1),
+            ("b","variable",1),
+            ("some","variable",3),
+            ("main","function",0),
+        ];
+
+        assert_namespace(input, expected);
+    }
+
+    #[test]
+    fn func_decls() {
+        let input = "
+int main() {
+    {
+        {
+            int foo(int a, int b);
+        }
+    }
+	return foo(1, 3);
+}";
+
+        let expected = vec![
+            ("main","function",0),
+            ("foo","function",3),
+            ("a","variable",4),
+            ("b","variable",4),
+        ];
+
+        assert_namespace(input, expected);
+    }
+
+    #[test]
+    fn get_current() {
+        todo!()
     }
 }

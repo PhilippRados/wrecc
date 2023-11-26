@@ -1,4 +1,4 @@
-//#include <stdio.h>
+// #include <stdio.h>
 
 // int a = b / #include<stdio.h>;
 /*
@@ -11,7 +11,7 @@ hello
 */
 int main() {
 
-#include <ctype.h>
+  not_first #include<stdio.h>;
   printf("not header #include <file.h>");
 }
 /*

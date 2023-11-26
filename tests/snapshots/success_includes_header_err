@@ -1,86 +1,11 @@
-error: Can only define functions in global scope
-|  --> in included file ctype.h:4:5
+error: Undeclared symbol 'not_first'
+|  --> in tests/fixtures/includes_header_err.c:14:3
 |
-4 int isalnum(int);
-|     ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:5:5
-|
-5 int isalpha(int);
-|     ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:6:5
-|
-6 int isblank(int);
-|     ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:7:5
-|
-7 int iscntrl(int);
-|     ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:8:5
-|
-8 int isdigit(int);
-|     ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:9:5
-|
-9 int isgraph(int);
-|     ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:10:5
-|
-10 int islower(int);
-|      ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:11:5
-|
-11 int isprint(int);
-|      ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:12:5
-|
-12 int ispunct(int);
-|      ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:13:5
-|
-13 int isspace(int);
-|      ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:14:5
-|
-14 int isupper(int);
-|      ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:15:5
-|
-15 int isxdigit(int);
-|      ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:16:5
-|
-16 int tolower(int);
-|      ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:17:5
-|
-17 int toupper(int);
-|      ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:18:5
-|
-18 int isascii(int);
-|      ^
-error: Can only define functions in global scope
-|  --> in included file ctype.h:19:5
-|
-19 int toascii(int);
-|      ^
+14   not_first #include<stdio.h>;
+|    ^
 error: Undeclared symbol 'printf'
 |  --> in tests/fixtures/includes_header_err.c:15:3
 |
 15   printf("not header #include <file.h>");
 |    ^
-17 errors generated.
+2 errors generated.

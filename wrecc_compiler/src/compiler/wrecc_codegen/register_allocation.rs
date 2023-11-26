@@ -1,4 +1,4 @@
-use crate::compiler::common::{environment::*, types::*};
+use crate::compiler::common::types::*;
 use crate::compiler::wrecc_codegen::{ir::*, register::*};
 use std::collections::HashMap;
 
@@ -41,8 +41,6 @@ pub struct RegisterAllocation {
     // offset from base-pointer; spilled variables stay after local-variable stack-locations
     spill_bp_offset: usize,
 
-    env: Vec<Symbols>,
-
     // registers that are saved before function call
     saved_regs: Vec<Vec<(usize, Box<dyn ScratchRegister>, Register)>>,
 
@@ -51,10 +49,9 @@ pub struct RegisterAllocation {
 }
 
 impl RegisterAllocation {
-    pub fn new(env: Vec<Symbols>, live_intervals: HashMap<usize, IntervalEntry>) -> Self {
+    pub fn new(live_intervals: HashMap<usize, IntervalEntry>) -> Self {
         RegisterAllocation {
             live_intervals,
-            env,
             saved_regs: Vec::new(),
             counter: 0,
             spill_bp_offset: 0,
@@ -94,11 +91,10 @@ impl RegisterAllocation {
                     self.restore_regs(&mut result);
                 }
                 Ir::FuncSetup(name, ..) => {
-                    // get current bp-offset so that spilled regs know where to spill
-                    self.spill_bp_offset = self
-                        .env
-                        .get_mut(name.token.get_index())
-                        .unwrap()
+                    self.spill_bp_offset = name
+                        .token
+                        .get_symbol_entry()
+                        .borrow()
                         .unwrap_func()
                         .stack_size;
 
@@ -488,9 +484,8 @@ mod tests {
     fn setup(
         intervals: HashMap<usize, IntervalEntry>,
         occupied_regs: Vec<usize>,
-        env: Vec<Symbols>,
     ) -> RegisterAllocation {
-        let mut reg_alloc = RegisterAllocation::new(env, intervals);
+        let mut reg_alloc = RegisterAllocation::new(intervals);
 
         for i in occupied_regs {
             reg_alloc.registers.0.get_mut(i).unwrap().in_use();
@@ -609,7 +604,7 @@ mod tests {
             arg_entry!(ArgRegisterKind::new(2), 1, 4),
         ]);
 
-        let reg_alloc = setup(intervals, occupied_regs, vec![]);
+        let reg_alloc = setup(intervals, occupied_regs);
 
         let input = vec![
             Ir::Mov(regs[0].clone(), regs[1].clone()),
@@ -647,7 +642,7 @@ mod tests {
             temp_entry!(RegularRegister::new("%r10"), 5, 7),
         ]);
 
-        let reg_alloc = setup(intervals, occupied_regs, vec![]);
+        let reg_alloc = setup(intervals, occupied_regs);
 
         let input = vec![
             Ir::Add(regs[0].clone(), regs[1].clone()),
@@ -719,7 +714,7 @@ mod tests {
             arg_entry!(ArgRegisterKind::new(2), 10, 13),
         ]);
 
-        let reg_alloc = setup(intervals, occupied_regs, vec![]);
+        let reg_alloc = setup(intervals, occupied_regs);
 
         let input = vec![
             Ir::SaveRegs,

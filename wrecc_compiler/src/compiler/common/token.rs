@@ -1,7 +1,14 @@
-use crate::compiler::common::error::Location;
-use crate::compiler::common::types::*;
+use crate::compiler::common::{environment::*, error::Location, types::*};
+use std::cell::RefCell;
 use std::fmt::Display;
 use std::path::PathBuf;
+use std::rc::Rc;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TableEntry {
+    Symbol(Rc<RefCell<Symbols>>),
+    Tag(Rc<RefCell<Tags>>),
+}
 
 // same as TokenType but without the associated types to allow checking for equality
 #[derive(PartialEq, Clone, Debug)]
@@ -217,7 +224,7 @@ pub enum TokenType {
     Ellipsis,
 
     // Literals.
-    Ident(String, usize), // idx to specify symbol table position
+    Ident(String, TableEntry),
     String(String),
     CharLit(i8),
     Number(i64),
@@ -246,17 +253,28 @@ pub enum TokenType {
     Goto,
 }
 impl TokenType {
-    pub fn update_index(&mut self, new: usize) {
+    pub fn update_entry(&mut self, new: TableEntry) {
         match self {
-            TokenType::Ident(_, i) => *i = new,
+            TokenType::Ident(_, entry) => *entry = new,
             _ => unreachable!(),
         }
     }
-    pub fn get_index(&self) -> usize {
+    // TODO:
+    // maybe make this function on token directly bc otherwise have to always say
+    // token.token.get_symbol_entry
+    // maybe also just call borrow() here instead of on call-site
+    pub fn get_symbol_entry(&self) -> Rc<RefCell<Symbols>> {
         match self {
-            TokenType::Ident(_, i) => *i,
+            TokenType::Ident(_, TableEntry::Symbol(s)) => s.clone(),
             _ => unreachable!(),
         }
+    }
+    pub fn new_ident(name: String) -> TokenType {
+        // some default table entry since it gets overwritten in parser anyways
+        TokenType::Ident(
+            name,
+            TableEntry::Symbol(Rc::new(RefCell::new(Symbols::TypeDef(NEWTypes::default())))),
+        )
     }
     pub fn len(&self) -> usize {
         match self {

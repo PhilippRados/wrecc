@@ -28,6 +28,8 @@ pub enum ErrorKind {
     EnumForwardDecl,
     EmptyAggregate(TokenType),
     Redefinition(&'static str, String),
+    RedefOtherSymbol(String, String),
+    RedefTypeMismatch(String, NEWTypes, NEWTypes),
     NonExistantMember(String, NEWTypes),
     DuplicateMember(String),
     InvalidArrayDesignator(NEWTypes),
@@ -173,6 +175,14 @@ impl ErrorKind {
                 format!("Can't declare anonymous {} without members", token)
             }
             ErrorKind::Redefinition(kind, name) => format!("Redefinition of {} '{}'", kind, name),
+            ErrorKind::RedefOtherSymbol(name, kind) => format!(
+                "Redefinition of '{}' as different symbol. Already exists as '{}'",
+                name, kind
+            ),
+            ErrorKind::RedefTypeMismatch(name, new, old) => format!(
+                "Redefinition of '{}' with different type: '{}' vs '{}'",
+                name, new, old
+            ),
             ErrorKind::NonExistantMember(member, type_decl) => {
                 format!("No member '{}' in '{}'", member, type_decl)
             }

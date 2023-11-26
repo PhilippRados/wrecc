@@ -22,22 +22,21 @@ pub fn compile(source: Vec<PPToken>, dump_ast: bool) -> Result<String, Vec<Error
     // Scan input
     let tokens = Scanner::new(source).scan_token()?;
 
-    // Parse statements and return Abstract Syntax Tree and symbol table
-    let (mut statements, env) = Parser::new(tokens).parse()?;
+    // Parse statements and return Abstract Syntax Tree
+    let mut statements = Parser::new(tokens).parse()?;
 
     if dump_ast {
         statements.iter().for_each(|s| eprintln!("{}", s));
     }
 
     // Check for semantic errors
-    let (const_labels, env, switches) = TypeChecker::new(env).check(&mut statements)?;
+    let (const_labels, switches) = TypeChecker::new().check(&mut statements)?;
 
     // Turn AST into IR
-    let (ir, live_intervals, env) =
-        Compiler::new(const_labels, env, switches).translate(statements);
+    let (ir, live_intervals) = Compiler::new(const_labels, switches).translate(statements);
 
     // Fill in physical registers
-    let asm = RegisterAllocation::new(env, live_intervals).generate(ir);
+    let asm = RegisterAllocation::new(live_intervals).generate(ir);
 
     let output = asm
         .into_iter()

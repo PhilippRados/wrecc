@@ -1,4 +1,4 @@
-use crate::compiler::common::{environment::*, expr::*, stmt::*, token::*, types::*};
+use crate::compiler::common::{expr::*, stmt::*, token::*, types::*};
 use crate::compiler::typechecker::{align_by, create_label};
 use crate::compiler::wrecc_codegen::{ir::*, register::*, register_allocation::*};
 use std::collections::{HashMap, VecDeque};
@@ -27,9 +27,6 @@ pub struct Compiler {
     // (key:register-id, values: (end of lifetime, reg-type, physical register))
     live_intervals: HashMap<usize, IntervalEntry>,
 
-    // symbol table
-    env: Vec<Symbols>,
-
     // when in function contains function name to access symbol table
     function_name: Option<Token>,
 
@@ -53,13 +50,8 @@ pub struct Compiler {
     switch_labels: VecDeque<usize>,
 }
 impl Compiler {
-    pub fn new(
-        const_labels: HashMap<String, usize>,
-        env: Vec<Symbols>,
-        switches: Vec<Vec<Option<i64>>>,
-    ) -> Self {
+    pub fn new(const_labels: HashMap<String, usize>, switches: Vec<Vec<Option<i64>>>) -> Self {
         Compiler {
-            env,
             switches: switches.into(),
             const_labels,
             output: Vec::with_capacity(100),
@@ -74,14 +66,11 @@ impl Compiler {
         }
     }
 
-    pub fn translate(
-        mut self,
-        statements: Vec<Stmt>,
-    ) -> (Vec<Ir>, HashMap<usize, IntervalEntry>, Vec<Symbols>) {
+    pub fn translate(mut self, statements: Vec<Stmt>) -> (Vec<Ir>, HashMap<usize, IntervalEntry>) {
         self.cg_const_labels();
         self.cg_stmts(statements);
 
-        (self.output, self.live_intervals, self.env)
+        (self.output, self.live_intervals)
     }
     fn write_out(&mut self, instruction: Ir) {
         self.instr_counter += 1;
@@ -124,24 +113,24 @@ impl Compiler {
         }
     }
     fn goto_statement(&mut self, label: Token) {
-        let function_index = self.function_name.clone().unwrap().token.get_index();
-        let label_index = self
-            .env
-            .get_mut(function_index)
+        let func = self
+            .function_name
+            .as_ref()
             .unwrap()
-            .unwrap_func()
-            .labels[&label.unwrap_string()];
+            .token
+            .get_symbol_entry();
+        let label_index = func.borrow().unwrap_func().labels[&label.unwrap_string()];
 
         self.write_out(Ir::Jmp(label_index));
     }
     fn label_statement(&mut self, name: Token, body: Stmt) {
-        let function_index = self.function_name.clone().unwrap().token.get_index();
-        let label_index = self
-            .env
-            .get_mut(function_index)
+        let func = self
+            .function_name
+            .as_ref()
             .unwrap()
-            .unwrap_func()
-            .labels[&name.unwrap_string()];
+            .token
+            .get_symbol_entry();
+        let label_index = func.borrow().unwrap_func().labels[&name.unwrap_string()];
 
         self.write_out(Ir::LabelDefinition(label_index));
         self.visit(body);
@@ -336,12 +325,14 @@ impl Compiler {
         self.write_out(Ir::LabelDefinition(done_label));
     }
     fn return_statement(&mut self, value: Option<Expr>) {
-        let function_epilogue = self
-            .env
-            .get_mut(self.function_name.clone().unwrap().token.get_index())
+        let func = self
+            .function_name
+            .as_ref()
             .unwrap()
-            .unwrap_func()
-            .epilogue_index;
+            .token
+            .get_symbol_entry();
+        let function_epilogue = func.borrow().unwrap_func().epilogue_index;
+
         match value {
             Some(expr) => {
                 let return_value = self.execute_expr(expr);
@@ -386,17 +377,17 @@ impl Compiler {
         ));
         let reg = Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl));
 
-        self.env
-            .get_mut(name.token.get_index())
-            .unwrap()
+        name.token
+            .get_symbol_entry()
+            .borrow_mut()
             .unwrap_var_mut()
             .set_reg(reg);
     }
     fn declare_var(&mut self, type_decl: NEWTypes, name: &Token) {
         let reg = Register::Stack(StackRegister::new(&mut self.current_bp_offset, type_decl));
-        self.env
-            .get_mut(name.token.get_index())
-            .unwrap()
+        name.token
+            .get_symbol_entry()
+            .borrow_mut()
             .unwrap_var_mut()
             .set_reg(reg);
     }
@@ -406,9 +397,10 @@ impl Compiler {
             type_decl.is_ptr(),
         ));
 
-        self.env
-            .get_mut(var_name.token.get_index())
-            .unwrap()
+        var_name
+            .token
+            .get_symbol_entry()
+            .borrow_mut()
             .unwrap_var_mut()
             .set_reg(Register::Label(LabelRegister::Var(
                 var_name.unwrap_string(),
@@ -464,10 +456,10 @@ impl Compiler {
         match init.kind {
             InitKind::Scalar(expr) => {
                 let value_reg = self.execute_expr(expr);
-                let mut var_reg = self
-                    .env
-                    .get(var_name.token.get_index())
-                    .unwrap()
+                let mut var_reg = var_name
+                    .token
+                    .get_symbol_entry()
+                    .borrow()
                     .unwrap_var()
                     .get_reg();
 
@@ -497,10 +489,10 @@ impl Compiler {
         // eax value that gets written
         // ecx amount
         // rdi at memory pos
-        let var = self
-            .env
-            .get(var_name.token.get_index())
-            .unwrap()
+        let var = var_name
+            .token
+            .get_symbol_entry()
+            .borrow()
             .unwrap_var()
             .get_reg();
         // TODO: can be optimized by writing 8Bytes (instead of 1) per repetition but that requires extra logic when amount and size don't align
@@ -538,9 +530,10 @@ impl Compiler {
         self.declare_var(type_decl, &var_name);
 
         let reg = self.cg_assign(
-            self.env
-                .get(var_name.token.get_index())
-                .unwrap()
+            var_name
+                .token
+                .get_symbol_entry()
+                .borrow()
                 .unwrap_var()
                 .get_reg(),
             arg_reg,
@@ -549,14 +542,19 @@ impl Compiler {
     }
 
     fn function_definition(&mut self, name: Token, body: Vec<Stmt>) {
-        let func_symbol = self.env.get_mut(name.token.get_index()).unwrap();
-        let params = func_symbol.unwrap_func().params.clone();
+        let func_symbol = name.token.get_symbol_entry();
+        let params = func_symbol.borrow().unwrap_func().params.clone();
 
         let function_epilogue = create_label(&mut self.label_index);
-        func_symbol.unwrap_func().epilogue_index = function_epilogue;
+        func_symbol.borrow_mut().unwrap_func_mut().epilogue_index = function_epilogue;
 
         // create a label for all goto-labels inside a function
-        for value in func_symbol.unwrap_func().labels.values_mut() {
+        for value in func_symbol
+            .borrow_mut()
+            .unwrap_func_mut()
+            .labels
+            .values_mut()
+        {
             *value = create_label(&mut self.label_index);
         }
         // save function name for return label jump
@@ -577,12 +575,13 @@ impl Compiler {
         self.function_name = None;
     }
     fn cg_func_preamble(&mut self, name: &Token, params: Vec<(NEWTypes, Token)>) {
-        let stack_size = self
-            .env
-            .get_mut(name.token.get_index())
+        let func = self
+            .function_name
+            .as_ref()
             .unwrap()
-            .unwrap_func()
-            .stack_size;
+            .token
+            .get_symbol_entry();
+        let stack_size = func.borrow().unwrap_func().stack_size;
         self.write_out(Ir::FuncSetup(name.clone(), stack_size));
 
         // initialize parameters
@@ -612,10 +611,10 @@ impl Compiler {
     fn cg_func_postamble(&mut self, name: Token, epilogue_index: usize) {
         self.write_out(Ir::LabelDefinition(epilogue_index));
 
-        let stack_size = self
-            .env
-            .get_mut(name.token.get_index())
-            .unwrap()
+        let stack_size = name
+            .token
+            .get_symbol_entry()
+            .borrow()
             .unwrap_func()
             .stack_size;
         self.write_out(Ir::FuncTeardown(stack_size))
@@ -743,10 +742,10 @@ impl Compiler {
             ExprKind::Ident(name) => {
                 // plain ident isn't compile-time-constant (this gets caught in typechecker)
                 // but is needed to evaluate address-constants
-                if let Register::Label(reg) = self
-                    .env
-                    .get(name.token.get_index())
-                    .unwrap()
+                if let Register::Label(reg) = name
+                    .token
+                    .get_symbol_entry()
+                    .borrow()
                     .unwrap_var()
                     .get_reg()
                 {
@@ -782,10 +781,10 @@ impl Compiler {
             ExprKind::CompoundAssign { l_expr, r_expr, token } => {
                 self.cg_comp_assign(*l_expr, token, *r_expr)
             }
-            ExprKind::Ident(name) => self
-                .env
-                .get(name.token.get_index())
-                .unwrap()
+            ExprKind::Ident(name) => name
+                .token
+                .get_symbol_entry()
+                .borrow()
                 .unwrap_var()
                 .get_reg(),
             ExprKind::Call { name, args, .. } => self.cg_call(name, args, ast.type_decl.unwrap()),

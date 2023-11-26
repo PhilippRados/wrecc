@@ -12,11 +12,9 @@ impl Expr {
     pub fn get_literal_constant(
         &mut self,
         token: &Token,
-        env: &Scope,
         msg: &'static str,
     ) -> Result<i64, Error> {
-        let symbols = env.get_symbols_ref();
-        self.integer_const_fold(&symbols)?;
+        self.integer_const_fold()?;
 
         if let ExprKind::Literal(n) = self.kind {
             Ok(n)
@@ -25,7 +23,7 @@ impl Expr {
         }
     }
     pub fn preprocessor_constant(&mut self, pp: &impl Location) -> Result<i64, Error> {
-        self.integer_const_fold(&vec![])?;
+        self.integer_const_fold()?;
 
         if let ExprKind::Literal(n) = self.kind {
             Ok(n)
@@ -37,20 +35,20 @@ impl Expr {
         }
     }
     // https://en.cppreference.com/w/c/language/constant_expression
-    pub fn integer_const_fold(&mut self, env: &Vec<&Symbols>) -> Result<(), Error> {
+    pub fn integer_const_fold(&mut self) -> Result<(), Error> {
         let folded: Option<Expr> = match &mut self.kind {
             ExprKind::Literal(_) => None,
             ExprKind::Ident(token) => {
                 // if variable is known at compile time then foldable
                 // is only enum-constant
-                if let Some(Symbols::Variable(SymbolInfo {
+                if let Symbols::Variable(SymbolInfo {
                     reg: Some(Register::Literal(n, _)),
                     type_decl,
                     ..
-                })) = env.get(token.token.get_index())
+                }) = token.token.get_symbol_entry().borrow().clone()
                 {
                     Some(Expr::new_literal(
-                        *n,
+                        n,
                         type_decl.get_primitive().unwrap().clone(),
                     ))
                 } else {
@@ -58,27 +56,27 @@ impl Expr {
                 }
             }
             ExprKind::Binary { left, token, right } => {
-                Self::binary_fold(left, token.clone(), right, env)?
+                Self::binary_fold(left, token.clone(), right)?
             }
-            ExprKind::Unary { token, right, .. } => Self::unary_fold(token.clone(), right, env)?,
+            ExprKind::Unary { token, right, .. } => Self::unary_fold(token.clone(), right)?,
 
             ExprKind::Logical { left, token, right } => {
-                Self::logical_fold(token.clone(), left, right, env)?
+                Self::logical_fold(token.clone(), left, right)?
             }
             ExprKind::Comparison { left, token, right } => {
-                Self::comp_fold(token.clone(), left, right, env)?
+                Self::comp_fold(token.clone(), left, right)?
             }
             ExprKind::Cast { new_type, token, expr, .. } => {
-                Self::const_cast(token.clone(), new_type.clone(), expr, env)?
+                Self::const_cast(token.clone(), new_type.clone(), expr)?
             }
             ExprKind::Grouping { expr } => {
-                expr.integer_const_fold(env)?;
+                expr.integer_const_fold()?;
                 Some(expr.as_ref().clone())
             }
             ExprKind::Ternary { cond, true_expr, false_expr, token } => {
-                cond.integer_const_fold(env)?;
-                true_expr.integer_const_fold(env)?;
-                false_expr.integer_const_fold(env)?;
+                cond.integer_const_fold()?;
+                true_expr.integer_const_fold()?;
+                false_expr.integer_const_fold()?;
 
                 if let (ExprKind::Literal(_), ExprKind::Literal(_)) =
                     (&true_expr.kind, &false_expr.kind)
@@ -105,30 +103,30 @@ impl Expr {
                 integer_type(*value as i64),
             )),
             ExprKind::Assign { l_expr, r_expr, .. } => {
-                l_expr.integer_const_fold(env)?;
-                r_expr.integer_const_fold(env)?;
+                l_expr.integer_const_fold()?;
+                r_expr.integer_const_fold()?;
                 None
             }
             ExprKind::CompoundAssign { l_expr, r_expr, .. } => {
-                l_expr.integer_const_fold(env)?;
-                r_expr.integer_const_fold(env)?;
+                l_expr.integer_const_fold()?;
+                r_expr.integer_const_fold()?;
                 None
             }
             ExprKind::Comma { left, right } => {
-                left.integer_const_fold(env)?;
-                right.integer_const_fold(env)?;
+                left.integer_const_fold()?;
+                right.integer_const_fold()?;
                 None
             }
             ExprKind::MemberAccess { expr, .. } => {
-                expr.integer_const_fold(env)?;
+                expr.integer_const_fold()?;
                 None
             }
             ExprKind::PostUnary { left, .. } => {
-                left.integer_const_fold(env)?;
+                left.integer_const_fold()?;
                 None
             }
             ExprKind::ScaleUp { expr, .. } | ExprKind::ScaleDown { expr, .. } => {
-                expr.integer_const_fold(env)?;
+                expr.integer_const_fold()?;
                 None
             }
             ExprKind::Call { .. }
@@ -146,10 +144,9 @@ impl Expr {
         left: &mut Box<Expr>,
         token: Token,
         right: &mut Box<Expr>,
-        env: &Vec<&Symbols>,
     ) -> Result<Option<Expr>, Error> {
-        left.integer_const_fold(env)?;
-        right.integer_const_fold(env)?;
+        left.integer_const_fold()?;
+        right.integer_const_fold()?;
 
         if let (ExprKind::Literal(mut left_n), ExprKind::Literal(mut right_n)) =
             (&mut left.kind, &mut right.kind)
@@ -293,12 +290,8 @@ impl Expr {
         (value > type_decl.max()) || ((value) < type_decl.min())
     }
 
-    fn unary_fold(
-        token: Token,
-        right: &mut Box<Expr>,
-        env: &Vec<&Symbols>,
-    ) -> Result<Option<Expr>, Error> {
-        right.integer_const_fold(env)?;
+    fn unary_fold(token: Token, right: &mut Box<Expr>) -> Result<Option<Expr>, Error> {
+        right.integer_const_fold()?;
 
         Ok(match (&right.kind, &token.token) {
             (ExprKind::Literal(n), TokenType::Bang) => {
@@ -334,10 +327,9 @@ impl Expr {
         token: Token,
         left: &mut Box<Expr>,
         right: &mut Box<Expr>,
-        env: &Vec<&Symbols>,
     ) -> Result<Option<Expr>, Error> {
-        left.integer_const_fold(env)?;
-        right.integer_const_fold(env)?;
+        left.integer_const_fold()?;
+        right.integer_const_fold()?;
 
         Ok(match token.token {
             TokenType::AmpAmp => match (&left.kind, &right.kind) {
@@ -372,10 +364,9 @@ impl Expr {
         token: Token,
         left: &mut Box<Expr>,
         right: &mut Box<Expr>,
-        env: &Vec<&Symbols>,
     ) -> Result<Option<Expr>, Error> {
-        left.integer_const_fold(env)?;
-        right.integer_const_fold(env)?;
+        left.integer_const_fold()?;
+        right.integer_const_fold()?;
 
         if let (ExprKind::Literal(left_n), ExprKind::Literal(right_n)) =
             (&mut left.kind, &mut right.kind)
@@ -415,9 +406,8 @@ impl Expr {
         token: Token,
         new_type: NEWTypes,
         expr: &mut Box<Expr>,
-        env: &Vec<&Symbols>,
     ) -> Result<Option<Expr>, Error> {
-        expr.integer_const_fold(env)?;
+        expr.integer_const_fold()?;
 
         if let ExprKind::Literal(right) = expr.kind {
             let (n, new_type) =
@@ -473,7 +463,7 @@ mod tests {
 
         let mut parser = Parser::new(tokens);
         let mut actual = parser.expression().unwrap();
-        actual.integer_const_fold(&Vec::new()).unwrap();
+        actual.integer_const_fold().unwrap();
 
         let pp_tokens = preprocess(Path::new(""), expected.to_string()).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
@@ -481,7 +471,7 @@ mod tests {
 
         let mut parser = Parser::new(tokens);
         let mut expected = parser.expression().unwrap();
-        expected.integer_const_fold(&Vec::new()).unwrap();
+        expected.integer_const_fold().unwrap();
 
         assert_eq!(actual, expected);
 
@@ -506,7 +496,7 @@ mod tests {
             let tokens = scanner.scan_token().unwrap();
 
             let mut parser = Parser::new(tokens);
-            let Err(actual_fold) = parser.expression().unwrap().integer_const_fold(&Vec::new()) else {
+            let Err(actual_fold) = parser.expression().unwrap().integer_const_fold() else {
                                                             panic!("should error on error test");
                                                         };
 

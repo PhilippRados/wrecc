@@ -1,0 +1,36 @@
+error: Redefinition of 'x' as different symbol. Already exists as 'variable'
+|  --> in tests/fixtures/global_redef_err.c:5:15
+|
+5 int x, x = 3, x();
+|               ^
+error: Redefinition of 'x' with different type: 'long' vs 'int'
+|  --> in tests/fixtures/global_redef_err.c:6:6
+|
+6 long x;
+|      ^
+error: Redefinition of symbol 'foo'
+|  --> in tests/fixtures/global_redef_err.c:12:5
+|
+12 int foo() { return 2; }
+|      ^
+error: Can only define functions in global scope
+|  --> in tests/fixtures/global_redef_err.c:21:7
+|
+21   int some() { return 1; }
+|        ^
+error: Redefinition of 'some' as different symbol. Already exists as 'function'
+|  --> in tests/fixtures/global_redef_err.c:23:16
+|
+23   typedef char some;
+|                 ^
+error: Redefinition of 'bar' with different type: 'long' vs 'char'
+|  --> in tests/fixtures/global_redef_err.c:27:16
+|
+27   typedef long bar;
+|                 ^
+error: Redefinition of symbol 'a'
+|  --> in tests/fixtures/global_redef_err.c:30:7
+|
+30   int a;
+|        ^
+7 errors generated.

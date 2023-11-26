@@ -219,8 +219,7 @@ impl<'a> Scanner<'a> {
                     if let Some(kw) = self.keywords.get(ident.as_str()) {
                         tokens.push(pp_token, kw.clone());
                     } else {
-                        // use 0 as placeholder value for symbol table index
-                        tokens.push(pp_token.clone(), TokenType::Ident(ident, 0))
+                        tokens.push(pp_token.clone(), TokenType::new_ident(ident))
                     }
                 }
                 PPKind::Whitespace(_) | PPKind::Newline => (),
@@ -362,7 +361,7 @@ mod tests {
         let actual = setup_generic("// this is a    comment\n\n!this");
         let expected = vec![
             test_token(TokenType::Bang, 3, 1, "!this"),
-            test_token(TokenType::Ident("this".to_string(), 0), 3, 2, "!this"),
+            test_token(TokenType::new_ident("this".to_string()), 3, 2, "!this"),
         ];
         assert_eq!(actual, expected);
     }
@@ -395,7 +394,7 @@ mod tests {
         let actual = setup("int some = \"this is a string\"");
         let expected = vec![
             TokenType::Int,
-            TokenType::Ident("some".to_string(), 0),
+            TokenType::new_ident("some".to_string()),
             TokenType::Equal,
             TokenType::String("this is a string".to_string()),
         ];
@@ -414,7 +413,7 @@ mod tests {
         let expected = vec![
             test_token(TokenType::Int, 1, 1, "int some_long;"),
             test_token(
-                TokenType::Ident("some_long".to_string(), 0),
+                TokenType::new_ident("some_long".to_string()),
                 1,
                 5,
                 "int some_long;",
@@ -423,7 +422,7 @@ mod tests {
             test_token(TokenType::While, 2, 1, "while (val >= 12) {*p = val}"),
             test_token(TokenType::LeftParen, 2, 7, "while (val >= 12) {*p = val}"),
             test_token(
-                TokenType::Ident("val".to_string(), 0),
+                TokenType::new_ident("val".to_string()),
                 2,
                 8,
                 "while (val >= 12) {*p = val}",
@@ -439,14 +438,14 @@ mod tests {
             test_token(TokenType::LeftBrace, 2, 19, "while (val >= 12) {*p = val}"),
             test_token(TokenType::Star, 2, 20, "while (val >= 12) {*p = val}"),
             test_token(
-                TokenType::Ident("p".to_string(), 0),
+                TokenType::new_ident("p".to_string()),
                 2,
                 21,
                 "while (val >= 12) {*p = val}",
             ),
             test_token(TokenType::Equal, 2, 23, "while (val >= 12) {*p = val}"),
             test_token(
-                TokenType::Ident("val".to_string(), 0),
+                TokenType::new_ident("val".to_string()),
                 2,
                 25,
                 "while (val >= 12) {*p = val}",
@@ -495,7 +494,7 @@ mod tests {
         let actual = setup_generic("\nint ä = 123");
         let expected = vec![
             test_token(TokenType::Int, 2, 1, "int ä = 123"),
-            test_token(TokenType::Ident("ä".to_string(), 0), 2, 5, "int ä = 123"),
+            test_token(TokenType::new_ident("ä".to_string()), 2, 5, "int ä = 123"),
             test_token(TokenType::Equal, 2, 8, "int ä = 123"), // ä len is 2 but thats fine because its the same when indexing
             test_token(TokenType::Number(123), 2, 10, "int ä = 123"),
         ];
@@ -518,7 +517,7 @@ mod tests {
         let actual = setup("char some = '1'");
         let expected = vec![
             TokenType::Char,
-            TokenType::Ident("some".to_string(), 0),
+            TokenType::new_ident("some".to_string()),
             TokenType::Equal,
             TokenType::CharLit('1' as i8),
         ];

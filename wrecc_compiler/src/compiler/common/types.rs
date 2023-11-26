@@ -523,9 +523,9 @@ macro_rules! arr_decay {
 macro_rules! into_newtype {
     ($token:expr,$name:expr,$value:expr) => {
         match $token.token {
-            TokenType::Struct => NEWTypes::Struct(StructInfo::Named($name, $value.unwrap_aggr())),
-            TokenType::Union => NEWTypes::Union(StructInfo::Named($name, $value.unwrap_aggr())),
-            TokenType::Enum => NEWTypes::Enum(Some($name), $value.unwrap_enum()),
+            TokenType::Struct => NEWTypes::Struct(StructInfo::Named($name, $value.clone().unwrap_aggr())),
+            TokenType::Union => NEWTypes::Union(StructInfo::Named($name, $value.clone().unwrap_aggr())),
+            TokenType::Enum => NEWTypes::Enum(Some($name), $value.clone().unwrap_enum()),
             _ => unreachable!("should only be used for aggregate types"),
         }
     };

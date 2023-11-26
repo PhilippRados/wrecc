@@ -24,7 +24,7 @@ impl Parser {
         }
     }
     // return list of all statements and identifier namespace table
-    pub fn parse(mut self) -> Result<(Vec<Stmt>, Vec<Symbols>), Vec<Error>> {
+    pub fn parse(mut self) -> Result<Vec<Stmt>, Vec<Error>> {
         let mut statements: Vec<Stmt> = Vec::new();
         let mut errors = vec![];
 
@@ -42,7 +42,7 @@ impl Parser {
         }
 
         if errors.is_empty() {
-            Ok((statements, self.env.get_symbols()))
+            Ok(statements)
         } else {
             Err(errors)
         }
@@ -159,7 +159,7 @@ impl Parser {
     }
     fn case_statement(&mut self, token: Token) -> Result<Stmt, Error> {
         let mut value = self.var_assignment()?;
-        let value = value.get_literal_constant(&token, &self.env, "Case value")?;
+        let value = value.get_literal_constant(&token, "Case value")?;
 
         self.consume(TokenKind::Colon, "Expect ':' following case-statement")?;
 
@@ -333,7 +333,7 @@ impl Parser {
     fn parse_arr(&mut self, type_decl: NEWTypes) -> Result<NEWTypes, Error> {
         if let Some(token) = self.matches(&[TokenKind::LeftBracket]) {
             let mut size = self.var_assignment()?;
-            let size = size.get_literal_constant(&token, &self.env, "Array size specifier")?;
+            let size = size.get_literal_constant(&token, "Array size specifier")?;
 
             self.consume(
                 TokenKind::RightBracket,
@@ -359,7 +359,7 @@ impl Parser {
             let ident = self.consume(TokenKind::Ident, "Expect identifier in enum definition")?;
             if let Some(t) = self.matches(&[TokenKind::Equal]) {
                 let mut index_expr = self.var_assignment()?;
-                index = index_expr.get_literal_constant(&t, &self.env, "Enum Constant")? as i32;
+                index = index_expr.get_literal_constant(&t, "Enum Constant")? as i32;
             }
             members.push((ident.clone(), index));
 
@@ -368,6 +368,7 @@ impl Parser {
                 &ident,
                 Symbols::Variable(SymbolInfo {
                     type_decl: NEWTypes::Primitive(Types::Int),
+                    kind: InitType::Definition,
                     reg: Some(Register::Literal(
                         index as i64,
                         NEWTypes::Primitive(Types::Int),
@@ -432,7 +433,7 @@ impl Parser {
                 Ok(match token.token {
                     TokenType::Struct | TokenType::Union => {
                         self.nest_level += 1;
-                        let index = self.env.declare_type(
+                        let custom_type = self.env.declare_type(
                             name,
                             Tags::Aggregate(StructRef::new(token.clone().token, true)),
                         )?;
@@ -440,12 +441,11 @@ impl Parser {
                         let members = self.parse_members(token)?;
                         self.nest_level -= 1;
 
-                        let custom_type = self.env.get_mut_type(index);
-                        let Tags::Aggregate(struct_ref) = custom_type else { unreachable!()};
+                        if let Tags::Aggregate(struct_ref) = &* custom_type.borrow_mut() {
+                            struct_ref.update(members);
+                        }
 
-                        struct_ref.update(members);
-
-                        into_newtype!(&token, name.unwrap_string(), custom_type.clone())
+                        into_newtype!(&token, name.unwrap_string(), custom_type.borrow())
                     }
                     TokenType::Enum => {
                         self.nest_level += 1;
@@ -463,8 +463,8 @@ impl Parser {
             (Some(name), None) => {
                 // lookup type-definition
                 let custom_type = match self.env.get_type(name) {
-                    Ok((t, _)) => {
-                        if token.token != *t.get_kind() {
+                    Ok(tag) => {
+                        if &token.token != tag.borrow().get_kind() {
                             return Err(Error::new(
                                 name,
                                 ErrorKind::TypeAlreadyExists(
@@ -473,26 +473,27 @@ impl Parser {
                                 ),
                             ));
                         }
-                        t
+                        tag
                     }
-                    Err(_) => {
-                        let index = self.env.declare_type(
-                            name,
-                            match token.token {
-                                TokenType::Union | TokenType::Struct => {
-                                    Tags::Aggregate(StructRef::new(token.clone().token, false))
-                                }
-                                TokenType::Enum => {
-                                    return Err(Error::new(token, ErrorKind::EnumForwardDecl));
-                                }
-                                _ => unreachable!(),
-                            },
-                        )?;
-                        self.env.get_mut_type(index).clone()
-                    }
+                    Err(_) => self.env.declare_type(
+                        name,
+                        match token.token {
+                            TokenType::Union | TokenType::Struct => {
+                                Tags::Aggregate(StructRef::new(token.clone().token, false))
+                            }
+                            TokenType::Enum => {
+                                return Err(Error::new(token, ErrorKind::EnumForwardDecl));
+                            }
+                            _ => unreachable!(),
+                        },
+                    )?,
                 };
 
-                Ok(into_newtype!(&token, name.unwrap_string(), custom_type))
+                Ok(into_newtype!(
+                    &token,
+                    name.unwrap_string(),
+                    custom_type.borrow()
+                ))
             }
             (None, Some(_)) => Ok(if token.token == TokenType::Enum {
                 self.nest_level += 1;
@@ -559,18 +560,28 @@ impl Parser {
             let is_global = self.env.is_global();
             type_decl = self.parse_arr(type_decl)?;
 
-            let index = self
-                .env
-                .declare_symbol(&name, Symbols::Variable(SymbolInfo::new(type_decl.clone())))?;
-            name.token.update_index(index);
-
             if self.matches(&[TokenKind::Equal]).is_some() {
                 if !type_decl.is_complete() {
                     return Err(Error::new(&name, ErrorKind::IncompleteType(type_decl)));
                 }
 
+                let symbol = self.env.declare_symbol(
+                    &name,
+                    Symbols::Variable(SymbolInfo {
+                        type_decl: type_decl.clone(),
+                        kind: InitType::Definition,
+                        reg: None,
+                    }),
+                )?;
+                name.token.update_entry(TableEntry::Symbol(symbol));
+
                 self.var_initialization(name, type_decl, is_global)
             } else {
+                let symbol = self
+                    .env
+                    .declare_symbol(&name, Symbols::Variable(SymbolInfo::new(type_decl.clone())))?;
+                name.token.update_entry(TableEntry::Symbol(symbol));
+
                 let tentative_decl = self.env.is_global() && type_decl.is_aggregate();
                 if !type_decl.is_complete() && !tentative_decl {
                     return Err(Error::new(&name, ErrorKind::IncompleteType(type_decl)));
@@ -613,49 +624,6 @@ impl Parser {
                 offset: 0,
             })
         }
-    }
-
-    fn compare_existing(
-        &mut self,
-        name: &Token,
-        index: usize,
-        existing: Option<(Symbols, usize)>,
-    ) -> Result<(), Error> {
-        // compare with existing symbol in symbol table
-        let is_def = self.tokens.peek()?.token == TokenType::LeftBrace;
-        match existing {
-            Some((Symbols::Func(other), ..)) => {
-                if is_def && other.kind == FunctionKind::Definition {
-                    return Err(Error::new(
-                        name,
-                        ErrorKind::Redefinition("function", name.unwrap_string()),
-                    ));
-                }
-
-                self.env
-                    .get_mut_symbol(index)
-                    .unwrap_func()
-                    .cmp(name, &other)?;
-
-                // if existing element is a definition remove newly added declaration
-                // so that last function symbol with this name is a definition
-                // and can properly check for redefinitions
-                if !is_def && other.kind == FunctionKind::Definition {
-                    self.env.remove_symbol(index);
-                }
-            }
-            Some(..) => {
-                return Err(Error::new(
-                    name,
-                    ErrorKind::Redefinition("symbol", name.unwrap_string()),
-                ));
-            }
-            None => {}
-        }
-        if !is_def {
-            self.env.exit();
-        }
-        Ok(())
     }
 
     fn initializer_list(
@@ -714,8 +682,7 @@ impl Parser {
                 }
             } else {
                 let mut designator_expr = self.var_assignment()?;
-                let literal =
-                    designator_expr.get_literal_constant(&t, &self.env, "Array designator")?;
+                let literal = designator_expr.get_literal_constant(&t, "Array designator")?;
 
                 if literal < 0 {
                     return Err(Error::new(
@@ -767,10 +734,10 @@ impl Parser {
 
             if let Some(name) = &mut name {
                 // insert parameters into symbol table
-                let index = self
+                let symbol = self
                     .env
                     .declare_symbol(name, Symbols::Variable(SymbolInfo::new(param_type.clone())))?;
-                name.token.update_index(index);
+                name.token.update_entry(TableEntry::Symbol(symbol));
             }
 
             params.push((param_type, name));
@@ -793,66 +760,62 @@ impl Parser {
 
         Ok((params, variadic))
     }
+
     fn function_decl(
         &mut self,
         return_type: NEWTypes,
         mut name: Token,
     ) -> Result<DeclarationKind, Error> {
-        // TODO: function declarations CAN be declared in non-global scope
-        if !self.env.is_global() {
-            return Err(Error::new(
-                &name,
-                ErrorKind::Regular("Can only define functions in global scope"),
-            ));
-        }
-        let existing = self.env.get_symbol(&name).ok();
-        let func = Function::new(return_type);
-        let index = self.env.declare_func(&name, Symbols::Func(func))?;
+        let mut func = Function::new(return_type);
 
-        name.token.update_index(index);
-
-        // params can't be in same scope as function-name so they get added after they
-        // have been parsed
+        // params can't be in same scope as function-name so they get added after they have been parsed
         self.env.enter();
-        let (params, variadic) = self.parse_params().map_err(|e| {
-            self.env.exit();
-            e
-        })?;
+        (func.params, func.variadic) = self.parse_params()?;
 
-        self.env.get_mut_symbol(index).unwrap_func().params = params;
-        self.env.get_mut_symbol(index).unwrap_func().variadic = variadic;
+        func.kind = if let Ok(TokenType::LeftBrace) = self.tokens.peek().map(|t| &t.token) {
+            InitType::Definition
+        } else {
+            InitType::Declaration
+        };
 
-        self.compare_existing(&name, index, existing).map_err(|e| {
+        let symbol = self
+            .env
+            .declare_prev_scope(&name, Symbols::Func(func.clone()))
+            .map_err(|err| {
+                self.env.exit();
+                err
+            })?;
+
+        name.token.update_entry(TableEntry::Symbol(symbol));
+
+        if func.kind == InitType::Declaration {
             self.env.exit();
-            e
-        })?;
+        }
 
         Ok(DeclarationKind::FuncDecl(name))
     }
     fn function_definition(&mut self, name: Token) -> Result<Stmt, Error> {
-        let index = name.token.get_index();
-        let func = self.env.get_mut_symbol(index).unwrap_func();
-
-        let return_type = func.return_type.clone();
+        let func_symbol = name.token.get_symbol_entry();
+        let return_type = func_symbol.borrow().unwrap_func().return_type.clone();
+        
         if !return_type.is_complete() && !return_type.is_void() {
             return Err(Error::new(
                 &name,
-                ErrorKind::IncompleteReturnType(name.unwrap_string(), return_type),
+                ErrorKind::IncompleteReturnType(name.unwrap_string(), return_type.clone()),
             ));
         }
 
-        if let Some(param_type) = func.has_incomplete_params() {
+        if let Some(param_type) = func_symbol.borrow().unwrap_func().has_incomplete_params() {
             return Err(Error::new(
                 &name,
                 ErrorKind::IncompleteFuncArg(name.unwrap_string(), param_type.clone()),
             ));
         }
 
-        if func.has_unnamed_params() {
+        if func_symbol.borrow().unwrap_func().has_unnamed_params() {
             return Err(Error::new(&name, ErrorKind::UnnamedFuncParams));
         }
 
-        func.kind = FunctionKind::Definition;
         let body = self.block()?;
 
         Ok(Stmt::Function(name, body))
@@ -1266,13 +1229,12 @@ impl Parser {
     fn has_complete_ident(&self, expr: &Expr, token: &Token) -> Result<(), Error> {
         let Some(ident) = get_ident(expr) else {return Ok(())};
 
-        if let Ok((
-            Symbols::Variable(SymbolInfo { type_decl, .. })
-            | Symbols::Func(Function { return_type: type_decl, .. }),
-            _,
-        )) = self.env.get_symbol(ident)
-        {
-            complete_access(token, &type_decl)?
+        if let Ok(existing_symbol) = self.env.get_symbol(ident) {
+            if let Symbols::Variable(SymbolInfo { type_decl, .. })
+            | Symbols::Func(Function { return_type: type_decl, .. }) = &*existing_symbol.borrow()
+            {
+                complete_access(token, &type_decl)?
+            }
         }
         Ok(())
     }
@@ -1309,12 +1271,12 @@ impl Parser {
         }
         if let Some(mut s) = self.matches(&[TokenKind::Ident]) {
             // if identifier isn't known in symbol table then error
-            let (symbol, table_index) = self.env.get_symbol(&s)?;
+            let symbol = self.env.get_symbol(&s)?;
 
-            // give the token the position of the symbol in symbol-table
-            s.token.update_index(table_index);
+            // give the token the reference of the symbol in symbol-table
+            s.token.update_entry(TableEntry::Symbol(symbol.clone()));
 
-            return Ok(match symbol {
+            return Ok(match &*symbol.borrow() {
                 Symbols::Variable(v) => Expr {
                     kind: ExprKind::Ident(s),
                     value_kind: ValueKind::Lvalue,
@@ -1386,7 +1348,11 @@ impl Parser {
             }
             // typedefed type
             TokenType::Ident(..) => {
-                if let Ok((Symbols::TypeDef(t), _)) = self.env.get_symbol(token) {
+                if let Ok(Symbols::TypeDef(t)) = self
+                    .env
+                    .get_symbol(token)
+                    .map(|symbol| symbol.borrow().clone())
+                {
                     self.tokens.next();
                     Ok(t)
                 } else {
@@ -1406,7 +1372,12 @@ impl Parser {
     }
     fn is_type(&self, token: &Token) -> bool {
         if let TokenType::Ident(..) = token.token {
-            return matches!(self.env.get_symbol(token), Ok((Symbols::TypeDef(_), _)));
+            return matches!(
+                self.env
+                    .get_symbol(token)
+                    .map(|symbol| symbol.borrow().clone()),
+                Ok(Symbols::TypeDef(_))
+            );
         }
         token.is_type()
     }
@@ -1556,7 +1527,6 @@ mod tests {
     fn setup_stmt(input: &str) -> String {
         setup(input)
             .parse()
-            .map(|(stmt, _)| stmt)
             .unwrap()
             .iter()
             .map(|stmt| stmt.to_string())

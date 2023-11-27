@@ -3,28 +3,31 @@
 int a;
 int a = 2;
 int a;
-int x, x = 3, x;
+int x, y, x = 3, x;
+
+int a, z;
 
 int foo();
 int foo() { return 4; }
 int foo();
 
-// int foo() { return 2; }
-
-// int some;
-
 typedef int some;
 typedef int some;
 
-// int some() { return 1; }
+int baz();
+
+int bar() { return y; }
 
 some main() {
   int foo();
-  // int some() { return 1; }
-  // int some();
-  // return a;
 
   printf("%d\n", foo());
+  printf("%d\n", baz());
+  printf("%d\n", bar());
   printf("%d\n", x);
   printf("%d\n", a);
 }
+
+int y = 7, z = 1, e;
+
+int baz() { return z; }

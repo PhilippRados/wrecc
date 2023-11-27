@@ -30,7 +30,11 @@ impl Parser {
 
         while self.tokens.peek().is_ok() {
             match self.external_declaration() {
-                Ok(v) => statements.push(v),
+                Ok(stmt) => {
+                    if let Some(stmt) = Self::merge_declarations(&mut statements,stmt) {
+                        statements.push(stmt);
+                    }
+                },
                 Err(e @ Error { kind: ErrorKind::Multiple(..), .. }) => {
                     errors.append(&mut e.flatten_multiple());
                 }
@@ -45,6 +49,39 @@ impl Parser {
             Ok(statements)
         } else {
             Err(errors)
+        }
+    }
+    fn merge_declarations(stmts:&mut Vec<Stmt>, new_stmt:Stmt) -> Option<Stmt> {
+        if let Stmt::Declaration(new_decls) = new_stmt {
+            let mut old_decls = stmts.iter_mut().filter_map(|stmt| if let Stmt::Declaration(decls) = stmt {
+                Some(decls)
+            } else {
+                None
+            }).collect::<Vec<_>>();
+
+            let mut updated_decls = Vec::new();
+            'outer: for decl in new_decls.into_iter() {
+                for old_decl in old_decls.iter_mut() {
+                    match Self::find_duplicate_decl(old_decl,&decl) {
+                        DupKind::Init(existing_decl) => {
+                            *existing_decl = decl;
+                            continue 'outer;
+                        }
+                        DupKind::Decl => continue 'outer,
+                        DupKind::None => ()
+                    }
+                }
+                // otherwise add it to the current declaration list again
+                updated_decls.push(decl);
+            }
+            // if all declarations were merged duplicates then don't emit any new statement
+            if !updated_decls.is_empty() {
+                Some(Stmt::Declaration(updated_decls))
+            } else {
+                None
+            }
+        } else {
+            Some(new_stmt)
         }
     }
     pub fn has_elements(&self) -> Option<&Token> {
@@ -538,14 +575,32 @@ impl Parser {
             return self.function_definition(name);
         }
 
-        decls.push(decl);
+        Self::add_decl(&mut decls,decl);
+
         while self.matches(&[TokenKind::Comma]).is_some() {
             let decl = self.init_decl(type_decl.clone())?;
-            decls.push(decl);
+            Self::add_decl(&mut decls,decl);
         }
         self.consume(TokenKind::Semicolon, "Expect ';' after declaration")?;
 
         Ok(Stmt::Declaration(decls))
+    }
+    fn find_duplicate_decl<'a>(decls:&'a mut Vec<DeclarationKind>, new_decl:&DeclarationKind) -> DupKind<'a> {
+        if let Some(existing_decl) = decls.iter_mut().find(|old_decl| *old_decl == new_decl) {
+            if matches!(new_decl, DeclarationKind::Initializer(..)) {
+                return DupKind::Init(existing_decl)
+            } else {
+                return DupKind::Decl
+            }
+        }
+        DupKind::None
+    }
+    fn add_decl(decls:&mut Vec<DeclarationKind>, new_decl:DeclarationKind) {
+        match Self::find_duplicate_decl(decls,&new_decl) {
+            DupKind::Init(existin_decl) => *existin_decl = new_decl,
+            DupKind::Decl => (),
+            DupKind::None => decls.push(new_decl),
+        }
     }
     fn init_decl(&mut self, mut type_decl: NEWTypes) -> Result<DeclarationKind, Error> {
         type_decl = self.parse_ptr(type_decl);
@@ -1385,6 +1440,11 @@ impl Parser {
         let t = self.matches_type()?;
         Ok(self.parse_ptr(t))
     }
+}
+enum DupKind<'a> {
+    Init(&'a mut DeclarationKind),
+    Decl,
+    None
 }
 
 impl From<(Option<Token>, ErrorKind)> for Error {

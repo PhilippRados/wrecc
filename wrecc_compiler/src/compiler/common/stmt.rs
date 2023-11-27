@@ -30,12 +30,27 @@ pub enum Stmt {
     Label(Token, Box<Stmt>),
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum DeclarationKind {
     Decl(NEWTypes, Token, bool),
     FuncDecl(Token),
     Initializer(NEWTypes, Token, Init, bool),
 }
+impl DeclarationKind {
+    fn get_token(&self) -> &Token {
+        match self {
+            DeclarationKind::Decl(_, token, _)
+            | DeclarationKind::Initializer(_, token, ..)
+            | DeclarationKind::FuncDecl(token) => token,
+        }
+    }
+}
+impl PartialEq for DeclarationKind {
+    fn eq(&self, other: &Self) -> bool {
+        self.get_token().unwrap_string() == other.get_token().unwrap_string()
+    }
+}
+
 #[derive(PartialEq, Clone, Debug)]
 pub struct Init {
     pub kind: InitKind,

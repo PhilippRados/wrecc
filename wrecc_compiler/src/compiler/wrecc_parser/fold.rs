@@ -9,11 +9,7 @@ impl Expr {
             value_kind: ValueKind::Rvalue,
         }
     }
-    pub fn get_literal_constant(
-        &mut self,
-        token: &Token,
-        msg: &'static str,
-    ) -> Result<i64, Error> {
+    pub fn get_literal_constant(&mut self, token: &Token, msg: &'static str) -> Result<i64, Error> {
         self.integer_const_fold()?;
 
         if let ExprKind::Literal(n) = self.kind {
@@ -84,7 +80,7 @@ impl Expr {
                     let true_type = true_expr.type_decl.clone().unwrap();
                     let false_type = false_expr.type_decl.clone().unwrap();
 
-                    if !true_type.type_compatible(&false_type) {
+                    if !true_type.type_compatible(&false_type, &false_expr.kind) {
                         return Err(Error::new(
                             token,
                             ErrorKind::TypeMismatch(true_type, false_type),
@@ -155,7 +151,12 @@ impl Expr {
                 left.type_decl.clone().unwrap(),
                 right.type_decl.clone().unwrap(),
             );
-            if !crate::compiler::typechecker::is_valid_bin(&token, &left_type, &right_type) {
+            if !crate::compiler::typechecker::is_valid_bin(
+                &token,
+                &left_type,
+                &right_type,
+                &right.kind,
+            ) {
                 return Err(Error::new(
                     &token,
                     ErrorKind::InvalidBinary(token.token.clone(), left_type, right_type),
@@ -368,15 +369,13 @@ impl Expr {
         left.integer_const_fold()?;
         right.integer_const_fold()?;
 
-        if let (ExprKind::Literal(left_n), ExprKind::Literal(right_n)) =
-            (&mut left.kind, &mut right.kind)
-        {
+        if let (ExprKind::Literal(left_n), ExprKind::Literal(right_n)) = (&left.kind, &right.kind) {
             let (left_type, right_type) = (
                 left.type_decl.clone().unwrap(),
                 right.type_decl.clone().unwrap(),
             );
 
-            if !left_type.type_compatible(&right_type)
+            if !left_type.type_compatible(&right_type, &right.kind)
                 || left_type.is_void()
                 || right_type.is_void()
             {

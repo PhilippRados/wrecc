@@ -1,4 +1,4 @@
-use crate::compiler::common::token::*;
+use crate::compiler::common::{expr::*, token::*};
 use std::fmt::Display;
 use std::rc::Rc;
 pub use struct_ref::StructRef;
@@ -122,7 +122,7 @@ impl NEWTypes {
     pub fn is_ptr(&self) -> bool {
         matches!(*self, NEWTypes::Pointer(_))
     }
-    pub fn type_compatible(&self, other: &NEWTypes) -> bool {
+    pub fn type_compatible(&self, other: &NEWTypes, other_expr: &ExprKind) -> bool {
         match (self, other) {
             (NEWTypes::Primitive(Types::Void), NEWTypes::Primitive(Types::Void)) => true,
 
@@ -131,10 +131,13 @@ impl NEWTypes {
 
             (NEWTypes::Primitive(_), NEWTypes::Primitive(_)) => true,
 
+            // pointer to null-pointer-constant
+            (NEWTypes::Pointer(_), _) if other_expr.is_zero() => true,
+
             (NEWTypes::Pointer(l), NEWTypes::Pointer(r))
                 if matches!(**l, NEWTypes::Struct(..)) && matches!(**r, NEWTypes::Struct(..)) =>
             {
-                l.type_compatible(r)
+                l.type_compatible(r, other_expr)
             }
             // void* is compatible to any other pointer
             (NEWTypes::Pointer(t), NEWTypes::Pointer(_))
@@ -523,8 +526,12 @@ macro_rules! arr_decay {
 macro_rules! into_newtype {
     ($token:expr,$name:expr,$value:expr) => {
         match $token.token {
-            TokenType::Struct => NEWTypes::Struct(StructInfo::Named($name, $value.clone().unwrap_aggr())),
-            TokenType::Union => NEWTypes::Union(StructInfo::Named($name, $value.clone().unwrap_aggr())),
+            TokenType::Struct => {
+                NEWTypes::Struct(StructInfo::Named($name, $value.clone().unwrap_aggr()))
+            }
+            TokenType::Union => {
+                NEWTypes::Union(StructInfo::Named($name, $value.clone().unwrap_aggr()))
+            }
             TokenType::Enum => NEWTypes::Enum(Some($name), $value.clone().unwrap_enum()),
             _ => unreachable!("should only be used for aggregate types"),
         }

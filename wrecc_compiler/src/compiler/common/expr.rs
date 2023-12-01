@@ -87,6 +87,15 @@ pub enum ExprKind {
     Ident(Token),
     Nop,
 }
+impl ExprKind {
+    pub fn is_zero(&self) -> bool {
+        if let ExprKind::Literal(0) = self {
+            true
+        } else {
+            false
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum CastDirection {

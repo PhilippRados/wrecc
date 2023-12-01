@@ -424,7 +424,7 @@ impl TypeChecker {
         let mut value_type = self.expr_type(expr)?;
 
         crate::arr_decay!(value_type, expr, token);
-        self.check_type_compatibility(token, type_decl, &value_type)?;
+        self.check_type_compatibility(token, type_decl, &value_type, &expr.kind)?;
         self.maybe_cast(type_decl, &value_type, expr);
 
         if is_global && !is_constant(expr) {
@@ -552,21 +552,17 @@ impl TypeChecker {
                 [single_init] if matches!(single_init.kind, InitKind::Scalar(_)) => {
                     self.init_check(type_decl, single_init, is_global)
                 }
-                [single_init] => {
-                    Err(Error::new(
-                        &single_init.token,
-                        ErrorKind::Regular("Too many braces around scalar initializer"),
-                    ))
-                }
+                [single_init] => Err(Error::new(
+                    &single_init.token,
+                    ErrorKind::Regular("Too many braces around scalar initializer"),
+                )),
                 [_, second_init, ..] => {
                     Err(Error::new(&second_init.token, ErrorKind::ScalarOverflow))
                 }
-                [] => {
-                    Err(Error::new(
-                        token,
-                        ErrorKind::Regular("Scalar initializer cannot be empty"),
-                    ))
-                }
+                [] => Err(Error::new(
+                    token,
+                    ErrorKind::Regular("Scalar initializer cannot be empty"),
+                )),
             },
         }
     }
@@ -586,14 +582,12 @@ impl TypeChecker {
                     Ok((n, n, *of.clone()))
                 }
             }
-            (DesignatorKind::Member(_), NEWTypes::Array { .. }) => {
-                Err(Error::new(
-                    &designator.token,
-                    ErrorKind::Regular(
-                        "Can only use member designator on type 'struct' and 'union' not 'array'",
-                    ),
-                ))
-            }
+            (DesignatorKind::Member(_), NEWTypes::Array { .. }) => Err(Error::new(
+                &designator.token,
+                ErrorKind::Regular(
+                    "Can only use member designator on type 'struct' and 'union' not 'array'",
+                ),
+            )),
 
             (DesignatorKind::Array(_), NEWTypes::Struct(_) | NEWTypes::Union(_)) => {
                 Err(Error::new(
@@ -696,8 +690,9 @@ impl TypeChecker {
         token: &Token,
         left: &NEWTypes,
         right: &NEWTypes,
+        right_expr: &ExprKind,
     ) -> Result<(), Error> {
-        if left.is_void() || right.is_void() || !left.type_compatible(right) {
+        if left.is_void() || right.is_void() || !left.type_compatible(right, right_expr) {
             Err(Error::new(
                 token,
                 ErrorKind::IllegalAssign(left.clone(), right.clone()),
@@ -837,14 +832,13 @@ impl TypeChecker {
             let mut body_return = self.expr_type(expr)?;
 
             crate::arr_decay!(body_return, expr, keyword);
-            self.check_return_compatibility(keyword, &function_type, &body_return)?;
+            self.check_return_compatibility(keyword, &function_type, &body_return, &expr.kind)?;
             self.maybe_cast(&function_type, &body_return, expr);
         } else {
-            self.check_return_compatibility(
-                keyword,
-                &function_type,
-                &NEWTypes::Primitive(Types::Void),
-            )?;
+            let body_return = &NEWTypes::Primitive(Types::Void);
+            let return_expr = ExprKind::Nop;
+
+            self.check_return_compatibility(keyword, &function_type, &body_return, &return_expr)?;
         }
         Ok(())
     }
@@ -937,7 +931,7 @@ impl TypeChecker {
         let mut true_type = self.expr_type(true_expr)?;
         let mut false_type = self.expr_type(false_expr)?;
 
-        if !true_type.type_compatible(&false_type) {
+        if !true_type.type_compatible(&false_type, &false_expr.kind) {
             return Err(Error::new(
                 token,
                 ErrorKind::TypeMismatch(true_type, false_type),
@@ -1073,7 +1067,7 @@ impl TypeChecker {
 
         crate::arr_decay!(r_type, r_expr, token);
 
-        self.check_type_compatibility(token, &l_type, &r_type)?;
+        self.check_type_compatibility(token, &l_type, &r_type, &r_expr.kind)?;
         self.maybe_cast(&l_type, &r_type, r_expr);
 
         Ok(l_type)
@@ -1134,7 +1128,7 @@ impl TypeChecker {
         for (index, ((expr, arg_type), (param_type, param_token))) in
             args.into_iter().zip(params).enumerate()
         {
-            self.check_type_compatibility(left_paren, param_type, &arg_type)
+            self.check_type_compatibility(left_paren, param_type, &arg_type, &expr.kind)
                 .or(Err(Error::new(
                     left_paren,
                     ErrorKind::MismatchedArgs(
@@ -1193,7 +1187,10 @@ impl TypeChecker {
         crate::arr_decay!(left_type, left, token);
         crate::arr_decay!(right_type, right, token);
 
-        if !left_type.type_compatible(&right_type) || left_type.is_void() || right_type.is_void() {
+        if self
+            .check_type_compatibility(token, &left_type, &right_type, &right.kind)
+            .is_err()
+        {
             return Err(Error::new(
                 token,
                 ErrorKind::InvalidComp(token.token.clone(), left_type, right_type),
@@ -1234,7 +1231,7 @@ impl TypeChecker {
         crate::arr_decay!(right_type, right, token);
 
         // check valid operations
-        if !is_valid_bin(token, &left_type, &right_type) {
+        if !is_valid_bin(token, &left_type, &right_type, &right.kind) {
             return Err(Error::new(
                 token,
                 ErrorKind::InvalidBinary(token.token.clone(), left_type, right_type),
@@ -1381,10 +1378,9 @@ impl TypeChecker {
         keyword: &Token,
         function_type: &NEWTypes,
         body_return: &NEWTypes,
+        return_expr: &ExprKind,
     ) -> Result<(), Error> {
-        if matches!(function_type, NEWTypes::Array { .. }) {
-            Err(Error::new(keyword, ErrorKind::InvalidArrayReturn))
-        } else if !function_type.type_compatible(body_return) {
+        if !function_type.type_compatible(body_return, return_expr) {
             Err(Error::new(
                 keyword,
                 ErrorKind::MismatchedFunctionReturn(function_type.clone(), body_return.clone()),
@@ -1394,6 +1390,7 @@ impl TypeChecker {
         }
     }
 }
+
 #[derive(Clone)]
 struct CurrentObjects(Vec<(i64, i64, NEWTypes)>);
 impl CurrentObjects {
@@ -1476,11 +1473,16 @@ pub fn create_label(index: &mut usize) -> usize {
     prev
 }
 
-pub fn is_valid_bin(token: &Token, left_type: &NEWTypes, right_type: &NEWTypes) -> bool {
+pub fn is_valid_bin(
+    token: &Token,
+    left_type: &NEWTypes,
+    right_type: &NEWTypes,
+    right_expr: &ExprKind,
+) -> bool {
     match (&left_type, &right_type) {
         (NEWTypes::Primitive(Types::Void), _) | (_, NEWTypes::Primitive(Types::Void)) => false,
         (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => {
-            if left_type.type_compatible(right_type) {
+            if left_type.type_compatible(right_type, right_expr) {
                 token.token == TokenType::Minus
             } else {
                 false

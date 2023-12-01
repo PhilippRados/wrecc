@@ -70,7 +70,6 @@ pub enum ErrorKind {
     InvalidBinary(TokenType, NEWTypes, NEWTypes),
     InvalidComp(TokenType, NEWTypes, NEWTypes),
     InvalidDerefType(NEWTypes),
-    InvalidArrayReturn,
     MismatchedFunctionReturn(NEWTypes, NEWTypes),
     InvalidUnary(TokenType, NEWTypes, &'static str),
     UnnamedFuncParams,
@@ -340,7 +339,6 @@ impl ErrorKind {
                     type_decl,
                 )
             }
-            ErrorKind::InvalidArrayReturn => "Can't return stack-array from function".to_string(),
             ErrorKind::MismatchedFunctionReturn(func_return, body_return) => {
                 format!(
                     "Mismatched function return type: expected '{}', found: '{}'",

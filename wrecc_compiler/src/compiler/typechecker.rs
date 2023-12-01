@@ -713,7 +713,7 @@ impl TypeChecker {
 
         crate::arr_decay!(old_type, expr, token);
 
-        if !old_type.is_scalar() || !new_type.is_scalar() {
+        if !new_type.is_void() && (!old_type.is_scalar() || !new_type.is_scalar()) {
             return Err(Error::new(
                 token,
                 ErrorKind::InvalidExplicitCast(old_type, new_type.clone()),

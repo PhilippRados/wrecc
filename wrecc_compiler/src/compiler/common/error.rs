@@ -73,6 +73,7 @@ pub enum ErrorKind {
     MismatchedFunctionReturn(NEWTypes, NEWTypes),
     InvalidUnary(TokenType, NEWTypes, &'static str),
     UnnamedFuncParams,
+    ArrayReturnType(NEWTypes),
     NonAggregateDesignator(NEWTypes),
     DesignatorOverflow(usize, i64),
     InitializerOverflow(NEWTypes),
@@ -388,6 +389,9 @@ impl ErrorKind {
             }
             ErrorKind::UnnamedFuncParams => {
                 "Unnamed parameters are not allowed in function definitions".to_string()
+            }
+            ErrorKind::ArrayReturnType(type_decl) => {
+                format!("Functions cannot return array type '{}'", type_decl)
             }
 
             ErrorKind::InvalidHeader(s) => format!("'{}' is not a valid header file", s),

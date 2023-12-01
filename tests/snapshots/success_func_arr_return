@@ -1,0 +1,16 @@
+error: Functions cannot return array type 'int[2]'
+|  --> in tests/fixtures/func_arr_return.c:3:5
+|
+3 arr some() {
+|     ^
+error: Brackets not allowed here; Put them after the Identifier
+|  --> in tests/fixtures/func_arr_return.c:8:4
+|
+8 int[2] f();
+|    ^
+error: Expect ';' after declaration
+|  --> in tests/fixtures/func_arr_return.c:12:10
+|
+12 int baz()[2];
+|           ^
+3 errors generated.

@@ -31,10 +31,10 @@ impl Parser {
         while self.tokens.peek().is_ok() {
             match self.external_declaration() {
                 Ok(stmt) => {
-                    if let Some(stmt) = Self::merge_declarations(&mut statements,stmt) {
+                    if let Some(stmt) = Self::merge_declarations(&mut statements, stmt) {
                         statements.push(stmt);
                     }
-                },
+                }
                 Err(e @ Error { kind: ErrorKind::Multiple(..), .. }) => {
                     errors.append(&mut e.flatten_multiple());
                 }
@@ -51,24 +51,29 @@ impl Parser {
             Err(errors)
         }
     }
-    fn merge_declarations(stmts:&mut Vec<Stmt>, new_stmt:Stmt) -> Option<Stmt> {
+    fn merge_declarations(stmts: &mut Vec<Stmt>, new_stmt: Stmt) -> Option<Stmt> {
         if let Stmt::Declaration(new_decls) = new_stmt {
-            let mut old_decls = stmts.iter_mut().filter_map(|stmt| if let Stmt::Declaration(decls) = stmt {
-                Some(decls)
-            } else {
-                None
-            }).collect::<Vec<_>>();
+            let mut old_decls = stmts
+                .iter_mut()
+                .filter_map(|stmt| {
+                    if let Stmt::Declaration(decls) = stmt {
+                        Some(decls)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
 
             let mut updated_decls = Vec::new();
             'outer: for decl in new_decls.into_iter() {
                 for old_decl in old_decls.iter_mut() {
-                    match Self::find_duplicate_decl(old_decl,&decl) {
+                    match Self::find_duplicate_decl(old_decl, &decl) {
                         DupKind::Init(existing_decl) => {
                             *existing_decl = decl;
                             continue 'outer;
                         }
                         DupKind::Decl => continue 'outer,
-                        DupKind::None => ()
+                        DupKind::None => (),
                     }
                 }
                 // otherwise add it to the current declaration list again
@@ -575,28 +580,31 @@ impl Parser {
             return self.function_definition(name);
         }
 
-        Self::add_decl(&mut decls,decl);
+        Self::add_decl(&mut decls, decl);
 
         while self.matches(&[TokenKind::Comma]).is_some() {
             let decl = self.init_decl(type_decl.clone())?;
-            Self::add_decl(&mut decls,decl);
+            Self::add_decl(&mut decls, decl);
         }
         self.consume(TokenKind::Semicolon, "Expect ';' after declaration")?;
 
         Ok(Stmt::Declaration(decls))
     }
-    fn find_duplicate_decl<'a>(decls:&'a mut Vec<DeclarationKind>, new_decl:&DeclarationKind) -> DupKind<'a> {
+    fn find_duplicate_decl<'a>(
+        decls: &'a mut Vec<DeclarationKind>,
+        new_decl: &DeclarationKind,
+    ) -> DupKind<'a> {
         if let Some(existing_decl) = decls.iter_mut().find(|old_decl| *old_decl == new_decl) {
             if matches!(new_decl, DeclarationKind::Initializer(..)) {
-                return DupKind::Init(existing_decl)
+                return DupKind::Init(existing_decl);
             } else {
-                return DupKind::Decl
+                return DupKind::Decl;
             }
         }
         DupKind::None
     }
-    fn add_decl(decls:&mut Vec<DeclarationKind>, new_decl:DeclarationKind) {
-        match Self::find_duplicate_decl(decls,&new_decl) {
+    fn add_decl(decls: &mut Vec<DeclarationKind>, new_decl: DeclarationKind) {
+        match Self::find_duplicate_decl(decls, &new_decl) {
             DupKind::Init(existin_decl) => *existin_decl = new_decl,
             DupKind::Decl => (),
             DupKind::None => decls.push(new_decl),
@@ -821,6 +829,10 @@ impl Parser {
         return_type: NEWTypes,
         mut name: Token,
     ) -> Result<DeclarationKind, Error> {
+        if let NEWTypes::Array { .. } = return_type {
+            return Err(Error::new(&name, ErrorKind::ArrayReturnType(return_type)));
+        }
+
         let mut func = Function::new(return_type);
 
         // params can't be in same scope as function-name so they get added after they have been parsed
@@ -1444,7 +1456,7 @@ impl Parser {
 enum DupKind<'a> {
     Init(&'a mut DeclarationKind),
     Decl,
-    None
+    None,
 }
 
 impl From<(Option<Token>, ErrorKind)> for Error {

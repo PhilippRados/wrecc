@@ -1263,6 +1263,21 @@ impl TypeChecker {
     ) -> (NEWTypes, Option<usize>) {
         match (&left_type, &right_type, token) {
             (.., TokenType::GreaterGreater | TokenType::LessLess) => (left_type, None),
+
+            // if pointer - pointer, scale result before operation to match left-pointers type
+            (NEWTypes::Pointer(inner), NEWTypes::Pointer(_), _) => {
+                (NEWTypes::Primitive(Types::Long), Some(inner.size()))
+            }
+            // if integer type and pointer always cast to pointer
+            (_, NEWTypes::Pointer(_), _) => {
+                cast!(left, right_type.clone(), CastDirection::Up);
+                (right_type, None)
+            }
+            (NEWTypes::Pointer(_), ..) => {
+                cast!(right, left_type.clone(), CastDirection::Up);
+                (left_type, None)
+            }
+
             (l, r, _) if l.size() > r.size() => {
                 cast!(right, left_type.clone(), CastDirection::Up);
                 (left_type, None)
@@ -1270,10 +1285,6 @@ impl TypeChecker {
             (l, r, _) if l.size() < r.size() => {
                 cast!(left, right_type.clone(), CastDirection::Up);
                 (right_type, None)
-            }
-            // if pointer - pointer, scale result before operation to match left-pointers type
-            (NEWTypes::Pointer(inner), NEWTypes::Pointer(_), _) => {
-                (NEWTypes::Primitive(Types::Long), Some(inner.size()))
             }
             _ => (left_type, None),
         }

@@ -25,11 +25,19 @@ pub trait TypeInfo {
 #[derive(Clone, PartialEq, Debug)]
 pub enum NEWTypes {
     Primitive(Types),
-    Array { amount: usize, of: Box<NEWTypes> },
+    Array {
+        amount: usize,
+        of: Box<NEWTypes>,
+    },
     Pointer(Box<NEWTypes>),
     Struct(StructInfo),
     Union(StructInfo),
     Enum(Option<String>, Vec<(Token, i32)>),
+    Function {
+        return_type: Box<NEWTypes>,
+        params: Vec<(NEWTypes, Option<Token>)>,
+        variadic: bool,
+    },
 }
 
 impl TypeInfo for NEWTypes {
@@ -41,6 +49,7 @@ impl TypeInfo for NEWTypes {
             NEWTypes::Pointer(_) => NEWTypes::Primitive(Types::Long).size(),
             NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).size(),
             NEWTypes::Array { amount, of: element_type } => amount * element_type.size(),
+            NEWTypes::Function { .. } => 1,
         }
     }
     fn reg_suffix(&self) -> String {
@@ -51,6 +60,7 @@ impl TypeInfo for NEWTypes {
             NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => {
                 NEWTypes::Primitive(Types::Long).reg_suffix()
             }
+            NEWTypes::Function { .. } => unreachable!("no plain function type used"),
         }
     }
     fn suffix(&self) -> String {
@@ -61,6 +71,7 @@ impl TypeInfo for NEWTypes {
             NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => {
                 NEWTypes::Primitive(Types::Long).suffix()
             }
+            NEWTypes::Function { .. } => unreachable!("no plain function type used"),
         }
     }
     fn complete_suffix(&self) -> String {
@@ -71,6 +82,7 @@ impl TypeInfo for NEWTypes {
             NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => {
                 NEWTypes::Primitive(Types::Long).complete_suffix()
             }
+            NEWTypes::Function { .. } => unreachable!("no plain function type used"),
         }
     }
     fn return_reg(&self) -> String {
@@ -82,6 +94,7 @@ impl TypeInfo for NEWTypes {
             NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).return_reg(),
             NEWTypes::Union(..) => self.union_biggest().return_reg(),
             NEWTypes::Struct(..) => unimplemented!("currently can't return structs"),
+            NEWTypes::Function { .. } => unreachable!("no plain function type used"),
         }
     }
 }
@@ -98,6 +111,16 @@ impl Display for NEWTypes {
                 NEWTypes::Struct(s) => "struct ".to_string() + &s.name(),
                 NEWTypes::Enum(Some(name), ..) => "enum ".to_string() + name,
                 NEWTypes::Enum(None, ..) => "enum <anonymous>".to_string(),
+                NEWTypes::Function { return_type, params, variadic } => format!(
+                    "{}({}{})",
+                    return_type,
+                    params
+                        .iter()
+                        .map(|(ty, _)| ty.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    if *variadic { "..." } else { "" }
+                ),
             }
         )
     }
@@ -107,8 +130,32 @@ impl NEWTypes {
     pub fn default() -> NEWTypes {
         NEWTypes::Primitive(Types::Int)
     }
-    pub fn pointer_to(&mut self) {
-        *self = NEWTypes::Pointer(Box::new(self.clone()));
+    pub fn pointer_to(self) -> NEWTypes {
+        NEWTypes::Pointer(Box::new(self.clone()))
+    }
+    pub fn array_of(self, amount: usize) -> NEWTypes {
+        NEWTypes::Array { amount, of: Box::new(self) }
+    }
+    pub fn function_of(self, params: Vec<(NEWTypes, Option<Token>)>, variadic: bool) -> NEWTypes {
+        NEWTypes::Function {
+            return_type: Box::new(self),
+            params,
+            variadic,
+        }
+    }
+    // appends a type to any derived type
+    pub fn append_type<'a>(&'a mut self, append: &'a mut NEWTypes) -> &'a mut NEWTypes {
+        match self {
+            NEWTypes::Array { ref mut of, .. } => *of = Box::new(of.append_type(append).clone()),
+            NEWTypes::Function { ref mut return_type, .. } => {
+                *return_type = Box::new(return_type.append_type(append).clone())
+            }
+            NEWTypes::Pointer(ref mut to) => *to = Box::new(to.append_type(append).clone()),
+            _ => {
+                return append;
+            }
+        };
+        self
     }
     pub fn deref_at(&self) -> Option<NEWTypes> {
         match self {
@@ -302,6 +349,13 @@ impl NEWTypes {
                 .fold(0, |acc, (m_type, _)| acc + m_type.size() as i64),
             NEWTypes::Array { of, .. } => of.size() as i64 * index,
             _ => 0,
+        }
+    }
+    pub fn unwrap_primitive(self) -> Types {
+        if let NEWTypes::Primitive(primitive) = self {
+            primitive
+        } else {
+            unreachable!("unwrap on non-primitive type")
         }
     }
 }

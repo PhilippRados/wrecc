@@ -1,8 +1,8 @@
-error: Expected type-declaration, found identifier
-|  --> in tests/fixtures/multiline_err.c:8:2
+error: Expect ';' after declaration
+|  --> in tests/fixtures/multiline_err.c:8:4
 |
 8  o wie "gehts";
-|  ^
+|    ^
 error: Expect ';' after declaration
 |  --> in tests/fixtures/multiline_err.c:21:2
 |

@@ -14,7 +14,6 @@ pub enum ErrorKind {
     Eof(&'static str),
 
     // parsing errors
-    BracketsNotAllowed,
     NotIntegerConstant(&'static str),
     NegativeArraySize,
     IsEmpty(TokenType),
@@ -73,7 +72,7 @@ pub enum ErrorKind {
     MismatchedFunctionReturn(NEWTypes, NEWTypes),
     InvalidUnary(TokenType, NEWTypes, &'static str),
     UnnamedFuncParams,
-    ArrayReturnType(NEWTypes),
+    InvalidReturnType(NEWTypes),
     NonAggregateDesignator(NEWTypes),
     DesignatorOverflow(usize, i64),
     InitializerOverflow(NEWTypes),
@@ -130,9 +129,6 @@ impl ErrorKind {
             ErrorKind::InvalidEscape(c) => format!("Can't escape character '{}'", c),
             ErrorKind::UnterminatedString => "Unterminated string".to_string(),
 
-            ErrorKind::BracketsNotAllowed => {
-                "Brackets not allowed here; Put them after the Identifier".to_string()
-            }
             ErrorKind::NotIntegerConstant(s) => {
                 format!("{} has to be an integer constant expression", s)
             }
@@ -390,8 +386,8 @@ impl ErrorKind {
             ErrorKind::UnnamedFuncParams => {
                 "Unnamed parameters are not allowed in function definitions".to_string()
             }
-            ErrorKind::ArrayReturnType(type_decl) => {
-                format!("Functions cannot return array type '{}'", type_decl)
+            ErrorKind::InvalidReturnType(type_decl) => {
+                format!("Functions cannot return type '{}'", type_decl)
             }
 
             ErrorKind::InvalidHeader(s) => format!("'{}' is not a valid header file", s),

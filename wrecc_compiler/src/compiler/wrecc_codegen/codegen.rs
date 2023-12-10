@@ -1,4 +1,4 @@
-use crate::compiler::common::{expr::*, stmt::*, token::*, types::*};
+use crate::compiler::common::{decl::*, expr::*, stmt::*, token::*, types::*};
 use crate::compiler::typechecker::{align_by, create_label};
 use crate::compiler::wrecc_codegen::{ir::*, register::*, register_allocation::*};
 use std::collections::{HashMap, VecDeque};
@@ -66,9 +66,12 @@ impl Compiler {
         }
     }
 
-    pub fn translate(mut self, statements: Vec<Stmt>) -> (Vec<Ir>, HashMap<usize, IntervalEntry>) {
+    pub fn translate(
+        mut self,
+        external_decls: Vec<ExternalDeclaration>,
+    ) -> (Vec<Ir>, HashMap<usize, IntervalEntry>) {
         self.cg_const_labels();
-        self.cg_stmts(statements);
+        self.cg_external_decls(external_decls);
 
         (self.output, self.live_intervals)
     }
@@ -81,12 +84,23 @@ impl Compiler {
             self.write_out(Ir::StringDeclaration(label_index, data));
         }
     }
-    fn cg_stmts(&mut self, statements: Vec<Stmt>) {
-        for s in statements {
-            self.visit(s)
+    fn cg_external_decls(&mut self, external_decls: Vec<ExternalDeclaration>) {
+        for decl in external_decls {
+            self.visit_decl(decl)
         }
     }
-    fn visit(&mut self, statement: Stmt) {
+    fn cg_stmts(&mut self, statements: Vec<Stmt>) {
+        for stmt in statements {
+            self.visit_stmt(stmt)
+        }
+    }
+    fn visit_decl(&mut self, external_decl: ExternalDeclaration) {
+        match external_decl {
+            ExternalDeclaration::Declaration(decls) => self.declaration(decls),
+            ExternalDeclaration::Function(name, body) => self.function_definition(name, body),
+        }
+    }
+    fn visit_stmt(&mut self, statement: Stmt) {
         match statement {
             Stmt::Expr(expr) => {
                 let reg = self.execute_expr(expr);
@@ -94,7 +108,6 @@ impl Compiler {
             }
             Stmt::Declaration(decls) => self.declaration(decls),
             Stmt::Block(statements) => self.block(statements),
-            Stmt::Function(name, body) => self.function_definition(name, body),
             Stmt::Return(_, expr) => self.return_statement(expr),
             Stmt::If(_, cond, then_branch, else_branch) => {
                 self.if_statement(cond, *then_branch, else_branch)
@@ -133,7 +146,7 @@ impl Compiler {
         let label_index = func.borrow().unwrap_func().labels[&name.unwrap_string()];
 
         self.write_out(Ir::LabelDefinition(label_index));
-        self.visit(body);
+        self.visit_stmt(body);
     }
 
     fn switch_statement(&mut self, cond: Expr, body: Stmt) {
@@ -172,7 +185,7 @@ impl Compiler {
         self.jump_labels.push((break_label, 0));
         self.switch_labels.append(&mut jump_labels.into());
 
-        self.visit(body);
+        self.visit_stmt(body);
 
         self.write_out(Ir::LabelDefinition(break_label));
 
@@ -183,7 +196,7 @@ impl Compiler {
 
         self.write_out(Ir::LabelDefinition(label));
 
-        self.visit(body);
+        self.visit_stmt(body);
     }
     fn do_statement(&mut self, body: Stmt, cond: Expr) {
         let body_label = create_label(&mut self.label_index);
@@ -193,7 +206,7 @@ impl Compiler {
         self.jump_labels.push((end_label, cond_label));
 
         self.write_out(Ir::LabelDefinition(body_label));
-        self.visit(body);
+        self.visit_stmt(body);
 
         self.write_out(Ir::LabelDefinition(cond_label));
         let mut cond_reg = self.execute_expr(cond);
@@ -231,12 +244,12 @@ impl Compiler {
 
         self.jump_labels.push((end_label, inc_label));
         if let Some(init) = init {
-            self.visit(*init);
+            self.visit_stmt(*init);
         }
         self.write_out(Ir::Jmp(cond_label));
         self.write_out(Ir::LabelDefinition(body_label));
 
-        self.visit(body);
+        self.visit_stmt(body);
 
         self.write_out(Ir::LabelDefinition(inc_label));
 
@@ -277,7 +290,7 @@ impl Compiler {
         self.write_out(Ir::Jmp(cond_label));
         self.write_out(Ir::LabelDefinition(body_label));
 
-        self.visit(body);
+        self.visit_stmt(body);
 
         self.write_out(Ir::LabelDefinition(cond_label));
 
@@ -315,12 +328,12 @@ impl Compiler {
         }
         self.write_out(Ir::JmpCond("e", else_label));
 
-        self.visit(then_branch);
+        self.visit_stmt(then_branch);
 
         if let Some(else_branch) = else_branch {
             self.write_out(Ir::Jmp(done_label));
             self.write_out(Ir::LabelDefinition(else_label));
-            self.visit(*else_branch);
+            self.visit_stmt(*else_branch);
         }
         self.write_out(Ir::LabelDefinition(done_label));
     }
@@ -349,54 +362,53 @@ impl Compiler {
     fn declaration(&mut self, decls: Vec<DeclarationKind>) {
         for d in decls {
             match d {
-                DeclarationKind::Decl(type_decl, name, true) => {
-                    self.declare_global_var(type_decl, name)
+                DeclarationKind::VarDecl(type_decl, name, init, true) => {
+                    self.declare_global_var(type_decl, name, init)
                 }
-                DeclarationKind::Decl(type_decl, name, false) => self.declare_var(type_decl, &name),
-                DeclarationKind::Initializer(type_decl, name, init, true) => {
-                    self.init_global_var(type_decl, name, init)
-                }
-                DeclarationKind::Initializer(type_decl, name, init, false) => {
-                    let size = align(type_decl.size(), &type_decl);
-                    self.declare_var(type_decl, &name);
-
-                    self.init_var(&name, init, size);
+                DeclarationKind::VarDecl(type_decl, name, init, false) => {
+                    self.declare_var(type_decl, &name, init)
                 }
                 DeclarationKind::FuncDecl(..) => (),
             }
         }
     }
-    fn declare_global_var(&mut self, type_decl: NEWTypes, name: Token) {
+    fn declare_global_var(&mut self, type_decl: NEWTypes, name: Token, init: Option<Init>) {
         self.write_out(Ir::GlobalDeclaration(
             name.unwrap_string(),
             type_decl.is_ptr(),
         ));
-        self.write_out(Ir::GlobalInit(
-            NEWTypes::Primitive(Types::Void),
-            StaticRegister::Literal(type_decl.size() as i64, NEWTypes::default()),
-        ));
-        let reg = Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl));
 
-        name.token
-            .get_symbol_entry()
-            .borrow_mut()
-            .unwrap_var_mut()
-            .set_reg(reg);
+        if let Some(init) = init {
+            self.init_global_var(type_decl, name, init);
+        } else {
+            self.write_out(Ir::GlobalInit(
+                NEWTypes::Primitive(Types::Void),
+                StaticRegister::Literal(type_decl.size() as i64, NEWTypes::default()),
+            ));
+            let reg = Register::Label(LabelRegister::Var(name.unwrap_string(), type_decl));
+
+            name.token
+                .get_symbol_entry()
+                .borrow_mut()
+                .unwrap_var_mut()
+                .set_reg(reg);
+        }
     }
-    fn declare_var(&mut self, type_decl: NEWTypes, name: &Token) {
+    fn declare_var(&mut self, type_decl: NEWTypes, name: &Token, init: Option<Init>) {
+        let size = align(type_decl.size(), &type_decl);
+
         let reg = Register::Stack(StackRegister::new(&mut self.current_bp_offset, type_decl));
         name.token
             .get_symbol_entry()
             .borrow_mut()
             .unwrap_var_mut()
             .set_reg(reg);
+
+        if let Some(init) = init {
+            self.init_var(name, init, size);
+        }
     }
     fn init_global_var(&mut self, type_decl: NEWTypes, var_name: Token, init: Init) {
-        self.write_out(Ir::GlobalDeclaration(
-            var_name.unwrap_string(),
-            type_decl.is_ptr(),
-        ));
-
         var_name
             .token
             .get_symbol_entry()
@@ -527,7 +539,7 @@ impl Compiler {
     }
 
     fn init_arg(&mut self, type_decl: NEWTypes, var_name: Token, arg_reg: Register) {
-        self.declare_var(type_decl, &var_name);
+        self.declare_var(type_decl, &var_name, None);
 
         let reg = self.cg_assign(
             var_name

@@ -87,7 +87,7 @@ impl Function {
             Ok(())
         }
     }
-    pub fn has_unnamed_params(&self) -> bool {
+    pub fn has_abstract_params(&self) -> bool {
         self.params
             .iter()
             .map(|(_, name)| name)
@@ -390,16 +390,6 @@ impl Environment {
     ) -> Result<Rc<RefCell<Symbols>>, Error> {
         let last_depth = self.current_depth - 1;
 
-        if matches!(symbol, Symbols::Func(_))
-            && symbol.get_kind() == &InitType::Definition
-            && last_depth != 0
-        {
-            return Err(Error::new(
-                var_name,
-                ErrorKind::Regular("Can only define functions in global scope"),
-            ));
-        }
-
         if let Some(existing_symbol) = self
             .symbols
             .contains_key(&var_name.unwrap_string(), last_depth)
@@ -501,7 +491,7 @@ mod tests {
     use crate::preprocess;
     use std::path::Path;
 
-    fn assert_namespace(input: &str, expected: Vec<(&str, &str,usize)>) {
+    fn assert_namespace(input: &str, expected: Vec<(&str, &str, usize)>) {
         let pp_tokens = preprocess(Path::new(""), input.to_string()).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         let tokens = scanner.scan_token().unwrap();
@@ -537,10 +527,10 @@ int main(){
 }";
 
         let expected = vec![
-            ("main","function",0),
-            ("s","variable",1),
-            ("n","variable",2),
-            ("n","variable",1),
+            ("main", "function", 0),
+            ("s", "variable", 1),
+            ("n", "variable", 2),
+            ("n", "variable", 1),
         ];
 
         assert_namespace(input, expected);
@@ -562,11 +552,11 @@ int main() {
 }";
 
         let expected = vec![
-            ("foo","function",0),
-            ("a","variable",1),
-            ("b","variable",1),
-            ("some","variable",3),
-            ("main","function",0),
+            ("foo", "function", 0),
+            ("a", "variable", 1),
+            ("b", "variable", 1),
+            ("some", "variable", 3),
+            ("main", "function", 0),
         ];
 
         assert_namespace(input, expected);
@@ -585,10 +575,10 @@ int main() {
 }";
 
         let expected = vec![
-            ("main","function",0),
-            ("foo","function",3),
-            ("a","variable",4),
-            ("b","variable",4),
+            ("main", "function", 0),
+            ("foo", "function", 3),
+            ("a", "variable", 4),
+            ("b", "variable", 4),
         ];
 
         assert_namespace(input, expected);

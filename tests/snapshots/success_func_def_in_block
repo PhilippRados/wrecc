@@ -1,11 +1,6 @@
-error: Can only define functions in global scope
+error: Cannot define functions in 'block'-statement
 |  --> in tests/fixtures/func_def_in_block.c:5:9
 |
 5     int some() {
 |         ^
-error: Undeclared symbol 'some'
-|  --> in tests/fixtures/func_def_in_block.c:8:5
-|
-8     some();
-|     ^
-2 errors generated.
+1 error generated.

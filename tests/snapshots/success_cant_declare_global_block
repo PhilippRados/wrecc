@@ -1,4 +1,4 @@
-error: Expected type-declaration, found '{'
+error: Expected identifier following type-specifier
 |  --> in tests/fixtures/cant_declare_global_block.c:2:1
 |
 2 {

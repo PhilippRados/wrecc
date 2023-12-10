@@ -1,4 +1,4 @@
-void printf(char* f, int d);
+void printf(char *f, int d);
 
 typedef struct {
   int x;
@@ -19,16 +19,15 @@ typedef struct {
 int main() {
   typedef int Number;
   Number a = 5;
-  
+
   {
     typedef char Number;
     Number b = 'd';
     printf("b = %c\n", b);
   }
-  
+
   printf("a = %d\n", a);
-  
-  //Line test = {{1,2},{3,4}};
+
   Person john = {"John", 25, {{12, 3}, {-7, 1}}};
   printf("a = %c\n", john.name[0]);
   printf("a = %c\n", john.name[1]);

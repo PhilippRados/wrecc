@@ -1,4 +1,6 @@
-use crate::compiler::common::{environment::*, error::*, expr::*, stmt::*, token::*, types::*};
+use crate::compiler::common::{
+    decl::*, environment::*, error::*, expr::*, stmt::*, token::*, types::*,
+};
 use crate::compiler::wrecc_codegen::codegen::align;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -144,18 +146,21 @@ impl TypeChecker {
     }
     pub fn check(
         mut self,
-        statements: &mut Vec<Stmt>,
+        external_decls: &mut Vec<ExternalDeclaration>,
     ) -> Result<(HashMap<String, usize>, Vec<Vec<Option<i64>>>), Vec<Error>> {
-        match self.check_statements(statements) {
+        match self.check_declarations(external_decls) {
             Ok(_) => Ok((self.const_labels, self.switches)),
             Err(e) => Err(e.flatten_multiple()),
         }
     }
-    fn check_statements(&mut self, statements: &mut Vec<Stmt>) -> Result<(), Error> {
+    fn check_declarations(
+        &mut self,
+        external_decls: &mut Vec<ExternalDeclaration>,
+    ) -> Result<(), Error> {
         let mut errors = vec![];
 
-        for s in statements {
-            if let Err(e) = self.visit(s) {
+        for decl in external_decls {
+            if let Err(e) = self.visit_decl(decl) {
                 errors.push(e);
             }
         }
@@ -166,10 +171,15 @@ impl TypeChecker {
             Err(Error::new_multiple(errors))
         }
     }
-    fn visit(&mut self, statement: &mut Stmt) -> Result<(), Error> {
+    fn visit_decl(&mut self, external_decl: &mut ExternalDeclaration) -> Result<(), Error> {
+        match external_decl {
+            ExternalDeclaration::Declaration(decls) => self.declaration(decls),
+            ExternalDeclaration::Function(name, body) => self.function_definition(name, body),
+        }
+    }
+    fn visit_stmt(&mut self, statement: &mut Stmt) -> Result<(), Error> {
         match statement {
             Stmt::Declaration(decls) => self.declaration(decls),
-            Stmt::Function(name, body) => self.function_definition(name, body),
             Stmt::Return(keyword, value) => self.return_statement(keyword, value),
             Stmt::Expr(expr) => match self.expr_type(expr) {
                 Ok(_) => Ok(()),
@@ -199,7 +209,7 @@ impl TypeChecker {
     }
     fn label_statement(&mut self, name_token: &Token, body: &mut Stmt) -> Result<(), Error> {
         self.scope.insert_label(name_token)?;
-        self.visit(body)?;
+        self.visit_stmt(body)?;
         Ok(())
     }
     fn switch_statement(
@@ -216,7 +226,7 @@ impl TypeChecker {
             ));
         }
         self.scope.0.push(ScopeKind::Switch(vec![]));
-        let err = self.visit(body);
+        let err = self.visit_stmt(body);
 
         let Some(ScopeKind::Switch(labels)) = self.scope.0.pop() else {
             unreachable!("all other scopes should be popped off by themselves")
@@ -249,7 +259,7 @@ impl TypeChecker {
             }
         }
 
-        self.visit(body)?;
+        self.visit_stmt(body)?;
         Ok(())
     }
     fn default_statement(&mut self, token: &Token, body: &mut Stmt) -> Result<(), Error> {
@@ -265,7 +275,7 @@ impl TypeChecker {
                 return Err(Error::new(token, ErrorKind::NotIn("default", "switch")));
             }
         }
-        self.visit(body)?;
+        self.visit_stmt(body)?;
         Ok(())
     }
     fn do_statement(
@@ -275,7 +285,7 @@ impl TypeChecker {
         cond: &mut Expr,
     ) -> Result<(), Error> {
         self.scope.0.push(ScopeKind::Loop);
-        self.visit(body)?;
+        self.visit_stmt(body)?;
         self.scope.0.pop();
 
         let cond_type = self.expr_type(cond)?;
@@ -299,7 +309,7 @@ impl TypeChecker {
         body: &mut Stmt,
     ) -> Result<(), Error> {
         if let Some(init) = init {
-            self.visit(&mut *init)?;
+            self.visit_stmt(&mut *init)?;
         }
         if let Some(cond) = cond {
             let cond_type = self.expr_type(cond)?;
@@ -312,7 +322,7 @@ impl TypeChecker {
         }
 
         self.scope.0.push(ScopeKind::Loop);
-        self.visit(body)?;
+        self.visit_stmt(body)?;
 
         if let Some(inc) = inc {
             self.expr_type(inc)?;
@@ -356,7 +366,7 @@ impl TypeChecker {
         }
 
         self.scope.0.push(ScopeKind::Loop);
-        self.visit(body)?;
+        self.visit_stmt(body)?;
         self.scope.0.pop();
 
         self.returns_all_paths = false;
@@ -366,32 +376,23 @@ impl TypeChecker {
     fn declaration(&mut self, decls: &mut Vec<DeclarationKind>) -> Result<(), Error> {
         for d in decls {
             match d {
-                DeclarationKind::Decl(type_decl, _, is_global) => {
-                    self.declare_var(type_decl, *is_global)?
-                }
-                DeclarationKind::Initializer(type_decl, _, init, is_global) => {
-                    self.init_var(type_decl, init, *is_global)?
+                DeclarationKind::VarDecl(type_decl, _, init, is_global) => {
+                    self.declare_var(type_decl, init, *is_global)?
                 }
                 DeclarationKind::FuncDecl(..) => (),
             }
         }
         Ok(())
     }
-    fn declare_var(&mut self, type_decl: &mut NEWTypes, is_global: bool) -> Result<(), Error> {
-        if !is_global {
-            self.scope.increment_stack_size(type_decl);
-        }
-
-        Ok(())
-    }
-
-    fn init_var(
+    fn declare_var(
         &mut self,
         type_decl: &mut NEWTypes,
-        init: &mut Init,
+        init: &mut Option<Init>,
         is_global: bool,
     ) -> Result<(), Error> {
-        self.init_check(type_decl, init, is_global)?;
+        if let Some(init) = init {
+            self.init_check(type_decl, init, is_global)?;
+        }
 
         if !is_global {
             self.scope.increment_stack_size(type_decl);
@@ -399,6 +400,7 @@ impl TypeChecker {
 
         Ok(())
     }
+
     fn init_check(
         &mut self,
         type_decl: &NEWTypes,
@@ -749,12 +751,12 @@ impl TypeChecker {
             ));
         }
 
-        self.visit(then_branch)?;
+        self.visit_stmt(then_branch)?;
         let then_return = self.returns_all_paths;
         self.returns_all_paths = false;
 
         if let Some(else_branch) = else_branch {
-            self.visit(else_branch)?;
+            self.visit_stmt(else_branch)?;
             let else_return = self.returns_all_paths;
 
             if !then_return || !else_return {
@@ -1148,7 +1150,19 @@ impl TypeChecker {
         Ok(())
     }
     fn block(&mut self, body: &mut Vec<Stmt>) -> Result<(), Error> {
-        self.check_statements(body)
+        let mut errors = vec![];
+
+        for stmt in body {
+            if let Err(e) = self.visit_stmt(stmt) {
+                errors.push(e);
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::new_multiple(errors))
+        }
     }
 
     fn evaluate_logical(
@@ -1665,10 +1679,10 @@ mod tests {
     }
     fn setup_init_list(input: &str) -> Result<InitKind, Error> {
         // TODO: maybe be can parser.parse() so that external declaration doesnt have to be public
-        let Stmt::Declaration(mut init) =
+        let ExternalDeclaration::Declaration(mut init) =
                 setup(input).external_declaration().unwrap() else {unreachable!("only passing type")};
 
-        let DeclarationKind::Initializer(type_decl,_,mut init,_) = init.remove(0) else  {unreachable!("only passing type")};
+        let DeclarationKind::VarDecl(type_decl,_,Some(mut init),_) = init.remove(0) else  {unreachable!("only passing type")};
 
         TypeChecker::new().init_check(&type_decl, &mut init, false)?;
 

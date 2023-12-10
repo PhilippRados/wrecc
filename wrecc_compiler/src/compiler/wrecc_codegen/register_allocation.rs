@@ -478,7 +478,7 @@ impl ScratchRegisters {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::common::expr::ValueKind;
+    use crate::compiler::ast::expr::ValueKind;
     use std::mem;
 
     fn setup(

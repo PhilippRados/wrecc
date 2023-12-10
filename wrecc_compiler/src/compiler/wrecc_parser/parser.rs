@@ -1,6 +1,5 @@
-use crate::compiler::common::{
-    decl::*, environment::*, error::*, expr::*, stmt::*, token::*, types::*,
-};
+use crate::compiler::ast::{decl::*, expr::*, stmt::*};
+use crate::compiler::common::{environment::*, error::*, token::*, types::*};
 use crate::compiler::wrecc_codegen::register::*;
 use crate::compiler::wrecc_parser::double_peek::*;
 use crate::into_newtype;
@@ -389,9 +388,7 @@ impl Parser {
         func.variadic = variadic;
         func.params = params;
 
-        let symbol = self
-            .env
-            .declare_prev_scope(&name, Symbols::Func(func))?;
+        let symbol = self.env.declare_prev_scope(&name, Symbols::Func(func))?;
 
         if !is_definition {
             self.env.exit();

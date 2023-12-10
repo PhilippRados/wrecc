@@ -1,4 +1,5 @@
-use crate::compiler::common::{expr::*, stmt::*, token::Token, types::NEWTypes};
+use crate::compiler::ast::{expr::*, stmt::*};
+use crate::compiler::common::{token::Token, types::NEWTypes};
 use std::collections::VecDeque;
 
 use super::expr::PrintIndent;
@@ -40,7 +41,6 @@ impl PartialEq for DeclarationKind {
     }
 }
 
-
 #[derive(PartialEq, Clone, Debug)]
 pub struct Init {
     pub kind: InitKind,
@@ -80,10 +80,10 @@ impl PrintIndent for ExternalDeclaration {
             ExternalDeclaration::Declaration(decls) => {
                 let decls = decls
                     .iter()
-                    .map(|kind| indent_fmt(kind,indent_level + 1))
+                    .map(|kind| indent_fmt(kind, indent_level + 1))
                     .collect::<Vec<_>>()
                     .join("\n");
-                format!("Decl:\n{}",decls)
+                format!("Decl:\n{}", decls)
             }
         }
     }
@@ -132,10 +132,8 @@ impl PrintIndent for DeclarationKind {
             DeclarationKind::FuncDecl(t) => {
                 format!("FuncDecl: '{}'", t.unwrap_string())
             }
-
         }
     }
-
 }
 
 impl std::fmt::Display for DeclarationKind {

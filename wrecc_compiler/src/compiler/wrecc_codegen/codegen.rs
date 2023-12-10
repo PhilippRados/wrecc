@@ -1,4 +1,5 @@
-use crate::compiler::common::{decl::*, expr::*, stmt::*, token::*, types::*};
+use crate::compiler::ast::{decl::*, expr::*, stmt::*};
+use crate::compiler::common::{token::*, types::*};
 use crate::compiler::typechecker::{align_by, create_label};
 use crate::compiler::wrecc_codegen::{ir::*, register::*, register_allocation::*};
 use std::collections::{HashMap, VecDeque};

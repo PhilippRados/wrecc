@@ -1,4 +1,5 @@
-use crate::compiler::common::{environment::*, error::*, expr::*, token::*, types::*};
+use crate::compiler::ast::expr::*;
+use crate::compiler::common::{environment::*, error::*, token::*, types::*};
 use crate::compiler::wrecc_codegen::register::*;
 
 impl Expr {

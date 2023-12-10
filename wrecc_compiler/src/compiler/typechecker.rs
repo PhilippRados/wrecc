@@ -1,6 +1,5 @@
-use crate::compiler::common::{
-    decl::*, environment::*, error::*, expr::*, stmt::*, token::*, types::*,
-};
+use crate::compiler::ast::{decl::*, expr::*, stmt::*};
+use crate::compiler::common::{environment::*, error::*, token::*, types::*};
 use crate::compiler::wrecc_codegen::codegen::align;
 use std::cmp::Ordering;
 use std::collections::HashMap;

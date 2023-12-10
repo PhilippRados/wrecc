@@ -1,5 +1,5 @@
+use crate::compiler::ast::{decl::*, expr::*};
 use crate::compiler::common::token::Token;
-use crate::compiler::common::{decl::*, expr::*};
 
 use super::expr::PrintIndent;
 
@@ -35,10 +35,10 @@ impl PrintIndent for Stmt {
             Stmt::Declaration(decls) => {
                 let decls = decls
                     .iter()
-                    .map(|kind| indent_fmt(kind,indent_level + 1))
+                    .map(|kind| indent_fmt(kind, indent_level + 1))
                     .collect::<Vec<_>>()
                     .join("\n");
-                format!("Decl:\n{}",decls)
+                format!("Decl:\n{}", decls)
             }
             Stmt::Block(body) => {
                 let body = body

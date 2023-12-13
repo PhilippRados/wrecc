@@ -1,4 +1,4 @@
-error: Initializer overflow. Excess elements in 'int[2][2]'
+error: Initializer overflow. Excess elements in 'int [2][2]'
 |  --> in tests/fixtures/array_overflow.c:4:32
 |
 4   int a[2][2] = {{1, 2,}, {3}, 4};

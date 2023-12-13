@@ -1,4 +1,4 @@
-error: Mismatched arguments in function 'some': expected parameter 'c' to be of type 'int*', found 'int'
+error: Mismatched arguments in function 'some': expected parameter 'c' to be of type 'int *', found 'int'
 |  --> in tests/fixtures/function_arg_type_check.c:8:12
 |
 8   a = *some(a);

@@ -3,7 +3,7 @@ error: 'struct Other' contains incomplete type
 |
 13     struct Other some;
 |                   ^
-error: 'struct Another[6]' contains incomplete type
+error: 'struct Another [6]' contains incomplete type
 |  --> in tests/fixtures/struct_decl_errors.c:18:20
 |
 18     struct Another some[6];

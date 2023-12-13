@@ -101,29 +101,96 @@ impl TypeInfo for NEWTypes {
 }
 impl Display for NEWTypes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
+        fn suffix_exists(modifiers: &Vec<&NEWTypes>, i: usize) -> bool {
+            modifiers
+                .iter()
+                .skip(i)
+                .find(|m| matches!(m, NEWTypes::Array { .. } | NEWTypes::Function { .. }))
+                .is_some()
+        }
+
+        fn print_type(type_decl: &NEWTypes) -> String {
+            let mut current = type_decl;
+            let mut modifiers = Vec::new();
+            loop {
+                match current {
+                    NEWTypes::Pointer(new)
+                    | NEWTypes::Array { of: new, .. }
+                    | NEWTypes::Function { return_type: new, .. } => {
+                        modifiers.push(current);
+                        current = new;
+                    }
+                    _ => break,
+                }
+            }
+            let mut result = match current {
                 NEWTypes::Primitive(t) => t.fmt().to_string(),
-                NEWTypes::Array { of, amount } => format!("{}[{}]", of, amount),
-                NEWTypes::Pointer(to) => format!("{}*", to),
                 NEWTypes::Union(s) => "union ".to_string() + &s.name(),
                 NEWTypes::Struct(s) => "struct ".to_string() + &s.name(),
                 NEWTypes::Enum(Some(name), ..) => "enum ".to_string() + name,
                 NEWTypes::Enum(None, ..) => "enum <anonymous>".to_string(),
-                NEWTypes::Function { return_type, params, variadic } => format!(
-                    "{}({}{})",
-                    return_type,
-                    params
-                        .iter()
-                        .map(|(ty, _)| ty.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    if *variadic { "..." } else { "" }
-                ),
+                _ => unreachable!("all modifiers were removed"),
+            };
+            if !modifiers.is_empty() {
+                result.push(' ');
             }
-        )
+            let mut pointers = Vec::new();
+            let mut suffixes = Vec::new();
+
+            for (i, modifier) in modifiers.iter().enumerate() {
+                match modifier {
+                    NEWTypes::Array { amount, .. } => {
+                        let closing_precedence =
+                            matches!(modifiers.get(i + 1), Some(NEWTypes::Pointer(_)))
+                                && suffix_exists(&modifiers, i + 1);
+
+                        suffixes.push(format!(
+                            "[{}]{}",
+                            amount,
+                            if closing_precedence { ")" } else { "" }
+                        ))
+                    }
+                    NEWTypes::Pointer(_) => {
+                        let precedence = matches!(
+                            modifiers.get(i + 1),
+                            Some(NEWTypes::Array { .. } | NEWTypes::Function { .. })
+                        );
+                        pointers.push(match precedence {
+                            true if pointers.is_empty() && suffixes.is_empty() => "(*)",
+                            true => "(*",
+                            false
+                                if suffixes.is_empty()
+                                    && suffix_exists(&modifiers, i)
+                                    && pointers.is_empty() =>
+                            {
+                                "*)"
+                            }
+                            _ => "*",
+                        });
+                    }
+                    NEWTypes::Function { return_type, params, variadic } => suffixes.push(format!(
+                        "{}({}{})",
+                        return_type,
+                        params
+                            .iter()
+                            .map(|(ty, _)| ty.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        if *variadic { "..." } else { "" }
+                    )),
+                    _ => unreachable!("not modifier"),
+                }
+            }
+            for s in pointers.iter().rev() {
+                result.push_str(s);
+            }
+            for s in suffixes {
+                result.push_str(&s);
+            }
+
+            result
+        }
+        write!(f, "{}", print_type(self))
     }
 }
 
@@ -480,7 +547,7 @@ impl StructInfo {
         match self {
             StructInfo::Named(name, _) => name.to_string(),
             StructInfo::Anonymous(token, _) => format!(
-                "<anonymous> at {}:{}:{}",
+                "(<anonymous> at {}:{}:{})",
                 token.filename.display(),
                 token.line_index,
                 token.column
@@ -606,6 +673,19 @@ macro_rules! into_newtype {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::ast::decl::*;
+    use crate::compiler::wrecc_parser::parser::tests::*;
+
+    fn assert_type_print(input: &str, expected: &str) {
+        if let Ok(ExternalDeclaration::Declaration(mut decls)) = setup(input).external_declaration()
+        {
+            if let Some(DeclarationKind::VarDecl(actual_type_decl, ..)) = decls.pop() {
+                assert_eq!(actual_type_decl.to_string(), expected);
+                return;
+            }
+        }
+        unreachable!("not variable declaration")
+    }
 
     #[test]
     fn multidimensional_array_size() {
@@ -619,5 +699,29 @@ mod tests {
         let actual = input.element_amount();
 
         assert_eq!(actual, 4);
+    }
+
+    #[test]
+    fn multi_dim_arr_print() {
+        assert_type_print("int a[4][2];", "int [4][2]");
+        assert_type_print("int (a[3])[4][2];", "int [3][4][2]");
+
+        assert_type_print("long int *a[3][4][2];", "long *[3][4][2]");
+        assert_type_print("char ***a[2];", "char ***[2]");
+
+        assert_type_print("char *((*a))[2];", "char *(*)[2]");
+        assert_type_print("char *(**a)[2];", "char *(**)[2]");
+        assert_type_print("char *(**a);", "char ***");
+
+        assert_type_print("char *(*a)[3][4][2];", "char *(*)[3][4][2]");
+        assert_type_print("char (**a[3][4])[2];", "char (**[3][4])[2]");
+        assert_type_print("char (**(*a)[4])[2];", "char (**(*)[4])[2]");
+        assert_type_print("char(**(*a[3])[4])[2];", "char (**(*[3])[4])[2]");
+
+        assert_type_print("char (*(*a[3]))[2];", "char (**[3])[2]");
+    }
+    #[test]
+    fn function_type_print() {
+        todo!()
     }
 }

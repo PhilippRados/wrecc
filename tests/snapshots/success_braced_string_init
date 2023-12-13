@@ -1,4 +1,4 @@
-error: Can't assign to type 'char' with type 'char*'
+error: Can't assign to type 'char' with type 'char *'
 |  --> in tests/fixtures/braced_string_init.c:7:17
 |
 7   char g[7] = {{"hello"}};
@@ -18,12 +18,12 @@ error: Excess elements in char array initializer
 |
 12   char m[7] = {"zwe", [0] = 1};
 |                              ^
-error: Can't assign to type 'char' with type 'char*'
+error: Can't assign to type 'char' with type 'char *'
 |  --> in tests/fixtures/braced_string_init.c:17:22
 |
 17   } l = {{1}, {[2] = "foo"}};
 |                       ^
-error: Can't assign to type 'char' with type 'char*'
+error: Can't assign to type 'char' with type 'char *'
 |  --> in tests/fixtures/braced_string_init.c:19:27
 |
 19   struct Foo d = {.s[0] = "foo"};

@@ -1,14 +1,14 @@
-error: Can't assign to type 'struct <anonymous> at tests/fixtures/pointer_null_init_err.c:3:1*' with type 'int'
+error: Can't assign to type 'struct (<anonymous> at tests/fixtures/pointer_null_init_err.c:3:1) *' with type 'int'
 |  --> in tests/fixtures/pointer_null_init_err.c:5:4
 |
 5 } *p = 1;
 |    ^
-error: Can't assign to type 'int*' with type 'int'
+error: Can't assign to type 'int *' with type 'int'
 |  --> in tests/fixtures/pointer_null_init_err.c:11:8
 |
 11   int *b = 1 - 2 + 0;
 |         ^
-error: Invalid comparsion: 'int*' '==' 'int'
+error: Invalid comparsion: 'int *' '==' 'int'
 |  --> in tests/fixtures/pointer_null_init_err.c:13:9
 |
 13   if (b == 1 - 2) {

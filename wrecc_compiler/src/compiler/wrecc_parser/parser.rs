@@ -1825,7 +1825,7 @@ pub fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::compiler::scanner::Scanner;
     use crate::preprocess;
@@ -1838,7 +1838,7 @@ mod tests {
         };
     }
 
-    fn setup(input: &str) -> Parser {
+    pub fn setup(input: &str) -> Parser {
         let pp_tokens = preprocess(Path::new(""), input.to_string()).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         let tokens = scanner.scan_token().unwrap();

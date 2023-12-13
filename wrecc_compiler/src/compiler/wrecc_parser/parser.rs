@@ -154,39 +154,20 @@ impl Parser {
     ) -> Result<(NEWTypes, bool), Error> {
         let start_token = self.tokens.peek()?.clone();
         let mut specifiers = Vec::new();
-        // the typedef keyword
         let mut is_typedef = false;
-        // an identifier that declares a typedefed type
-        let mut found_typedefed = false;
 
         while let Ok(token) = self.tokens.peek() {
             if self.is_type(token) {
-                if let TokenType::Ident(..) = token.token {
-                    if found_typedefed {
-                        return Err(Error::new(
-                            token,
-                            ErrorKind::Regular(
-                                "Cannot combine with previous typedefed type in declaration specifier",
-                            ),
-                        ));
-                    }
-                    found_typedefed = true;
+                if matches!(token.token, TokenType::Ident(..)) && !specifiers.is_empty() {
+                    break;
                 }
 
-                let type_specifier = self.type_specifier()?;
-
-                specifiers.push(type_specifier);
+                specifiers.push(self.type_specifier()?);
             } else if let Some(token) = self.matches(&[TokenKind::TypeDef]) {
                 if !allow_storage_classes {
                     return Err(Error::new(
                         &token,
                         ErrorKind::Regular("Storage classes not allowed in this specifier"),
-                    ));
-                }
-                if is_typedef {
-                    return Err(Error::new(
-                        &token,
-                        ErrorKind::Regular("Can only have single typedef-specifier in declaration"),
                     ));
                 }
                 is_typedef = true;

@@ -1,19 +1,10 @@
 use crate::compiler::ast::{decl::*, expr::*, stmt::*};
 use crate::compiler::common::{environment::*, error::*, token::*, types::*};
 use crate::compiler::wrecc_codegen::codegen::align;
+use crate::compiler::wrecc_codegen::register::*;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-#[derive(PartialEq, Debug)]
-enum ScopeKind {
-    Global,
-    Loop,
-    // (function name, return type, save all gotos so that can error if no matching label)
-    Function(Token, NEWTypes, Vec<Token>),
-    // all cases and defaults that are in a switch
-    // if Some(value) then case, if None then default
-    Switch(Vec<Option<i64>>),
-}
 macro_rules! find_scope {
     ($scope:expr,$($expected:pat_param)|+) => {{
         let mut result = None;
@@ -27,82 +18,12 @@ macro_rules! find_scope {
     }};
 }
 
-// vector to go through and check if certain statements are
-// enclosed by others. eg: return only in functions, break only in switch/loops
-#[derive(PartialEq, Debug)]
-struct ScopeLevel(Vec<ScopeKind>);
-impl ScopeLevel {
-    fn increment_stack_size(&mut self, type_decl: &NEWTypes) {
-        let ScopeKind::Function(func_name, ..) = find_scope!(self, ScopeKind::Function(..))
-            .expect("can only be called inside a function") else {unreachable!()};
-        let func_symbol = func_name.token.get_symbol_entry();
-        let stack_size = func_symbol.borrow().unwrap_func().stack_size;
-
-        let mut size = stack_size + type_decl.size();
-        size = align(size, type_decl);
-
-        func_symbol.borrow_mut().unwrap_func_mut().stack_size = size;
-    }
-    fn insert_label(&mut self, name_token: &Token) -> Result<(), Error> {
-        let name = name_token.unwrap_string();
-        let ScopeKind::Function(func_name, ..) = find_scope!(self,ScopeKind::Function(..))
-            .expect("ensured by parser that label is always inside function") else {unreachable!()};
-
-        let func_symbol = func_name.token.get_symbol_entry();
-
-        if func_symbol
-            .borrow()
-            .unwrap_func()
-            .labels
-            .contains_key(&name)
-        {
-            return Err(Error::new(
-                name_token,
-                ErrorKind::Redefinition("Label", name_token.unwrap_string()),
-            ));
-        }
-        let len = func_symbol.borrow().unwrap_func().labels.len();
-        func_symbol
-            .borrow_mut()
-            .unwrap_func_mut()
-            .labels
-            .insert(name, len);
-
-        Ok(())
-    }
-    fn insert_goto(&mut self, name_token: Token) -> Result<(), Error> {
-        let ScopeKind::Function(.., gotos) = find_scope!(self,ScopeKind::Function(..))
-            .expect("ensured by parser that label is always inside function") else {unreachable!()};
-
-        gotos.push(name_token);
-        Ok(())
-    }
-    fn compare_gotos(&mut self) -> Result<(), Error> {
-        let ScopeKind::Function(func_name, _,gotos) = find_scope!(self,ScopeKind::Function(..))
-            .expect("ensured by parser that label is always inside function") else {unreachable!()};
-
-        let func_symbol = func_name.token.get_symbol_entry();
-
-        for g in gotos {
-            let label = g.unwrap_string();
-            if !func_symbol
-                .borrow()
-                .unwrap_func()
-                .labels
-                .contains_key(&label)
-            {
-                return Err(Error::new(
-                    g,
-                    ErrorKind::MissingLabel(label, func_name.unwrap_string()),
-                ));
-            }
-        }
-        Ok(())
-    }
-}
 pub struct TypeChecker {
     // keeps track of current scope-kind
     scope: ScopeLevel,
+
+    // symbol table
+    pub env: Environment,
 
     // TODO: this should be done via control-flow-graph
     // checks if all paths return from a function
@@ -118,6 +39,7 @@ pub struct TypeChecker {
     // so that codegen is simpler
     switches: Vec<Vec<Option<i64>>>,
 }
+
 macro_rules! cast {
     ($ex:expr,$new_type:expr,$direction:path) => {
         *$ex = Expr {
@@ -125,6 +47,10 @@ macro_rules! cast {
                 token: Token::default(TokenType::LeftParen),
                 direction: Some($direction),
                 new_type: $new_type,
+                decl_type: DeclType {
+                    specifiers: Vec::new(),
+                    modifiers: Vec::new(),
+                },
                 expr: Box::new($ex.clone()),
             },
             type_decl: Some($new_type),
@@ -137,10 +63,11 @@ impl TypeChecker {
     pub fn new() -> Self {
         TypeChecker {
             scope: ScopeLevel(vec![ScopeKind::Global]),
+            env: Environment::new(),
             returns_all_paths: false,
             const_labels: HashMap::new(),
             const_label_count: 0,
-            switches: vec![],
+            switches: Vec::new(),
         }
     }
     pub fn check(
@@ -156,7 +83,7 @@ impl TypeChecker {
         &mut self,
         external_decls: &mut Vec<ExternalDeclaration>,
     ) -> Result<(), Error> {
-        let mut errors = vec![];
+        let mut errors = Vec::new();
 
         for decl in external_decls {
             if let Err(e) = self.visit_decl(decl) {
@@ -172,19 +99,22 @@ impl TypeChecker {
     }
     fn visit_decl(&mut self, external_decl: &mut ExternalDeclaration) -> Result<(), Error> {
         match external_decl {
-            ExternalDeclaration::Declaration(decls) => self.declaration(decls),
-            ExternalDeclaration::Function(name, body) => self.function_definition(name, body),
+            ExternalDeclaration::Declaration(decl) => self.declaration(decl),
+            ExternalDeclaration::Function(decl_type, name, body) => {
+                self.function_definition(decl_type, name, body)
+            }
         }
     }
+
     fn visit_stmt(&mut self, statement: &mut Stmt) -> Result<(), Error> {
         match statement {
             Stmt::Declaration(decls) => self.declaration(decls),
             Stmt::Return(keyword, value) => self.return_statement(keyword, value),
-            Stmt::Expr(expr) => match self.expr_type(expr) {
-                Ok(_) => Ok(()),
-                Err(e) => Err(e),
-            },
-            Stmt::Block(statements) => self.block(statements),
+            Stmt::Expr(expr) => self.expr_type(expr).map(|_| ()),
+            Stmt::Block(statements) => {
+                self.env.enter();
+                self.block(statements)
+            }
             Stmt::If(keyword, cond, then_branch, else_branch) => {
                 self.if_statement(keyword, cond, then_branch, else_branch)
             }
@@ -242,15 +172,17 @@ impl TypeChecker {
     fn case_statement(
         &mut self,
         token: &Token,
-        value: &mut i64,
+        value: &mut Expr,
         body: &mut Stmt,
     ) -> Result<(), Error> {
+        let value = value.get_literal_constant(self, token, "Case value")?;
+
         match find_scope!(&mut self.scope, ScopeKind::Switch(..)) {
             Some(ScopeKind::Switch(labels)) => {
-                if !labels.contains(&Some(*value)) {
-                    labels.push(Some(*value))
+                if !labels.contains(&Some(value)) {
+                    labels.push(Some(value))
                 } else {
-                    return Err(Error::new(token, ErrorKind::DuplicateCase(*value)));
+                    return Err(Error::new(token, ErrorKind::DuplicateCase(value)));
                 }
             }
             _ => {
@@ -307,6 +239,8 @@ impl TypeChecker {
         inc: &mut Option<Expr>,
         body: &mut Stmt,
     ) -> Result<(), Error> {
+        self.env.enter();
+
         if let Some(init) = init {
             self.visit_stmt(&mut *init)?;
         }
@@ -328,6 +262,7 @@ impl TypeChecker {
         }
 
         self.scope.0.pop();
+        self.env.exit();
 
         self.returns_all_paths = false;
         Ok(())
@@ -372,47 +307,413 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn declaration(&mut self, decls: &mut Vec<DeclarationKind>) -> Result<(), Error> {
-        for d in decls {
-            match d {
-                DeclarationKind::VarDecl(type_decl, _, init, is_global) => {
-                    self.declare_var(type_decl, init, *is_global)?
+    fn declaration(&mut self, decl: &mut Declaration) -> Result<(), Error> {
+        let specifier_type = self.parse_specifiers(decl.specifiers.clone())?;
+
+        for declarator in &mut decl.declarators {
+            self.declarator(specifier_type.clone(), decl.is_typedef, declarator)?;
+        }
+
+        Ok(())
+    }
+    fn declarator(
+        &mut self,
+        specifier_type: NEWTypes,
+        is_typedef: bool,
+        (declarator, init): &mut (Declarator, Option<Init>),
+    ) -> Result<(), Error> {
+        let parsed_type = self.parse_modifiers(specifier_type, &mut declarator.modifiers)?;
+
+        if let Some(name) = &mut declarator.name {
+            let symbol = if is_typedef {
+                Symbols::TypeDef(parsed_type.clone())
+            } else if let NEWTypes::Function { return_type, params, variadic } = parsed_type.clone()
+            {
+                let func = Function::new(*return_type, params, variadic, InitType::Declaration);
+                Symbols::Func(func)
+            } else {
+                Symbols::Variable(SymbolInfo {
+                    kind: if init.is_some() {
+                        InitType::Definition
+                    } else {
+                        InitType::Declaration
+                    },
+                    token: name.clone(),
+                    type_decl: parsed_type.clone(),
+                    is_global: self.env.is_global(),
+                    // since global variable declarations can be used before initialization already
+                    // insert its register
+                    reg: if self.env.is_global() {
+                        Some(Register::Label(LabelRegister::Var(
+                            name.unwrap_string(),
+                            parsed_type.clone(),
+                        )))
+                    } else {
+                        None
+                    },
+                })
+            };
+
+            let already_exists = self
+                .env
+                .symbols
+                .get_current(&name.unwrap_string())
+                .is_some();
+            let entry = self.env.declare_symbol(&name, symbol)?;
+            name.token.update_entry(TableEntry::Symbol(entry));
+
+            let is_var = !parsed_type.is_func() && !is_typedef;
+
+            if let Some(init) = init {
+                if !is_var {
+                    return Err(Error::new(
+                        name,
+                        ErrorKind::Regular("Only variables can be initialized"),
+                    ));
                 }
-                DeclarationKind::FuncDecl(..) => (),
+                if !parsed_type.is_complete() {
+                    return Err(Error::new(name, ErrorKind::IncompleteType(parsed_type)));
+                }
+
+                self.init_check(&parsed_type, init)?;
+            } else if is_var {
+                let tentative_decl = self.env.is_global() && parsed_type.is_aggregate();
+                if !parsed_type.is_complete() && !tentative_decl {
+                    return Err(Error::new(name, ErrorKind::IncompleteType(parsed_type)));
+                }
+            }
+
+            if is_var && !self.env.is_global() && !already_exists {
+                self.scope.increment_stack_size(&parsed_type);
+            }
+        }
+
+        Ok(())
+    }
+    pub fn parse_type(&mut self, decl_type: &mut DeclType) -> Result<NEWTypes, Error> {
+        let specifier_type = self.parse_specifiers(decl_type.specifiers.clone())?;
+        let parsed_type = self.parse_modifiers(specifier_type, &mut decl_type.modifiers)?;
+
+        Ok(parsed_type)
+    }
+    fn parse_specifiers(&mut self, specifiers: Vec<DeclSpecifier>) -> Result<NEWTypes, Error> {
+        if specifiers.is_empty() {
+            return Ok(NEWTypes::Primitive(Types::Int));
+        }
+
+        let token = specifiers[0].token.clone();
+
+        let mut specifier_kind_list: Vec<SpecifierKind> =
+            specifiers.into_iter().map(|spec| spec.kind).collect();
+
+        specifier_kind_list.sort_by(|s1, s2| s2.order().cmp(&s1.order()));
+
+        match specifier_kind_list.as_slice() {
+            [SpecifierKind::Struct(name, members)] | [SpecifierKind::Union(name, members)] => {
+                self.struct_or_union_specifier(token, name, members)
+            }
+            [SpecifierKind::Enum(name, enum_constants)] => {
+                self.enum_specifier(token, name, enum_constants)
+            }
+            [SpecifierKind::UserType] => {
+                if let Ok(Symbols::TypeDef(type_decl)) = self
+                    .env
+                    .get_symbol(&token)
+                    .map(|symbol| symbol.borrow().clone())
+                {
+                    Ok(type_decl)
+                } else {
+                    Err(Error::new(
+                        &token,
+                        ErrorKind::InvalidSymbol(token.unwrap_string(), "user-type"),
+                    ))
+                }
+            }
+
+            [SpecifierKind::Void] => Ok(NEWTypes::Primitive(Types::Void)),
+            [SpecifierKind::Char] => Ok(NEWTypes::Primitive(Types::Char)),
+            [SpecifierKind::Int] => Ok(NEWTypes::Primitive(Types::Int)),
+            [SpecifierKind::Long]
+            | [SpecifierKind::Long, SpecifierKind::Int]
+            | [SpecifierKind::Long, SpecifierKind::Long]
+            | [SpecifierKind::Long, SpecifierKind::Long, SpecifierKind::Int] => {
+                Ok(NEWTypes::Primitive(Types::Long))
+            }
+            _ => Err(Error::new(
+                &token,
+                ErrorKind::Regular("Invalid combination of type-specifiers"),
+            )),
+        }
+    }
+    fn parse_modifiers(
+        &mut self,
+        mut parsed_type: NEWTypes,
+        modifiers: &mut Vec<DeclModifier>,
+    ) -> Result<NEWTypes, Error> {
+        for m in modifiers {
+            parsed_type = match m {
+                DeclModifier::Pointer => parsed_type.pointer_to(),
+                DeclModifier::Array(token, expr) => {
+                    let size = expr.get_literal_constant(self, token, "Array size specifier")?;
+
+                    if parsed_type.is_func() {
+                        return Err(Error::new(token, ErrorKind::InvalidArray(parsed_type)));
+                    }
+
+                    if size > 0 {
+                        parsed_type.array_of(size as usize)
+                    } else {
+                        return Err(Error::new(token, ErrorKind::NegativeArraySize));
+                    }
+                }
+                DeclModifier::Function { token, params, variadic } => {
+                    // func-params have own scope (their types too)
+                    self.env.enter();
+                    let params = self.parse_params(&token, params)?;
+                    self.env.exit();
+
+                    if parsed_type.is_func() || parsed_type.is_array() {
+                        return Err(Error::new(token, ErrorKind::InvalidReturnType(parsed_type)));
+                    }
+
+                    parsed_type.function_of(params, *variadic)
+                }
+            };
+        }
+
+        Ok(parsed_type)
+    }
+    fn struct_or_union_specifier(
+        &mut self,
+        token: Token,
+        name: &Option<Token>,
+        members: &Option<Vec<MemberDeclaration>>,
+    ) -> Result<NEWTypes, Error> {
+        let members = match (&name, members) {
+            (Some(name), Some(members)) => {
+                let custom_type = self.env.declare_type(
+                    name,
+                    Tags::Aggregate(StructRef::new(token.clone().token, true)),
+                )?;
+
+                let members = self.struct_declaration(members.clone())?;
+
+                if let Tags::Aggregate(struct_ref) = &*custom_type.borrow_mut() {
+                    struct_ref.update(members);
+                }
+                let members = custom_type.borrow().clone().unwrap_aggr();
+
+                StructInfo::Named(name.unwrap_string(), members)
+            }
+
+            (Some(name), None) => {
+                let custom_type = self.env.get_type(name).or_else(|_| {
+                    self.env.declare_type(
+                        name,
+                        Tags::Aggregate(StructRef::new(token.clone().token, false)),
+                    )
+                })?;
+
+                if &token.token != custom_type.borrow().get_kind() {
+                    return Err(Error::new(
+                        name,
+                        ErrorKind::TypeAlreadyExists(name.unwrap_string(), token.token.clone()),
+                    ));
+                }
+
+                let members = custom_type.borrow().clone().unwrap_aggr();
+
+                StructInfo::Named(name.unwrap_string(), members)
+            }
+            (None, Some(members)) => {
+                let members = self.struct_declaration(members.clone())?;
+                StructInfo::Anonymous(token.clone(), members)
+            }
+            (None, None) => {
+                return Err(Error::new(
+                    &token,
+                    ErrorKind::EmptyAggregate(token.token.clone()),
+                ));
+            }
+        };
+
+        Ok(match token.token {
+            TokenType::Struct => NEWTypes::Struct(members),
+            TokenType::Union => NEWTypes::Union(members),
+            _ => unreachable!("not struct/union specifier"),
+        })
+    }
+    fn struct_declaration(
+        &mut self,
+        members: Vec<MemberDeclaration>,
+    ) -> Result<Vec<(NEWTypes, Token)>, Error> {
+        let mut parsed_members = Vec::new();
+
+        for (spec, declarators) in members {
+            let specifier_type = self.parse_specifiers(spec)?;
+
+            for Declarator { name, mut modifiers } in declarators {
+                let parsed_type = self.parse_modifiers(specifier_type.clone(), &mut modifiers)?;
+                let name = name.expect("cannot have abstract declarators in structs");
+
+                if !parsed_type.is_complete() {
+                    return Err(Error::new(&name, ErrorKind::IncompleteType(parsed_type)));
+                }
+                // TODO: also cant have pure function
+
+                parsed_members.push((parsed_type, name));
+            }
+        }
+
+        Self::check_duplicate_members(&parsed_members)?;
+
+        Ok(parsed_members)
+    }
+    fn check_duplicate_members(vec: &Vec<(NEWTypes, Token)>) -> Result<(), Error> {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        for token in vec.iter().map(|(_, name)| name) {
+            if !set.insert(token.unwrap_string()) {
+                return Err(Error::new(
+                    token,
+                    ErrorKind::DuplicateMember(token.unwrap_string()),
+                ));
             }
         }
         Ok(())
     }
-    fn declare_var(
+
+    fn enum_specifier(
         &mut self,
-        type_decl: &mut NEWTypes,
-        init: &mut Option<Init>,
-        is_global: bool,
-    ) -> Result<(), Error> {
-        if let Some(init) = init {
-            self.init_check(type_decl, init, is_global)?;
+        token: Token,
+        name: &Option<Token>,
+        constants: &Option<Vec<(Token, Option<Expr>)>>,
+    ) -> Result<NEWTypes, Error> {
+        match (&name, constants) {
+            (Some(name), Some(values)) => {
+                let members = self.enumerator_list(values.clone())?;
+                self.env.declare_type(name, Tags::Enum(members.clone()))?;
+
+                Ok(NEWTypes::Enum(Some(name.unwrap_string()), members))
+            }
+            (Some(name), None) => {
+                let custom_type = self
+                    .env
+                    .get_type(name)
+                    .map_err(|_| Error::new(name, ErrorKind::EnumForwardDecl))?;
+
+                if &token.token != custom_type.borrow().get_kind() {
+                    return Err(Error::new(
+                        name,
+                        ErrorKind::TypeAlreadyExists(name.unwrap_string(), token.token.clone()),
+                    ));
+                }
+                let constants = custom_type.borrow().clone().unwrap_enum();
+
+                Ok(NEWTypes::Enum(Some(name.unwrap_string()), constants))
+            }
+            (None, Some(values)) => Ok(NEWTypes::Enum(None, self.enumerator_list(values.clone())?)),
+            (None, None) => Err(Error::new(
+                &token,
+                ErrorKind::EmptyAggregate(token.token.clone()),
+            )),
+        }
+    }
+    fn enumerator_list(
+        &mut self,
+        constants: Vec<(Token, Option<Expr>)>,
+    ) -> Result<Vec<(Token, i32)>, Error> {
+        let mut parsed_constants = Vec::new();
+        let mut index: i32 = 0;
+
+        for (name, init) in constants {
+            if let Some(mut init_expr) = init {
+                index = init_expr.get_literal_constant(self, &name, "Enum Constant")? as i32;
+            }
+
+            // insert enum constant into symbol table
+            self.env.declare_symbol(
+                &name,
+                Symbols::Variable(SymbolInfo {
+                    token: name.clone(),
+                    type_decl: NEWTypes::Primitive(Types::Int),
+                    kind: InitType::Definition,
+                    is_global: self.env.is_global(),
+                    reg: Some(Register::Literal(
+                        index as i64,
+                        NEWTypes::Primitive(Types::Int),
+                    )),
+                }),
+            )?;
+
+            parsed_constants.push((name.clone(), index));
+
+            if let Some(inc) = index.checked_add(1) {
+                index = inc;
+            } else {
+                return Err(Error::new(&name, ErrorKind::EnumOverflow));
+            }
         }
 
-        if !is_global {
-            self.scope.increment_stack_size(type_decl);
+        Ok(parsed_constants)
+    }
+    fn parse_params(
+        &mut self,
+        token: &Token,
+        params: &mut Vec<(Vec<DeclSpecifier>, Declarator)>,
+    ) -> Result<Vec<(NEWTypes, Option<Token>)>, Error> {
+        let mut parsed_params = Vec::new();
+
+        for (specifiers, declarator) in params {
+            let specifier_type = self.parse_specifiers(specifiers.clone())?;
+            let mut parsed_type =
+                self.parse_modifiers(specifier_type, &mut declarator.modifiers)?;
+
+            parsed_type = match parsed_type {
+                NEWTypes::Array { of, .. } => of.pointer_to(),
+                NEWTypes::Function { .. } => parsed_type.pointer_to(),
+                ty => ty,
+            };
+
+            if let Some(name) = &mut declarator.name {
+                // insert parameters into symbol table
+                let symbol = self.env.declare_symbol(
+                    name,
+                    Symbols::Variable(SymbolInfo {
+                        token: name.clone(),
+                        type_decl: parsed_type.clone(),
+                        kind: InitType::Declaration,
+                        is_global: false,
+                        reg: None,
+                    }),
+                )?;
+                name.token.update_entry(TableEntry::Symbol(symbol));
+            }
+
+            parsed_params.push((parsed_type, declarator.name.clone()));
         }
 
-        Ok(())
+        // single unnamed void param is equivalent to empty params
+        if let [(NEWTypes::Primitive(Types::Void), None)] = parsed_params.as_slice() {
+            parsed_params.pop();
+        } else if parsed_params
+            .iter()
+            .any(|(type_decl, _)| type_decl.is_void())
+        {
+            return Err(Error::new(token, ErrorKind::VoidFuncArg));
+        }
+
+        Ok(parsed_params)
     }
 
-    fn init_check(
-        &mut self,
-        type_decl: &NEWTypes,
-        init: &mut Init,
-        is_global: bool,
-    ) -> Result<(), Error> {
+    fn init_check(&mut self, type_decl: &NEWTypes, init: &mut Init) -> Result<(), Error> {
         if let Some((amount, s)) = Self::is_string_init(type_decl, init)? {
             init.kind = Self::char_array(init.token.clone(), s, amount)?;
         }
 
         match &mut init.kind {
-            InitKind::Scalar(expr) => self.init_scalar(type_decl, &init.token, expr, is_global),
-            InitKind::Aggr(list) => self.init_aggregate(type_decl, &init.token, list, is_global),
+            InitKind::Scalar(expr) => self.init_scalar(type_decl, &init.token, expr),
+            InitKind::Aggr(list) => self.init_aggregate(type_decl, &init.token, list),
         }
     }
     fn init_scalar(
@@ -420,7 +721,6 @@ impl TypeChecker {
         type_decl: &NEWTypes,
         token: &Token,
         expr: &mut Expr,
-        is_global: bool,
     ) -> Result<(), Error> {
         let mut value_type = self.expr_type(expr)?;
 
@@ -428,7 +728,7 @@ impl TypeChecker {
         self.check_type_compatibility(token, type_decl, &value_type, &expr.kind)?;
         self.maybe_cast(type_decl, &value_type, expr);
 
-        if is_global && !is_constant(expr) {
+        if self.env.is_global() && !is_constant(expr) {
             return Err(Error::new(
                 token,
                 ErrorKind::NotConstantInit("Global variables"),
@@ -442,7 +742,6 @@ impl TypeChecker {
         type_decl: &NEWTypes,
         token: &Token,
         list: &mut Vec<Box<Init>>,
-        is_global: bool,
     ) -> Result<(), Error> {
         match type_decl {
             NEWTypes::Array { .. } | NEWTypes::Struct(_) | NEWTypes::Union(_) => {
@@ -457,7 +756,7 @@ impl TypeChecker {
 
                         while let Some(d) = designator.pop_front() {
                             let designator_info =
-                                Self::designator_index(objects.current_type(), d)?;
+                                self.designator_index(objects.current_type(), d)?;
                             objects.update(designator_info);
                         }
 
@@ -515,7 +814,7 @@ impl TypeChecker {
                         ..*list.remove(0)
                     };
 
-                    self.init_check(sub_type, &mut init, is_global)?;
+                    self.init_check(sub_type, &mut init)?;
 
                     // remove overriding elements
                     let init_interval =
@@ -551,7 +850,7 @@ impl TypeChecker {
             }
             _ => match list.as_mut_slice() {
                 [single_init] if matches!(single_init.kind, InitKind::Scalar(_)) => {
-                    self.init_check(type_decl, single_init, is_global)
+                    self.init_check(type_decl, single_init)
                 }
                 [single_init] => Err(Error::new(
                     &single_init.token,
@@ -569,18 +868,28 @@ impl TypeChecker {
     }
 
     fn designator_index(
+        &mut self,
         type_decl: &NEWTypes,
         designator: Designator,
     ) -> Result<(i64, i64, NEWTypes), Error> {
         match (designator.kind, type_decl) {
-            (DesignatorKind::Array(n), NEWTypes::Array { amount, of }) => {
-                if n >= *amount as i64 {
+            (DesignatorKind::Array(mut expr), NEWTypes::Array { amount, of }) => {
+                let literal =
+                    expr.get_literal_constant(self, &designator.token, "Array designator")?;
+                if literal < 0 {
+                    return Err(Error::new(
+                        &designator.token,
+                        ErrorKind::Regular("Array designator must be positive number"),
+                    ));
+                }
+
+                if literal >= *amount as i64 {
                     Err(Error::new(
                         &designator.token,
-                        ErrorKind::DesignatorOverflow(*amount, n),
+                        ErrorKind::DesignatorOverflow(*amount, literal),
                     ))
                 } else {
-                    Ok((n, n, *of.clone()))
+                    Ok((literal, literal, *of.clone()))
                 }
             }
             (DesignatorKind::Member(_), NEWTypes::Array { .. }) => Err(Error::new(
@@ -707,10 +1016,12 @@ impl TypeChecker {
         &mut self,
         token: &Token,
         expr: &mut Expr,
-        new_type: &NEWTypes,
+        decl_type: &mut DeclType,
+        new_type: &mut NEWTypes,
         direction: &mut Option<CastDirection>,
     ) -> Result<NEWTypes, Error> {
         let mut old_type = self.expr_type(expr)?;
+        *new_type = self.parse_type(decl_type)?;
 
         crate::arr_decay!(old_type, expr, token);
 
@@ -764,17 +1075,69 @@ impl TypeChecker {
         }
         Ok(())
     }
-    fn function_definition(&mut self, name: &Token, body: &mut Vec<Stmt>) -> Result<(), Error> {
-        let func_symbol = name.token.get_symbol_entry();
+    fn function_definition(
+        &mut self,
+        decl_type: &mut DeclType,
+        name: &mut Token,
+        body: &mut Vec<Stmt>,
+    ) -> Result<(), Error> {
+        let Some(DeclModifier::Function { mut params, variadic,token }) = decl_type.modifiers.pop() else {
+            unreachable!("last modifier has to be function to be func-def");
+        };
+        let return_type = self.parse_type(decl_type)?;
 
-        let return_type = func_symbol.borrow().unwrap_func().return_type.clone();
-        let params = func_symbol.borrow().unwrap_func().params.clone();
+        if return_type.is_func() || return_type.is_array() {
+            return Err(Error::new(
+                &token,
+                ErrorKind::InvalidReturnType(return_type),
+            ));
+        }
+
+        if !return_type.is_complete() && !return_type.is_void() {
+            return Err(Error::new(
+                name,
+                ErrorKind::IncompleteReturnType(name.unwrap_string(), return_type),
+            ));
+        }
 
         // have to push scope before declaring local variables
+        self.env.enter();
+
+        let params = self.parse_params(&token, &mut params)?;
+
+        if let Some(param_type) = params
+            .iter()
+            .map(|(type_decl, _)| type_decl)
+            .find(|type_decl| !type_decl.is_complete())
+        {
+            return Err(Error::new(
+                name,
+                ErrorKind::IncompleteFuncArg(name.unwrap_string(), param_type.clone()),
+            ));
+        }
+
+        if params
+            .iter()
+            .map(|(_, name)| name)
+            .any(|name| name.is_none())
+        {
+            return Err(Error::new(name, ErrorKind::UnnamedFuncParams));
+        }
+
+        let func = Function::new(
+            return_type.clone(),
+            params.clone(),
+            variadic,
+            InitType::Definition,
+        );
+
+        let symbol = self.env.declare_global(name, Symbols::Func(func))?;
+        name.token.update_entry(TableEntry::Symbol(symbol.clone()));
+
         self.scope.0.push(ScopeKind::Function(
             name.clone(),
             return_type.clone(),
-            vec![],
+            Vec::new(),
         ));
         for (type_decl, _) in params.iter().by_ref() {
             self.scope.increment_stack_size(type_decl);
@@ -782,8 +1145,8 @@ impl TypeChecker {
 
         // check function body
         let err = self.block(body);
-        self.scope.compare_gotos()?;
 
+        self.scope.compare_gotos()?;
         self.scope.0.pop();
 
         err?;
@@ -845,7 +1208,7 @@ impl TypeChecker {
     }
 
     pub fn expr_type(&mut self, ast: &mut Expr) -> Result<NEWTypes, Error> {
-        ast.integer_const_fold()?;
+        ast.integer_const_fold(self)?;
 
         ast.type_decl = Some(match &mut ast.kind {
             ExprKind::Binary { left, token, right } => {
@@ -884,9 +1247,13 @@ impl TypeChecker {
             ExprKind::MemberAccess { token, expr, member } => {
                 self.member_access(token, member, expr)?
             }
-            ExprKind::Cast { token, new_type, expr, direction } => {
-                self.explicit_cast(token, expr, new_type, direction)?
-            }
+            ExprKind::Cast {
+                token,
+                decl_type,
+                expr,
+                direction,
+                new_type,
+            } => self.explicit_cast(token, expr, decl_type, new_type, direction)?,
             ExprKind::Ternary { token, cond, true_expr, false_expr } => {
                 self.ternary(token, cond, true_expr, false_expr)?
             }
@@ -898,15 +1265,12 @@ impl TypeChecker {
             ExprKind::ScaleUp { .. } => unreachable!("is only used in codegen"),
             ExprKind::ScaleDown { .. } => unreachable!("is only used in codegen"),
         });
+
         Ok(ast.type_decl.clone().unwrap())
     }
-    fn sizeof_expr(
-        &mut self,
-        expr: &mut Expr,
-        value: &mut Option<usize>,
-    ) -> Result<NEWTypes, Error> {
+    fn sizeof_expr(&mut self, expr: &mut Expr, value: &mut usize) -> Result<NEWTypes, Error> {
         let expr_type = self.expr_type(expr)?;
-        *value = Some(expr_type.size());
+        *value = expr_type.size();
 
         Ok(NEWTypes::Primitive(Types::Long))
     }
@@ -954,14 +1318,17 @@ impl TypeChecker {
             Ordering::Equal => Ok(true_type),
         }
     }
-    fn ident(&mut self, token: &Token) -> Result<NEWTypes, Error> {
-        match &*token.token.get_symbol_entry().borrow() {
+    fn ident(&mut self, token: &mut Token) -> Result<NEWTypes, Error> {
+        let symbol = self.env.get_symbol(token)?;
+        token.token.update_entry(TableEntry::Symbol(symbol.clone()));
+
+        return match &*symbol.borrow() {
             Symbols::Variable(v) => Ok(v.get_type()),
             Symbols::TypeDef(..) | Symbols::Func(..) => Err(Error::new(
                 token,
                 ErrorKind::InvalidSymbol(token.unwrap_string(), "variable"),
             )),
-        }
+        };
     }
     fn member_access(
         &mut self,
@@ -970,6 +1337,13 @@ impl TypeChecker {
         expr: &mut Expr,
     ) -> Result<NEWTypes, Error> {
         let expr_type = self.expr_type(expr)?;
+
+        if !expr_type.is_complete() {
+            return Err(Error::new(
+                token,
+                ErrorKind::IncompleteMemberAccess(expr_type),
+            ));
+        }
 
         match expr_type.clone() {
             NEWTypes::Struct(s) | NEWTypes::Union(s) => {
@@ -1089,7 +1463,12 @@ impl TypeChecker {
             arg_types.push((expr, t));
         }
 
-        match &*func_name.token.get_symbol_entry().borrow() {
+        let symbol = self.env.get_symbol(func_name)?;
+        func_name
+            .token
+            .update_entry(TableEntry::Symbol(symbol.clone()));
+
+        return match &*symbol.borrow() {
             Symbols::Variable(_) | Symbols::TypeDef(..) => Err(Error::new(
                 left_paren,
                 ErrorKind::InvalidSymbol(func_name.unwrap_string(), "function"),
@@ -1117,7 +1496,7 @@ impl TypeChecker {
                     ))
                 }
             }
-        }
+        };
     }
     fn args_and_params_match(
         &self,
@@ -1156,6 +1535,8 @@ impl TypeChecker {
                 errors.push(e);
             }
         }
+
+        self.env.exit();
 
         if errors.is_empty() {
             Ok(())
@@ -1415,6 +1796,91 @@ impl TypeChecker {
     }
 }
 
+#[derive(PartialEq, Debug)]
+enum ScopeKind {
+    Global,
+    Loop,
+    // (function name, return type, save all gotos so that can error if no matching label)
+    Function(Token, NEWTypes, Vec<Token>),
+    // all cases and defaults that are in a switch
+    // if Some(value) then case, if None then default
+    Switch(Vec<Option<i64>>),
+}
+
+// vector to go through and check if certain statements are
+// enclosed by others. eg: return only in functions, break only in switch/loops
+#[derive(PartialEq, Debug)]
+struct ScopeLevel(Vec<ScopeKind>);
+impl ScopeLevel {
+    fn increment_stack_size(&mut self, type_decl: &NEWTypes) {
+        let ScopeKind::Function(func_name, ..) = find_scope!(self, ScopeKind::Function(..))
+            .expect("can only be called inside a function") else {unreachable!()};
+        let func_symbol = func_name.token.get_symbol_entry();
+        let stack_size = func_symbol.borrow().unwrap_func().stack_size;
+
+        let mut size = stack_size + type_decl.size();
+        size = align(size, type_decl);
+
+        func_symbol.borrow_mut().unwrap_func_mut().stack_size = size;
+    }
+    fn insert_label(&mut self, name_token: &Token) -> Result<(), Error> {
+        let name = name_token.unwrap_string();
+        let ScopeKind::Function(func_name, ..) = find_scope!(self,ScopeKind::Function(..))
+            .expect("ensured by parser that label is always inside function") else {unreachable!()};
+
+        let func_symbol = func_name.token.get_symbol_entry();
+
+        if func_symbol
+            .borrow()
+            .unwrap_func()
+            .labels
+            .contains_key(&name)
+        {
+            return Err(Error::new(
+                name_token,
+                ErrorKind::Redefinition("Label", name_token.unwrap_string()),
+            ));
+        }
+        let len = func_symbol.borrow().unwrap_func().labels.len();
+        func_symbol
+            .borrow_mut()
+            .unwrap_func_mut()
+            .labels
+            .insert(name, len);
+
+        Ok(())
+    }
+    fn insert_goto(&mut self, name_token: Token) -> Result<(), Error> {
+        let ScopeKind::Function(.., gotos) = find_scope!(self,ScopeKind::Function(..))
+            .expect("ensured by parser that label is always inside function") else {unreachable!()};
+
+        gotos.push(name_token);
+        Ok(())
+    }
+    fn compare_gotos(&mut self) -> Result<(), Error> {
+        let ScopeKind::Function(func_name, _,gotos) = find_scope!(self,ScopeKind::Function(..))
+            .expect("ensured by parser that label is always inside function") else {unreachable!()};
+
+        let func_symbol = func_name.token.get_symbol_entry();
+
+        for g in gotos {
+            let label = g.unwrap_string();
+            if !func_symbol
+                .borrow()
+                .unwrap_func()
+                .labels
+                .contains_key(&label)
+            {
+                return Err(Error::new(
+                    g,
+                    ErrorKind::MissingLabel(label, func_name.unwrap_string()),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 struct CurrentObjects(Vec<(i64, i64, NEWTypes)>);
 impl CurrentObjects {
@@ -1649,18 +2115,25 @@ mod tests {
     macro_rules! assert_const_expr {
         ($input: expr, $expected: expr, $symbols: expr) => {
             let mut parser = setup($input);
-            for (name, type_decl) in $symbols {
-                parser
-                    .env
-                    .declare_symbol(
-                        &Token::default(TokenType::new_ident(name.to_string())),
-                        Symbols::Variable(SymbolInfo::new(type_decl)),
-                    )
-                    .unwrap();
-            }
             let mut expr = parser.expression().unwrap();
 
             let mut typechecker = TypeChecker::new();
+            for (name, type_decl) in $symbols {
+                typechecker
+                    .env
+                    .declare_symbol(
+                        &Token::default(TokenType::new_ident(name.to_string())),
+                        Symbols::Variable(SymbolInfo {
+                            type_decl,
+                            kind: InitType::Declaration,
+                            reg: None,
+                            is_global: false,
+                            token: Token::default(TokenType::Semicolon),
+                        }),
+                    )
+                    .unwrap();
+            }
+
             let value_type = typechecker.expr_type(&mut expr).unwrap();
 
             // have to do manual array decay because is constant expects array to be decayed already
@@ -1678,14 +2151,17 @@ mod tests {
     }
     fn setup_init_list(input: &str) -> Result<InitKind, Error> {
         // TODO: maybe be can parser.parse() so that external declaration doesnt have to be public
-        let ExternalDeclaration::Declaration(mut init) =
+        let ExternalDeclaration::Declaration(decls) =
                 setup(input).external_declaration().unwrap() else {unreachable!("only passing type")};
 
-        let DeclarationKind::VarDecl(type_decl,_,Some(mut init),_) = init.remove(0) else  {unreachable!("only passing type")};
+        let Declaration { specifiers, declarators, is_typedef } = decls;
+        let mut typechecker = TypeChecker::new();
 
-        TypeChecker::new().init_check(&type_decl, &mut init, false)?;
+        let mut decl = declarators[0].clone();
+        let specifier_type = typechecker.parse_specifiers(specifiers).unwrap();
+        typechecker.declarator(specifier_type, is_typedef, &mut decl)?;
 
-        Ok(init.kind)
+        Ok(decl.1.unwrap().kind)
     }
     fn assert_init(actual: InitKind, expected: Vec<(usize, &'static str)>) {
         let InitKind::Aggr(actual) = actual else {unreachable!()};

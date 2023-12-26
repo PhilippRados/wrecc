@@ -1,16 +1,11 @@
 error: Functions cannot return type 'int [2]'
-|  --> in tests/fixtures/func_arr_return.c:3:5
+|  --> in tests/fixtures/func_arr_return.c:3:9
 |
 3 arr some() {
-|     ^
-error: Expected identifier following type-specifier
-|  --> in tests/fixtures/func_arr_return.c:8:4
-|
-8 int[2] f();
-|    ^
+|         ^
 error: Functions cannot return type 'int [2]'
-|  --> in tests/fixtures/func_arr_return.c:12:5
+|  --> in tests/fixtures/func_arr_return.c:10:8
 |
-12 int baz()[2];
-|      ^
-3 errors generated.
+10 int baz()[2];
+|         ^
+2 errors generated.

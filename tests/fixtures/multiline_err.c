@@ -23,7 +23,7 @@ me = 2\
 #ifdef somename
 int main() {
   printf("defined %d",\
-         some + num2);
+         some + );
 }
 #else
 int main() { printf("not defined"); }

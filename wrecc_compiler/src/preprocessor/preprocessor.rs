@@ -388,11 +388,11 @@ impl<'a> Preprocessor<'a> {
             .scan_token()
             .map_err(Error::new_multiple)?;
         let mut parser = Parser::new(tokens);
-        let mut expr = parser.expression().map_err(|mut e| {
-            if let ErrorKind::Eof(msg) = e.kind {
-                e.kind = ErrorKind::Regular(msg)
+        let mut expr = parser.expression().map_err(|mut err| {
+            if let ErrorKind::Eof(msg) = err.kind {
+                err.kind = ErrorKind::Regular(msg)
             }
-            e
+            err
         })?;
 
         if let Some(token) = parser.has_elements() {

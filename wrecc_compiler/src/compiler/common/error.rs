@@ -77,6 +77,7 @@ pub enum ErrorKind {
     DesignatorOverflow(usize, i64),
     InitializerOverflow(NEWTypes),
     ScalarOverflow,
+    InvalidArray(NEWTypes),
 
     // environment errors
     MismatchedFuncDeclReturn(NEWTypes, NEWTypes),
@@ -196,6 +197,7 @@ impl ErrorKind {
                 format!("Initializer overflow. Excess elements in '{}'", type_decl)
             }
             ErrorKind::ScalarOverflow => "Excess elements in scalar initializer".to_string(),
+            ErrorKind::InvalidArray(type_decl) => format!("Invalid array-type: '{}'", type_decl),
 
             ErrorKind::NonAggregateDesignator(type_decl) => {
                 format!(

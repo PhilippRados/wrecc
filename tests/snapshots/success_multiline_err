@@ -8,9 +8,9 @@ error: Expect ';' after declaration
 |
 21 2ö;
 |   ^
-error: Undeclared symbol 'num2'
+error: Expected expression found: ')'
 |  --> in tests/fixtures/multiline_err.c:26:17
 |
-26          some + num2);
+26          some + );
 |                  ^
 3 errors generated.

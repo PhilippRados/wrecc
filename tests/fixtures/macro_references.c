@@ -1,13 +1,16 @@
-#include <stdio.h>
-
 #define uwe test
 #define simon uwe
-#define ahmed simon uwe
+#define siggi simon; uwe
 
 #define foo1 bar
 #define bar foo2
 
 int main() {
   foo1;
-  ahmed;
+  siggi;
 }
+// preprocessor generates:
+// int main(){
+//   foo2;
+//   test; test;
+// }

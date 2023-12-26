@@ -1,5 +1,5 @@
 use crate::compiler::ast::{decl::*, expr::*, stmt::*};
-use crate::compiler::common::{token::*, types::*};
+use crate::compiler::common::{environment::*, token::*, types::*};
 use crate::compiler::typechecker::{align_by, create_label};
 use crate::compiler::wrecc_codegen::{ir::*, register::*, register_allocation::*};
 use std::collections::{HashMap, VecDeque};
@@ -98,7 +98,7 @@ impl Compiler {
     fn visit_decl(&mut self, external_decl: ExternalDeclaration) {
         match external_decl {
             ExternalDeclaration::Declaration(decls) => self.declaration(decls),
-            ExternalDeclaration::Function(name, body) => self.function_definition(name, body),
+            ExternalDeclaration::Function(_, name, body) => self.function_definition(name, body),
         }
     }
     fn visit_stmt(&mut self, statement: Stmt) {
@@ -360,16 +360,21 @@ impl Compiler {
             None => self.write_out(Ir::Jmp(function_epilogue)),
         }
     }
-    fn declaration(&mut self, decls: Vec<DeclarationKind>) {
-        for d in decls {
-            match d {
-                DeclarationKind::VarDecl(type_decl, name, init, true) => {
-                    self.declare_global_var(type_decl, name, init)
+    fn declaration(&mut self, decl: Declaration) {
+        for (declarator, init) in decl.declarators {
+            if let Some(name) = declarator.name {
+                let Symbols::Variable(SymbolInfo { type_decl, is_global,token,.. }) =
+                    (*name.token.get_symbol_entry()).borrow().clone() else {
+                    continue;
+                };
+
+                if name == token {
+                    if is_global {
+                        self.declare_global_var(type_decl, name, init)
+                    } else {
+                        self.declare_var(type_decl, &name, init)
+                    }
                 }
-                DeclarationKind::VarDecl(type_decl, name, init, false) => {
-                    self.declare_var(type_decl, &name, init)
-                }
-                DeclarationKind::FuncDecl(..) => (),
             }
         }
     }
@@ -588,12 +593,8 @@ impl Compiler {
         self.function_name = None;
     }
     fn cg_func_preamble(&mut self, name: &Token, params: Vec<(NEWTypes, Token)>) {
-        let func = self
-            .function_name
-            .as_ref()
-            .unwrap()
-            .token
-            .get_symbol_entry();
+        let func = name.token.get_symbol_entry();
+
         let stack_size = func.borrow().unwrap_func().stack_size;
         self.write_out(Ir::FuncSetup(name.clone(), stack_size));
 
@@ -818,11 +819,10 @@ impl Compiler {
                 self.cg_ternary(*cond, *true_expr, *false_expr)
             }
             ExprKind::Comma { left, right } => self.cg_comma(*left, *right),
-            ExprKind::SizeofExpr { value: Some(value), .. } | ExprKind::SizeofType { value } => {
+            ExprKind::SizeofExpr { value, .. } | ExprKind::SizeofType { value, .. } => {
                 Register::Literal(value as i64, NEWTypes::Primitive(Types::Long))
             }
             ExprKind::Nop => Register::Void,
-            _ => unreachable!("can only be sizeof but all cases covered"),
         }
     }
     fn cg_comma(&mut self, left: Expr, right: Expr) -> Register {

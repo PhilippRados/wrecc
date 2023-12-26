@@ -1,3 +1,4 @@
+use crate::compiler::ast::decl::SpecifierKind;
 use crate::compiler::common::{environment::*, error::Location, types::*};
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -400,7 +401,7 @@ impl Display for TokenType {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub struct Token {
     pub token: TokenType,
     pub line_index: i32,
@@ -458,17 +459,6 @@ impl Token {
             || self.token == TokenType::Struct
             || Types::into_vec().contains(&TokenKind::from(&self.token))
     }
-    pub fn into_type(self) -> NEWTypes {
-        assert!(self.is_type());
-
-        NEWTypes::Primitive(match self.token {
-            TokenType::Int => Types::Int,
-            TokenType::Char => Types::Char,
-            TokenType::Void => Types::Void,
-            TokenType::Long => Types::Long,
-            _ => unreachable!("only types are checked"),
-        })
-    }
     pub fn comp_to_binary(&self) -> TokenType {
         match self.token {
             TokenType::SlashEqual => TokenType::Slash,
@@ -482,6 +472,25 @@ impl Token {
             TokenType::MinusEqual | TokenType::MinusMinus => TokenType::Minus,
             TokenType::PlusEqual | TokenType::PlusPlus => TokenType::Plus,
             _ => unreachable!("not compound token"),
+        }
+    }
+}
+impl PartialEq for Token {
+    fn eq(&self, other: &Token) -> bool {
+        self.line_index == other.line_index
+            && self.column == other.column
+            && self.filename == other.filename
+            && TokenKind::from(&self.token) == TokenKind::from(&other.token)
+    }
+}
+impl Into<SpecifierKind> for Token {
+    fn into(self) -> SpecifierKind {
+        match self.token {
+            TokenType::Int => SpecifierKind::Int,
+            TokenType::Char => SpecifierKind::Char,
+            TokenType::Void => SpecifierKind::Void,
+            TokenType::Long => SpecifierKind::Long,
+            _ => unreachable!("token not specifier"),
         }
     }
 }

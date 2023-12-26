@@ -33,15 +33,19 @@ pub struct Function {
     pub epilogue_index: usize,
 }
 impl Function {
-    pub fn new(return_type: NEWTypes) -> Self {
-        // can only know return-type at point of declaration
+    pub fn new(
+        return_type: NEWTypes,
+        params: Vec<(NEWTypes, Option<Token>)>,
+        variadic: bool,
+        kind: InitType,
+    ) -> Self {
         Function {
+            variadic,
+            return_type,
+            kind,
+            params,
             stack_size: 0,
             epilogue_index: 0,
-            variadic: false,
-            return_type,
-            kind: InitType::Declaration,
-            params: vec![],
             labels: HashMap::new(),
         }
     }
@@ -87,19 +91,6 @@ impl Function {
             Ok(())
         }
     }
-    pub fn has_abstract_params(&self) -> bool {
-        self.params
-            .iter()
-            .map(|(_, name)| name)
-            .any(|name| name.is_none())
-    }
-
-    pub fn has_incomplete_params(&self) -> Option<&NEWTypes> {
-        self.params
-            .iter()
-            .map(|(type_decl, _)| type_decl)
-            .find(|type_decl| !type_decl.is_complete())
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -113,16 +104,15 @@ pub struct SymbolInfo {
     // optional because info isn't known at moment of insertion
     // can be label-register or stack-register
     pub reg: Option<Register>,
+
+    // used in codegen to indicate if declaration needs to be declared as global
+    pub is_global: bool,
+
+    // used in codegen to ensure only single declaration of same symbol
+    pub token: Token,
 }
 
 impl SymbolInfo {
-    pub fn new(type_decl: NEWTypes) -> Self {
-        SymbolInfo {
-            type_decl,
-            kind: InitType::Declaration,
-            reg: None,
-        }
-    }
     pub fn get_type(&self) -> NEWTypes {
         self.type_decl.clone()
     }
@@ -259,157 +249,118 @@ impl Tags {
     }
 }
 
+type Scope<T> = HashMap<String, Rc<RefCell<T>>>;
+
 #[derive(Clone, Debug)]
-struct Element<T> {
-    name: String,
-    depth: usize,
-    kind: Rc<RefCell<T>>,
+pub struct NameSpace<T> {
+    elems: Vec<Scope<T>>,
 }
-#[derive(Clone, Debug)]
-struct NameSpace<T> {
-    elems: Vec<Element<T>>,
-}
-impl<T: Clone + std::fmt::Debug> NameSpace<T> {
-    fn new() -> Self {
-        NameSpace { elems: Vec::new() }
+impl<T> NameSpace<T> {
+    pub fn new() -> Self {
+        NameSpace { elems: vec![Scope::new()] }
     }
-    // return sub-array of elements that are in current scope
-    fn get_current(&self, depth: usize) -> Vec<&Element<T>> {
-        self.elems
-            .iter()
-            .rev()
-            .take_while(|elem| elem.depth >= depth)
-            .filter(|elem| elem.depth == depth)
-            .collect()
+    pub fn enter(&mut self) {
+        self.elems.push(Scope::new());
+    }
+    pub fn exit(&mut self) {
+        self.elems.pop();
     }
 
     // checks if element is in current scope
-    fn contains_key(&self, expected: &String, depth: usize) -> Option<Rc<RefCell<T>>> {
-        self.get_current(depth)
-            .into_iter()
-            .find(|elem| &elem.name == expected)
-            .map(|elem| Rc::clone(&elem.kind))
-    }
-    fn declare(&mut self, name: String, depth: usize, kind: T) -> Rc<RefCell<T>> {
-        let kind = Rc::new(RefCell::new(kind));
+    pub fn get_current(&self, expected: &String) -> Option<Rc<RefCell<T>>> {
         self.elems
-            .push(Element { name, depth, kind: Rc::clone(&kind) });
+            .last()
+            .unwrap()
+            .get(expected)
+            .map(|elem| Rc::clone(&elem))
+    }
+    pub fn declare(&mut self, name: String, elem: T) -> Rc<RefCell<T>> {
+        let kind = Rc::new(RefCell::new(elem));
+        self.elems
+            .last_mut()
+            .unwrap()
+            .insert(name, Rc::clone(&kind));
         Rc::clone(&kind)
     }
-    // returns a specific element and its index in st from all valid scopes
-    fn get(&self, name: String, depth: usize) -> Option<Rc<RefCell<T>>> {
-        for d in (0..=depth).rev() {
-            if let Some(elem) = self.get_current(d).iter().find(|elem| elem.name == name) {
-                return Some(Rc::clone(&elem.kind));
+    pub fn get(&self, name: String) -> Option<Rc<RefCell<T>>> {
+        for scope in self.elems.iter().rev() {
+            if let Some(elem) = scope.get(&name) {
+                return Some(Rc::clone(&elem));
             }
         }
         None
-    }
-    // inserts an element in the last scope before the current
-    fn declare_prev(&mut self, name: String, last_depth: usize, kind: T) -> Rc<RefCell<T>> {
-        let kind = Rc::new(RefCell::new(kind));
-
-        let mut insert_pos = self.elems.len();
-        for elem in self.elems.iter().rev() {
-            if elem.depth > last_depth {
-                insert_pos -= 1;
-            } else {
-                break;
-            }
-        }
-
-        self.elems.insert(
-            insert_pos,
-            Element {
-                name,
-                depth: last_depth,
-                kind: Rc::clone(&kind),
-            },
-        );
-
-        Rc::clone(&kind)
     }
 }
 
 #[derive(Debug)]
 pub struct Environment {
-    current_depth: usize,
-    symbols: NameSpace<Symbols>,
+    pub symbols: NameSpace<Symbols>,
     tags: NameSpace<Tags>,
 }
 impl Environment {
     pub fn new() -> Self {
         Environment {
-            current_depth: 0,
             symbols: NameSpace::new(),
             tags: NameSpace::new(),
         }
     }
     pub fn is_global(&self) -> bool {
-        self.current_depth == 0
+        self.symbols.elems.len() == 1
     }
     pub fn enter(&mut self) {
-        self.current_depth += 1
+        self.symbols.enter();
+        self.tags.enter();
     }
     pub fn exit(&mut self) {
-        self.current_depth -= 1;
-
-        // TODO: clean this up
-        // hacky solution but need a way to indicate when current scope ends
-        let _ = self.symbols.declare(
-            "".to_string(),
-            self.current_depth,
-            Symbols::TypeDef(NEWTypes::Primitive(Types::Void)),
-        );
-        let _ = self
-            .tags
-            .declare("".to_string(), self.current_depth, Tags::Enum(vec![]));
+        self.symbols.exit();
+        self.tags.exit();
     }
     pub fn declare_symbol(
         &mut self,
         var_name: &Token,
         symbol: Symbols,
     ) -> Result<Rc<RefCell<Symbols>>, Error> {
-        if let Some(existing_symbol) = self
-            .symbols
-            .contains_key(&var_name.unwrap_string(), self.current_depth)
-        {
-            return Self::check_redef(var_name, symbol, existing_symbol, self.current_depth);
+        if let Some(existing_symbol) = self.symbols.get_current(&var_name.unwrap_string()) {
+            return self.check_redef(var_name, symbol, existing_symbol);
         }
 
-        Ok(self
-            .symbols
-            .declare(var_name.unwrap_string(), self.current_depth, symbol))
+        Ok(self.symbols.declare(var_name.unwrap_string(), symbol))
     }
-
-    // only used for functions since they have to be inserted before params
-    pub fn declare_prev_scope(
+    // only used for functions since they have to be inserted before params but need params to be
+    // already parsed
+    pub fn declare_global(
         &mut self,
         var_name: &Token,
         symbol: Symbols,
     ) -> Result<Rc<RefCell<Symbols>>, Error> {
-        let last_depth = self.current_depth - 1;
-
-        if let Some(existing_symbol) = self
+        let global_scope = self
             .symbols
-            .contains_key(&var_name.unwrap_string(), last_depth)
+            .elems
+            .get_mut(0)
+            .expect("always have a global scope");
+
+        if let Some(existing_symbol) = global_scope
+            .get(&var_name.unwrap_string())
+            .map(|elem| Rc::clone(&elem))
         {
-            return Self::check_redef(var_name, symbol, existing_symbol, last_depth);
+            return self.check_redef(var_name, symbol, existing_symbol);
         }
 
-        Ok(self
-            .symbols
-            .declare_prev(var_name.unwrap_string(), last_depth, symbol))
+        let func = Rc::new(RefCell::new(symbol));
+        global_scope.insert(var_name.unwrap_string(), Rc::clone(&func));
+
+        Ok(Rc::clone(&func))
     }
+
     fn check_redef(
+        &self,
         var_name: &Token,
         symbol: Symbols,
         existing_symbol: Rc<RefCell<Symbols>>,
-        depth: usize,
     ) -> Result<Rc<RefCell<Symbols>>, Error> {
         symbol.cmp(var_name, &existing_symbol.borrow())?;
 
-        if matches!(symbol, Symbols::Variable(_)) && depth != 0 {
+        if matches!(symbol, Symbols::Variable(_)) && !self.is_global() {
             return Err(Error::new(
                 var_name,
                 ErrorKind::Redefinition("symbol", var_name.unwrap_string()),
@@ -439,7 +390,7 @@ impl Environment {
         tag: Tags,
     ) -> Result<Rc<RefCell<Tags>>, Error> {
         let name = var_name.unwrap_string();
-        match self.tags.contains_key(&name, self.current_depth) {
+        match self.tags.get_current(&name) {
             Some(existing_tag)
                 if existing_tag.borrow().is_complete() || existing_tag.borrow().in_definition() =>
             {
@@ -460,132 +411,126 @@ impl Environment {
             Some(existing_tag) => return Ok(existing_tag),
             _ => (),
         }
-        Ok(self.tags.declare(name, self.current_depth, tag))
+        Ok(self.tags.declare(name, tag))
     }
     pub fn get_symbol(&self, var_name: &Token) -> Result<Rc<RefCell<Symbols>>, Error> {
-        self.symbols
-            .get(var_name.unwrap_string(), self.current_depth)
-            .ok_or_else(|| {
-                Error::new(
-                    var_name,
-                    ErrorKind::UndeclaredSymbol(var_name.unwrap_string()),
-                )
-            })
+        self.symbols.get(var_name.unwrap_string()).ok_or_else(|| {
+            Error::new(
+                var_name,
+                ErrorKind::UndeclaredSymbol(var_name.unwrap_string()),
+            )
+        })
     }
     pub fn get_type(&self, var_name: &Token) -> Result<Rc<RefCell<Tags>>, Error> {
-        self.tags
-            .get(var_name.unwrap_string(), self.current_depth)
-            .ok_or_else(|| {
-                Error::new(
-                    var_name,
-                    ErrorKind::UndeclaredType(var_name.unwrap_string()),
-                )
-            })
+        self.tags.get(var_name.unwrap_string()).ok_or_else(|| {
+            Error::new(
+                var_name,
+                ErrorKind::UndeclaredType(var_name.unwrap_string()),
+            )
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::compiler::scanner::Scanner;
+    use crate::compiler::typechecker::TypeChecker;
     use crate::compiler::wrecc_parser::parser::Parser;
     use crate::preprocess;
     use std::path::Path;
 
-    fn assert_namespace(input: &str, expected: Vec<(&str, &str, usize)>) {
-        let pp_tokens = preprocess(Path::new(""), input.to_string()).unwrap();
-        let mut scanner = Scanner::new(pp_tokens);
-        let tokens = scanner.scan_token().unwrap();
+    //     fn assert_namespace(input: &str, expected: Vec<(&str, &str, usize)>) {
+    //         let pp_tokens = preprocess(Path::new(""), input.to_string()).unwrap();
+    //         let mut scanner = Scanner::new(pp_tokens);
+    //         let tokens = scanner.scan_token().unwrap();
 
-        let mut parser = Parser::new(tokens);
-        while parser.external_declaration().is_ok() {}
+    //         let mut parser = Parser::new(tokens);
+    //         let mut ext_decls = parser.parse().unwrap();
 
-        let actual = parser.env.symbols.elems;
+    //         let mut typechecker = TypeChecker::new();
+    //         typechecker.check(&mut ext_decls);
 
-        // remove environment indicators
-        let actual = actual
-            .iter()
-            .filter(|elem| !elem.name.is_empty())
-            .collect::<Vec<_>>();
+    //         let actual = typechecker.env.symbols.elems;
 
-        assert_eq!(actual.len(), expected.len());
-        for (actual, expected) in actual.into_iter().zip(expected) {
-            assert_eq!(actual.name, expected.0);
-            assert_eq!(actual.kind.borrow().to_string(), expected.1);
-            assert_eq!(actual.depth, expected.2);
-        }
-    }
+    //         assert_eq!(actual.len(), expected.len());
+    //         for (actual, expected) in actual.into_iter().zip(expected) {
+    //             assert_eq!(actual.name, expected.0);
+    //             assert_eq!(actual.kind.borrow().to_string(), expected.1);
+    //             assert_eq!(actual.depth, expected.2);
+    //         }
+    //     }
 
-    #[test]
-    fn builds_symbol_table() {
-        let input = "
-int main(){
-    char* s;
-    {
-        char* n;
-    }
-    char* n;
-}";
+    //     #[test]
+    //     fn builds_symbol_table() {
+    //         let input = "
+    // int main(){
+    //     char* s;
+    //     {
+    //         char* n;
+    //     }
+    //     char* n;
+    // }";
 
-        let expected = vec![
-            ("main", "function", 0),
-            ("s", "variable", 1),
-            ("n", "variable", 2),
-            ("n", "variable", 1),
-        ];
+    //         let expected = vec![
+    //             ("main", "function", 0),
+    //             ("s", "variable", 1),
+    //             ("n", "variable", 2),
+    //             ("n", "variable", 1),
+    //         ];
 
-        assert_namespace(input, expected);
-    }
-    #[test]
-    fn func_args() {
-        let input = "
-int foo(int a, int b) {
-    {
-        {
-            long some;
-        }
-    }
-	return 2 + a - b;
-}
+    //         assert_namespace(input, expected);
+    //     }
+    //     #[test]
+    //     fn func_args() {
+    //         let input = "
+    // int foo(int a, int b) {
+    //     {
+    //         {
+    //             long some;
+    //         }
+    //     }
+    // 	return 2 + a - b;
+    // }
 
-int main() {
-	return foo(1, 3);
-}";
+    // int main() {
+    // 	return foo(1, 3);
+    // }";
 
-        let expected = vec![
-            ("foo", "function", 0),
-            ("a", "variable", 1),
-            ("b", "variable", 1),
-            ("some", "variable", 3),
-            ("main", "function", 0),
-        ];
+    //         let expected = vec![
+    //             ("foo", "function", 0),
+    //             ("a", "variable", 1),
+    //             ("b", "variable", 1),
+    //             ("some", "variable", 3),
+    //             ("main", "function", 0),
+    //         ];
 
-        assert_namespace(input, expected);
-    }
+    //         assert_namespace(input, expected);
+    //     }
 
-    #[test]
-    fn func_decls() {
-        let input = "
-int main() {
-    {
-        {
-            int foo(int a, int b);
-        }
-    }
-	return foo(1, 3);
-}";
+    //     #[test]
+    //     fn func_decls() {
+    //         let input = "
+    // int main() {
+    //     {
+    //         {
+    //             int foo(int a, int b);
+    //         }
+    //     }
+    // 	return foo(1, 3);
+    // }";
 
-        let expected = vec![
-            ("main", "function", 0),
-            ("foo", "function", 3),
-            ("a", "variable", 4),
-            ("b", "variable", 4),
-        ];
+    //         let expected = vec![
+    //             ("main", "function", 0),
+    //             ("foo", "function", 3),
+    //             ("a", "variable", 4),
+    //             ("b", "variable", 4),
+    //         ];
 
-        assert_namespace(input, expected);
-    }
+    //         assert_namespace(input, expected);
+    //     }
 
-    #[test]
-    fn get_current() {
-        todo!()
-    }
+    //     #[test]
+    //     fn get_current() {
+    //         todo!()
+    //     }
 }

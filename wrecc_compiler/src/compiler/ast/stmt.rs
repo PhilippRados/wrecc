@@ -5,7 +5,7 @@ use super::expr::PrintIndent;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Stmt {
-    Declaration(Vec<DeclarationKind>),
+    Declaration(Declaration),
     Expr(Expr),
     Block(Vec<Stmt>),
     If(Token, Expr, Box<Stmt>, Option<Box<Stmt>>),
@@ -22,7 +22,7 @@ pub enum Stmt {
     Break(Token),
     Continue(Token),
     Switch(Token, Expr, Box<Stmt>),
-    Case(Token, i64, Box<Stmt>),
+    Case(Token, Expr, Box<Stmt>),
     Default(Token, Box<Stmt>),
     Goto(Token),
     Label(Token, Box<Stmt>),
@@ -32,13 +32,14 @@ impl PrintIndent for Stmt {
     fn print_indent(&self, indent_level: usize) -> String {
         match self {
             Stmt::Expr(expr) => format!("Expr:\n{}", indent_fmt(expr, indent_level + 1)),
-            Stmt::Declaration(decls) => {
-                let decls = decls
-                    .iter()
-                    .map(|kind| indent_fmt(kind, indent_level + 1))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                format!("Decl:\n{}", decls)
+            Stmt::Declaration(_decls) => {
+                // let decls = decls
+                //     .iter()
+                //     .map(|kind| indent_fmt(kind, indent_level + 1))
+                //     .collect::<Vec<_>>()
+                //     .join("\n");
+                // format!("Decl:\n{}", decls)
+                "decl todo".to_string()
             }
             Stmt::Block(body) => {
                 let body = body

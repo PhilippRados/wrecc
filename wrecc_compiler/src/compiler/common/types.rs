@@ -211,20 +211,6 @@ impl NEWTypes {
             variadic,
         }
     }
-    // appends a type to any derived type
-    pub fn append_type<'a>(&'a mut self, append: &'a mut NEWTypes) -> &'a mut NEWTypes {
-        match self {
-            NEWTypes::Array { ref mut of, .. } => *of = Box::new(of.append_type(append).clone()),
-            NEWTypes::Function { ref mut return_type, .. } => {
-                *return_type = Box::new(return_type.append_type(append).clone())
-            }
-            NEWTypes::Pointer(ref mut to) => *to = Box::new(to.append_type(append).clone()),
-            _ => {
-                return append;
-            }
-        };
-        self
-    }
     pub fn deref_at(&self) -> Option<NEWTypes> {
         match self {
             NEWTypes::Pointer(inner) => Some(*inner.clone()),
@@ -233,6 +219,12 @@ impl NEWTypes {
     }
     pub fn is_void(&self) -> bool {
         *self == NEWTypes::Primitive(Types::Void)
+    }
+    pub fn is_func(&self) -> bool {
+        matches!(self, NEWTypes::Function { .. })
+    }
+    pub fn is_array(&self) -> bool {
+        matches!(self, NEWTypes::Array { .. })
     }
     pub fn is_ptr(&self) -> bool {
         matches!(*self, NEWTypes::Pointer(_))
@@ -321,8 +313,6 @@ impl NEWTypes {
             _ => unreachable!("not union"),
         }
     }
-    // used in parser to check if type contains any incomplete type when accessing it's members
-    // would be better to check in typechecker but at that point type could be complete
     pub fn is_complete(&self) -> bool {
         match self {
             NEWTypes::Struct(s) | NEWTypes::Union(s) => s.is_complete(),
@@ -643,44 +633,17 @@ macro_rules! arr_decay {
         }
     };
 }
-// converts token of aggregate type into its corresponding type
-#[macro_export]
-macro_rules! into_newtype {
-    ($token:expr,$name:expr,$value:expr) => {
-        match $token.token {
-            TokenType::Struct => {
-                NEWTypes::Struct(StructInfo::Named($name, $value.clone().unwrap_aggr()))
-            }
-            TokenType::Union => {
-                NEWTypes::Union(StructInfo::Named($name, $value.clone().unwrap_aggr()))
-            }
-            TokenType::Enum => NEWTypes::Enum(Some($name), $value.clone().unwrap_enum()),
-            _ => unreachable!("should only be used for aggregate types"),
-        }
-    };
-    ($token:expr,$value:expr) => {
-        match $token.token {
-            TokenType::Struct => NEWTypes::Struct(StructInfo::Anonymous($token.clone(), $value)),
-            TokenType::Union => NEWTypes::Union(StructInfo::Anonymous($token.clone(), $value)),
-            _ => unreachable!("should only be used for aggregate types"),
-        }
-    };
-    ($value:expr) => {
-        NEWTypes::Enum(None, $value)
-    };
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::ast::decl::*;
+    use crate::compiler::typechecker::TypeChecker;
     use crate::compiler::wrecc_parser::parser::tests::*;
 
     fn assert_type_print(input: &str, expected: &str) {
-        if let Ok(ExternalDeclaration::Declaration(mut decls)) = setup(input).external_declaration()
-        {
-            if let Some(DeclarationKind::VarDecl(actual_type_decl, ..)) = decls.pop() {
-                assert_eq!(actual_type_decl.to_string(), expected);
+        if let Ok(mut ty) = setup(input).type_name() {
+            if let Ok(actual_ty) = TypeChecker::new().parse_type(&mut ty) {
+                assert_eq!(actual_ty.to_string(), expected);
                 return;
             }
         }
@@ -703,22 +666,22 @@ mod tests {
 
     #[test]
     fn multi_dim_arr_print() {
-        assert_type_print("int a[4][2];", "int [4][2]");
-        assert_type_print("int (a[3])[4][2];", "int [3][4][2]");
+        assert_type_print("int [4][2];", "int [4][2]");
+        assert_type_print("int ([3])[4][2];", "int [3][4][2]");
 
-        assert_type_print("long int *a[3][4][2];", "long *[3][4][2]");
-        assert_type_print("char ***a[2];", "char ***[2]");
+        assert_type_print("long int *[3][4][2];", "long *[3][4][2]");
+        assert_type_print("char ***[2];", "char ***[2]");
 
-        assert_type_print("char *((*a))[2];", "char *(*)[2]");
-        assert_type_print("char *(**a)[2];", "char *(**)[2]");
-        assert_type_print("char *(**a);", "char ***");
+        assert_type_print("char *((*))[2];", "char *(*)[2]");
+        assert_type_print("char *(**)[2];", "char *(**)[2]");
+        assert_type_print("char *(**);", "char ***");
 
-        assert_type_print("char *(*a)[3][4][2];", "char *(*)[3][4][2]");
-        assert_type_print("char (**a[3][4])[2];", "char (**[3][4])[2]");
-        assert_type_print("char (**(*a)[4])[2];", "char (**(*)[4])[2]");
-        assert_type_print("char(**(*a[3])[4])[2];", "char (**(*[3])[4])[2]");
+        assert_type_print("char *(*)[3][4][2];", "char *(*)[3][4][2]");
+        assert_type_print("char (**[3][4])[2];", "char (**[3][4])[2]");
+        assert_type_print("char (**(*)[4])[2];", "char (**(*)[4])[2]");
+        assert_type_print("char(**(*[3])[4])[2];", "char (**(*[3])[4])[2]");
 
-        assert_type_print("char (*(*a[3]))[2];", "char (**[3])[2]");
+        assert_type_print("char (*(*[3]))[2];", "char (**[3])[2]");
     }
     #[test]
     fn function_type_print() {

@@ -1,6 +1,6 @@
 typedef struct Some s;
 
-s l = {.age};
+s l = {.age = 2};
 s fine;
 
 struct Some {
@@ -12,4 +12,3 @@ int main() {
 
   other_un consazmprlpivzzzzzzzzzzz;
 }
-

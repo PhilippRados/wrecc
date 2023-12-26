@@ -1,3 +1,4 @@
+use crate::compiler::ast::decl::*;
 use crate::compiler::common::{token::*, types::*};
 use std::fmt;
 
@@ -42,6 +43,7 @@ pub enum ExprKind {
     },
     Cast {
         token: Token,
+        decl_type: DeclType,
         new_type: NEWTypes,
         direction: Option<CastDirection>,
         expr: Box<Expr>,
@@ -74,13 +76,14 @@ pub enum ExprKind {
         left: Box<Expr>,
         right: Box<Expr>,
     },
+    // value gets filled in in typechecker
     SizeofType {
+        decl_type: DeclType,
         value: usize,
     },
-    // value gets filled in in typechecker
     SizeofExpr {
         expr: Box<Expr>,
-        value: Option<usize>,
+        value: usize,
     },
     String(Token),
     Literal(i64),
@@ -214,7 +217,7 @@ impl PrintIndent for Expr {
             ExprKind::SizeofExpr { expr, .. } => {
                 format!("Sizeof:\n{}", indent_fmt(expr.as_ref(), indent_level + 1))
             }
-            ExprKind::SizeofType { value } => format!("SizeofType: {}", value),
+            ExprKind::SizeofType { value, .. } => format!("SizeofType: {}", value),
             ExprKind::Nop => "Nop".to_string(),
             ExprKind::ScaleUp { .. } => "'scaling-up'".to_string(),
             ExprKind::ScaleDown { .. } => "'scaling-down'".to_string(),

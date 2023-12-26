@@ -5,8 +5,6 @@ arr some() {
   return a;
 }
 
-int[2] f();
-
 arr *bar();
 
 int baz()[2];

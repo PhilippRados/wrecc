@@ -204,7 +204,6 @@ impl<'a> Scanner<'a> {
                     }
                 },
                 PPKind::Ident(_)
-                | PPKind::Hash
                 | PPKind::Include
                 | PPKind::If
                 | PPKind::Ifdef
@@ -222,6 +221,7 @@ impl<'a> Scanner<'a> {
                         tokens.push(pp_token.clone(), TokenType::new_ident(ident))
                     }
                 }
+                PPKind::Hash => errors.push(Error::new(&pp_token, ErrorKind::UnexpectedChar('#'))),
                 PPKind::Whitespace(_) | PPKind::Newline => (),
             }
         }

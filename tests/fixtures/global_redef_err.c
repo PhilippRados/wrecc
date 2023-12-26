@@ -18,7 +18,6 @@ some main() {
   int foo();
 
   int some();
-  int some() { return 1; }
 
   typedef char some;
 

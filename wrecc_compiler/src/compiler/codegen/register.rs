@@ -167,7 +167,7 @@ pub struct StackRegister {
 impl StackRegister {
     pub fn new(bp_offset: &mut usize, type_decl: NEWTypes) -> Self {
         *bp_offset += type_decl.size();
-        *bp_offset = crate::compiler::wrecc_codegen::codegen::align(*bp_offset, &type_decl);
+        *bp_offset = crate::compiler::codegen::align(*bp_offset, &type_decl);
 
         StackRegister {
             bp_offset: *bp_offset,

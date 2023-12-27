@@ -1,6 +1,9 @@
+pub mod double_peek;
+pub mod fold;
+
 use crate::compiler::ast::{decl::*, expr::*, stmt::*};
 use crate::compiler::common::{environment::*, error::*, token::*, types::*};
-use crate::compiler::wrecc_parser::double_peek::*;
+use crate::compiler::parser::double_peek::*;
 
 use std::collections::VecDeque;
 

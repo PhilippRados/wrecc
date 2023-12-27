@@ -637,8 +637,8 @@ macro_rules! arr_decay {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::parser::tests::*;
     use crate::compiler::typechecker::TypeChecker;
-    use crate::compiler::wrecc_parser::parser::tests::*;
 
     fn assert_type_print(input: &str, expected: &str) {
         if let Ok(mut ty) = setup(input).type_name() {

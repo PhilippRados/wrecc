@@ -1,7 +1,7 @@
 use crate::compiler::ast::{decl::*, expr::*, stmt::*};
+use crate::compiler::codegen::align;
+use crate::compiler::codegen::register::*;
 use crate::compiler::common::{environment::*, error::*, token::*, types::*};
-use crate::compiler::wrecc_codegen::codegen::align;
-use crate::compiler::wrecc_codegen::register::*;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
@@ -2066,8 +2066,8 @@ fn log_2(x: i32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::parser::Parser;
     use crate::compiler::scanner::Scanner;
-    use crate::compiler::wrecc_parser::parser::Parser;
     use crate::preprocess;
     use std::path::Path;
 

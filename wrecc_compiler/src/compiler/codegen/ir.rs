@@ -1,5 +1,5 @@
+use crate::compiler::codegen::register::*;
 use crate::compiler::common::{token::*, types::*};
-use crate::compiler::wrecc_codegen::register::*;
 use std::fmt::Display;
 
 // Intermediate representation as an assembly instruction abstraction to simplify register allocation.

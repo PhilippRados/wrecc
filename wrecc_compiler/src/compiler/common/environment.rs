@@ -1,5 +1,5 @@
+use crate::compiler::codegen::register::*;
 use crate::compiler::common::{error::*, token::*, types::*};
-use crate::compiler::wrecc_codegen::register::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -433,9 +433,9 @@ impl Environment {
 
 #[cfg(test)]
 mod tests {
+    use crate::compiler::parser::Parser;
     use crate::compiler::scanner::Scanner;
     use crate::compiler::typechecker::TypeChecker;
-    use crate::compiler::wrecc_parser::parser::Parser;
     use crate::preprocess;
     use std::path::Path;
 

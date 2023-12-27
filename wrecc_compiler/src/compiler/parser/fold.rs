@@ -1,8 +1,8 @@
 use crate::compiler::ast::decl::DeclType;
 use crate::compiler::ast::expr::*;
+use crate::compiler::codegen::register::*;
 use crate::compiler::common::{environment::*, error::*, token::*, types::*};
 use crate::compiler::typechecker::*;
-use crate::compiler::wrecc_codegen::register::*;
 
 impl Expr {
     pub fn new_literal(value: i64, primitive_type: Types) -> Self {
@@ -468,8 +468,8 @@ impl Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::parser::Parser;
     use crate::compiler::scanner::Scanner;
-    use crate::compiler::wrecc_parser::parser::Parser;
     use crate::preprocess;
     use std::path::Path;
 

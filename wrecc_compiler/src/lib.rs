@@ -2,10 +2,10 @@ pub mod compiler;
 pub mod preprocessor;
 
 use compiler::{
-    common::error::*, scanner::*, typechecker::*, wrecc_codegen::codegen::*,
-    wrecc_codegen::register_allocation::*, wrecc_parser::parser::*,
+    codegen::register_allocation::*, codegen::*, common::error::*, parser::*, scanner::*,
+    typechecker::*,
 };
-use preprocessor::{preprocessor::*, scanner::Scanner as PPScanner};
+use preprocessor::{scanner::Scanner as PPScanner, *};
 
 use std::path::Path;
 

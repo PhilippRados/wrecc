@@ -1,7 +1,11 @@
+pub mod ir;
+pub mod register;
+pub mod register_allocation;
+
 use crate::compiler::ast::{decl::*, expr::*, stmt::*};
+use crate::compiler::codegen::{ir::*, register::*, register_allocation::*};
 use crate::compiler::common::{environment::*, token::*, types::*};
 use crate::compiler::typechecker::{align_by, create_label};
-use crate::compiler::wrecc_codegen::{ir::*, register::*, register_allocation::*};
 use std::collections::{HashMap, VecDeque};
 
 // converts a register into a scratch-register if it matches the pattern

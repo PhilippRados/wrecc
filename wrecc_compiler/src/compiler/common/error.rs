@@ -502,7 +502,7 @@ impl Error {
                 color_text(
                     &self.filename.display().to_string(),
                     Color::White,
-                    true,
+                    false,
                     no_color
                 ),
                 self.line_index,

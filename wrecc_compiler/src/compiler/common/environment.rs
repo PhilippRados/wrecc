@@ -267,7 +267,7 @@ impl<T> NameSpace<T> {
     }
 
     // checks if element is in current scope
-    pub fn get_current(&self, expected: &String) -> Option<Rc<RefCell<T>>> {
+    pub fn get_current(&self, expected: &str) -> Option<Rc<RefCell<T>>> {
         self.elems
             .last()
             .unwrap()
@@ -432,105 +432,213 @@ impl Environment {
 }
 
 #[cfg(test)]
+#[rustfmt::skip]
 mod tests {
-    use crate::compiler::parser::Parser;
-    use crate::compiler::scanner::Scanner;
-    use crate::compiler::typechecker::TypeChecker;
-    use crate::preprocess;
-    use std::path::Path;
+    use super::*;
+    use crate::compiler::common::types::tests::setup_type;
 
-    //     fn assert_namespace(input: &str, expected: Vec<(&str, &str, usize)>) {
-    //         let pp_tokens = preprocess(Path::new(""), input.to_string()).unwrap();
-    //         let mut scanner = Scanner::new(pp_tokens);
-    //         let tokens = scanner.scan_token().unwrap();
+    fn func_template(name: &str, kind: InitType) -> (Token, Symbols) {
+        let token = Token::default(TokenType::new_ident(name.to_string()));
+        let symbol = Symbols::Func(Function::new(setup_type("void"), Vec::new(), false, kind));
 
-    //         let mut parser = Parser::new(tokens);
-    //         let mut ext_decls = parser.parse().unwrap();
+        (token, symbol)
+    }
 
-    //         let mut typechecker = TypeChecker::new();
-    //         typechecker.check(&mut ext_decls);
+    fn var_template(name: &str, ty: &str, kind: InitType) -> (Token, Symbols) {
+        let token = Token::default(TokenType::new_ident(name.to_string()));
+        let symbol = Symbols::Variable(SymbolInfo {
+            kind,
+            token: token.clone(),
+            type_decl: setup_type(ty),
+            reg: None,
+            is_global: false,
+        });
 
-    //         let actual = typechecker.env.symbols.elems;
+        (token, symbol)
+    }
 
-    //         assert_eq!(actual.len(), expected.len());
-    //         for (actual, expected) in actual.into_iter().zip(expected) {
-    //             assert_eq!(actual.name, expected.0);
-    //             assert_eq!(actual.kind.borrow().to_string(), expected.1);
-    //             assert_eq!(actual.depth, expected.2);
-    //         }
-    //     }
+    fn declare(env: &mut Environment, (token, symbol): (Token, Symbols), global: bool) -> Result<Rc<RefCell<Symbols>>,Error>{
+        match global {
+            true => env.declare_global(&token, symbol),
+            false => env.declare_symbol(&token, symbol),
+        }
+    }
 
-    //     #[test]
-    //     fn builds_symbol_table() {
-    //         let input = "
-    // int main(){
-    //     char* s;
-    //     {
-    //         char* n;
-    //     }
-    //     char* n;
-    // }";
+    #[test]
+    fn builds_symbol_table() {
+        // int main(){
+        //     char* s;
+        //     {
+        //         char* n;
+        //     }
+        //     char* n;
+        // };
 
-    //         let expected = vec![
-    //             ("main", "function", 0),
-    //             ("s", "variable", 1),
-    //             ("n", "variable", 2),
-    //             ("n", "variable", 1),
-    //         ];
+        let mut env = Environment::new();
 
-    //         assert_namespace(input, expected);
-    //     }
-    //     #[test]
-    //     fn func_args() {
-    //         let input = "
-    // int foo(int a, int b) {
-    //     {
-    //         {
-    //             long some;
-    //         }
-    //     }
-    // 	return 2 + a - b;
-    // }
+        env.enter();
+        declare(&mut env, func_template("main", InitType::Definition), true).unwrap();
+        assert!(env.symbols.get_current("main").is_none());
 
-    // int main() {
-    // 	return foo(1, 3);
-    // }";
+        declare(&mut env,var_template("s", "char*", InitType::Declaration),false).unwrap();
+        assert!(env.symbols.get_current("s").is_some());
 
-    //         let expected = vec![
-    //             ("foo", "function", 0),
-    //             ("a", "variable", 1),
-    //             ("b", "variable", 1),
-    //             ("some", "variable", 3),
-    //             ("main", "function", 0),
-    //         ];
+        env.enter();
+        declare(&mut env,var_template("n", "int", InitType::Declaration),false).unwrap();
+        assert!(env.symbols.get_current("n").is_some());
+        assert!(env.symbols.get_current("s").is_none());
+        env.exit();
 
-    //         assert_namespace(input, expected);
-    //     }
+        assert!(env.symbols.get_current("s").is_some());
 
-    //     #[test]
-    //     fn func_decls() {
-    //         let input = "
-    // int main() {
-    //     {
-    //         {
-    //             int foo(int a, int b);
-    //         }
-    //     }
-    // 	return foo(1, 3);
-    // }";
+        declare(&mut env,var_template("n", "long", InitType::Declaration),false).unwrap();
+        assert!(matches!(
+            env.symbols.get_current("n").map(|sy|sy.borrow().clone()),
+            Some(Symbols::Variable(SymbolInfo {type_decl: NEWTypes::Primitive(Types::Long),..}))
+        ));
+        assert!(env.symbols.get_current("s").is_some());
 
-    //         let expected = vec![
-    //             ("main", "function", 0),
-    //             ("foo", "function", 3),
-    //             ("a", "variable", 4),
-    //             ("b", "variable", 4),
-    //         ];
+        env.exit();
+        assert!(env.symbols.get_current("main").is_some());
+    }
 
-    //         assert_namespace(input, expected);
-    //     }
+    #[test]
+    fn func_args() {
+        // int foo(int a, int b) {
+        //     {
+        //         {
+        //             long some;
+        //         }
+        //     }
+        //     return 2 + a - b;
+        // }
+        // int main() {
+        // 	   return foo(1, 3);
+        // }
 
-    //     #[test]
-    //     fn get_current() {
-    //         todo!()
-    //     }
+        let mut env = Environment::new();
+
+        env.enter();
+        declare(&mut env,var_template("a", "int", InitType::Declaration),false).unwrap();
+        declare(&mut env,var_template("b", "int", InitType::Declaration),false).unwrap();
+
+        declare(&mut env, func_template("foo", InitType::Definition), true).unwrap();
+        assert!(env.symbols.get_current("foo").is_none());
+        assert!(env.symbols.get_current("a").is_some());
+        assert!(env.symbols.get_current("b").is_some());
+
+        env.enter();
+        assert!(env.symbols.get_current("foo").is_none());
+        assert!(env.symbols.get_current("a").is_none());
+        env.enter();
+        declare(&mut env,var_template("some", "long", InitType::Declaration),false).unwrap();
+        assert!(env.symbols.get("some".to_string()).is_some());
+        assert!(env.symbols.get("a".to_string()).is_some());
+        assert!(env.symbols.get("foo".to_string()).is_some());
+
+        env.exit();
+        assert!(env.symbols.get("some".to_string()).is_none());
+        env.exit();
+        env.exit();
+
+        declare(&mut env, func_template("main", InitType::Definition), true).unwrap();
+
+        assert!(env.symbols.get_current("a").is_none());
+        assert!(env.symbols.get_current("foo").is_some());
+        assert!(env.symbols.get_current("main").is_some());
+    }
+
+    #[test]
+    fn func_decls() {
+        // int main() {
+        //     int a;
+        //     {
+        //         long a;
+        //         {
+        //             int foo(char a, int b);
+        //         }
+        //     }
+        // 	return foo(1, 3);
+        // }
+        let mut env = Environment::new();
+
+        env.enter();
+        declare(&mut env, func_template("main", InitType::Definition), true).unwrap();
+        declare(&mut env, var_template("a", "int", InitType::Declaration),false).unwrap();
+        env.enter();
+        assert!(env.symbols.get_current("a").is_none());
+        assert!(matches!(
+            env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
+            Some(Symbols::Variable(SymbolInfo {type_decl:NEWTypes::Primitive(Types::Int),..}))
+        ));
+
+        declare(&mut env, var_template("a", "long", InitType::Declaration),false).unwrap();
+        assert!(matches!(
+            env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
+            Some(Symbols::Variable(SymbolInfo {type_decl:NEWTypes::Primitive(Types::Long),..}))
+        ));
+        env.enter();
+
+        env.enter();
+        declare(&mut env,var_template("a", "char", InitType::Declaration),false).unwrap();
+        declare(&mut env,var_template("b", "int", InitType::Declaration),false).unwrap();
+        env.exit();
+        declare(&mut env, func_template("foo", InitType::Declaration), false).unwrap();
+
+        assert!(env.symbols.get_current("a").is_none());
+        assert!(matches!(
+            env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
+            Some(Symbols::Variable(SymbolInfo {type_decl:NEWTypes::Primitive(Types::Long),..}))
+        ));
+        assert!(env.symbols.get("foo".to_string()).is_some());
+
+        env.exit();
+        assert!(env.symbols.get("foo".to_string()).is_none());
+        assert!(matches!(
+            env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
+            Some(Symbols::Variable(SymbolInfo {type_decl:NEWTypes::Primitive(Types::Long),..}))
+        ));
+        env.exit();
+        assert!(matches!(
+            env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
+            Some(Symbols::Variable(SymbolInfo {type_decl:NEWTypes::Primitive(Types::Int),..}))
+        ));
+        env.exit();
+
+        assert!(env.symbols.get("main".to_string()).is_some());
+        assert!(env.symbols.get("foo".to_string()).is_none());
+    }
+
+    #[test]
+    fn redeclarations() {
+        let mut env = Environment::new();
+
+        declare(&mut env, func_template("foo", InitType::Declaration), true).unwrap();
+        declare(&mut env, func_template("foo", InitType::Definition), true).unwrap();
+        declare(&mut env, func_template("foo", InitType::Declaration), true).unwrap();
+
+        assert!(declare(&mut env, func_template("foo", InitType::Definition), true).is_err());
+
+        env.enter();
+        assert!(matches!(
+            env.symbols.get("foo".to_string()).map(|sy|sy.borrow().clone()),
+            Some(Symbols::Func(Function {kind:InitType::Definition,..})
+        )));
+        assert!(env.symbols.get_current("foo").is_none());
+
+        declare(&mut env, func_template("bar", InitType::Declaration), false).unwrap();
+        assert!(declare(&mut env, func_template("bar", InitType::Declaration), false).is_ok());
+
+        declare(&mut env, var_template("baz", "int", InitType::Declaration), false).unwrap();
+        assert!(declare(&mut env, var_template("baz", "int", InitType::Declaration), false).is_err());
+        assert!(declare(&mut env, var_template("baz", "int", InitType::Definition), false).is_err());
+
+        env.exit();
+
+        declare(&mut env, var_template("baz", "int", InitType::Declaration), false).unwrap();
+        assert!(declare(&mut env, var_template("baz", "int", InitType::Declaration), false).is_ok());
+        assert!(declare(&mut env, var_template("baz", "int", InitType::Definition), false).is_ok());
+        assert!(declare(&mut env, var_template("baz", "long", InitType::Declaration), false).is_err());
+
+    }
 }

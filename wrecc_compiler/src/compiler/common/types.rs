@@ -635,19 +635,22 @@ macro_rules! arr_decay {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::compiler::parser::tests::*;
     use crate::compiler::typechecker::TypeChecker;
 
-    fn assert_type_print(input: &str, expected: &str) {
+    pub fn setup_type(input: &str) -> NEWTypes {
         if let Ok(mut ty) = setup(input).type_name() {
             if let Ok(actual_ty) = TypeChecker::new().parse_type(&mut ty) {
-                assert_eq!(actual_ty.to_string(), expected);
-                return;
+                return actual_ty;
             }
         }
-        unreachable!("not variable declaration")
+        unreachable!("not type declaration")
+    }
+    fn assert_type_print(input: &str, expected: &str) {
+        let type_string = setup_type(input);
+        assert_eq!(type_string.to_string(), expected);
     }
 
     #[test]
@@ -666,22 +669,22 @@ mod tests {
 
     #[test]
     fn multi_dim_arr_print() {
-        assert_type_print("int [4][2];", "int [4][2]");
-        assert_type_print("int ([3])[4][2];", "int [3][4][2]");
+        assert_type_print("int [4][2]", "int [4][2]");
+        assert_type_print("int ([3])[4][2]", "int [3][4][2]");
 
-        assert_type_print("long int *[3][4][2];", "long *[3][4][2]");
-        assert_type_print("char ***[2];", "char ***[2]");
+        assert_type_print("long int *[3][4][2]", "long *[3][4][2]");
+        assert_type_print("char ***[2]", "char ***[2]");
 
-        assert_type_print("char *((*))[2];", "char *(*)[2]");
-        assert_type_print("char *(**)[2];", "char *(**)[2]");
-        assert_type_print("char *(**);", "char ***");
+        assert_type_print("char *((*))[2]", "char *(*)[2]");
+        assert_type_print("char *(**)[2]", "char *(**)[2]");
+        assert_type_print("char *(**)", "char ***");
 
-        assert_type_print("char *(*)[3][4][2];", "char *(*)[3][4][2]");
-        assert_type_print("char (**[3][4])[2];", "char (**[3][4])[2]");
-        assert_type_print("char (**(*)[4])[2];", "char (**(*)[4])[2]");
-        assert_type_print("char(**(*[3])[4])[2];", "char (**(*[3])[4])[2]");
+        assert_type_print("char *(*)[3][4][2]", "char *(*)[3][4][2]");
+        assert_type_print("char (**[3][4])[2]", "char (**[3][4])[2]");
+        assert_type_print("char (**(*)[4])[2]", "char (**(*)[4])[2]");
+        assert_type_print("char(**(*[3])[4])[2]", "char (**(*[3])[4])[2]");
 
-        assert_type_print("char (*(*[3]))[2];", "char (**[3])[2]");
+        assert_type_print("char (*(*[3]))[2]", "char (**[3])[2]");
     }
     #[test]
     fn function_type_print() {

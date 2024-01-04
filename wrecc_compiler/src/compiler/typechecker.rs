@@ -2066,31 +2066,24 @@ fn log_2(x: i32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::parser::Parser;
-    use crate::compiler::scanner::Scanner;
-    use crate::preprocess;
-    use std::path::Path;
+    use crate::compiler::common::environment::tests::var_template;
+    use crate::compiler::common::types::tests::setup_type;
+    use crate::compiler::parser::tests::setup;
 
-    fn setup(input: &str) -> Parser {
-        let pp_tokens = preprocess(Path::new(""), input.to_string()).unwrap();
-        let mut scanner = Scanner::new(pp_tokens);
-        let tokens = scanner.scan_token().unwrap();
-
-        Parser::new(tokens)
-    }
     macro_rules! assert_type {
-        ($input:expr,$expected_type:pat) => {
+        ($input:expr,$expected_type:expr) => {
             let mut parser = setup($input);
             let mut expr = parser.expression().unwrap();
 
             let mut typechecker = TypeChecker::new();
             let actual = typechecker.expr_type(&mut expr).unwrap();
+            let expected_type = setup_type($expected_type);
 
             assert!(
-                matches!(actual, $expected_type),
+                actual == expected_type,
                 "actual: {:?}, expected: {}",
                 actual,
-                stringify!($expected_type),
+                expected_type.to_string(),
             );
         };
     }
@@ -2118,20 +2111,9 @@ mod tests {
             let mut expr = parser.expression().unwrap();
 
             let mut typechecker = TypeChecker::new();
-            for (name, type_decl) in $symbols {
-                typechecker
-                    .env
-                    .declare_symbol(
-                        &Token::default(TokenType::new_ident(name.to_string())),
-                        Symbols::Variable(SymbolInfo {
-                            type_decl,
-                            kind: InitType::Declaration,
-                            reg: None,
-                            is_global: false,
-                            token: Token::default(TokenType::Semicolon),
-                        }),
-                    )
-                    .unwrap();
+            for (name, ty) in $symbols {
+                let (token, symbol) = var_template(name, ty, InitType::Declaration);
+                typechecker.env.declare_symbol(&token, symbol).unwrap();
             }
 
             let value_type = typechecker.expr_type(&mut expr).unwrap();
@@ -2178,23 +2160,23 @@ mod tests {
 
     #[test]
     fn binary_integer_promotion() {
-        assert_type!("'1' + '2'", NEWTypes::Primitive(Types::Int));
+        assert_type!("'1' + '2'", "int");
     }
 
     #[test]
     fn shift_type() {
-        assert_type!("1 << (long)2", NEWTypes::Primitive(Types::Int));
-        assert_type!("(long)1 << (char)2", NEWTypes::Primitive(Types::Long));
-        assert_type!("'1' << (char)2", NEWTypes::Primitive(Types::Int));
+        assert_type!("1 << (long)2", "int");
+        assert_type!("(long)1 << (char)2", "long");
+        assert_type!("'1' << (char)2", "int");
     }
 
     #[test]
     fn comp_type() {
-        assert_type!("1 == (long)2", NEWTypes::Primitive(Types::Int));
-        assert_type!("(char*)1 == (char*)2", NEWTypes::Primitive(Types::Int));
-        assert_type!("1 <= (long)2", NEWTypes::Primitive(Types::Int));
-        assert_type!("(char*)1 > (char*)2", NEWTypes::Primitive(Types::Int));
-        assert_type!("(void*)1 == (long*)2", NEWTypes::Primitive(Types::Int));
+        assert_type!("1 == (long)2", "int");
+        assert_type!("(char*)1 == (char*)2", "int");
+        assert_type!("1 <= (long)2", "int");
+        assert_type!("(char*)1 > (char*)2", "int");
+        assert_type!("(void*)1 == (long*)2", "int");
 
         assert_type_err!("1 == (long*)2", ErrorKind::InvalidComp(..));
         assert_type_err!("(int*)1 == (long*)2", ErrorKind::InvalidComp(..));
@@ -2202,75 +2184,28 @@ mod tests {
 
     #[test]
     fn static_constant_test() {
-        assert_const_expr!(
-            "&a + (int)(3 * 1)",
-            true,
-            vec![("a", NEWTypes::Primitive(Types::Int))]
-        );
+        assert_const_expr!("&a + (int)(3 * 1)", true, vec![("a", "int")]);
 
-        assert_const_expr!(
-            "a + (int)(3 * 1)",
-            false,
-            vec![(
-                "a",
-                NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Int)))
-            )]
-        );
-        assert_const_expr!(
-            "\"hi\" + (int)(3 * 1)",
-            true,
-            Vec::<(&str, NEWTypes)>::new()
-        );
-        assert_const_expr!(
-            "&\"hi\" + (int)(3 * 1)",
-            true,
-            Vec::<(&str, NEWTypes)>::new()
-        );
+        assert_const_expr!("a + (int)(3 * 1)", false, vec![("a", "int*")]);
+        assert_const_expr!("\"hi\" + (int)(3 * 1)", true, Vec::new());
+        assert_const_expr!("&\"hi\" + (int)(3 * 1)", true, Vec::new());
 
-        assert_const_expr!(
-            "(long*)&a",
-            true,
-            vec![("a", NEWTypes::Primitive(Types::Int))]
-        );
+        assert_const_expr!("(long*)&a", true, vec![("a", "int")]);
 
-        assert_const_expr!("(long*)1 + 3", true, Vec::<(&str, NEWTypes)>::new());
+        assert_const_expr!("(long*)1 + 3", true, Vec::new());
 
-        assert_const_expr!(
-            "&a[3]",
-            true,
-            vec![(
-                "a",
-                NEWTypes::Array {
-                    amount: 4,
-                    of: Box::new(NEWTypes::Primitive(Types::Int)),
-                },
-            )]
-        );
+        assert_const_expr!("&a[3]", true, vec![("a", "int[4]")]);
 
-        assert_const_expr!(
-            "*&a[3]",
-            false,
-            vec![(
-                "a",
-                NEWTypes::Array {
-                    amount: 4,
-                    of: Box::new(NEWTypes::Primitive(Types::Int)),
-                },
-            )]
-        );
+        assert_const_expr!("*&a[3]", false, vec![("a", "int[4]")]);
 
         assert_const_expr!(
             "&a.age",
             true,
             vec![(
                 "a",
-                NEWTypes::Struct(StructInfo::Anonymous(
-                    Token::default(TokenType::Comma),
-                    vec![(
-                        NEWTypes::default(),
-                        Token::default(TokenType::new_ident("age".to_string())),
-                    )]
-                ))
+                "struct {
+                    int age;
+                }"
             )]
         );
 
@@ -2279,81 +2214,30 @@ mod tests {
             false,
             vec![(
                 "a",
-                NEWTypes::Struct(StructInfo::Anonymous(
-                    Token::default(TokenType::Comma),
-                    vec![(
-                        NEWTypes::default(),
-                        Token::default(TokenType::new_ident("age".to_string())),
-                    )]
-                ))
+                "struct {
+                    int age;
+                }"
             )]
         );
-        assert_const_expr!(
-            "*a",
-            false,
-            vec![(
-                "a",
-                NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Int)))
-            )]
-        );
+        assert_const_expr!("*a", false, vec![("a", "int*")]);
 
-        assert_const_expr!(
-            "(int *)*a",
-            false,
-            vec![(
-                "a",
-                NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Int)))
-            )]
-        );
+        assert_const_expr!("(int *)*a", false, vec![("a", "int*")]);
 
-        assert_const_expr!(
-            "*a",
-            true,
-            vec![(
-                "a",
-                NEWTypes::Array {
-                    amount: 4,
-                    of: Box::new(NEWTypes::Array {
-                        amount: 4,
-                        of: Box::new(NEWTypes::Primitive(Types::Int))
-                    },),
-                },
-            )]
-        );
-        assert_const_expr!(
-            "*&a[3]",
-            true,
-            vec![(
-                "a",
-                NEWTypes::Array {
-                    amount: 4,
-                    of: Box::new(NEWTypes::Array {
-                        amount: 4,
-                        of: Box::new(NEWTypes::Primitive(Types::Int))
-                    },),
-                },
-            )]
-        );
+        assert_const_expr!("*a", true, vec![("a", "int[4][4]")]);
+        assert_const_expr!("*&a[3]", true, vec![("a", "int[4][4]")]);
 
         assert_const_expr!(
             "&a->age",
             true,
             vec![(
                 "a",
-                NEWTypes::Array {
-                    amount: 4,
-                    of: Box::new(NEWTypes::Struct(StructInfo::Anonymous(
-                        Token::default(TokenType::Comma),
-                        vec![(
-                            NEWTypes::default(),
-                            Token::default(TokenType::new_ident("age".to_string())),
-                        )]
-                    ))),
-                },
+                "struct {
+                    int age;
+                }[4]"
             )]
         );
 
-        assert_const_expr!("a", false, vec![("a", NEWTypes::Primitive(Types::Int))]);
+        assert_const_expr!("a", false, vec![("a", "int")]);
     }
 
     #[test]

@@ -433,7 +433,7 @@ impl Environment {
 
 #[cfg(test)]
 #[rustfmt::skip]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::compiler::common::types::tests::setup_type;
 
@@ -444,7 +444,7 @@ mod tests {
         (token, symbol)
     }
 
-    fn var_template(name: &str, ty: &str, kind: InitType) -> (Token, Symbols) {
+    pub fn var_template(name: &str, ty: &str, kind: InitType) -> (Token, Symbols) {
         let token = Token::default(TokenType::new_ident(name.to_string()));
         let symbol = Symbols::Variable(SymbolInfo {
             kind,

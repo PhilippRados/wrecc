@@ -1,0 +1,106 @@
+error: Typedef not allowed in function-definition
+|  --> in tests/fixtures/parser_recovery.c:1:13
+|
+1 typedef int my_func() {
+|             ^
+error: Storage classes not allowed in this specifier
+|  --> in tests/fixtures/parser_recovery.c:7:3
+|
+7   typedef int a;
+|   ^
+error: Can't have empty 'enum'
+|  --> in tests/fixtures/parser_recovery.c:9:5
+|
+9     enum C {} empty;
+|     ^
+error: Expect ';' after member declaration
+|  --> in tests/fixtures/parser_recovery.c:12:9
+|
+12   int n long last;
+|          ^
+error: Cannot define functions in 'for'-loop
+|  --> in tests/fixtures/parser_recovery.c:16:12
+|
+16   for (int foo(){}; -2;;) {
+|             ^
+error: Expected expression found: ')'
+|  --> in tests/fixtures/parser_recovery.c:16:25
+|
+16   for (int foo(){}; -2;;) {
+|                          ^
+error: Expect '=' after array designator
+|  --> in tests/fixtures/parser_recovery.c:23:16
+|
+23 int a[3] = {[0], 2, 1 -- -};
+|                 ^
+error: Expect ';' after member declaration
+|  --> in tests/fixtures/parser_recovery.c:26:9
+|
+26   int a a;
+|          ^
+error: Storage classes not allowed in this specifier
+|  --> in tests/fixtures/parser_recovery.c:28:5
+|
+28     typedef long b;
+|      ^
+error: Expect ';' after member declaration
+|  --> in tests/fixtures/parser_recovery.c:32:1
+|
+32 };
+|  ^
+error: Expected identifier following type-specifier
+|  --> in tests/fixtures/parser_recovery.c:34:1
+|
+34 return 1 + 2;
+|  ^
+error: Expect ';' after declaration
+|  --> in tests/fixtures/parser_recovery.c:36:7
+|
+36 int a a;
+|        ^
+error: Expected expression found: ')'
+|  --> in tests/fixtures/parser_recovery.c:39:14
+|
+39   if (a + a +) {
+|               ^
+error: Expected expression found: ';'
+|  --> in tests/fixtures/parser_recovery.c:44:15
+|
+44   int a = 3 + ;
+|                ^
+error: Expect ';' after declaration
+|  --> in tests/fixtures/parser_recovery.c:49:7
+|
+49       printf("%d %d\n", a, b);
+|        ^
+error: Expect ';' after declaration
+|  --> in tests/fixtures/parser_recovery.c:51:9
+|
+51   int a e;
+|          ^
+error: Expect ';' after expression
+|  --> in tests/fixtures/parser_recovery.c:54:17
+|
+54 int foo() { but this will be ignored; }
+|                  ^
+error: Expected identifier following type-specifier
+|  --> in tests/fixtures/parser_recovery.c:55:1
+|
+55 }
+|  ^
+error: Expected identifier following type-specifier
+|  --> in tests/fixtures/parser_recovery.c:56:1
+|
+56 {
+|  ^
+error: Expect ')' after function parameters
+|  --> in tests/fixtures/parser_recovery.c:62:16
+|
+62 void bar(int a a, some) { return; }
+|                 ^
+error: Expect ';' after declaration
+|  --> in tests/fixtures/parser_recovery.c:64:11
+|
+64 int x, x(){};
+|            ^
+21 errors generated.

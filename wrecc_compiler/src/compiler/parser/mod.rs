@@ -12,9 +12,6 @@ pub struct Parser {
 
     // only used as indicator if an identifier was declared as a typedef
     typedefs: NameSpace<()>,
-
-    // nest-depth to indicate matching synchronizing token
-    nest_level: usize,
 }
 
 impl Parser {
@@ -22,7 +19,6 @@ impl Parser {
         Parser {
             tokens: DoublePeek::new(tokens),
             typedefs: NameSpace::new(),
-            nest_level: 0,
         }
     }
     pub fn parse(mut self) -> Result<Vec<ExternalDeclaration>, Vec<Error>> {
@@ -39,7 +35,7 @@ impl Parser {
                 }
                 Err(e) => {
                     errors.push(e);
-                    self.sync();
+                    self.sync(TokenType::Semicolon);
                 }
             }
         }
@@ -54,24 +50,41 @@ impl Parser {
         self.tokens.peek().ok()
     }
 
-    // skips to next valid declaration/statement
-    fn sync(&mut self) {
-        let mut scope = self.nest_level;
+    fn maybe_sync(
+        &mut self,
+        result: Result<(), Error>,
+        errors: &mut Vec<Error>,
+        until: TokenType,
+    ) -> bool {
+        if let Err(err) = result {
+            // if multiple errors then parser has already been synchronized
+            if !matches!(err.kind, ErrorKind::Multiple(_)) {
+                self.sync(until);
+            }
+            errors.push(err);
+            return true;
+        }
+        false
+    }
+    // skips tokens until the next synchronizing token is reached
+    fn sync(&mut self, until: TokenType) {
+        let mut open_braces = 0;
 
-        while let Some(v) = self.tokens.next() {
-            match v.token {
-                TokenType::Semicolon if scope == 0 => break,
-                TokenType::LeftBrace => scope += 1,
+        while let Some(token) = self.tokens.next() {
+            match token.token {
+                tok if tok == until && open_braces <= 0 => {
+                    break;
+                }
+                TokenType::LeftBrace => open_braces += 1,
                 TokenType::RightBrace => {
-                    if scope == 0 || scope == 1 {
+                    if open_braces <= 1 {
                         break;
                     }
-                    scope -= 1;
+                    open_braces -= 1
                 }
                 _ => (),
             }
         }
-        self.nest_level = 0;
     }
 
     // <external-declaration> ::= <function-definition>
@@ -92,8 +105,10 @@ impl Parser {
         if matches!(
             declarator.modifiers.last(),
             Some(DeclModifier::Function { .. })
-        ) && self.matches(&[TokenKind::LeftBrace]).is_some()
-        {
+        ) && matches!(
+            self.tokens.peek(),
+            Ok(Token { token: TokenType::LeftBrace, .. })
+        ) {
             return self.function_definition(specifiers, is_typedef, declarator);
         }
 
@@ -287,6 +302,8 @@ impl Parser {
             ));
         }
 
+        self.tokens.next().expect("consume peeked left-brace");
+
         let body = self.block()?;
 
         Ok(ExternalDeclaration::Function(
@@ -349,9 +366,7 @@ impl Parser {
         designator: Option<VecDeque<Designator>>,
     ) -> Result<Init, Error> {
         if self.matches(&[TokenKind::LeftBrace]).is_some() {
-            self.nest_level += 1;
             let init_list = self.initializer_list(token, designator)?;
-            self.nest_level -= 1;
 
             Ok(init_list)
         } else {
@@ -372,36 +387,50 @@ impl Parser {
         designator: Option<VecDeque<Designator>>,
     ) -> Result<Init, Error> {
         let mut init_list = Vec::new();
+        let mut errors = Vec::new();
 
         while !self.check(TokenKind::RightBrace) {
-            let designator = self.parse_designator()?;
-            if designator.is_some() {
-                self.consume(TokenKind::Equal, "Expect '=' after array designator")?;
-            }
+            let result = || -> Result<(), Error> {
+                let designator = self.parse_designator()?;
+                if designator.is_some() {
+                    self.consume(TokenKind::Equal, "Expect '=' after array designator")?;
+                }
 
-            let token = self.tokens.peek()?.clone();
-            let init = self.initializers(&token, designator)?;
+                let token = self.tokens.peek()?.clone();
+                let init = self.initializers(&token, designator)?;
 
-            init_list.push(Box::new(init));
+                init_list.push(Box::new(init));
 
-            if !self.check(TokenKind::RightBrace) {
-                self.consume(
-                    TokenKind::Comma,
-                    "Expect ',' seperating expressions in initializer-list",
-                )?;
+                if !self.check(TokenKind::RightBrace) {
+                    self.consume(
+                        TokenKind::Comma,
+                        "Expect ',' seperating expressions in initializer-list",
+                    )?;
+                }
+
+                Ok(())
+            }();
+
+            if self.maybe_sync(result, &mut errors, TokenType::RightBrace) {
+                break;
             }
         }
-        self.consume(
-            TokenKind::RightBrace,
-            "Expected closing '}' after initializer-list",
-        )?;
 
-        Ok(Init {
-            token: token.clone(),
-            designator,
-            kind: InitKind::Aggr(init_list),
-            offset: 0,
-        })
+        if errors.is_empty() {
+            self.consume(
+                TokenKind::RightBrace,
+                "Expected closing '}' after initializer-list",
+            )?;
+
+            Ok(Init {
+                token: token.clone(),
+                designator,
+                kind: InitKind::Aggr(init_list),
+                offset: 0,
+            })
+        } else {
+            Err(Error::new_multiple(errors))
+        }
     }
 
     fn parse_designator(&mut self) -> Result<Option<VecDeque<Designator>>, Error> {
@@ -446,26 +475,42 @@ impl Parser {
     //                | <identifier> = <conditional-expression>
     fn enumerator_list(&mut self, token: &Token) -> Result<Vec<(Token, Option<Expr>)>, Error> {
         let mut constants = Vec::new();
+        let mut errors = Vec::new();
+
         if self.check(TokenKind::RightBrace) {
             return Err(Error::new(token, ErrorKind::IsEmpty(token.token.clone())));
         }
-        while self.matches(&[TokenKind::RightBrace]).is_none() {
-            let ident = self.consume(TokenKind::Ident, "Expect identifier in enum definition")?;
-            let init = if self.matches(&[TokenKind::Equal]).is_some() {
-                Some(self.ternary_conditional()?)
-            } else {
-                None
-            };
-            constants.push((ident.clone(), init));
 
-            if !self.check(TokenKind::RightBrace) {
-                self.consume(
-                    TokenKind::Comma,
-                    "Expect ',' seperating expressions in enum-specifier",
-                )?;
+        while self.matches(&[TokenKind::RightBrace]).is_none() {
+            let result = || -> Result<(), Error> {
+                let ident =
+                    self.consume(TokenKind::Ident, "Expect identifier in enum definition")?;
+                let init = if self.matches(&[TokenKind::Equal]).is_some() {
+                    Some(self.ternary_conditional()?)
+                } else {
+                    None
+                };
+                constants.push((ident.clone(), init));
+
+                if !self.check(TokenKind::RightBrace) {
+                    self.consume(
+                        TokenKind::Comma,
+                        "Expect ',' seperating expressions in enum-specifier",
+                    )?;
+                }
+                Ok(())
+            }();
+
+            if self.maybe_sync(result, &mut errors, TokenType::RightBrace) {
+                break;
             }
         }
-        Ok(constants)
+
+        if errors.is_empty() {
+            Ok(constants)
+        } else {
+            Err(Error::new_multiple(errors))
+        }
     }
     // <struct-declaration> ::= {<specifier-qualifier>}* <struct-declarator-list>
     // <struct-declarator-list> ::= <struct-declarator>
@@ -473,27 +518,43 @@ impl Parser {
     // <struct-declarator> ::= <declarator>
     fn struct_declaration(&mut self, token: &Token) -> Result<Vec<MemberDeclaration>, Error> {
         let mut members = Vec::new();
+        let mut errors = Vec::new();
 
         if self.check(TokenKind::RightBrace) {
             return Err(Error::new(token, ErrorKind::IsEmpty(token.token.clone())));
         }
 
         while self.matches(&[TokenKind::RightBrace]).is_none() {
-            let (specifiers, _) = self.declaration_specifiers(false)?;
-            let mut declarators = Vec::new();
-            loop {
-                declarators.push(self.declarator(DeclaratorKind::NoAbstract)?);
+            let result = || -> Result<(), Error> {
+                let (specifiers, _) = self.declaration_specifiers(false)?;
+                let mut declarators = Vec::new();
 
-                if self.matches(&[TokenKind::Comma]).is_none() {
-                    break;
+                loop {
+                    let declarator = self.declarator(DeclaratorKind::NoAbstract)?;
+                    declarators.push(declarator);
+
+                    if self.matches(&[TokenKind::Comma]).is_none() {
+                        break;
+                    }
                 }
-            }
-            members.push((specifiers, declarators));
+                members.push((specifiers, declarators));
 
-            self.consume(TokenKind::Semicolon, "Expect ';' after member declaration")?;
+                if let Err(e) =
+                    self.consume(TokenKind::Semicolon, "Expect ';' after member declaration")
+                {
+                    errors.push(e);
+                }
+                Ok(())
+            }();
+
+            self.maybe_sync(result, &mut errors, TokenType::Semicolon);
         }
 
-        Ok(members)
+        if errors.is_empty() {
+            Ok(members)
+        } else {
+            Err(Error::new_multiple(errors))
+        }
     }
     // <struct-or-union-specifier> ::= <struct-or-union> <identifier> { {<parse-members>}+ }
     //                               | <struct-or-union> { {<parse-members>}+ }
@@ -634,10 +695,11 @@ impl Parser {
         Ok(Stmt::Continue(keyword))
     }
     fn return_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
-        let mut value = None;
-        if !self.check(TokenKind::Semicolon) {
-            value = Some(self.expression()?);
-        }
+        let value = match self.check(TokenKind::Semicolon) {
+            false => Some(self.expression()?),
+            true => None,
+        };
+
         self.consume(TokenKind::Semicolon, "Expect ';' after return statement")?;
         Ok(Stmt::Return(keyword, value))
     }
@@ -715,32 +777,27 @@ impl Parser {
 
         self.typedefs.enter();
 
-        while let Ok(token) = self.tokens.peek() {
+        while let Ok(token) = self.tokens.peek().map(|tok| tok.clone()) {
             if token.token == TokenType::RightBrace {
                 break;
             }
-            let stmt = match self.is_specifier(token) {
-                true => self.external_declaration().and_then(|decl| match decl {
-                    ExternalDeclaration::Declaration(decl) => Ok(Stmt::Declaration(decl)),
-                    ExternalDeclaration::Function(_, name, _) => Err(Error::new(
-                        &name,
-                        ErrorKind::Regular("Cannot define functions in 'block'-statement"),
-                    )),
-                }),
-                false => self.statement(),
-            };
+            let result = || -> Result<(), Error> {
+                let stmt = match self.is_specifier(&token) {
+                    true => self.external_declaration().and_then(|decl| match decl {
+                        ExternalDeclaration::Declaration(decl) => Ok(Stmt::Declaration(decl)),
+                        ExternalDeclaration::Function(_, name, _) => Err(Error::new(
+                            &name,
+                            ErrorKind::Regular("Cannot define functions in 'block'-statement"),
+                        )),
+                    }),
+                    false => self.statement(),
+                }?;
 
-            match stmt {
-                Ok(s) => statements.push(s),
-                Err(e) if matches!(e.kind, ErrorKind::Multiple(_)) => {
-                    // if error is multiple then stmt has already been synchronized
-                    errors.push(e);
-                }
-                Err(e) => {
-                    errors.push(e);
-                    self.sync();
-                }
-            }
+                statements.push(stmt);
+                Ok(())
+            }();
+
+            self.maybe_sync(result, &mut errors, TokenType::Semicolon);
         }
 
         if let Err(e) = self.consume(TokenKind::RightBrace, "Expected closing '}' after Block") {
@@ -769,10 +826,11 @@ impl Parser {
         )?;
 
         let then_branch = self.statement()?;
-        let mut else_branch = None;
-        if self.matches(&[TokenKind::Else]).is_some() {
-            else_branch = Some(Box::new(self.statement()?))
-        }
+        let else_branch = if self.matches(&[TokenKind::Else]).is_some() {
+            Some(Box::new(self.statement()?))
+        } else {
+            None
+        };
         Ok(Stmt::If(
             keyword,
             condition,

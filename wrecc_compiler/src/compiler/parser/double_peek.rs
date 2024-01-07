@@ -25,10 +25,4 @@ impl<T: Clone> DoublePeek<T> {
             .get(1)
             .ok_or_else(|| (self.eof.clone(), ErrorKind::Eof("Expected expression")))
     }
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-    pub fn to_vec(self) -> Vec<T> {
-        self.inner.into()
-    }
 }

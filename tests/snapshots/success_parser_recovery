@@ -18,7 +18,7 @@ error: Expect ';' after member declaration
 |
 12   int n long last;
 |          ^
-error: Cannot define functions in 'for'-loop
+error: Cannot define functions in 'for'-statement
 |  --> in tests/fixtures/parser_recovery.c:16:12
 |
 16   for (int foo(){}; -2;;) {

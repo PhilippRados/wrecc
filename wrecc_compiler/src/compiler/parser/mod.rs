@@ -711,24 +711,19 @@ impl Parser {
         let init = match self.is_specifier(self.tokens.peek()?) {
             true => self.external_declaration().and_then(|decl| match decl {
                 ExternalDeclaration::Declaration(decl) => {
-                    // if let Some(decl_kind) = decl
-                    //     .iter()
-                    //     .find(|kind| !matches!(kind, DeclarationKind::VarDecl(..)))
-                    // {
-                    //     return Err(Error::new(
-                    //         decl_kind.get_token(),
-                    //         ErrorKind::Regular(
-                    //             "Cannot have non-variable declaration in 'for'-loop",
-                    //         ),
-                    //     ));
-                    // } else {
+                    if decl.is_typedef {
+                        return Err(Error::new(
+                            &left_paren,
+                            ErrorKind::Regular("Typedef not allowed in for-statement"),
+                        ));
+                    }
+
                     Ok(Some(Box::new(Stmt::Declaration(decl))))
-                    // }
                 }
                 ExternalDeclaration::Function(_, name, _) => {
                     return Err(Error::new(
                         &name,
-                        ErrorKind::Regular("Cannot define functions in 'for'-loop"),
+                        ErrorKind::Regular("Cannot define functions in 'for'-statement"),
                     ));
                 }
             }),
@@ -736,7 +731,7 @@ impl Parser {
                 Ok(Some(Box::new(self.expression_statement()?)))
             }
             false => {
-                self.consume(TokenKind::Semicolon, "Expect ';' in for loop")?;
+                self.consume(TokenKind::Semicolon, "Expect ';' in 'for'-statement")?;
                 Ok(None)
             }
         }?;

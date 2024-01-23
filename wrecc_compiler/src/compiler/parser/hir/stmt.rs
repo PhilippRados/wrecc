@@ -1,28 +1,28 @@
-use crate::compiler::ast::{decl::*, expr::*};
 use crate::compiler::common::token::Token;
+use crate::compiler::parser::hir::{decl::*, expr::*};
 
 use super::expr::PrintIndent;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Stmt {
     Declaration(Declaration),
-    Expr(Expr),
+    Expr(ExprKind),
     Block(Vec<Stmt>),
-    If(Token, Expr, Box<Stmt>, Option<Box<Stmt>>),
-    While(Token, Expr, Box<Stmt>),
-    Do(Token, Box<Stmt>, Expr),
+    If(Token, ExprKind, Box<Stmt>, Option<Box<Stmt>>),
+    While(Token, ExprKind, Box<Stmt>),
+    Do(Token, Box<Stmt>, ExprKind),
     For(
         Token,
         Option<Box<Stmt>>,
-        Option<Expr>,
-        Option<Expr>,
+        Option<ExprKind>,
+        Option<ExprKind>,
         Box<Stmt>,
     ),
-    Return(Token, Option<Expr>),
+    Return(Token, Option<ExprKind>),
     Break(Token),
     Continue(Token),
-    Switch(Token, Expr, Box<Stmt>),
-    Case(Token, Expr, Box<Stmt>),
+    Switch(Token, ExprKind, Box<Stmt>),
+    Case(Token, ExprKind, Box<Stmt>),
     Default(Token, Box<Stmt>),
     Goto(Token),
     Label(Token, Box<Stmt>),

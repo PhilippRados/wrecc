@@ -1,134 +1,98 @@
-use crate::compiler::ast::decl::*;
-use crate::compiler::common::{token::*, types::*};
+use crate::compiler::common::{token::Token, types::NEWTypes};
+use crate::compiler::parser::hir::decl::*;
+use crate::compiler::typechecker::TypeChecker;
 use std::fmt;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ExprKind {
     Binary {
-        left: Box<Expr>,
+        left: Box<ExprKind>,
         token: Token,
-        right: Box<Expr>,
+        right: Box<ExprKind>,
     },
     Unary {
         token: Token,
-        right: Box<Expr>,
+        right: Box<ExprKind>,
     },
     Grouping {
-        expr: Box<Expr>,
+        expr: Box<ExprKind>,
     },
     Assign {
-        l_expr: Box<Expr>,
+        l_expr: Box<ExprKind>,
         token: Token,
-        r_expr: Box<Expr>,
+        r_expr: Box<ExprKind>,
     },
     CompoundAssign {
-        l_expr: Box<Expr>,
+        l_expr: Box<ExprKind>,
         token: Token,
-        r_expr: Box<Expr>,
+        r_expr: Box<ExprKind>,
     },
     Logical {
-        left: Box<Expr>,
+        left: Box<ExprKind>,
         token: Token,
-        right: Box<Expr>,
+        right: Box<ExprKind>,
     },
     Comparison {
-        left: Box<Expr>,
+        left: Box<ExprKind>,
         token: Token,
-        right: Box<Expr>,
+        right: Box<ExprKind>,
     },
     Call {
         left_paren: Token,
         name: Token,
-        args: Vec<Expr>,
+        args: Vec<ExprKind>,
     },
     Cast {
         token: Token,
         decl_type: DeclType,
-        new_type: NEWTypes,
-        direction: Option<CastDirection>,
-        expr: Box<Expr>,
-    },
-    ScaleUp {
-        by: usize,
-        expr: Box<Expr>,
-    },
-    ScaleDown {
-        shift_amount: usize,
-        expr: Box<Expr>,
+        expr: Box<ExprKind>,
     },
     PostUnary {
         token: Token,
-        left: Box<Expr>,
-        by_amount: usize,
+        left: Box<ExprKind>,
     },
     MemberAccess {
         token: Token,
         member: Token,
-        expr: Box<Expr>,
+        expr: Box<ExprKind>,
     },
     Ternary {
         token: Token,
-        cond: Box<Expr>,
-        true_expr: Box<Expr>,
-        false_expr: Box<Expr>,
+        cond: Box<ExprKind>,
+        true_expr: Box<ExprKind>,
+        false_expr: Box<ExprKind>,
     },
     Comma {
-        left: Box<Expr>,
-        right: Box<Expr>,
+        left: Box<ExprKind>,
+        right: Box<ExprKind>,
     },
-    // value gets filled in in typechecker
     SizeofType {
         decl_type: DeclType,
-        value: usize,
     },
     SizeofExpr {
-        expr: Box<Expr>,
-        value: usize,
+        expr: Box<ExprKind>,
     },
     String(Token),
-    Literal(i64),
+    Literal(i64, NEWTypes),
     Ident(Token),
     Nop,
 }
-impl ExprKind {
-    pub fn is_zero(&self) -> bool {
-        if let ExprKind::Literal(0) = self {
-            true
-        } else {
-            false
-        }
-    }
-}
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum CastDirection {
-    Up,
-    Down,
-    Equal,
+pub trait IsZero {
+    fn is_zero(&self) -> bool;
 }
-#[derive(Debug, PartialEq, Clone)]
-pub enum ValueKind {
-    Lvalue,
-    Rvalue,
-}
-#[derive(Debug, PartialEq, Clone)]
-pub struct Expr {
-    pub kind: ExprKind,
-    pub type_decl: Option<NEWTypes>,
-    pub value_kind: ValueKind,
-}
-impl Expr {
-    pub fn new(kind: ExprKind, value_kind: ValueKind) -> Self {
-        Expr { type_decl: None, kind, value_kind }
+impl IsZero for ExprKind {
+    fn is_zero(&self) -> bool {
+        matches!(self, ExprKind::Literal(0, _))
     }
 }
 
 pub trait PrintIndent {
     fn print_indent(&self, indent_level: usize) -> String;
 }
-impl PrintIndent for Expr {
+impl PrintIndent for ExprKind {
     fn print_indent(&self, indent_level: usize) -> String {
-        match &self.kind {
+        match &self {
             ExprKind::Binary { left, token, right } => format!(
                 "Binary: {}\n{}\n{}",
                 token.token,
@@ -152,7 +116,7 @@ impl PrintIndent for Expr {
                     indent_fmt(r_expr.as_ref(), indent_level + 1)
                 )
             }
-            ExprKind::Literal(n) => format!("Literal: {}", n),
+            ExprKind::Literal(n, _) => format!("Literal: {}", n),
             ExprKind::Ident(name) => format!("Ident: '{}'", name.unwrap_string()),
             ExprKind::String(token) => format!("String: '{}'", token.unwrap_string()),
             ExprKind::Logical { token, left, right } => format!(
@@ -178,11 +142,17 @@ impl PrintIndent for Expr {
                 }
                 format!("FuncCall: '{}'{}", name.unwrap_string(), args)
             }
-            ExprKind::Cast { new_type, expr, .. } => format!(
-                "Cast: '{}'\n{}",
-                new_type,
-                indent_fmt(expr.as_ref(), indent_level + 1)
-            ),
+            ExprKind::Cast { decl_type, expr, .. } => {
+                let type_string = TypeChecker::new()
+                    .parse_type(decl_type.clone())
+                    .map(|ty| ty.to_string())
+                    .unwrap_or("invalid type".to_string());
+                format!(
+                    "Cast: '{}'\n{}",
+                    type_string,
+                    indent_fmt(expr.as_ref(), indent_level + 1)
+                )
+            }
             ExprKind::PostUnary { token, left, .. } => format!(
                 "PostUnary: {}\n{}",
                 token.token,
@@ -215,12 +185,20 @@ impl PrintIndent for Expr {
                 )
             }
             ExprKind::SizeofExpr { expr, .. } => {
-                format!("Sizeof:\n{}", indent_fmt(expr.as_ref(), indent_level + 1))
+                format!(
+                    "SizeofExpr:\n{}",
+                    indent_fmt(expr.as_ref(), indent_level + 1)
+                )
             }
-            ExprKind::SizeofType { value, .. } => format!("SizeofType: {}", value),
+            ExprKind::SizeofType { decl_type } => {
+                let type_string = TypeChecker::new()
+                    .parse_type(decl_type.clone())
+                    .map(|ty| ty.to_string())
+                    .unwrap_or("invalid type".to_string());
+
+                format!("SizeofType: {}", type_string)
+            }
             ExprKind::Nop => "Nop".to_string(),
-            ExprKind::ScaleUp { .. } => "'scaling-up'".to_string(),
-            ExprKind::ScaleDown { .. } => "'scaling-down'".to_string(),
         }
     }
 }
@@ -231,7 +209,7 @@ pub fn indent_fmt<T: PrintIndent>(object: &T, indent_level: usize) -> String {
     format!("{}{}", indent, object.print_indent(indent_level))
 }
 
-impl fmt::Display for Expr {
+impl fmt::Display for ExprKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", indent_fmt(self, 0))
     }

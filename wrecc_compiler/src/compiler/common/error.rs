@@ -45,7 +45,7 @@ pub enum ErrorKind {
     InvalidConstCast(NEWTypes, NEWTypes),
 
     // typechecker errors
-    MissingLabel(String, String),
+    UndeclaredLabel(String),
     NotInteger(&'static str, NEWTypes),
     NotScalar(&'static str, NEWTypes),
     DuplicateCase(i64),
@@ -226,8 +226,8 @@ impl ErrorKind {
                 format!("Integer overflow with type: '{}'", type_decl)
             }
 
-            ErrorKind::MissingLabel(label, func_name) => {
-                format!("No label '{}' in function '{}'", label, func_name)
+            ErrorKind::UndeclaredLabel(label) => {
+                format!("Undeclared label '{}'", label)
             }
             ErrorKind::NotInteger(s, type_decl) => {
                 format!("{} must be integer type, found '{}'", s, type_decl,)

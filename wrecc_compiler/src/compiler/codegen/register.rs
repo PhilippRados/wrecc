@@ -1,6 +1,6 @@
-use crate::compiler::ast::expr::ValueKind;
 use crate::compiler::common::token::TokenType;
 use crate::compiler::common::types::*;
+use crate::compiler::typechecker::mir::expr::ValueKind;
 
 pub static ARG_REGS: &[[&str; 3]; 6] = &[
     ["%rdi", "%edi", "%dil"],
@@ -226,7 +226,7 @@ impl TempRegister {
     // boilerplate register that is only used to access it's base-name
     pub fn default(reg: Box<dyn ScratchRegister>) -> Self {
         TempRegister {
-            type_decl: NEWTypes::default(),
+            type_decl: NEWTypes::Primitive(Types::Int),
             id: 0,
             reg: Some(TempKind::Scratch(reg)),
             start_idx: 0,

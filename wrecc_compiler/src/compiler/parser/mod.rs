@@ -1,9 +1,10 @@
 pub mod double_peek;
 pub mod fold;
+pub mod hir;
 
-use crate::compiler::ast::{decl::*, expr::*, stmt::*};
 use crate::compiler::common::{environment::*, error::*, token::*, types::*};
 use crate::compiler::parser::double_peek::*;
+use crate::compiler::parser::hir::{decl::*, expr::*, stmt::*};
 
 use std::collections::VecDeque;
 
@@ -23,7 +24,7 @@ impl Parser {
     }
     pub fn parse(mut self) -> Result<Vec<ExternalDeclaration>, Vec<Error>> {
         let mut external_declarations: Vec<ExternalDeclaration> = Vec::new();
-        let mut errors = vec![];
+        let mut errors = Vec::new();
 
         while self.tokens.peek().is_ok() {
             match self.external_declaration() {
@@ -376,7 +377,6 @@ impl Parser {
                 token: token.clone(),
                 designator,
                 kind: InitKind::Scalar(r_value),
-                offset: 0,
             })
         }
     }
@@ -426,7 +426,6 @@ impl Parser {
                 token: token.clone(),
                 designator,
                 kind: InitKind::Aggr(init_list),
-                offset: 0,
             })
         } else {
             Err(Error::new_multiple(errors))
@@ -473,7 +472,7 @@ impl Parser {
     // <enumerator-list> ::= {enumerator}+
     // <enumerator> ::= <identifier>
     //                | <identifier> = <conditional-expression>
-    fn enumerator_list(&mut self, token: &Token) -> Result<Vec<(Token, Option<Expr>)>, Error> {
+    fn enumerator_list(&mut self, token: &Token) -> Result<Vec<(Token, Option<ExprKind>)>, Error> {
         let mut constants = Vec::new();
         let mut errors = Vec::new();
 
@@ -619,7 +618,7 @@ impl Parser {
                 TokenType::Case => self.case_statement(token),
                 TokenType::Default => self.default_statement(token),
                 TokenType::Goto => self.goto_statement(),
-                TokenType::Semicolon => Ok(Stmt::Expr(Expr::new(ExprKind::Nop, ValueKind::Rvalue))),
+                TokenType::Semicolon => Ok(Stmt::Expr(ExprKind::Nop)),
                 _ => unreachable!(),
             };
         }
@@ -834,37 +833,31 @@ impl Parser {
         ))
     }
 
-    pub fn expression(&mut self) -> Result<Expr, Error> {
+    pub fn expression(&mut self) -> Result<ExprKind, Error> {
         self.comma()
     }
-    fn comma(&mut self) -> Result<Expr, Error> {
+    fn comma(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.assignment()?;
 
         while self.matches(&[TokenKind::Comma]).is_some() {
-            expr = Expr::new(
-                ExprKind::Comma {
-                    left: Box::new(expr),
-                    right: Box::new(self.assignment()?),
-                },
-                ValueKind::Rvalue,
-            )
+            expr = ExprKind::Comma {
+                left: Box::new(expr),
+                right: Box::new(self.assignment()?),
+            }
         }
 
         Ok(expr)
     }
-    fn assignment(&mut self) -> Result<Expr, Error> {
+    fn assignment(&mut self) -> Result<ExprKind, Error> {
         let expr = self.ternary_conditional()?;
 
         if let Some(t) = self.matches(&[TokenKind::Equal]) {
             let value = self.assignment()?;
-            return Ok(Expr::new(
-                ExprKind::Assign {
-                    l_expr: Box::new(expr),
-                    token: t,
-                    r_expr: Box::new(value),
-                },
-                ValueKind::Rvalue,
-            ));
+            return Ok(ExprKind::Assign {
+                l_expr: Box::new(expr),
+                token: t,
+                r_expr: Box::new(value),
+            });
         } else if let Some(t) = self.matches(&[
             TokenKind::PlusEqual,
             TokenKind::MinusEqual,
@@ -879,18 +872,15 @@ impl Parser {
         ]) {
             let value = self.assignment()?;
 
-            return Ok(Expr::new(
-                ExprKind::CompoundAssign {
-                    l_expr: Box::new(expr),
-                    token: t,
-                    r_expr: Box::new(value),
-                },
-                ValueKind::Rvalue,
-            ));
+            return Ok(ExprKind::CompoundAssign {
+                l_expr: Box::new(expr),
+                token: t,
+                r_expr: Box::new(value),
+            });
         }
         Ok(expr)
     }
-    fn ternary_conditional(&mut self) -> Result<Expr, Error> {
+    fn ternary_conditional(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.or()?;
 
         while let Some(token) = self.matches(&[TokenKind::Question]) {
@@ -901,116 +891,95 @@ impl Parser {
             )?;
             let false_expr = self.expression()?;
 
-            expr = Expr::new(
-                ExprKind::Ternary {
-                    token,
-                    cond: Box::new(expr),
-                    true_expr: Box::new(true_expr),
-                    false_expr: Box::new(false_expr),
-                },
-                ValueKind::Rvalue,
-            )
+            expr = ExprKind::Ternary {
+                token,
+                cond: Box::new(expr),
+                true_expr: Box::new(true_expr),
+                false_expr: Box::new(false_expr),
+            }
         }
         Ok(expr)
     }
-    fn or(&mut self) -> Result<Expr, Error> {
+    fn or(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.and()?;
 
         while let Some(token) = self.matches(&[TokenKind::PipePipe]) {
             let right = self.and()?;
-            expr = Expr::new(
-                ExprKind::Logical {
-                    left: Box::new(expr),
-                    token,
-                    right: Box::new(right),
-                },
-                ValueKind::Rvalue,
-            )
+            expr = ExprKind::Logical {
+                left: Box::new(expr),
+                token,
+                right: Box::new(right),
+            }
         }
         Ok(expr)
     }
-    fn and(&mut self) -> Result<Expr, Error> {
+    fn and(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.bit_or()?;
 
         while let Some(token) = self.matches(&[TokenKind::AmpAmp]) {
             let right = self.bit_or()?;
-            expr = Expr::new(
-                ExprKind::Logical {
-                    left: Box::new(expr),
-                    token,
-                    right: Box::new(right),
-                },
-                ValueKind::Rvalue,
-            )
+            expr = ExprKind::Logical {
+                left: Box::new(expr),
+                token,
+                right: Box::new(right),
+            }
         }
         Ok(expr)
     }
-    fn bit_or(&mut self) -> Result<Expr, Error> {
+    fn bit_or(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.bit_xor()?;
 
         while let Some(token) = self.matches(&[TokenKind::Pipe]) {
             let right = self.bit_xor()?;
-            expr = Expr::new(
-                ExprKind::Binary {
-                    left: Box::new(expr),
-                    token,
-                    right: Box::new(right),
-                },
-                ValueKind::Rvalue,
-            )
+            expr = ExprKind::Binary {
+                left: Box::new(expr),
+                token,
+                right: Box::new(right),
+            }
         }
         Ok(expr)
     }
-    fn bit_xor(&mut self) -> Result<Expr, Error> {
+    fn bit_xor(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.bit_and()?;
 
         while let Some(token) = self.matches(&[TokenKind::Xor]) {
             let right = self.bit_and()?;
-            expr = Expr::new(
-                ExprKind::Binary {
-                    left: Box::new(expr),
-                    token,
-                    right: Box::new(right),
-                },
-                ValueKind::Rvalue,
-            )
+            expr = ExprKind::Binary {
+                left: Box::new(expr),
+                token,
+                right: Box::new(right),
+            }
         }
         Ok(expr)
     }
-    fn bit_and(&mut self) -> Result<Expr, Error> {
+    fn bit_and(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.equality()?;
 
         while let Some(token) = self.matches(&[TokenKind::Amp]) {
             let right = self.equality()?;
-            expr = Expr::new(
-                ExprKind::Binary {
-                    left: Box::new(expr),
-                    token,
-                    right: Box::new(right),
-                },
-                ValueKind::Rvalue,
-            )
+            expr = ExprKind::Binary {
+                left: Box::new(expr),
+                token,
+                right: Box::new(right),
+            }
         }
         Ok(expr)
     }
-    fn equality(&mut self) -> Result<Expr, Error> {
+    fn equality(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.comparison()?;
 
         while let Some(token) = self.matches(&[TokenKind::BangEqual, TokenKind::EqualEqual]) {
             let operator = token;
             let right = self.comparison()?;
-            expr = Expr::new(
-                ExprKind::Comparison {
-                    left: Box::new(expr),
-                    token: operator,
-                    right: Box::new(right),
-                },
-                ValueKind::Rvalue,
-            )
+            expr = ExprKind::Comparison {
+                left: Box::new(expr),
+                token: operator,
+                right: Box::new(right),
+            }
         }
         Ok(expr)
     }
-    fn comparison(&mut self) -> Result<Expr, Error> {
+    fn comparison(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.shift()?;
 
         while let Some(token) = self.matches(&[
@@ -1021,70 +990,58 @@ impl Parser {
         ]) {
             let operator = token;
             let right = self.shift()?;
-            expr = Expr::new(
-                ExprKind::Comparison {
-                    left: Box::new(expr),
-                    token: operator,
-                    right: Box::new(right),
-                },
-                ValueKind::Rvalue,
-            );
+            expr = ExprKind::Comparison {
+                left: Box::new(expr),
+                token: operator,
+                right: Box::new(right),
+            }
         }
         Ok(expr)
     }
-    fn shift(&mut self) -> Result<Expr, Error> {
+    fn shift(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.term()?;
 
         while let Some(token) = self.matches(&[TokenKind::GreaterGreater, TokenKind::LessLess]) {
             let operator = token;
             let right = self.term()?;
-            expr = Expr::new(
-                ExprKind::Binary {
-                    left: Box::new(expr),
-                    token: operator,
-                    right: Box::new(right),
-                },
-                ValueKind::Rvalue,
-            );
+            expr = ExprKind::Binary {
+                left: Box::new(expr),
+                token: operator,
+                right: Box::new(right),
+            }
         }
         Ok(expr)
     }
 
-    fn term(&mut self) -> Result<Expr, Error> {
+    fn term(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.factor()?;
 
         while let Some(token) = self.matches(&[TokenKind::Minus, TokenKind::Plus]) {
             let operator = token;
             let right = self.factor()?;
-            expr = Expr::new(
-                ExprKind::Binary {
-                    left: Box::new(expr),
-                    token: operator,
-                    right: Box::new(right),
-                },
-                ValueKind::Rvalue,
-            );
+            expr = ExprKind::Binary {
+                left: Box::new(expr),
+                token: operator,
+                right: Box::new(right),
+            }
         }
         Ok(expr)
     }
-    fn factor(&mut self) -> Result<Expr, Error> {
+    fn factor(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.unary()?;
 
         while let Some(token) = self.matches(&[TokenKind::Slash, TokenKind::Star, TokenKind::Mod]) {
             let operator = token;
             let right = self.unary()?;
-            expr = Expr::new(
-                ExprKind::Binary {
-                    left: Box::new(expr),
-                    token: operator,
-                    right: Box::new(right),
-                },
-                ValueKind::Rvalue,
-            );
+            expr = ExprKind::Binary {
+                left: Box::new(expr),
+                token: operator,
+                right: Box::new(right),
+            }
         }
         Ok(expr)
     }
-    fn unary(&mut self) -> Result<Expr, Error> {
+    fn unary(&mut self) -> Result<ExprKind, Error> {
         if let kind @ (TokenType::Star
         | TokenType::Amp
         | TokenType::Bang
@@ -1101,14 +1058,12 @@ impl Parser {
                 TokenType::PlusPlus | TokenType::MinusMinus => {
                     let token = self.tokens.next().unwrap();
                     let right = self.unary()?;
-                    Expr::new(
-                        ExprKind::CompoundAssign {
-                            l_expr: Box::new(right),
-                            token,
-                            r_expr: Box::new(Expr::new_literal(1, Types::Int)),
-                        },
-                        ValueKind::Rvalue,
-                    )
+
+                    ExprKind::CompoundAssign {
+                        l_expr: Box::new(right),
+                        token,
+                        r_expr: Box::new(ExprKind::Literal(1, NEWTypes::Primitive(Types::Int))),
+                    }
                 }
                 // typecast
                 // have to check whether expression or type inside of parentheses
@@ -1131,53 +1086,33 @@ impl Parser {
                             let decl_type = self.type_name()?;
 
                             self.consume(TokenKind::RightParen, "Expect closing ')' after sizeof")?;
-                            return Ok(Expr::new(
-                                ExprKind::SizeofType { decl_type, value: 0 },
-                                ValueKind::Rvalue,
-                            ));
+                            return Ok(ExprKind::SizeofType { decl_type });
                         }
                     }
 
                     let right = self.unary()?;
-                    Expr::new(
-                        ExprKind::SizeofExpr { expr: Box::new(right), value: 0 },
-                        ValueKind::Rvalue,
-                    )
+                    ExprKind::SizeofExpr { expr: Box::new(right) }
                 }
                 _ => {
                     let token = self.tokens.next().unwrap();
                     let right = self.unary()?;
-                    Expr::new(
-                        ExprKind::Unary {
-                            right: Box::new(right),
-                            token: token.clone(),
-                        },
-                        match token.token {
-                            TokenType::Star => ValueKind::Lvalue,
-                            _ => ValueKind::Rvalue,
-                        },
-                    )
+
+                    ExprKind::Unary {
+                        right: Box::new(right),
+                        token: token.clone(),
+                    }
                 }
             });
         }
         self.postfix()
     }
-    fn typecast(&mut self, token: Token, decl_type: DeclType) -> Result<Expr, Error> {
+    fn typecast(&mut self, token: Token, decl_type: DeclType) -> Result<ExprKind, Error> {
         self.consume(TokenKind::RightParen, "Expect closing ')' after type-cast")?;
         let expr = self.unary()?;
 
-        Ok(Expr::new(
-            ExprKind::Cast {
-                token,
-                decl_type,
-                direction: None,
-                new_type: NEWTypes::default(),
-                expr: Box::new(expr),
-            },
-            ValueKind::Rvalue,
-        ))
+        Ok(ExprKind::Cast { token, decl_type, expr: Box::new(expr) })
     }
-    fn postfix(&mut self) -> Result<Expr, Error> {
+    fn postfix(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.primary()?;
 
         while let Some(token) = self.matches(&[
@@ -1206,10 +1141,9 @@ impl Parser {
                 TokenType::Dot | TokenType::Arrow => {
                     if let Some(member) = self.matches(&[TokenKind::Ident]) {
                         expr = match token.token {
-                            TokenType::Dot => Expr::new(
-                                ExprKind::MemberAccess { token, member, expr: Box::new(expr) },
-                                ValueKind::Lvalue,
-                            ),
+                            TokenType::Dot => {
+                                ExprKind::MemberAccess { token, member, expr: Box::new(expr) }
+                            }
                             TokenType::Arrow => arrow_sugar(expr, member, token),
                             _ => unreachable!(),
                         }
@@ -1222,20 +1156,13 @@ impl Parser {
                 }
                 _ => {
                     // a++ or a--
-                    expr = Expr::new(
-                        ExprKind::PostUnary {
-                            token,
-                            left: Box::new(expr),
-                            by_amount: 1,
-                        },
-                        ValueKind::Rvalue,
-                    )
+                    expr = ExprKind::PostUnary { token, left: Box::new(expr) }
                 }
             }
         }
         Ok(expr)
     }
-    fn call(&mut self, left_paren: Token, callee: Expr) -> Result<Expr, Error> {
+    fn call(&mut self, left_paren: Token, callee: ExprKind) -> Result<ExprKind, Error> {
         let mut args = Vec::new();
         if !self.check(TokenKind::RightParen) {
             loop {
@@ -1246,11 +1173,8 @@ impl Parser {
             }
         }
         self.consume(TokenKind::RightParen, "Expect ')' after function call")?;
-        if let ExprKind::Ident(name) = callee.kind {
-            Ok(Expr::new(
-                ExprKind::Call { left_paren, name, args },
-                ValueKind::Rvalue,
-            ))
+        if let ExprKind::Ident(name) = callee {
+            Ok(ExprKind::Call { left_paren, name, args })
         } else {
             Err(Error::new(
                 &left_paren,
@@ -1258,35 +1182,35 @@ impl Parser {
             ))
         }
     }
-    fn primary(&mut self) -> Result<Expr, Error> {
+    fn primary(&mut self) -> Result<ExprKind, Error> {
         if let Some(n) = self.matches(&[TokenKind::Number]) {
             let n = n.unwrap_num();
-            return Ok(Expr::new_literal(n, integer_type(n)));
+            return Ok(ExprKind::Literal(n, NEWTypes::Primitive(integer_type(n))));
         }
         if let Some(c) = self.matches(&[TokenKind::CharLit]) {
-            return Ok(Expr::new_literal(c.unwrap_char() as i64, Types::Char));
+            return Ok(ExprKind::Literal(
+                c.unwrap_char() as i64,
+                NEWTypes::Primitive(Types::Char),
+            ));
         }
         if let Some(s) = self.matches(&[TokenKind::Ident]) {
-            return Ok(Expr::new(ExprKind::Ident(s), ValueKind::Lvalue));
+            return Ok(ExprKind::Ident(s));
         }
         if let Some(s) = self.matches(&[TokenKind::String]) {
-            return Ok(Expr::new(ExprKind::String(s), ValueKind::Lvalue));
+            return Ok(ExprKind::String(s));
         }
 
         if self.matches(&[TokenKind::LeftParen]).is_some() {
             let expr = self.expression()?;
             self.consume(TokenKind::RightParen, "missing closing ')'")?;
 
-            return Ok(Expr::new(
-                ExprKind::Grouping { expr: Box::new(expr.clone()) },
-                expr.value_kind,
-            ));
+            return Ok(ExprKind::Grouping { expr: Box::new(expr.clone()) });
         }
 
-        let t = self.tokens.peek()?;
+        let token = self.tokens.peek()?;
         Err(Error::new(
-            t,
-            ErrorKind::ExpectedExpression(t.token.clone()),
+            token,
+            ErrorKind::ExpectedExpression(token.token.clone()),
         ))
     }
     fn consume(&mut self, token: TokenKind, msg: &'static str) -> Result<Token, Error> {
@@ -1375,49 +1299,31 @@ impl From<(Option<Token>, ErrorKind)> for Error {
 // some_struct->member
 // equivalent to:
 // (*some_struct).member
-fn arrow_sugar(left: Expr, member: Token, arrow_token: Token) -> Expr {
-    Expr::new(
-        ExprKind::MemberAccess {
-            token: arrow_token,
-            member: member.clone(),
-            expr: Box::new(Expr::new(
-                ExprKind::Grouping {
-                    expr: Box::new(Expr::new(
-                        ExprKind::Unary {
-                            token: Token { token: TokenType::Star, ..member },
-                            right: Box::new(left),
-                        },
-                        ValueKind::Lvalue,
-                    )),
-                },
-                ValueKind::Lvalue,
-            )),
-        },
-        ValueKind::Lvalue,
-    )
+fn arrow_sugar(left: ExprKind, member: Token, arrow_token: Token) -> ExprKind {
+    ExprKind::MemberAccess {
+        token: arrow_token,
+        member: member.clone(),
+        expr: Box::new(ExprKind::Grouping {
+            expr: Box::new(ExprKind::Unary {
+                token: Token { token: TokenType::Star, ..member },
+                right: Box::new(left),
+            }),
+        }),
+    }
 }
 
 // a[i] <=> *(a + i)
-pub fn index_sugar(token: Token, expr: Expr, index: Expr) -> Expr {
-    Expr::new(
-        ExprKind::Unary {
-            token: Token { token: TokenType::Star, ..token.clone() },
-            right: Box::new(Expr::new(
-                ExprKind::Grouping {
-                    expr: Box::new(Expr::new(
-                        ExprKind::Binary {
-                            left: Box::new(expr),
-                            token: Token { token: TokenType::Plus, ..token },
-                            right: Box::new(index),
-                        },
-                        ValueKind::Lvalue,
-                    )),
-                },
-                ValueKind::Lvalue,
-            )),
-        },
-        ValueKind::Lvalue,
-    )
+pub fn index_sugar(token: Token, expr: ExprKind, index: ExprKind) -> ExprKind {
+    ExprKind::Unary {
+        token: Token { token: TokenType::Star, ..token.clone() },
+        right: Box::new(ExprKind::Grouping {
+            expr: Box::new(ExprKind::Binary {
+                left: Box::new(expr),
+                token: Token { token: TokenType::Plus, ..token },
+                right: Box::new(index),
+            }),
+        }),
+    }
 }
 
 #[cfg(test)]

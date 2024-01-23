@@ -1,10 +1,16 @@
-use crate::compiler::ast::expr::*;
-use crate::compiler::common::token::*;
-use std::fmt::Display;
-use std::rc::Rc;
 pub use struct_ref::StructRef;
 
+use crate::compiler::common::{environment::Symbols, token::*};
+use crate::compiler::parser::hir::expr::*;
+
+use std::cell::RefCell;
+use std::fmt::Display;
+use std::rc::Rc;
+
 static RETURN_REG: &[&str; 3] = &["%al", "%eax", "%rax"];
+
+pub type VarSymbol = Rc<RefCell<Symbols>>;
+pub type FuncSymbol = Rc<RefCell<Symbols>>;
 
 pub trait TypeInfo {
     // returns size in bytes of type
@@ -195,9 +201,6 @@ impl Display for NEWTypes {
 }
 
 impl NEWTypes {
-    pub fn default() -> NEWTypes {
-        NEWTypes::Primitive(Types::Int)
-    }
     pub fn pointer_to(self) -> NEWTypes {
         NEWTypes::Pointer(Box::new(self.clone()))
     }
@@ -229,7 +232,7 @@ impl NEWTypes {
     pub fn is_ptr(&self) -> bool {
         matches!(*self, NEWTypes::Pointer(_))
     }
-    pub fn type_compatible(&self, other: &NEWTypes, other_expr: &ExprKind) -> bool {
+    pub fn type_compatible(&self, other: &NEWTypes, other_expr: &impl IsZero) -> bool {
         match (self, other) {
             (NEWTypes::Primitive(Types::Void), NEWTypes::Primitive(Types::Void)) => true,
 
@@ -620,20 +623,6 @@ mod struct_ref {
     }
 }
 
-#[macro_export]
-macro_rules! arr_decay {
-    ($arr:expr,$ast:expr,$token:expr) => {
-        if let NEWTypes::Array { of, .. } = $arr {
-            $arr = NEWTypes::Pointer(of);
-
-            $ast.kind = ExprKind::Unary {
-                token: Token { token: TokenType::Amp, ..$token.clone() },
-                right: Box::new($ast.clone()),
-            };
-        }
-    };
-}
-
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -641,8 +630,8 @@ pub mod tests {
     use crate::compiler::typechecker::TypeChecker;
 
     pub fn setup_type(input: &str) -> NEWTypes {
-        if let Ok(mut ty) = setup(input).type_name() {
-            if let Ok(actual_ty) = TypeChecker::new().parse_type(&mut ty) {
+        if let Ok(ty) = setup(input).type_name() {
+            if let Ok(actual_ty) = TypeChecker::new().parse_type(ty) {
                 return actual_ty;
             }
         }

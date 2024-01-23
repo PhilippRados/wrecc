@@ -1,4 +1,4 @@
-use crate::compiler::codegen::{ir::*, register::*};
+use crate::compiler::codegen::{lir::*, register::*};
 use crate::compiler::common::types::*;
 use std::collections::HashMap;
 
@@ -59,7 +59,7 @@ impl RegisterAllocation {
             registers: ScratchRegisters::new(),
         }
     }
-    pub fn generate(mut self, mut ir: Vec<Ir>) -> Vec<Ir> {
+    pub fn generate(mut self, mut ir: Vec<Lir>) -> Vec<Lir> {
         let mut result = Vec::with_capacity(ir.len());
 
         for (i, mut instr) in ir.drain(..).enumerate() {
@@ -84,23 +84,18 @@ impl RegisterAllocation {
             }
 
             match &mut instr {
-                Ir::SaveRegs => {
+                Lir::SaveRegs => {
                     self.save_regs(&mut result);
                 }
-                Ir::RestoreRegs => {
+                Lir::RestoreRegs => {
                     self.restore_regs(&mut result);
                 }
-                Ir::FuncSetup(name, ..) => {
-                    self.spill_bp_offset = name
-                        .token
-                        .get_symbol_entry()
-                        .borrow()
-                        .unwrap_func()
-                        .stack_size;
+                Lir::FuncSetup(_, stack_size) => {
+                    self.spill_bp_offset = *stack_size;
 
                     result.push(instr);
                 }
-                Ir::FuncTeardown(stack_size) => {
+                Lir::FuncTeardown(stack_size) => {
                     // when function is done update stack-size if registers where spilled to stack
                     if *stack_size != self.spill_bp_offset {
                         *stack_size = self.spill_bp_offset;
@@ -116,7 +111,7 @@ impl RegisterAllocation {
     // When explictily allocating arg-register then when arg-register is occupied the occupant gets pushed
     // exlicit arg-registers always have priority. This covers cases when a specific arg-register is needed
     // by an operation but is occpied as an argument.
-    fn alloc_arg(&mut self, result: &mut Vec<Ir>) {
+    fn alloc_arg(&mut self, result: &mut Vec<Lir>) {
         // get the interval if a new arg-register has been declared
         let new_arg_interval = self.live_intervals.iter_mut().find(|(_, v)| {
             self.counter >= v.start
@@ -137,7 +132,7 @@ impl RegisterAllocation {
             if let Some((occupied_key, used_scratch)) = reg_in_use {
                 // if already in use push previous value on stack
                 let occupied_reg = Register::Temp(TempRegister::default(used_scratch.clone()));
-                result.push(Ir::Push(occupied_reg));
+                result.push(Lir::Push(occupied_reg));
 
                 self.live_intervals.get_mut(&key).unwrap().scratch =
                     Some(TempKind::Scratch(used_scratch.clone()));
@@ -155,7 +150,7 @@ impl RegisterAllocation {
         }
     }
 
-    fn alloc(&mut self, reg: &mut TempRegister, other: Vec<usize>, ir: &mut Vec<Ir>) {
+    fn alloc(&mut self, reg: &mut TempRegister, other: Vec<usize>, ir: &mut Vec<Lir>) {
         // only needs to fill in virtual registers whose interval doesn't have a register assigned to it
         let value = match self.live_intervals.get(&reg.id) {
             Some(IntervalEntry {
@@ -184,7 +179,7 @@ impl RegisterAllocation {
     }
     fn get_scratch(
         &mut self,
-        ir: &mut Vec<Ir>,
+        ir: &mut Vec<Lir>,
         reg: &mut TempRegister,
         other: Vec<usize>,
     ) -> TempKind {
@@ -194,7 +189,7 @@ impl RegisterAllocation {
             self.spill(ir, reg, other)
         }
     }
-    fn spill(&mut self, ir: &mut Vec<Ir>, reg: &mut TempRegister, other: Vec<usize>) -> TempKind {
+    fn spill(&mut self, ir: &mut Vec<Lir>, reg: &mut TempRegister, other: Vec<usize>) -> TempKind {
         let spill_reg_idx = self.choose_spill_reg(other);
         let spill_interval = self.get_interval_of_reg(spill_reg_idx);
         let Some(IntervalEntry{ type_decl,scratch:Some(entry),.. }) = self.live_intervals.get_mut(&spill_interval) else {unreachable!()};
@@ -215,13 +210,18 @@ impl RegisterAllocation {
         // change the interval register to the stackregister
         *entry = new.reg.clone().unwrap();
 
-        ir.push(Ir::Mov(Register::Temp(prev.clone()), Register::Temp(new)));
+        ir.push(Lir::Mov(Register::Temp(prev.clone()), Register::Temp(new)));
 
         // return the now free register
         prev.reg.unwrap()
     }
 
-    fn unspill(&mut self, ir: &mut Vec<Ir>, reg: &mut TempRegister, other: Vec<usize>) -> TempKind {
+    fn unspill(
+        &mut self,
+        ir: &mut Vec<Lir>,
+        reg: &mut TempRegister,
+        other: Vec<usize>,
+    ) -> TempKind {
         let Some(IntervalEntry{ type_decl, scratch:Some(entry),.. }) = self.live_intervals.get_mut(&reg.id) else {unreachable!()};
 
         let mut prev_reg = reg.clone();
@@ -232,7 +232,7 @@ impl RegisterAllocation {
         new.type_decl = type_decl.clone();
         new.reg = Some(self.get_scratch(ir, reg, other));
 
-        ir.push(Ir::Mov(
+        ir.push(Lir::Mov(
             Register::Temp(prev_reg),
             Register::Temp(new.clone()),
         ));
@@ -306,7 +306,7 @@ impl RegisterAllocation {
         index
     }
     // marks freed interval-registers as available again and removes interval from live_intervals
-    fn expire_old_intervals(&mut self, instr_idx: usize, result: &mut Vec<Ir>) {
+    fn expire_old_intervals(&mut self, instr_idx: usize, result: &mut Vec<Lir>) {
         let expired_keys: Vec<usize> = self
             .live_intervals
             .iter()
@@ -319,7 +319,7 @@ impl RegisterAllocation {
                 if let Some(TempKind::Scratch(scratch)) = &expired_intervals.scratch {
                     if let Some(other_interval) = self.find_same_reg_pushed(key) {
                         // if there exists another interval where this reg is pushed, pop that instead of freeing physical
-                        result.push(Ir::Pop(Register::Temp(TempRegister::default(
+                        result.push(Lir::Pop(Register::Temp(TempRegister::default(
                             scratch.clone(),
                         ))));
                         other_interval.scratch = expired_intervals.scratch.clone();
@@ -364,7 +364,7 @@ impl RegisterAllocation {
         active_intervals.sort_by(|(_, a), (_, b)| a.base_name().cmp(b.base_name()));
         active_intervals
     }
-    fn save_regs(&mut self, ir: &mut Vec<Ir>) {
+    fn save_regs(&mut self, ir: &mut Vec<Lir>) {
         let active_intervals: Vec<_> = self
             .get_active_intervals()
             .iter()
@@ -378,7 +378,7 @@ impl RegisterAllocation {
             .collect();
 
         for (key, scratch, reg) in active_intervals.iter() {
-            ir.push(Ir::Push(reg.clone()));
+            ir.push(Lir::Push(reg.clone()));
 
             // WARN: should be fine passing 0 as interval-key since values are restored anyway before freeing regs
             self.live_intervals.get_mut(key).unwrap().scratch = Some(TempKind::Pushed(0));
@@ -387,20 +387,20 @@ impl RegisterAllocation {
 
         // align stack
         if !active_intervals.is_empty() && active_intervals.len() % 2 != 0 {
-            ir.push(Ir::SubSp(8));
+            ir.push(Lir::SubSp(8));
         }
 
         self.saved_regs.push(active_intervals);
     }
 
-    fn restore_regs(&mut self, ir: &mut Vec<Ir>) {
+    fn restore_regs(&mut self, ir: &mut Vec<Lir>) {
         let saved = self.saved_regs.pop().expect("restore always after save");
 
         if !saved.is_empty() && saved.len() % 2 != 0 {
-            ir.push(Ir::AddSp(8));
+            ir.push(Lir::AddSp(8));
         }
         for (key, scratch, reg) in saved.iter().rev() {
-            ir.push(Ir::Pop(reg.clone()));
+            ir.push(Lir::Pop(reg.clone()));
 
             // mark popped registers as used again
             self.registers.activate_reg(scratch.clone());
@@ -409,12 +409,12 @@ impl RegisterAllocation {
         }
     }
     // backtrack trough result and update allocated stack-space
-    fn update_func_setup(&self, result: &mut [Ir]) {
+    fn update_func_setup(&self, result: &mut [Lir]) {
         let setup_size = result
             .iter_mut()
             .rev()
             .filter_map(|instr| {
-                if let Ir::FuncSetup(.., setup_size) = instr {
+                if let Lir::FuncSetup(.., setup_size) = instr {
                     Some(setup_size)
                 } else {
                     None
@@ -478,7 +478,7 @@ impl ScratchRegisters {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::ast::expr::ValueKind;
+    use crate::compiler::typechecker::mir::expr::ValueKind;
     use std::mem;
 
     fn setup(
@@ -541,7 +541,7 @@ mod tests {
 
         (intervals, regs, filled_regs)
     }
-    fn assert_regalloc(input: Vec<Ir>, expected: Vec<Ir>, reg_alloc: RegisterAllocation) {
+    fn assert_regalloc(input: Vec<Lir>, expected: Vec<Lir>, reg_alloc: RegisterAllocation) {
         let actual = reg_alloc.generate(input);
 
         assert_eq!(actual.len(), expected.len());
@@ -575,7 +575,7 @@ mod tests {
         ($reg:expr,$start:expr,$end:expr) => {
             (
                 Some(Box::new($reg)),
-                IntervalEntry::new($start, $end, None, NEWTypes::default()),
+                IntervalEntry::new($start, $end, None, NEWTypes::Primitive(Types::Int)),
             )
         };
     }
@@ -583,7 +583,7 @@ mod tests {
         ($reg:expr,$start:expr,$end:expr) => {
             (
                 None,
-                IntervalEntry::new($start, $end, Some($reg), NEWTypes::default()),
+                IntervalEntry::new($start, $end, Some($reg), NEWTypes::Primitive(Types::Int)),
             )
         };
     }
@@ -607,23 +607,23 @@ mod tests {
         let reg_alloc = setup(intervals, occupied_regs);
 
         let input = vec![
-            Ir::Mov(regs[0].clone(), regs[1].clone()),
-            Ir::Add(regs[2].clone(), regs[1].clone()),
-            Ir::Idiv(regs[1].clone()),
-            Ir::Mov(regs[1].clone(), regs[4].clone()),
-            Ir::Mov(regs[4].clone(), regs[6].clone()),
-            Ir::Shift("l", regs[6].clone(), regs[3].clone()),
-            Ir::Xor(regs[3].clone(), regs[5].clone()),
+            Lir::Mov(regs[0].clone(), regs[1].clone()),
+            Lir::Add(regs[2].clone(), regs[1].clone()),
+            Lir::Idiv(regs[1].clone()),
+            Lir::Mov(regs[1].clone(), regs[4].clone()),
+            Lir::Mov(regs[4].clone(), regs[6].clone()),
+            Lir::Shift("l", regs[6].clone(), regs[3].clone()),
+            Lir::Xor(regs[3].clone(), regs[5].clone()),
         ];
 
         let expected = vec![
-            Ir::Mov(filled_regs[0].clone(), filled_regs[1].clone()),
-            Ir::Add(filled_regs[2].clone(), filled_regs[1].clone()),
-            Ir::Idiv(filled_regs[1].clone()),
-            Ir::Mov(filled_regs[1].clone(), filled_regs[4].clone()),
-            Ir::Mov(filled_regs[4].clone(), filled_regs[6].clone()),
-            Ir::Shift("l", filled_regs[6].clone(), filled_regs[3].clone()),
-            Ir::Xor(filled_regs[3].clone(), filled_regs[5].clone()),
+            Lir::Mov(filled_regs[0].clone(), filled_regs[1].clone()),
+            Lir::Add(filled_regs[2].clone(), filled_regs[1].clone()),
+            Lir::Idiv(filled_regs[1].clone()),
+            Lir::Mov(filled_regs[1].clone(), filled_regs[4].clone()),
+            Lir::Mov(filled_regs[4].clone(), filled_regs[6].clone()),
+            Lir::Shift("l", filled_regs[6].clone(), filled_regs[3].clone()),
+            Lir::Xor(filled_regs[3].clone(), filled_regs[5].clone()),
         ];
 
         assert_regalloc(input, expected, reg_alloc);
@@ -645,17 +645,18 @@ mod tests {
         let reg_alloc = setup(intervals, occupied_regs);
 
         let input = vec![
-            Ir::Add(regs[0].clone(), regs[1].clone()),
-            Ir::Imul(regs[1].clone(), regs[2].clone()),
-            Ir::Mov(regs[3].clone(), regs[1].clone()),
-            Ir::Or(regs[1].clone(), regs[4].clone()),
-            Ir::Neg(regs[5].clone()),
-            Ir::Mov(regs[6].clone(), regs[5].clone()),
-            Ir::Mov(regs[0].clone(), regs[6].clone()),
+            Lir::Add(regs[0].clone(), regs[1].clone()),
+            Lir::Imul(regs[1].clone(), regs[2].clone()),
+            Lir::Mov(regs[3].clone(), regs[1].clone()),
+            Lir::Or(regs[1].clone(), regs[4].clone()),
+            Lir::Neg(regs[5].clone()),
+            Lir::Mov(regs[6].clone(), regs[5].clone()),
+            Lir::Mov(regs[0].clone(), regs[6].clone()),
         ];
 
-        // Reg0 is spilled because is Ir::Or there are no regs left.
-        let spilled_reg = Register::Stack(StackRegister::new(&mut 0, NEWTypes::default()));
+        // Reg0 is spilled because is Lir::Or there are no regs left.
+        let spilled_reg =
+            Register::Stack(StackRegister::new(&mut 0, NEWTypes::Primitive(Types::Int)));
 
         // When it is unspilled again because it is needed in instruction 6, %r10 is not available
         // because when Reg4 was freed %r10 was marked as available again and was assigned to Reg6.
@@ -670,15 +671,15 @@ mod tests {
         };
 
         let expected = vec![
-            Ir::Add(filled_regs[0].clone(), filled_regs[1].clone()),
-            Ir::Imul(filled_regs[1].clone(), filled_regs[2].clone()),
-            Ir::Mov(filled_regs[3].clone(), filled_regs[1].clone()),
-            Ir::Mov(filled_regs[0].clone(), spilled_reg.clone()),
-            Ir::Or(filled_regs[1].clone(), filled_regs[4].clone()),
-            Ir::Neg(filled_regs[5].clone()),
-            Ir::Mov(filled_regs[6].clone(), filled_regs[5].clone()),
-            Ir::Mov(spilled_reg, unspilled_reg_0.clone()),
-            Ir::Mov(unspilled_reg_0.clone(), filled_regs[6].clone()),
+            Lir::Add(filled_regs[0].clone(), filled_regs[1].clone()),
+            Lir::Imul(filled_regs[1].clone(), filled_regs[2].clone()),
+            Lir::Mov(filled_regs[3].clone(), filled_regs[1].clone()),
+            Lir::Mov(filled_regs[0].clone(), spilled_reg.clone()),
+            Lir::Or(filled_regs[1].clone(), filled_regs[4].clone()),
+            Lir::Neg(filled_regs[5].clone()),
+            Lir::Mov(filled_regs[6].clone(), filled_regs[5].clone()),
+            Lir::Mov(spilled_reg, unspilled_reg_0.clone()),
+            Lir::Mov(unspilled_reg_0.clone(), filled_regs[6].clone()),
         ];
 
         assert_regalloc(input, expected, reg_alloc);
@@ -717,31 +718,35 @@ mod tests {
         let reg_alloc = setup(intervals, occupied_regs);
 
         let input = vec![
-            Ir::SaveRegs,
-            Ir::Add(regs[0].clone(), regs[1].clone()),
-            Ir::Imul(regs[1].clone(), regs[2].clone()),
-            Ir::Mov(regs[3].clone(), regs[16].clone()),
-            Ir::Add(regs[4].clone(), regs[5].clone()),
-            Ir::Imul(regs[5].clone(), regs[6].clone()),
-            Ir::Mov(regs[6].clone(), regs[17].clone()),
-            Ir::Mov(regs[7].clone(), regs[18].clone()),
-            Ir::And(regs[8].clone(), regs[9].clone()),
-            Ir::Mov(regs[9].clone(), regs[19].clone()),
-            Ir::And(regs[10].clone(), regs[11].clone()),
-            Ir::Idiv(regs[11].clone()),
-            Ir::And(regs[11].clone(), regs[12].clone()),
-            Ir::Add(regs[13].clone(), regs[14].clone()),
-            Ir::Mov(regs[10].clone(), regs[20].clone()),
-            Ir::Mov(regs[15].clone(), regs[21].clone()),
-            Ir::Call("foo".to_string()),
-            Ir::RestoreRegs,
+            Lir::SaveRegs,
+            Lir::Add(regs[0].clone(), regs[1].clone()),
+            Lir::Imul(regs[1].clone(), regs[2].clone()),
+            Lir::Mov(regs[3].clone(), regs[16].clone()),
+            Lir::Add(regs[4].clone(), regs[5].clone()),
+            Lir::Imul(regs[5].clone(), regs[6].clone()),
+            Lir::Mov(regs[6].clone(), regs[17].clone()),
+            Lir::Mov(regs[7].clone(), regs[18].clone()),
+            Lir::And(regs[8].clone(), regs[9].clone()),
+            Lir::Mov(regs[9].clone(), regs[19].clone()),
+            Lir::And(regs[10].clone(), regs[11].clone()),
+            Lir::Idiv(regs[11].clone()),
+            Lir::And(regs[11].clone(), regs[12].clone()),
+            Lir::Add(regs[13].clone(), regs[14].clone()),
+            Lir::Mov(regs[10].clone(), regs[20].clone()),
+            Lir::Mov(regs[15].clone(), regs[21].clone()),
+            Lir::Call("foo".to_string()),
+            Lir::RestoreRegs,
         ];
 
         let mut bp = 0;
-        let spilled_reg1 = Register::Stack(StackRegister::new(&mut bp, NEWTypes::default()));
-        let spilled_reg2 = Register::Stack(StackRegister::new(&mut bp, NEWTypes::default()));
-        let spilled_reg3 = Register::Stack(StackRegister::new(&mut bp, NEWTypes::default()));
-        let spilled_reg4 = Register::Stack(StackRegister::new(&mut bp, NEWTypes::default()));
+        let spilled_reg1 =
+            Register::Stack(StackRegister::new(&mut bp, NEWTypes::Primitive(Types::Int)));
+        let spilled_reg2 =
+            Register::Stack(StackRegister::new(&mut bp, NEWTypes::Primitive(Types::Int)));
+        let spilled_reg3 =
+            Register::Stack(StackRegister::new(&mut bp, NEWTypes::Primitive(Types::Int)));
+        let spilled_reg4 =
+            Register::Stack(StackRegister::new(&mut bp, NEWTypes::Primitive(Types::Int)));
 
         let unspilled_reg_1 = if let Register::Temp(filled) = filled_regs[10].clone() {
             Register::Temp(TempRegister {
@@ -752,29 +757,29 @@ mod tests {
             unreachable!()
         };
         let expected = vec![
-            Ir::Add(filled_regs[0].clone(), filled_regs[1].clone()),
-            Ir::Imul(filled_regs[1].clone(), filled_regs[2].clone()),
-            Ir::Mov(filled_regs[3].clone(), filled_regs[16].clone()),
-            Ir::Add(filled_regs[4].clone(), filled_regs[5].clone()),
-            Ir::Imul(filled_regs[5].clone(), filled_regs[6].clone()),
-            Ir::Mov(filled_regs[6].clone(), filled_regs[17].clone()),
-            Ir::Mov(filled_regs[7].clone(), filled_regs[18].clone()),
-            Ir::And(filled_regs[8].clone(), filled_regs[9].clone()),
-            Ir::Mov(filled_regs[9].clone(), filled_regs[19].clone()),
-            Ir::Push(filled_regs[22].clone()),
-            Ir::And(filled_regs[10].clone(), filled_regs[11].clone()),
-            Ir::Idiv(filled_regs[11].clone()),
-            Ir::Mov(filled_regs[10].clone(), spilled_reg1.clone()), // spill %r10
-            Ir::And(filled_regs[11].clone(), filled_regs[12].clone()),
-            Ir::Pop(filled_regs[22].clone()),
-            Ir::Mov(filled_regs[11].clone(), spilled_reg2), // spill %r11
-            Ir::Mov(filled_regs[12].clone(), spilled_reg3), // spill %r10
-            Ir::Add(filled_regs[13].clone(), filled_regs[14].clone()),
-            Ir::Mov(filled_regs[13].clone(), spilled_reg4), // spill %r11
-            Ir::Mov(spilled_reg1, unspilled_reg_1.clone()), // unspill filled_reg[10]
-            Ir::Mov(unspilled_reg_1, filled_regs[20].clone()),
-            Ir::Mov(filled_regs[15].clone(), filled_regs[21].clone()),
-            Ir::Call("foo".to_string()),
+            Lir::Add(filled_regs[0].clone(), filled_regs[1].clone()),
+            Lir::Imul(filled_regs[1].clone(), filled_regs[2].clone()),
+            Lir::Mov(filled_regs[3].clone(), filled_regs[16].clone()),
+            Lir::Add(filled_regs[4].clone(), filled_regs[5].clone()),
+            Lir::Imul(filled_regs[5].clone(), filled_regs[6].clone()),
+            Lir::Mov(filled_regs[6].clone(), filled_regs[17].clone()),
+            Lir::Mov(filled_regs[7].clone(), filled_regs[18].clone()),
+            Lir::And(filled_regs[8].clone(), filled_regs[9].clone()),
+            Lir::Mov(filled_regs[9].clone(), filled_regs[19].clone()),
+            Lir::Push(filled_regs[22].clone()),
+            Lir::And(filled_regs[10].clone(), filled_regs[11].clone()),
+            Lir::Idiv(filled_regs[11].clone()),
+            Lir::Mov(filled_regs[10].clone(), spilled_reg1.clone()), // spill %r10
+            Lir::And(filled_regs[11].clone(), filled_regs[12].clone()),
+            Lir::Pop(filled_regs[22].clone()),
+            Lir::Mov(filled_regs[11].clone(), spilled_reg2), // spill %r11
+            Lir::Mov(filled_regs[12].clone(), spilled_reg3), // spill %r10
+            Lir::Add(filled_regs[13].clone(), filled_regs[14].clone()),
+            Lir::Mov(filled_regs[13].clone(), spilled_reg4), // spill %r11
+            Lir::Mov(spilled_reg1, unspilled_reg_1.clone()), // unspill filled_reg[10]
+            Lir::Mov(unspilled_reg_1, filled_regs[20].clone()),
+            Lir::Mov(filled_regs[15].clone(), filled_regs[21].clone()),
+            Lir::Call("foo".to_string()),
         ];
 
         assert_regalloc(input, expected, reg_alloc);

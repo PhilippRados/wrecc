@@ -54,42 +54,42 @@ impl Function {
     }
     fn cmp(&self, token: &Token, other: &Function) -> Result<(), Error> {
         if self.return_type != other.return_type {
-            Err(Error::new(
+            return Err(Error::new(
                 token,
                 ErrorKind::MismatchedFuncDeclReturn(
                     self.return_type.clone(),
                     other.return_type.clone(),
                 ),
-            ))
-        } else if self.arity() != other.arity() {
-            Err(Error::new(
+            ));
+        }
+        if self.arity() != other.arity() {
+            return Err(Error::new(
                 token,
                 ErrorKind::MismatchedFuncDeclArity(self.arity(), other.arity()),
-            ))
-        } else if self.variadic != other.variadic {
-            Err(Error::new(
+            ));
+        }
+        if self.variadic != other.variadic {
+            return Err(Error::new(
                 token,
                 ErrorKind::MismatchedVariadic(self.variadic, other.variadic),
-            ))
-        } else {
-            for (i, (types, param_token)) in self.params.iter().enumerate() {
-                if *types != other.params[i].0 {
-                    return Err(Error::new(
-                        if let Some(param) = param_token {
-                            param
-                        } else {
-                            token
-                        },
-                        ErrorKind::TypeMismatchFuncDecl(
-                            i,
-                            other.params[i].0.clone(),
-                            types.clone(),
-                        ),
-                    ));
-                }
-            }
-            Ok(())
+            ));
         }
+        for (i, ((my_type, my_token), (other_type, _))) in
+            self.params.iter().zip(&other.params).enumerate()
+        {
+            if my_type != other_type {
+                return Err(Error::new(
+                    if let Some(param) = my_token {
+                        param
+                    } else {
+                        token
+                    },
+                    ErrorKind::TypeMismatchFuncDecl(i, other_type.clone(), my_type.clone()),
+                ));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -438,14 +438,14 @@ pub mod tests {
     use crate::compiler::common::types::tests::setup_type;
 
     fn func_template(name: &str, kind: InitType) -> (Token, Symbols) {
-        let token = Token::default(TokenType::new_ident(name.to_string()));
+        let token = Token::default(TokenType::Ident(name.to_string()));
         let symbol = Symbols::Func(Function::new(setup_type("void"), Vec::new(), false, kind));
 
         (token, symbol)
     }
 
     pub fn var_template(name: &str, ty: &str, kind: InitType) -> (Token, Symbols) {
-        let token = Token::default(TokenType::new_ident(name.to_string()));
+        let token = Token::default(TokenType::Ident(name.to_string()));
         let symbol = Symbols::Variable(SymbolInfo {
             kind,
             token: token.clone(),

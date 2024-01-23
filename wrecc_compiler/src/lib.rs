@@ -19,23 +19,23 @@ pub fn preprocess(filename: &Path, source: String) -> Result<Vec<PPToken>, Vec<E
 }
 
 pub fn compile(source: Vec<PPToken>, dump_ast: bool) -> Result<String, Vec<Error>> {
-    // Scan input
+    // scan input
     let tokens = Scanner::new(source).scan_token()?;
 
-    // Parse statements and return Abstract Syntax Tree
-    let mut declarations = Parser::new(tokens).parse()?;
+    // parse tokens and return parse-tree
+    let parse_tree = Parser::new(tokens).parse()?;
 
     if dump_ast {
-        declarations.iter().for_each(|decl| eprintln!("{}", decl));
+        parse_tree.iter().for_each(|decl| eprintln!("{}", decl));
     }
 
-    // Check for semantic errors
-    let (const_labels, switches) = TypeChecker::new().check(&mut declarations)?;
+    // check for semantic errors and annotate parse-tree returning new ast
+    let (declarations, const_labels, switches) = TypeChecker::new().check(parse_tree)?;
 
-    // Turn AST into IR
+    // turn AST into LIR
     let (ir, live_intervals) = Compiler::new(const_labels, switches).translate(declarations);
 
-    // Fill in physical registers
+    // fill in physical registers
     let asm = RegisterAllocation::new(live_intervals).generate(ir);
 
     let output = asm

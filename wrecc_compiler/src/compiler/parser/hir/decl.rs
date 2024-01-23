@@ -1,5 +1,5 @@
-use crate::compiler::ast::{expr::*, stmt::*};
 use crate::compiler::common::token::Token;
+use crate::compiler::parser::hir::{expr::*, stmt::*};
 use std::collections::VecDeque;
 
 use super::expr::PrintIndent;
@@ -39,7 +39,7 @@ pub enum SpecifierKind {
 
     Struct(Option<Token>, Option<Vec<MemberDeclaration>>),
     Union(Option<Token>, Option<Vec<MemberDeclaration>>),
-    Enum(Option<Token>, Option<Vec<(Token, Option<Expr>)>>),
+    Enum(Option<Token>, Option<Vec<(Token, Option<ExprKind>)>>),
 
     UserType,
 }
@@ -57,7 +57,7 @@ impl SpecifierKind {
 #[derive(Clone, Debug, PartialEq)]
 pub enum DeclModifier {
     Pointer,
-    Array(Token, Expr),
+    Array(Token, ExprKind),
     Function {
         params: Vec<(Vec<DeclSpecifier>, Declarator)>,
         variadic: bool,
@@ -81,11 +81,10 @@ pub struct Init {
     pub kind: InitKind,
     pub designator: Option<VecDeque<Designator>>,
     pub token: Token,
-    pub offset: i64,
 }
 #[derive(PartialEq, Clone, Debug)]
 pub enum InitKind {
-    Scalar(Expr),
+    Scalar(ExprKind),
     Aggr(Vec<Box<Init>>),
 }
 
@@ -96,7 +95,7 @@ pub struct Designator {
 }
 #[derive(PartialEq, Clone, Debug)]
 pub enum DesignatorKind {
-    Array(Expr),
+    Array(ExprKind),
     Member(String),
 }
 

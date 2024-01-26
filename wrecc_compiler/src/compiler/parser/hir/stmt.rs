@@ -32,15 +32,7 @@ impl PrintIndent for Stmt {
     fn print_indent(&self, indent_level: usize) -> String {
         match self {
             Stmt::Expr(expr) => format!("Expr:\n{}", indent_fmt(expr, indent_level + 1)),
-            Stmt::Declaration(_decls) => {
-                // let decls = decls
-                //     .iter()
-                //     .map(|kind| indent_fmt(kind, indent_level + 1))
-                //     .collect::<Vec<_>>()
-                //     .join("\n");
-                // format!("Decl:\n{}", decls)
-                "decl todo".to_string()
-            }
+            Stmt::Declaration(decl) => decl.print_indent(indent_level + 1),
             Stmt::Block(body) => {
                 let body = body
                     .iter()
@@ -93,7 +85,7 @@ impl PrintIndent for Stmt {
             ),
             Stmt::Case(_, value, body) => format!(
                 "Case:\n{}\n{}",
-                format_args!("{}Value: {}", "-".repeat(indent_level + 1), value),
+                indent_fmt(value, indent_level + 1),
                 indent_fmt(body.as_ref(), indent_level + 1)
             ),
             Stmt::Default(_, body) => {

@@ -1435,22 +1435,24 @@ end:
 }
 "#,
         );
-        let expected = r#"Decl:
--FuncDecl: 'printf'
-Decl:
--VarInit: 'a'
+        let expected = r#"Declaration:
+-Decl: 'printf'
+Declaration:
+-Empty
+Declaration:
+-Init: 'a'
 --Aggregate:
 ---Aggregate:
 ----Scalar:
 -----Literal: 21
 ---Scalar:
 ----Literal: 33
-Func: 'main'
--Decl:
---VarInit: 'i'
+FuncDef: 'main'
+-Declaration:
+--Init: 'i'
 ---Scalar:
 ----Literal: 0
---VarDecl: 'b'
+--Decl: 'b'
 -If:
 --Literal: 1
 --Block:
@@ -1458,7 +1460,9 @@ Func: 'main'
 ----Ident: 'b'
 ----Block:
 -----Case:
-------Value: 3
+------Binary: '+'
+-------Literal: 1
+-------Literal: 2
 ------Block:
 -------Expr:
 --------FuncCall: 'printf'
@@ -1470,8 +1474,8 @@ Func: 'main'
 --------String: 'hello'
 --Block:
 ---For:
-----Decl:
------VarInit: 'i'
+----Declaration:
+-----Init: 'i'
 ------Scalar:
 -------Literal: 5
 ----CompoundAssign: '-='
@@ -1488,8 +1492,8 @@ Func: 'main'
 ----Ident: 'i'
 ----Literal: 1
 ---Ident: 'b'
--Decl:
---VarDecl: 'a'
+-Declaration:
+--Decl: 'a'
 -Label: 'end'
 --Return:
 ---Literal: 1"#;

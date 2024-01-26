@@ -109,17 +109,9 @@ impl PrintIndent for ExternalDeclaration {
                     .collect::<Vec<String>>()
                     .join("\n");
 
-                format!("Func: '{}'\n{}", name.unwrap_string(), body)
+                format!("FuncDef: '{}'\n{}", name.unwrap_string(), body)
             }
-            ExternalDeclaration::Declaration(_decls) => {
-                // let decls = decls
-                //     .iter()
-                //     .map(|kind| indent_fmt(kind, indent_level + 1))
-                //     .collect::<Vec<_>>()
-                //     .join("\n");
-                // format!("Decl:\n{}", decls)
-                "decl".to_string()
-            }
+            ExternalDeclaration::Declaration(decl) => decl.print_indent(indent_level + 1),
         }
     }
 }
@@ -144,6 +136,38 @@ impl PrintIndent for InitKind {
         }
     }
 }
+impl PrintIndent for Declaration {
+    fn print_indent(&self, indent_level: usize) -> String {
+        let indent = "-".repeat(indent_level);
+        let decls = self
+            .declarators
+            .iter()
+            .map(|(declarator, init)| {
+                if let Some(name) = &declarator.name {
+                    match init {
+                        Some(init) => format!(
+                            "{}Init: '{}'\n{}",
+                            indent,
+                            name.unwrap_string(),
+                            indent_fmt(&init.kind, indent_level + 1)
+                        ),
+                        None => format!("{}Decl: '{}'", indent, name.unwrap_string()),
+                    }
+                } else {
+                    String::from("")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if decls.is_empty() {
+            format!("Declaration:\n{}Empty", indent)
+        } else {
+            format!("Declaration:\n{}", decls)
+        }
+    }
+}
+
 impl std::fmt::Display for InitKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", indent_fmt(self, 0))

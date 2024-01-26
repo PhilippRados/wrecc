@@ -2335,7 +2335,7 @@ mod tests {
 
         Ok(declarator.unwrap().init.unwrap())
     }
-    fn assert_init(actual: mir::decl::Init, expected: Vec<(usize, &'static str)>) {
+    fn assert_init(actual: mir::decl::Init, expected: Vec<(usize, &'static str, &'static str)>) {
         let mir::decl::Init::Aggr(actual) = actual else {unreachable!()};
         let mut typechecker = TypeChecker::new();
 
@@ -2343,9 +2343,14 @@ mod tests {
         for (actual, expected) in actual.into_iter().zip(expected) {
             assert_eq!(actual.1, expected.0);
 
-            let expected_expr = typechecker
-                .visit_expr(setup(expected.1).expression().unwrap())
-                .unwrap();
+            let expected_type = setup_type(expected.2);
+            let expected_expr = TypeChecker::maybe_cast(
+                expected_type,
+                typechecker
+                    .visit_expr(setup(expected.1).expression().unwrap())
+                    .unwrap(),
+            );
+
             assert_eq!(actual.0, expected_expr);
         }
     }
@@ -2515,7 +2520,7 @@ mod tests {
     #[test]
     fn array_init_list() {
         let actual = setup_init_list("int a[3] = {1,2};").unwrap();
-        let expected = vec![(0, "1"), (4, "2")];
+        let expected = vec![(0, "1", "int"), (4, "2", "int")];
 
         assert_init(actual, expected);
     }
@@ -2528,7 +2533,7 @@ mod tests {
             } a = {3,.s = 1,2};"#,
         )
         .unwrap();
-        let expected = vec![(0, "1"), (4, "2")];
+        let expected = vec![(0, "1", "int"), (4, "2", "int")];
 
         assert_init(actual, expected);
     }
@@ -2560,11 +2565,11 @@ mod tests {
         )
         .unwrap();
         let expected = vec![
-            (0, "'h'"),
-            (1, "'e'"),
-            (2, "'i'"),
-            (3, "'\\0'"),
-            (4, "'\\0'"),
+            (0, "'h'", "char"),
+            (1, "'e'", "char"),
+            (2, "'i'", "char"),
+            (3, "'\\0'", "char"),
+            (4, "'\\0'", "char"),
         ];
 
         assert_init(actual, expected);
@@ -2573,7 +2578,7 @@ mod tests {
     #[test]
     fn multidimensional_array() {
         let actual = setup_init_list("int a[2][3] = {{1},1,2};").unwrap();
-        let expected = vec![(0, "1"), (12, "1"), (16, "2")];
+        let expected = vec![(0, "1", "int"), (12, "1", "int"), (16, "2", "int")];
 
         assert_init(actual, expected);
     }
@@ -2591,13 +2596,13 @@ mod tests {
         )
         .unwrap();
         let expected = vec![
-            (0, "1"),
-            (4, "(long)2"),
-            (28, "21"),
-            (40, "(long)3"),
-            (48, "(long)4"),
-            (56, "1"),
-            (64, "2"),
+            (0, "1", "int"),
+            (4, "2", "long"),
+            (28, "21", "int"),
+            (40, "3", "long"),
+            (48, "4", "long"),
+            (56, "1", "int"),
+            (64, "2", "int"),
         ];
 
         assert_init(actual, expected);
@@ -2614,12 +2619,12 @@ mod tests {
         )
         .unwrap();
         let expected = vec![
-            (0, "(char)2"),
-            (1, "'m'"),
-            (2, "'e'"),
-            (3, "'\\0'"),
-            (4, "2"),
-            (8, "4"),
+            (0, "2", "char"),
+            (1, "'m'", "char"),
+            (2, "'e'", "char"),
+            (3, "'\\0'", "char"),
+            (4, "2", "int"),
+            (8, "4", "int"),
         ];
 
         assert_init(actual, expected);
@@ -2638,7 +2643,7 @@ mod tests {
               } a = {.inner_struct.inner_union.arr = '1', '3'};",
         )
         .unwrap();
-        let expected = vec![(2, "'1'"), (3, "'3'")];
+        let expected = vec![(2, "'1'", "char"), (3, "'3'", "char")];
 
         assert_init(actual, expected);
     }
@@ -2675,7 +2680,7 @@ mod tests {
               } a = {.inner_struct.inner_union.arr = 1, 3,.inner_struct.inner_union.arr[1] = 5};",
         )
         .unwrap();
-        let expected = vec![(2, "(char)1"), (3, "(char)5")];
+        let expected = vec![(2, "1", "char"), (3, "5", "char")];
 
         assert_init(actual, expected);
     }
@@ -2694,7 +2699,7 @@ mod tests {
                      .inner_struct.inner_union.arr[1] = 8};",
         )
         .unwrap();
-        let expected = vec![(3, "(char)8")];
+        let expected = vec![(3, "8", "char")];
 
         assert_init(actual, expected);
     }
@@ -2708,7 +2713,7 @@ mod tests {
               } my_union = {{1, 2}, .arr = 3};",
         )
         .unwrap();
-        let expected = vec![(0, "3"), (4, "2")];
+        let expected = vec![(0, "3", "int"), (4, "2", "int")];
 
         assert_init(actual, expected);
     }

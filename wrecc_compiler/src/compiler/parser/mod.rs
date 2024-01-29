@@ -1401,6 +1401,48 @@ pub mod tests {
     }
 
     #[test]
+    fn typedef_print() {
+        let actual = setup_stmt(
+            r#"
+typedef int n, a = 2;
+
+n some_var;"#,
+        );
+        let expected = r#"Typedef-Declaration:
+-Decl: 'n'
+-Init: 'a'
+--Scalar:
+---Literal: 2
+Declaration:
+-Decl: 'some_var'"#;
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn cast_print() {
+        let actual = setup_stmt(
+            r#"
+int main(){
+    int a = (long*)12;
+    int b = (long char)3;
+}"#,
+        );
+        let expected = r#"FuncDef: 'main'
+-Declaration:
+--Init: 'a'
+---Scalar:
+----Cast: 'long *'
+-----Literal: 12
+-Declaration:
+--Init: 'b'
+---Scalar:
+----Cast: 'invalid type'
+-----Literal: 3"#;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn stmt_ast() {
         let actual = setup_stmt(
             r#"

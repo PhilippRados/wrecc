@@ -160,10 +160,11 @@ impl PrintIndent for Declaration {
             .collect::<Vec<_>>()
             .join("\n");
 
+        let typedef = if self.is_typedef { "Typedef-" } else { "" };
         if decls.is_empty() {
-            format!("Declaration:\n{}Empty", indent)
+            format!("{}Declaration:\n{}Empty", typedef, indent)
         } else {
-            format!("Declaration:\n{}", decls)
+            format!("{}Declaration:\n{}", typedef, decls)
         }
     }
 }

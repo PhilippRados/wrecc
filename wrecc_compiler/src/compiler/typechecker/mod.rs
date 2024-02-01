@@ -1404,7 +1404,7 @@ impl TypeChecker {
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Literal(type_decl.size() as i64),
-            type_decl: NEWTypes::Primitive(Types::Long),
+            type_decl: NEWTypes::Primitive(Types::Int),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -1414,7 +1414,7 @@ impl TypeChecker {
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Literal(expr.type_decl.size() as i64),
-            type_decl: NEWTypes::Primitive(Types::Long),
+            type_decl: NEWTypes::Primitive(Types::Int),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -1550,33 +1550,37 @@ impl TypeChecker {
         token: Token,
         expr: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let expr = self.visit_expr(expr)?;
+        let type_decl = self.visit_expr(expr.clone())?.type_decl;
 
-        if !expr.type_decl.is_scalar() {
-            return Err(Error::new(
-                &token,
-                ErrorKind::InvalidIncrementType(expr.type_decl),
-            ));
-        }
-        if expr.value_kind == ValueKind::Rvalue {
-            return Err(Error::new(&token, ErrorKind::InvalidRvalueIncrement));
-        }
-
-        let amount = if let NEWTypes::Pointer(inner) = &expr.type_decl {
-            inner.size()
-        } else {
-            1
+        let (comp_op, bin_op) = match token.token {
+            TokenType::PlusPlus => (TokenType::PlusEqual, TokenType::Minus),
+            TokenType::MinusMinus => (TokenType::MinusEqual, TokenType::Plus),
+            _ => unreachable!("not a postunary token"),
         };
 
-        Ok(mir::expr::Expr {
-            value_kind: expr.value_kind.clone(),
-            type_decl: expr.type_decl.clone(),
-            kind: mir::expr::ExprKind::PostUnary {
-                operator: token.token,
-                left: Box::new(expr),
-                by_amount: amount,
-            },
-        })
+        // A++ <=> (A += 1) - 1 or A-- <=> (A -= 1) + 1
+        let postunary_sugar = hir::expr::ExprKind::Binary {
+            left: Box::new(hir::expr::ExprKind::CompoundAssign {
+                l_expr: Box::new(expr),
+                token: Token { token: comp_op, ..token.clone() },
+                r_expr: Box::new(hir::expr::ExprKind::Literal(
+                    1,
+                    NEWTypes::Primitive(Types::Int),
+                )),
+            }),
+            token: Token { token: bin_op, ..token },
+            right: Box::new(hir::expr::ExprKind::Literal(
+                1,
+                NEWTypes::Primitive(Types::Int),
+            )),
+        };
+
+        // need to cast back to left-type since binary operation integer promotes
+        // char c; typeof(c--) == char
+        Ok(Self::maybe_cast(
+            type_decl,
+            self.visit_expr(postunary_sugar)?,
+        ))
     }
     fn string(&mut self, data: String) -> Result<mir::expr::Expr, Error> {
         let len = data.len() + 1; // extra byte for \0-Terminator
@@ -1624,6 +1628,7 @@ impl TypeChecker {
             )
             .expect("always valid to declare tmp in new scope");
 
+        // tmp = &A, *tmp = *tmp op B
         let compound_sugar = hir::expr::ExprKind::Comma {
             left: Box::new(hir::expr::ExprKind::Assign {
                 l_expr: Box::new(hir::expr::ExprKind::Ident(tmp_token.clone())),

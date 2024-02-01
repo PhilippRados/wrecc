@@ -738,9 +738,6 @@ impl Compiler {
             ExprKind::ScaleUp { expr, by } => self.cg_scale_up(*expr, by),
             ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(*expr, shift_amount),
             ExprKind::String(name) => self.cg_string(name),
-            ExprKind::PostUnary { operator, left, by_amount } => {
-                self.cg_postunary(operator, *left, by_amount)
-            }
             ExprKind::MemberAccess { expr, member } => {
                 let reg = self.execute_expr(*expr);
                 self.cg_member_access(reg, &member, true)
@@ -830,50 +827,6 @@ impl Compiler {
         // only have to declare tmp var, since compound assign is only syntax sugar
         self.declare_var(tmp_symbol, None);
         self.execute_expr(expr)
-    }
-    fn cg_postunary(&mut self, operator: TokenType, expr: Expr, by_amount: usize) -> Register {
-        let reg = self.execute_expr(expr);
-
-        let return_reg = Register::Temp(TempRegister::new(
-            reg.get_type(),
-            &mut self.interval_counter,
-            self.instr_counter,
-        ));
-
-        // Assign value to return-register before binary operation
-        self.write_out(Lir::Mov(reg.clone(), return_reg.clone()));
-
-        // Do binary operation with at least 4Byte register
-        let mut operation_reg = Register::Temp(TempRegister::new(
-            reg.get_type(),
-            &mut self.interval_counter,
-            self.instr_counter,
-        ));
-
-        if operation_reg.get_type().size() < Types::Int.size() {
-            operation_reg.set_type(NEWTypes::Primitive(Types::Int));
-            self.write_out(Lir::Movs(return_reg.clone(), operation_reg.clone()));
-        } else {
-            self.write_out(Lir::Mov(return_reg.clone(), operation_reg.clone()));
-        }
-
-        let by_amount = Register::Literal(by_amount as i64, NEWTypes::Primitive(Types::Int));
-        match operator {
-            TokenType::PlusPlus => self.write_out(Lir::Add(by_amount, operation_reg.clone())),
-            TokenType::MinusMinus => self.write_out(Lir::Sub(by_amount, operation_reg.clone())),
-            _ => unreachable!(),
-        };
-
-        // reset operation-regs type to type of original reg
-        operation_reg.set_type(reg.get_type());
-
-        // Write operation result back to original reg
-        self.write_out(Lir::Mov(operation_reg.clone(), reg.clone()));
-
-        self.free(reg);
-        self.free(operation_reg);
-
-        return_reg
     }
     fn cg_string(&mut self, name: String) -> Register {
         Register::Label(LabelRegister::String(self.const_labels[&name]))

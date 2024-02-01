@@ -99,10 +99,7 @@ impl ExprKind {
             }
             ExprKind::SizeofType { decl_type, .. } => {
                 let size = typechecker.parse_type(decl_type.clone())?.size();
-                Some(ExprKind::new_literal(
-                    size as i64,
-                    integer_type(size as i64),
-                ))
+                Some(ExprKind::new_literal(size as i64, Types::Int))
             }
 
             ExprKind::Assign { l_expr, r_expr, .. } => {

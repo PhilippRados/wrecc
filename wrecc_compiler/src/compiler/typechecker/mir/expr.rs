@@ -49,11 +49,6 @@ pub enum ExprKind {
         shift_amount: usize,
         expr: Box<Expr>,
     },
-    PostUnary {
-        operator: TokenType,
-        left: Box<Expr>,
-        by_amount: usize,
-    },
     MemberAccess {
         member: String,
         expr: Box<Expr>,

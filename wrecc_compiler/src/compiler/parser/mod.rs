@@ -26,7 +26,7 @@ impl Parser {
         let mut external_declarations: Vec<ExternalDeclaration> = Vec::new();
         let mut errors = Vec::new();
 
-        while self.tokens.peek().is_ok() {
+        while self.tokens.peek("").is_ok() {
             match self.external_declaration() {
                 Ok(decl) => {
                     external_declarations.push(decl);
@@ -48,7 +48,7 @@ impl Parser {
         }
     }
     pub fn has_elements(&self) -> Option<&Token> {
-        self.tokens.peek().ok()
+        self.tokens.peek("").ok()
     }
 
     fn maybe_sync(
@@ -107,7 +107,7 @@ impl Parser {
             declarator.modifiers.last(),
             Some(DeclModifier::Function { .. })
         ) && matches!(
-            self.tokens.peek(),
+            self.tokens.peek(""),
             Ok(Token { token: TokenType::LeftBrace, .. })
         ) {
             return self.function_definition(specifiers, is_typedef, declarator);
@@ -131,7 +131,7 @@ impl Parser {
         let mut specifiers = Vec::new();
         let mut is_typedef = false;
 
-        while let Ok(token) = self.tokens.peek() {
+        while let Ok(token) = self.tokens.peek("") {
             if self.is_type(token) {
                 if matches!(token.token, TokenType::Ident(..)) && !specifiers.is_empty() {
                     break;
@@ -396,7 +396,7 @@ impl Parser {
                     self.consume(TokenKind::Equal, "Expect '=' after array designator")?;
                 }
 
-                let token = self.tokens.peek()?.clone();
+                let token = self.tokens.peek("Expected expression")?.clone();
                 let init = self.initializers(&token, designator)?;
 
                 init_list.push(Box::new(init));
@@ -480,7 +480,10 @@ impl Parser {
             return Err(Error::new(token, ErrorKind::IsEmpty(token.token.clone())));
         }
 
-        while self.matches(&[TokenKind::RightBrace]).is_none() {
+        while let Ok(token) = self.tokens.peek("") {
+            if let TokenType::RightBrace = token.token {
+                break;
+            }
             let result = || -> Result<(), Error> {
                 let ident =
                     self.consume(TokenKind::Ident, "Expect identifier in enum definition")?;
@@ -505,6 +508,13 @@ impl Parser {
             }
         }
 
+        if let Err(e) = self.consume(
+            TokenKind::RightBrace,
+            "Expected closing '}' after enum definition",
+        ) {
+            errors.push(e);
+        }
+
         if errors.is_empty() {
             Ok(constants)
         } else {
@@ -519,14 +529,19 @@ impl Parser {
         let mut members = Vec::new();
         let mut errors = Vec::new();
 
-        while self.matches(&[TokenKind::RightBrace]).is_none() {
+        while let Ok(token) = self.tokens.peek("") {
+            if let TokenType::RightBrace = token.token {
+                break;
+            }
             let result = || -> Result<(), Error> {
                 let (specifiers, _) = self.declaration_specifiers(false)?;
                 let mut declarators = Vec::new();
 
                 loop {
                     // allows `int;` but not `int *;`
-                    if let TokenType::Semicolon = self.tokens.peek()?.token {
+                    if let TokenType::Semicolon =
+                        self.tokens.peek("Expected member-declarator")?.token
+                    {
                         break;
                     }
 
@@ -543,6 +558,7 @@ impl Parser {
                 }
                 members.push((specifiers, declarators));
 
+                // dont return Error directly because then then can't sync properly
                 if let Err(e) =
                     self.consume(TokenKind::Semicolon, "Expect ';' after member declaration")
                 {
@@ -556,6 +572,13 @@ impl Parser {
 
         if members.iter().all(|(_, decl)| decl.is_empty()) {
             errors.push(Error::new(token, ErrorKind::IsEmpty(token.token.clone())))
+        }
+
+        if let Err(e) = self.consume(
+            TokenKind::RightBrace,
+            "Expected closing '}' after struct declaration",
+        ) {
+            errors.push(e);
         }
 
         if errors.is_empty() {
@@ -631,8 +654,8 @@ impl Parser {
                 _ => unreachable!(),
             };
         }
-        if let TokenType::Ident(..) = self.tokens.peek()?.token {
-            if let TokenType::Colon = self.tokens.double_peek()?.token {
+        if let TokenType::Ident(..) = self.tokens.peek("Expected expression")?.token {
+            if let TokenType::Colon = self.tokens.double_peek("Expected expression")?.token {
                 let ident = self.tokens.next().expect("value is peeked");
                 self.tokens.next();
 
@@ -716,7 +739,7 @@ impl Parser {
 
         self.typedefs.enter();
 
-        let init = match self.is_specifier(self.tokens.peek()?) {
+        let init = match self.is_specifier(self.tokens.peek("Expected type-specifier")?) {
             true => self.external_declaration().and_then(|decl| match decl {
                 ExternalDeclaration::Declaration(decl) => {
                     if decl.is_typedef {
@@ -780,7 +803,7 @@ impl Parser {
 
         self.typedefs.enter();
 
-        while let Ok(token) = self.tokens.peek().map(|tok| tok.clone()) {
+        while let Ok(token) = self.tokens.peek("").map(|tok| tok.clone()) {
             if token.token == TokenType::RightBrace {
                 break;
             }
@@ -803,7 +826,7 @@ impl Parser {
             self.maybe_sync(result, &mut errors, TokenType::Semicolon);
         }
 
-        if let Err(e) = self.consume(TokenKind::RightBrace, "Expected closing '}' after Block") {
+        if let Err(e) = self.consume(TokenKind::RightBrace, "Expected closing '}' after block") {
             errors.push(e);
         }
 
@@ -1060,7 +1083,7 @@ impl Parser {
         | TokenType::PlusPlus
         | TokenType::MinusMinus
         | TokenType::LeftParen
-        | TokenType::Sizeof) = self.tokens.peek()?.token.clone()
+        | TokenType::Sizeof) = self.tokens.peek("Expected expression")?.token.clone()
         {
             return Ok(match kind {
                 // ++a or --a is equivalent to a += 1 or a -= 1
@@ -1077,7 +1100,7 @@ impl Parser {
                 // typecast
                 // have to check whether expression or type inside of parentheses
                 TokenType::LeftParen => {
-                    if self.is_type(self.tokens.double_peek()?) {
+                    if self.is_type(self.tokens.double_peek("Expected expression")?) {
                         let token = self.tokens.next().unwrap();
                         let decl_type = self.type_name()?;
 
@@ -1089,8 +1112,11 @@ impl Parser {
                 TokenType::Sizeof => {
                     // sizeof expr doesnt need parentheses but sizeof type does
                     self.tokens.next().unwrap();
-                    if let TokenType::LeftParen = self.tokens.peek()?.token {
-                        if self.is_type(self.tokens.double_peek()?) {
+                    if let TokenType::LeftParen = self.tokens.peek("Expected expression")?.token {
+                        if self.is_type(
+                            self.tokens
+                                .double_peek("Expected expression or type-specifier")?,
+                        ) {
                             self.tokens.next().unwrap();
                             let decl_type = self.type_name()?;
 
@@ -1216,14 +1242,14 @@ impl Parser {
             return Ok(ExprKind::Grouping { expr: Box::new(expr.clone()) });
         }
 
-        let token = self.tokens.peek()?;
+        let token = self.tokens.peek("Expected expression")?;
         Err(Error::new(
             token,
             ErrorKind::ExpectedExpression(token.token.clone()),
         ))
     }
     fn consume(&mut self, token: TokenKind, msg: &'static str) -> Result<Token, Error> {
-        match self.tokens.peek() {
+        match self.tokens.peek("") {
             Ok(v) => {
                 if TokenKind::from(&v.token) != token {
                     Err(Error::new(v, ErrorKind::Regular(msg)))
@@ -1236,14 +1262,14 @@ impl Parser {
         }
     }
     fn check(&mut self, expected: TokenKind) -> bool {
-        if let Ok(token) = self.tokens.peek() {
+        if let Ok(token) = self.tokens.peek("") {
             return TokenKind::from(&token.token) == expected;
         }
         false
     }
 
     fn matches(&mut self, expected: &[TokenKind]) -> Option<Token> {
-        match self.tokens.peek() {
+        match self.tokens.peek("") {
             Ok(v) => {
                 if !expected.contains(&TokenKind::from(&v.token)) {
                     return None;
@@ -1254,7 +1280,7 @@ impl Parser {
         self.tokens.next()
     }
     fn type_specifier(&mut self) -> Result<SpecifierKind, Error> {
-        let token = self.tokens.peek()?;
+        let token = self.tokens.peek("Expected type-specifier")?;
         match token.token {
             TokenType::Struct | TokenType::Union => {
                 let token = self.tokens.next().unwrap();
@@ -1300,6 +1326,7 @@ impl From<(Option<Token>, ErrorKind)> for Error {
         if let Some(eof_token) = eof_token {
             Error::new(&eof_token, kind)
         } else {
+            // QUESTION: is this ever reached?
             Error::eof("Expected expression")
         }
     }

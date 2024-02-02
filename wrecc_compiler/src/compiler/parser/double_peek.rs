@@ -15,14 +15,15 @@ impl<T: Clone> DoublePeek<T> {
     pub fn next(&mut self) -> Option<T> {
         self.inner.pop_front()
     }
-    pub fn peek(&self) -> Result<&T, (Option<T>, ErrorKind)> {
+    // cannot return Error directly because preprocessor::scanner::Token doesnt implement Location
+    pub fn peek(&self, expected: &'static str) -> Result<&T, (Option<T>, ErrorKind)> {
         self.inner
             .front()
-            .ok_or_else(|| (self.eof.clone(), ErrorKind::Eof("Expected expression")))
+            .ok_or_else(|| (self.eof.clone(), ErrorKind::Eof(expected)))
     }
-    pub fn double_peek(&self) -> Result<&T, (Option<T>, ErrorKind)> {
+    pub fn double_peek(&self, expected: &'static str) -> Result<&T, (Option<T>, ErrorKind)> {
         self.inner
             .get(1)
-            .ok_or_else(|| (self.eof.clone(), ErrorKind::Eof("Expected expression")))
+            .ok_or_else(|| (self.eof.clone(), ErrorKind::Eof(expected)))
     }
 }

@@ -159,7 +159,7 @@ impl Scanner {
 
                     self.add_token(&mut result, TokenKind::CharLit(s), Some(loc));
                 }
-                '/' if matches!(self.source.peek(), Ok('/')) => {
+                '/' if matches!(self.source.peek(""), Ok('/')) => {
                     self.source.next();
                     let (_, (newlines, col)) =
                         self.consume_until("//", |ch| ch == '\n' && ch == '\0', false);
@@ -167,7 +167,7 @@ impl Scanner {
                     self.line += newlines;
                     self.column = col;
                 }
-                '/' if matches!(self.source.peek(), Ok('*')) => {
+                '/' if matches!(self.source.peek(""), Ok('*')) => {
                     self.source.next();
                     let (newlines, col) = self.multiline_comment();
 
@@ -194,7 +194,7 @@ impl Scanner {
 
                     self.add_token(&mut result, TokenKind::Number(number), Some(loc));
                 }
-                '\\' if matches!(self.source.peek(), Ok('\n')) => {
+                '\\' if matches!(self.source.peek(""), Ok('\n')) => {
                     // skip over escaped newline
                     self.source.next();
                     self.line += 1;
@@ -217,9 +217,9 @@ impl Scanner {
         let mut result = String::from(start);
         let (mut newlines, mut column) = (0, self.column + start.len() as i32);
 
-        while let Ok(peeked) = self.source.peek() {
+        while let Ok(peeked) = self.source.peek("") {
             match peeked {
-                '\\' if matches!(self.source.double_peek(), Ok('\n')) => {
+                '\\' if matches!(self.source.double_peek(""), Ok('\n')) => {
                     self.source.next();
                     self.source.next();
                     column = 1;
@@ -244,9 +244,9 @@ impl Scanner {
     fn multiline_comment(&mut self) -> (i32, i32) {
         let (mut newlines, mut column) = (0, self.column + 2);
 
-        while let Ok(peeked) = self.source.peek() {
+        while let Ok(peeked) = self.source.peek("") {
             match peeked {
-                '*' if matches!(self.source.double_peek(), Ok('/')) => {
+                '*' if matches!(self.source.double_peek(""), Ok('/')) => {
                     self.source.next();
                     self.source.next();
                     column += 2;

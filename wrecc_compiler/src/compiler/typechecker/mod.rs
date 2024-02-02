@@ -125,7 +125,7 @@ impl TypeChecker {
     }
     fn declarator(
         &mut self,
-        specifier_type: NEWTypes,
+        specifier_type: Type,
         is_typedef: bool,
         (declarator, init): (hir::decl::Declarator, Option<hir::decl::Init>),
     ) -> Result<Option<mir::decl::Declarator>, Error> {
@@ -134,8 +134,7 @@ impl TypeChecker {
         if let Some(name) = declarator.name {
             let symbol = if is_typedef {
                 Symbols::TypeDef(parsed_type.clone())
-            } else if let NEWTypes::Function { return_type, params, variadic } = parsed_type.clone()
-            {
+            } else if let Type::Function { return_type, params, variadic } = parsed_type.clone() {
                 let func = Function::new(*return_type, params, variadic, InitType::Declaration);
                 Symbols::Func(func)
             } else {
@@ -204,7 +203,7 @@ impl TypeChecker {
             Ok(None)
         }
     }
-    pub fn parse_type(&mut self, decl_type: hir::decl::DeclType) -> Result<NEWTypes, Error> {
+    pub fn parse_type(&mut self, decl_type: hir::decl::DeclType) -> Result<Type, Error> {
         let specifier_type = self.parse_specifiers(decl_type.specifiers)?;
         let parsed_type = self.parse_modifiers(specifier_type, decl_type.modifiers)?;
 
@@ -213,9 +212,9 @@ impl TypeChecker {
     fn parse_specifiers(
         &mut self,
         specifiers: Vec<hir::decl::DeclSpecifier>,
-    ) -> Result<NEWTypes, Error> {
+    ) -> Result<Type, Error> {
         if specifiers.is_empty() {
-            return Ok(NEWTypes::Primitive(Types::Int));
+            return Ok(Type::Primitive(Primitive::Int));
         }
 
         let token = specifiers[0].token.clone();
@@ -248,14 +247,14 @@ impl TypeChecker {
                 }
             }
 
-            [hir::decl::SpecifierKind::Void] => Ok(NEWTypes::Primitive(Types::Void)),
-            [hir::decl::SpecifierKind::Char] => Ok(NEWTypes::Primitive(Types::Char)),
-            [hir::decl::SpecifierKind::Int] => Ok(NEWTypes::Primitive(Types::Int)),
+            [hir::decl::SpecifierKind::Void] => Ok(Type::Primitive(Primitive::Void)),
+            [hir::decl::SpecifierKind::Char] => Ok(Type::Primitive(Primitive::Char)),
+            [hir::decl::SpecifierKind::Int] => Ok(Type::Primitive(Primitive::Int)),
             [hir::decl::SpecifierKind::Long]
             | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Int]
             | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Long]
             | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Int] => {
-                Ok(NEWTypes::Primitive(Types::Long))
+                Ok(Type::Primitive(Primitive::Long))
             }
             _ => Err(Error::new(
                 &token,
@@ -265,9 +264,9 @@ impl TypeChecker {
     }
     fn parse_modifiers(
         &mut self,
-        mut parsed_type: NEWTypes,
+        mut parsed_type: Type,
         modifiers: Vec<hir::decl::DeclModifier>,
-    ) -> Result<NEWTypes, Error> {
+    ) -> Result<Type, Error> {
         for m in modifiers {
             parsed_type = match m {
                 hir::decl::DeclModifier::Pointer => parsed_type.pointer_to(),
@@ -319,7 +318,7 @@ impl TypeChecker {
         token: Token,
         name: &Option<Token>,
         members: &Option<Vec<hir::decl::MemberDeclaration>>,
-    ) -> Result<NEWTypes, Error> {
+    ) -> Result<Type, Error> {
         let members = match (&name, members) {
             (Some(name), Some(members)) => {
                 let custom_type = self.env.declare_type(
@@ -369,15 +368,15 @@ impl TypeChecker {
         };
 
         Ok(match token.token {
-            TokenType::Struct => NEWTypes::Struct(members),
-            TokenType::Union => NEWTypes::Union(members),
+            TokenType::Struct => Type::Struct(members),
+            TokenType::Union => Type::Union(members),
             _ => unreachable!("not struct/union specifier"),
         })
     }
     fn struct_declaration(
         &mut self,
         members: Vec<hir::decl::MemberDeclaration>,
-    ) -> Result<Vec<(NEWTypes, Token)>, Error> {
+    ) -> Result<Vec<(Type, Token)>, Error> {
         let mut parsed_members = Vec::new();
 
         for (spec, declarators) in members {
@@ -399,7 +398,7 @@ impl TypeChecker {
 
         Ok(parsed_members)
     }
-    fn check_duplicate_members(vec: &Vec<(NEWTypes, Token)>) -> Result<(), Error> {
+    fn check_duplicate_members(vec: &Vec<(Type, Token)>) -> Result<(), Error> {
         use std::collections::HashSet;
         let mut set = HashSet::new();
         for token in vec.iter().map(|(_, name)| name) {
@@ -418,13 +417,13 @@ impl TypeChecker {
         token: Token,
         name: &Option<Token>,
         constants: &Option<Vec<(Token, Option<hir::expr::ExprKind>)>>,
-    ) -> Result<NEWTypes, Error> {
+    ) -> Result<Type, Error> {
         match (&name, constants) {
             (Some(name), Some(values)) => {
                 let members = self.enumerator_list(values.clone())?;
                 self.env.declare_type(name, Tags::Enum(members.clone()))?;
 
-                Ok(NEWTypes::Enum(Some(name.unwrap_string()), members))
+                Ok(Type::Enum(Some(name.unwrap_string()), members))
             }
             (Some(name), None) => {
                 let custom_type = self
@@ -440,9 +439,9 @@ impl TypeChecker {
                 }
                 let constants = custom_type.borrow().clone().unwrap_enum();
 
-                Ok(NEWTypes::Enum(Some(name.unwrap_string()), constants))
+                Ok(Type::Enum(Some(name.unwrap_string()), constants))
             }
-            (None, Some(values)) => Ok(NEWTypes::Enum(None, self.enumerator_list(values.clone())?)),
+            (None, Some(values)) => Ok(Type::Enum(None, self.enumerator_list(values.clone())?)),
             (None, None) => Err(Error::new(
                 &token,
                 ErrorKind::EmptyAggregate(token.token.clone()),
@@ -466,12 +465,12 @@ impl TypeChecker {
                 &name,
                 Symbols::Variable(SymbolInfo {
                     token: name.clone(),
-                    type_decl: NEWTypes::Primitive(Types::Int),
+                    type_decl: Type::Primitive(Primitive::Int),
                     kind: InitType::Definition,
                     is_global: self.env.is_global(),
                     reg: Some(Register::Literal(
                         index as i64,
-                        NEWTypes::Primitive(Types::Int),
+                        Type::Primitive(Primitive::Int),
                     )),
                 }),
             )?;
@@ -491,7 +490,7 @@ impl TypeChecker {
         &mut self,
         token: &Token,
         params: Vec<(Vec<hir::decl::DeclSpecifier>, hir::decl::Declarator)>,
-    ) -> Result<Vec<(NEWTypes, Option<(Token, VarSymbol)>)>, Error> {
+    ) -> Result<Vec<(Type, Option<(Token, VarSymbol)>)>, Error> {
         let mut parsed_params = Vec::new();
 
         for (specifiers, declarator) in params {
@@ -499,8 +498,8 @@ impl TypeChecker {
             let mut parsed_type = self.parse_modifiers(specifier_type, declarator.modifiers)?;
 
             parsed_type = match parsed_type {
-                NEWTypes::Array { of, .. } => of.pointer_to(),
-                NEWTypes::Function { .. } => parsed_type.pointer_to(),
+                Type::Array { of, .. } => of.pointer_to(),
+                Type::Function { .. } => parsed_type.pointer_to(),
                 ty => ty,
             };
 
@@ -525,7 +524,7 @@ impl TypeChecker {
         }
 
         // single unnamed void param is equivalent to empty params
-        if let [(NEWTypes::Primitive(Types::Void), None)] = parsed_params.as_slice() {
+        if let [(Type::Primitive(Primitive::Void), None)] = parsed_params.as_slice() {
             parsed_params.pop();
         } else if parsed_params
             .iter()
@@ -539,7 +538,7 @@ impl TypeChecker {
 
     fn init_check(
         &mut self,
-        type_decl: &NEWTypes,
+        type_decl: &Type,
         mut init: hir::decl::Init,
     ) -> Result<mir::decl::Init, Error> {
         if let Some((amount, s)) = Self::is_string_init(type_decl, &init)? {
@@ -553,7 +552,7 @@ impl TypeChecker {
     }
     fn init_scalar(
         &mut self,
-        type_decl: &NEWTypes,
+        type_decl: &Type,
         token: &Token,
         expr: hir::expr::ExprKind,
     ) -> Result<mir::decl::Init, Error> {
@@ -574,12 +573,12 @@ impl TypeChecker {
     }
     fn init_aggregate(
         &mut self,
-        type_decl: &NEWTypes,
+        type_decl: &Type,
         token: Token,
         mut list: Vec<Box<hir::decl::Init>>,
     ) -> Result<mir::decl::Init, Error> {
         match type_decl {
-            NEWTypes::Array { .. } | NEWTypes::Struct(_) | NEWTypes::Union(_) => {
+            Type::Array { .. } | Type::Struct(_) | Type::Union(_) => {
                 let mut new_list = Vec::new();
                 let mut objects = CurrentObjects::new(type_decl.clone());
 
@@ -701,11 +700,11 @@ impl TypeChecker {
 
     fn designator_index(
         &mut self,
-        type_decl: &NEWTypes,
+        type_decl: &Type,
         designator: hir::decl::Designator,
-    ) -> Result<(i64, i64, NEWTypes), Error> {
+    ) -> Result<(i64, i64, Type), Error> {
         match (designator.kind, type_decl) {
-            (hir::decl::DesignatorKind::Array(mut expr), NEWTypes::Array { amount, of }) => {
+            (hir::decl::DesignatorKind::Array(mut expr), Type::Array { amount, of }) => {
                 let literal =
                     expr.get_literal_constant(self, &designator.token, "Array designator")?;
                 if literal < 0 {
@@ -724,27 +723,27 @@ impl TypeChecker {
                     Ok((literal, literal, *of.clone()))
                 }
             }
-            (hir::decl::DesignatorKind::Member(_), NEWTypes::Array { .. }) => Err(Error::new(
+            (hir::decl::DesignatorKind::Member(_), Type::Array { .. }) => Err(Error::new(
                 &designator.token,
                 ErrorKind::Regular(
                     "Can only use member designator on type 'struct' and 'union' not 'array'",
                 ),
             )),
 
-            (hir::decl::DesignatorKind::Array(_), NEWTypes::Struct(_) | NEWTypes::Union(_)) => {
+            (hir::decl::DesignatorKind::Array(_), Type::Struct(_) | Type::Union(_)) => {
                 Err(Error::new(
                     &designator.token,
                     ErrorKind::InvalidArrayDesignator(type_decl.clone()),
                 ))
             }
-            (hir::decl::DesignatorKind::Member(m), NEWTypes::Struct(s) | NEWTypes::Union(s)) => {
+            (hir::decl::DesignatorKind::Member(m), Type::Struct(s) | Type::Union(s)) => {
                 if let Some(i) = s
                     .members()
                     .iter()
                     .position(|(_, m_token)| *m == m_token.unwrap_string())
                 {
                     // unions only have single index
-                    if let NEWTypes::Union(_) = type_decl {
+                    if let Type::Union(_) = type_decl {
                         Ok((0, i as i64, s.member_type(&m)))
                     } else {
                         Ok((i as i64, i as i64, s.member_type(&m)))
@@ -768,7 +767,7 @@ impl TypeChecker {
     // - char arr[4] = "foo";
     // - char arr[4] = {"foo"};
     fn is_string_init(
-        type_decl: &NEWTypes,
+        type_decl: &Type,
         init: &hir::decl::Init,
     ) -> Result<Option<(usize, String)>, Error> {
         if let Some(amount) = type_decl.is_char_array() {
@@ -827,7 +826,7 @@ impl TypeChecker {
                         token: token.clone(),
                         kind: hir::decl::InitKind::Scalar(hir::expr::ExprKind::Literal(
                             *c as i64,
-                            NEWTypes::Primitive(Types::Char),
+                            Type::Primitive(Primitive::Char),
                         )),
                         designator: None,
                     })
@@ -935,8 +934,8 @@ impl TypeChecker {
             ))
         }
     }
-    fn main_returns_int(name_token: &Token, return_type: &NEWTypes) -> Result<(), Error> {
-        if name_token.unwrap_string() == "main" && *return_type != NEWTypes::Primitive(Types::Int) {
+    fn main_returns_int(name_token: &Token, return_type: &Type) -> Result<(), Error> {
+        if name_token.unwrap_string() == "main" && *return_type != Type::Primitive(Primitive::Int) {
             Err(Error::new(
                 name_token,
                 ErrorKind::InvalidMainReturn(return_type.clone()),
@@ -958,7 +957,7 @@ impl TypeChecker {
                 func_symbol,
                 Some(mir::expr::Expr {
                     kind: mir::expr::ExprKind::Literal(0),
-                    type_decl: NEWTypes::Primitive(Types::Int),
+                    type_decl: Type::Primitive(Primitive::Int),
                     value_kind: ValueKind::Rvalue,
                 }),
             ));
@@ -1257,7 +1256,7 @@ impl TypeChecker {
 
             Some(expr)
         } else {
-            let return_type = NEWTypes::Primitive(Types::Void);
+            let return_type = Type::Primitive(Primitive::Void);
             let return_expr = hir::expr::ExprKind::Nop;
 
             if !function_type.type_compatible(&return_type, &return_expr) {
@@ -1345,14 +1344,14 @@ impl TypeChecker {
             hir::expr::ExprKind::SizeofExpr { expr } => self.sizeof_expr(*expr),
             hir::expr::ExprKind::Nop => Ok(mir::expr::Expr {
                 kind: mir::expr::ExprKind::Nop,
-                type_decl: NEWTypes::Primitive(Types::Void),
+                type_decl: Type::Primitive(Primitive::Void),
                 value_kind: ValueKind::Rvalue,
             }),
         }
     }
     fn check_type_compatibility(
         token: &Token,
-        left_type: &NEWTypes,
+        left_type: &Type,
         right: &mir::expr::Expr,
     ) -> Result<(), Error> {
         if left_type.is_void()
@@ -1390,7 +1389,7 @@ impl TypeChecker {
             Ordering::Equal => expr.cast_to(new_type, CastDirection::Equal),
         })
     }
-    fn maybe_cast(new_type: NEWTypes, expr: mir::expr::Expr) -> mir::expr::Expr {
+    fn maybe_cast(new_type: Type, expr: mir::expr::Expr) -> mir::expr::Expr {
         match expr.type_decl.size().cmp(&new_type.size()) {
             Ordering::Less => expr.cast_to(new_type, CastDirection::Up),
             Ordering::Greater => expr.cast_to(new_type, CastDirection::Down),
@@ -1403,7 +1402,7 @@ impl TypeChecker {
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Literal(type_decl.size() as i64),
-            type_decl: NEWTypes::Primitive(Types::Int),
+            type_decl: Type::Primitive(Primitive::Int),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -1413,7 +1412,7 @@ impl TypeChecker {
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Literal(expr.type_decl.size() as i64),
-            type_decl: NEWTypes::Primitive(Types::Int),
+            type_decl: Type::Primitive(Primitive::Int),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -1518,7 +1517,7 @@ impl TypeChecker {
         }
 
         match &expr.type_decl {
-            NEWTypes::Struct(s) | NEWTypes::Union(s) => {
+            Type::Struct(s) | Type::Union(s) => {
                 let member = member.unwrap_string();
 
                 if let Some((member_type, _)) = s
@@ -1564,13 +1563,13 @@ impl TypeChecker {
                 token: Token { token: comp_op, ..token.clone() },
                 r_expr: Box::new(hir::expr::ExprKind::Literal(
                     1,
-                    NEWTypes::Primitive(Types::Int),
+                    Type::Primitive(Primitive::Int),
                 )),
             }),
             token: Token { token: bin_op, ..token },
             right: Box::new(hir::expr::ExprKind::Literal(
                 1,
-                NEWTypes::Primitive(Types::Int),
+                Type::Primitive(Primitive::Int),
             )),
         };
 
@@ -1588,8 +1587,8 @@ impl TypeChecker {
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::String(data),
-            type_decl: NEWTypes::Array {
-                of: Box::new(NEWTypes::Primitive(Types::Char)),
+            type_decl: Type::Array {
+                of: Box::new(Type::Primitive(Primitive::Char)),
                 amount: len,
             },
             value_kind: ValueKind::Lvalue,
@@ -1676,7 +1675,7 @@ impl TypeChecker {
         token: Token,
         right: mir::expr::Expr,
     ) -> Result<mir::expr::Expr, Error> {
-        if matches!(left.type_decl, NEWTypes::Array { .. }) {
+        if matches!(left.type_decl, Type::Array { .. }) {
             return Err(Error::new(&token, ErrorKind::NotAssignable(left.type_decl)));
         }
 
@@ -1750,7 +1749,7 @@ impl TypeChecker {
         &self,
         left_paren: &Token,
         func_name: String,
-        params: &[(NEWTypes, Option<Token>)],
+        params: &[(Type, Option<Token>)],
         mut args: Vec<mir::expr::Expr>,
     ) -> Result<Vec<mir::expr::Expr>, Error> {
         let mut new_args = Vec::new();
@@ -1772,7 +1771,7 @@ impl TypeChecker {
 
             // cast argument to the correct parameter type
             new_args.push(
-                if param_type.size() > NEWTypes::Primitive(Types::Char).size() {
+                if param_type.size() > Type::Primitive(Primitive::Char).size() {
                     Self::maybe_cast(param_type.clone(), arg)
                 } else {
                     arg
@@ -1810,7 +1809,7 @@ impl TypeChecker {
                 right: Box::new(right),
                 operator: token.token,
             },
-            type_decl: NEWTypes::Primitive(Types::Int),
+            type_decl: Type::Primitive(Primitive::Int),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -1851,7 +1850,7 @@ impl TypeChecker {
                 left: Box::new(left),
                 right: Box::new(right),
             },
-            type_decl: NEWTypes::Primitive(Types::Int),
+            type_decl: Type::Primitive(Primitive::Int),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -1903,14 +1902,12 @@ impl TypeChecker {
                 (.., TokenType::GreaterGreater | TokenType::LessLess) => (left, right, None),
 
                 // if pointer - pointer, scale result before operation to match left-pointers type
-                (NEWTypes::Pointer(inner), NEWTypes::Pointer(_), _) => {
-                    (left, right, Some(inner.size()))
-                }
+                (Type::Pointer(inner), Type::Pointer(_), _) => (left, right, Some(inner.size())),
                 // if integer type and pointer always cast to pointer
-                (_, right_type @ NEWTypes::Pointer(_), _) => {
+                (_, right_type @ Type::Pointer(_), _) => {
                     (left.cast_to(right_type, CastDirection::Up), right, None)
                 }
-                (left_type @ NEWTypes::Pointer(_), ..) => {
+                (left_type @ Type::Pointer(_), ..) => {
                     (left, right.cast_to(left_type, CastDirection::Up), None)
                 }
 
@@ -1940,7 +1937,7 @@ impl TypeChecker {
                     shift_amount: log_2(scale_factor as i32),
                     expr: Box::new(result),
                 },
-                type_decl: NEWTypes::Primitive(Types::Long),
+                type_decl: Type::Primitive(Primitive::Long),
                 value_kind: mir::expr::ValueKind::Rvalue,
             }
         } else {
@@ -1975,7 +1972,7 @@ impl TypeChecker {
 
                     Ok(mir::expr::Expr {
                         kind: mir::expr::ExprKind::Unary { operator: token.token, right },
-                        type_decl: NEWTypes::Primitive(Types::Int),
+                        type_decl: Type::Primitive(Primitive::Int),
                         value_kind: ValueKind::Rvalue,
                     })
                 }
@@ -2060,7 +2057,7 @@ enum ScopeKind {
 #[derive(Debug, PartialEq)]
 struct Scope(Vec<ScopeKind>);
 impl Scope {
-    fn increment_stack_size(&mut self, type_decl: &NEWTypes) {
+    fn increment_stack_size(&mut self, type_decl: &Type) {
         let ScopeKind::Function(func_symbol, _) = find_scope!(self, ScopeKind::Function(..))
             .expect("can only be called inside a function") else {unreachable!()};
         let stack_size = func_symbol.borrow().unwrap_func().stack_size;
@@ -2122,20 +2119,20 @@ impl Scope {
 }
 
 #[derive(Clone)]
-struct CurrentObjects(Vec<(i64, i64, NEWTypes)>);
+struct CurrentObjects(Vec<(i64, i64, Type)>);
 impl CurrentObjects {
-    fn new(type_decl: NEWTypes) -> Self {
+    fn new(type_decl: Type) -> Self {
         CurrentObjects(vec![(0, 0, type_decl)])
     }
-    fn update(&mut self, (i, union_index, new_type): (i64, i64, NEWTypes)) {
+    fn update(&mut self, (i, union_index, new_type): (i64, i64, Type)) {
         self.0.last_mut().unwrap().0 = i;
         self.0.last_mut().unwrap().1 = union_index;
         self.0.push((0, 0, new_type));
     }
-    fn current(&self) -> &(i64, i64, NEWTypes) {
+    fn current(&self) -> &(i64, i64, Type) {
         self.0.last().unwrap()
     }
-    fn current_type(&self) -> &NEWTypes {
+    fn current_type(&self) -> &Type {
         if let Some((.., type_decl)) = self.0.last() {
             type_decl
         } else {
@@ -2177,9 +2174,7 @@ impl CurrentObjects {
             let mut offset = 0;
             for (other_obj, current_obj) in objects.0.iter().zip(&self.0) {
                 match (other_obj, current_obj) {
-                    ((_, i1, type_decl @ NEWTypes::Union(_)), (_, i2, NEWTypes::Union(_)))
-                        if i1 != i2 =>
-                    {
+                    ((_, i1, type_decl @ Type::Union(_)), (_, i2, Type::Union(_))) if i1 != i2 => {
                         return Some((offset, type_decl.size()))
                     }
                     ((i1, ..), (i2, ..)) if *i1 != *i2 => break,
@@ -2206,41 +2201,41 @@ pub fn create_label(index: &mut usize) -> usize {
 
 pub fn is_valid_bin(
     operator: &TokenType,
-    left_type: &NEWTypes,
-    right_type: &NEWTypes,
+    left_type: &Type,
+    right_type: &Type,
     right_expr: &impl hir::expr::IsZero,
 ) -> bool {
     match (&left_type, &right_type) {
-        (NEWTypes::Primitive(Types::Void), _) | (_, NEWTypes::Primitive(Types::Void)) => false,
-        (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => {
+        (Type::Primitive(Primitive::Void), _) | (_, Type::Primitive(Primitive::Void)) => false,
+        (Type::Pointer(_), Type::Pointer(_)) => {
             if left_type.type_compatible(right_type, right_expr) {
                 operator == &TokenType::Minus
             } else {
                 false
             }
         }
-        (_, NEWTypes::Pointer(_)) => operator == &TokenType::Plus,
-        (NEWTypes::Pointer(_), _) => operator == &TokenType::Plus || operator == &TokenType::Minus,
-        (NEWTypes::Struct(..), _)
-        | (_, NEWTypes::Struct(..))
-        | (NEWTypes::Union(..), _)
-        | (_, NEWTypes::Union(..)) => false,
+        (_, Type::Pointer(_)) => operator == &TokenType::Plus,
+        (Type::Pointer(_), _) => operator == &TokenType::Plus || operator == &TokenType::Minus,
+        (Type::Struct(..), _)
+        | (_, Type::Struct(..))
+        | (Type::Union(..), _)
+        | (_, Type::Union(..)) => false,
         _ => true,
     }
 }
 
 // scale index when pointer arithmetic
 pub fn maybe_scale_index<'a, T>(
-    left_type: &NEWTypes,
-    right_type: &NEWTypes,
+    left_type: &Type,
+    right_type: &Type,
     left_expr: &'a mut T,
     right_expr: &'a mut T,
 ) -> Option<(&'a mut T, usize)> {
     match (left_type, right_type) {
-        (t, NEWTypes::Pointer(inner)) if !t.is_ptr() && inner.size() > 1 => {
+        (t, Type::Pointer(inner)) if !t.is_ptr() && inner.size() > 1 => {
             Some((left_expr, inner.size()))
         }
-        (NEWTypes::Pointer(inner), t) if !t.is_ptr() && inner.size() > 1 => {
+        (Type::Pointer(inner), t) if !t.is_ptr() && inner.size() > 1 => {
             Some((right_expr, inner.size()))
         }
         _ => None,
@@ -2313,7 +2308,7 @@ mod tests {
             let mut expr = typechecker.visit_expr(expr).unwrap();
 
             // have to do manual array decay because is constant expects array to be decayed already
-            if let NEWTypes::Array { .. } = expr.type_decl {
+            if let Type::Array { .. } = expr.type_decl {
                 expr.kind = mir::expr::ExprKind::Unary {
                     operator: TokenType::Amp,
                     right: Box::new(expr.clone()),
@@ -2553,7 +2548,7 @@ mod tests {
         assert!(matches!(
             actual,
             Err(Error {
-                kind: ErrorKind::InitializerOverflow(NEWTypes::Union(_)),
+                kind: ErrorKind::InitializerOverflow(Type::Union(_)),
                 ..
             })
         ));

@@ -157,7 +157,7 @@ impl Compiler {
                     cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
                     self.write_out(Lir::Cmp(
-                        Register::Literal(*case_value, NEWTypes::Primitive(Types::Int)),
+                        Register::Literal(*case_value, Type::Primitive(Primitive::Int)),
                         cond_reg.clone(),
                     ));
                     self.write_out(Lir::JmpCond("e", label));
@@ -205,7 +205,7 @@ impl Compiler {
         cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
         self.write_out(Lir::Cmp(
-            Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(0, Type::Primitive(Primitive::Int)),
             cond_reg.clone(),
         ));
         self.write_out(Lir::JmpCond("ne", body_label));
@@ -258,7 +258,7 @@ impl Compiler {
                 cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
                 self.write_out(Lir::Cmp(
-                    Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+                    Register::Literal(0, Type::Primitive(Primitive::Int)),
                     cond_reg.clone(),
                 ));
                 self.write_out(Lir::JmpCond("ne", body_label));
@@ -290,7 +290,7 @@ impl Compiler {
         cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
         self.write_out(Lir::Cmp(
-            Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(0, Type::Primitive(Primitive::Int)),
             cond_reg.clone(),
         ));
         self.write_out(Lir::JmpCond("ne", body_label));
@@ -309,7 +309,7 @@ impl Compiler {
         let mut else_label = done_label;
 
         self.write_out(Lir::Cmp(
-            Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(0, Type::Primitive(Primitive::Int)),
             cond_reg.clone(),
         ));
         self.free(cond_reg);
@@ -365,7 +365,7 @@ impl Compiler {
     fn declare_global_var(
         &mut self,
         name: String,
-        type_decl: NEWTypes,
+        type_decl: Type,
         var_symbol: VarSymbol,
         init: Option<Init>,
     ) {
@@ -375,8 +375,8 @@ impl Compiler {
             self.init_global_var(name, type_decl, var_symbol, init);
         } else {
             self.write_out(Lir::GlobalInit(
-                NEWTypes::Primitive(Types::Void),
-                StaticRegister::Literal(type_decl.size() as i64, NEWTypes::Primitive(Types::Int)),
+                Type::Primitive(Primitive::Void),
+                StaticRegister::Literal(type_decl.size() as i64, Type::Primitive(Primitive::Int)),
             ));
             let reg = Register::Label(LabelRegister::Var(name, type_decl));
 
@@ -407,7 +407,7 @@ impl Compiler {
     fn init_global_var(
         &mut self,
         name: String,
-        type_decl: NEWTypes,
+        type_decl: Type,
         var_symbol: VarSymbol,
         init: Init,
     ) {
@@ -434,8 +434,8 @@ impl Compiler {
                     let diff = offset as i64 - prev_offset;
                     if diff != 0 {
                         self.write_out(Lir::GlobalInit(
-                            NEWTypes::Primitive(Types::Void),
-                            StaticRegister::Literal(diff, NEWTypes::Primitive(Types::Int)),
+                            Type::Primitive(Primitive::Void),
+                            StaticRegister::Literal(diff, Type::Primitive(Primitive::Int)),
                         ));
                         size -= diff;
                     }
@@ -449,8 +449,8 @@ impl Compiler {
                 // fill remaining fields in type
                 if size > 0 {
                     self.write_out(Lir::GlobalInit(
-                        NEWTypes::Primitive(Types::Void),
-                        StaticRegister::Literal(size, NEWTypes::Primitive(Types::Int)),
+                        Type::Primitive(Primitive::Void),
+                        StaticRegister::Literal(size, Type::Primitive(Primitive::Int)),
                     ));
                 }
             }
@@ -480,26 +480,26 @@ impl Compiler {
         let var_reg = var_symbol.borrow().unwrap_var().get_reg();
 
         // TODO: can be optimized by writing 8Bytes (instead of 1) per repetition but that requires extra logic when amount and size don't align
-        let eax_reg = Register::Return(NEWTypes::Primitive(Types::Char));
+        let eax_reg = Register::Return(Type::Primitive(Primitive::Char));
         let ecx_reg = Register::Arg(ArgRegister::new(
             3,
-            NEWTypes::Primitive(Types::Int),
+            Type::Primitive(Primitive::Int),
             &mut self.interval_counter,
             self.instr_counter,
         ));
         let rdi_reg = Register::Arg(ArgRegister::new(
             0,
-            NEWTypes::Primitive(Types::Long),
+            Type::Primitive(Primitive::Long),
             &mut self.interval_counter,
             self.instr_counter,
         ));
 
         self.write_out(Lir::Mov(
-            Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(0, Type::Primitive(Primitive::Int)),
             eax_reg.clone(),
         ));
         self.write_out(Lir::Mov(
-            Register::Literal(amount as i64, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(amount as i64, Type::Primitive(Primitive::Int)),
             ecx_reg.clone(),
         ));
         self.write_out(Lir::Load(var_reg, rdi_reg.clone()));
@@ -584,11 +584,11 @@ impl Compiler {
         self.cg_stmts(statements)
     }
 
-    fn cg_literal(&mut self, n: i64, type_decl: NEWTypes) -> Register {
+    fn cg_literal(&mut self, n: i64, type_decl: Type) -> Register {
         let literal_reg = Register::Literal(n, type_decl);
 
         // 64bit literals are only allowed to move to scratch-register
-        if let Types::Long = integer_type(n) {
+        if let Primitive::Long = integer_type(n) {
             let scratch_reg = Register::Temp(TempRegister::new(
                 literal_reg.get_type(),
                 &mut self.interval_counter,
@@ -617,7 +617,7 @@ impl Compiler {
                     let scaled_type = integer_type(n);
 
                     let type_decl = if type_decl.size() < scaled_type.size() {
-                        NEWTypes::Primitive(scaled_type)
+                        Type::Primitive(scaled_type)
                     } else {
                         type_decl
                     };
@@ -630,7 +630,7 @@ impl Compiler {
             ExprKind::Unary { operator, right } => {
                 let mut reg = self.execute_global_expr(*right);
                 match operator {
-                    TokenType::Amp => reg.set_type(NEWTypes::Pointer(Box::new(reg.get_type()))),
+                    TokenType::Amp => reg.set_type(Type::Pointer(Box::new(reg.get_type()))),
                     TokenType::Star => reg.set_type(expr.type_decl),
                     _ => unreachable!("non-constant unary expression"),
                 }
@@ -640,7 +640,7 @@ impl Compiler {
                 let mut reg = self.execute_global_expr(*expr);
 
                 match reg.get_type() {
-                    NEWTypes::Struct(s) => {
+                    Type::Struct(s) => {
                         let offset = s.member_offset(&member);
                         let member_type = s.member_type(&member);
 
@@ -662,7 +662,7 @@ impl Compiler {
                             _ => unreachable!("Literal can't be struct address"),
                         }
                     }
-                    NEWTypes::Union(s) => {
+                    Type::Union(s) => {
                         let member_type = s.member_type(&member);
                         reg.set_type(member_type);
                         reg
@@ -764,7 +764,7 @@ impl Compiler {
         let else_label = create_label(&mut self.label_index);
 
         self.write_out(Lir::Cmp(
-            Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(0, Type::Primitive(Primitive::Int)),
             cond_reg.clone(),
         ));
         self.write_out(Lir::JmpCond("e", else_label));
@@ -794,14 +794,14 @@ impl Compiler {
         result
     }
     fn cg_member_access(&mut self, reg: Register, member: &str, free: bool) -> Register {
-        if let NEWTypes::Struct(s) = reg.get_type() {
+        if let Type::Struct(s) = reg.get_type() {
             let offset = s.member_offset(member);
             let member_type = s.member_type(member);
 
             let address = self.cg_address_at(reg, free);
             let mut result = if offset != 0 {
                 self.cg_add(
-                    Register::Literal(offset as i64, NEWTypes::Primitive(Types::Int)),
+                    Register::Literal(offset as i64, Type::Primitive(Primitive::Int)),
                     address,
                 )
             } else {
@@ -811,7 +811,7 @@ impl Compiler {
             result.set_type(member_type);
             result.set_value_kind(ValueKind::Lvalue);
             result
-        } else if let NEWTypes::Union(s) = reg.get_type() {
+        } else if let Type::Union(s) = reg.get_type() {
             let member_type = s.member_type(member);
 
             let mut result = self.cg_address_at(reg, free);
@@ -838,7 +838,7 @@ impl Compiler {
         // right shift number, equivalent to division (works bc type-size is 2^n)
         self.write_out(Lir::Shift(
             "r",
-            Register::Literal(by_amount as i64, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(by_amount as i64, Type::Primitive(Primitive::Int)),
             value_reg.clone(),
         ));
 
@@ -848,24 +848,24 @@ impl Compiler {
         let value_reg = self.execute_expr(expr);
 
         self.cg_mult(
-            Register::Literal(by_amount as i64, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(by_amount as i64, Type::Primitive(Primitive::Int)),
             value_reg,
         )
     }
-    fn cg_cast(&mut self, new_type: NEWTypes, expr: Expr, direction: CastDirection) -> Register {
+    fn cg_cast(&mut self, new_type: Type, expr: Expr, direction: CastDirection) -> Register {
         match direction {
             CastDirection::Up => self.cg_cast_up(expr, new_type),
             CastDirection::Down => self.cg_cast_down(expr, new_type),
             CastDirection::Equal => self.execute_expr(expr),
         }
     }
-    fn cg_cast_down(&mut self, expr: Expr, new_type: NEWTypes) -> Register {
+    fn cg_cast_down(&mut self, expr: Expr, new_type: Type) -> Register {
         let mut value_reg = self.execute_expr(expr);
         value_reg.set_type(new_type);
 
         value_reg
     }
-    fn cg_cast_up(&mut self, expr: Expr, new_type: NEWTypes) -> Register {
+    fn cg_cast_up(&mut self, expr: Expr, new_type: Type) -> Register {
         let mut value_reg = self.execute_expr(expr);
 
         if matches!(
@@ -888,7 +888,7 @@ impl Compiler {
         }
     }
     fn cg_assign(&mut self, l_value: Register, r_value: Register) -> Register {
-        if let NEWTypes::Struct(s) = l_value.get_type() {
+        if let Type::Struct(s) = l_value.get_type() {
             // when assigning structs have to assign each member
             for (_, member) in s.members().iter() {
                 let member_lvalue =
@@ -911,7 +911,7 @@ impl Compiler {
             l_value
         }
     }
-    fn cg_call(&mut self, name: String, args: Vec<Expr>, return_type: NEWTypes) -> Register {
+    fn cg_call(&mut self, name: String, args: Vec<Expr>, return_type: Type) -> Register {
         self.write_out(Lir::SaveRegs);
 
         let args_len = args.len();
@@ -1019,9 +1019,9 @@ impl Compiler {
         self.write_out(Lir::Cmp(right.clone(), left.clone()));
         self.write_out(Lir::Set(operator));
 
-        right.set_type(NEWTypes::Primitive(Types::Int));
+        right.set_type(Type::Primitive(Primitive::Int));
         self.write_out(Lir::Movz(
-            Register::Return(NEWTypes::Primitive(Types::Char)),
+            Register::Return(Type::Primitive(Primitive::Char)),
             right.clone(),
         ));
 
@@ -1037,7 +1037,7 @@ impl Compiler {
 
         // jump to true label left is true => short circuit
         self.write_out(Lir::Cmp(
-            Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(0, Type::Primitive(Primitive::Int)),
             left.clone(),
         ));
         self.write_out(Lir::JmpCond("ne", true_label));
@@ -1050,7 +1050,7 @@ impl Compiler {
 
         // if right is false we know expression is false
         self.write_out(Lir::Cmp(
-            Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(0, Type::Primitive(Primitive::Int)),
             right.clone(),
         ));
         self.write_out(Lir::JmpCond("e", false_label));
@@ -1058,14 +1058,14 @@ impl Compiler {
 
         let done_label = create_label(&mut self.label_index);
         let result = Register::Temp(TempRegister::new(
-            NEWTypes::Primitive(Types::Int),
+            Type::Primitive(Primitive::Int),
             &mut self.interval_counter,
             self.instr_counter,
         ));
         // if expression true write 1 in result and skip false label
         self.write_out(Lir::LabelDefinition(true_label));
         self.write_out(Lir::Mov(
-            Register::Literal(1, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(1, Type::Primitive(Primitive::Int)),
             result.clone(),
         ));
 
@@ -1073,7 +1073,7 @@ impl Compiler {
 
         self.write_out(Lir::LabelDefinition(false_label));
         self.write_out(Lir::Mov(
-            Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(0, Type::Primitive(Primitive::Int)),
             result.clone(),
         ));
 
@@ -1089,7 +1089,7 @@ impl Compiler {
 
         // if left is false expression is false, we jump to false label
         self.write_out(Lir::Cmp(
-            Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(0, Type::Primitive(Primitive::Int)),
             left.clone(),
         ));
         self.write_out(Lir::JmpCond("e", false_label));
@@ -1100,7 +1100,7 @@ impl Compiler {
         let right = convert_reg!(self, right, Register::Literal(..));
 
         self.write_out(Lir::Cmp(
-            Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(0, Type::Primitive(Primitive::Int)),
             right.clone(),
         ));
         self.write_out(Lir::JmpCond("e", false_label));
@@ -1109,19 +1109,19 @@ impl Compiler {
         // if no prior jump was taken expression is true
         let true_label = create_label(&mut self.label_index);
         let result = Register::Temp(TempRegister::new(
-            NEWTypes::Primitive(Types::Int),
+            Type::Primitive(Primitive::Int),
             &mut self.interval_counter,
             self.instr_counter,
         ));
         self.write_out(Lir::Mov(
-            Register::Literal(1, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(1, Type::Primitive(Primitive::Int)),
             result.clone(),
         ));
         self.write_out(Lir::Jmp(true_label));
 
         self.write_out(Lir::LabelDefinition(false_label));
         self.write_out(Lir::Mov(
-            Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(0, Type::Primitive(Primitive::Int)),
             result.clone(),
         ));
 
@@ -1129,7 +1129,7 @@ impl Compiler {
 
         result
     }
-    fn cg_unary(&mut self, operator: TokenType, right: Expr, new_type: NEWTypes) -> Register {
+    fn cg_unary(&mut self, operator: TokenType, right: Expr, new_type: Type) -> Register {
         let mut reg = self.execute_expr(right);
         // can't have literal as only operand to unary expression
         reg = convert_reg!(self, reg, Register::Literal(..));
@@ -1154,19 +1154,19 @@ impl Compiler {
     fn cg_bang(&mut self, reg: Register) -> Register {
         // compares reg-value with 0
         self.write_out(Lir::Cmp(
-            Register::Literal(0, NEWTypes::Primitive(Types::Int)),
+            Register::Literal(0, Type::Primitive(Primitive::Int)),
             reg.clone(),
         ));
         self.write_out(Lir::Set("sete"));
 
         let result = Register::Temp(TempRegister::new(
-            NEWTypes::Primitive(Types::Int),
+            Type::Primitive(Primitive::Int),
             &mut self.interval_counter,
             self.instr_counter,
         ));
 
         self.write_out(Lir::Movz(
-            Register::Return(NEWTypes::Primitive(Types::Char)),
+            Register::Return(Type::Primitive(Primitive::Char)),
             result.clone(),
         ));
         self.free(reg);
@@ -1181,7 +1181,7 @@ impl Compiler {
     }
     fn cg_address_at(&mut self, reg: Register, free: bool) -> Register {
         let dest = Register::Temp(TempRegister::new(
-            NEWTypes::Pointer(Box::new(reg.get_type())),
+            Type::Pointer(Box::new(reg.get_type())),
             &mut self.interval_counter,
             self.instr_counter,
         ));
@@ -1193,7 +1193,7 @@ impl Compiler {
 
         dest
     }
-    fn cg_deref(&mut self, reg: Register, new_type: NEWTypes) -> Register {
+    fn cg_deref(&mut self, reg: Register, new_type: Type) -> Register {
         let reg = convert_reg!(self, reg, Register::Label(..) | Register::Stack(..));
         let mut reg = self.convert_to_rval(reg);
 
@@ -1337,7 +1337,7 @@ impl Compiler {
         self.write_out(Lir::Mov(right.clone(), cl_reg.clone()));
         self.free(right);
 
-        cl_reg.set_type(NEWTypes::Primitive(Types::Char));
+        cl_reg.set_type(Type::Primitive(Primitive::Char));
         self.write_out(Lir::Shift(direction, cl_reg.clone(), left.clone()));
 
         self.free(cl_reg);
@@ -1414,9 +1414,9 @@ impl Compiler {
     }
 }
 
-pub fn align(offset: usize, type_decl: &NEWTypes) -> usize {
+pub fn align(offset: usize, type_decl: &Type) -> usize {
     let size = match type_decl {
-        NEWTypes::Array { of, .. } => of.size(),
+        Type::Array { of, .. } => of.size(),
         _ => type_decl.size(),
     };
     align_by(offset, size)

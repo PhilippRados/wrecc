@@ -9,7 +9,7 @@ pub enum Lir {
     // name, if needs alignment
     GlobalDeclaration(String, bool),
     // type, value
-    GlobalInit(NEWTypes, StaticRegister),
+    GlobalInit(Type, StaticRegister),
     // label index, value
     StringDeclaration(usize, String),
     // label index

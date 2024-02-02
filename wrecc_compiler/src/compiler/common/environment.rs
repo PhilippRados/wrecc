@@ -13,9 +13,9 @@ pub enum InitType {
 pub struct Function {
     // parameters to a function with it's corresponding name
     // a parameter-name is optional in a function declaration
-    pub params: Vec<(NEWTypes, Option<Token>)>,
+    pub params: Vec<(Type, Option<Token>)>,
 
-    pub return_type: NEWTypes,
+    pub return_type: Type,
 
     // if function contains var-args
     pub variadic: bool,
@@ -34,8 +34,8 @@ pub struct Function {
 }
 impl Function {
     pub fn new(
-        return_type: NEWTypes,
-        params: Vec<(NEWTypes, Option<Token>)>,
+        return_type: Type,
+        params: Vec<(Type, Option<Token>)>,
         variadic: bool,
         kind: InitType,
     ) -> Self {
@@ -96,7 +96,7 @@ impl Function {
 #[derive(Clone, Debug)]
 pub struct SymbolInfo {
     // type of identifier given in declaration
-    pub type_decl: NEWTypes,
+    pub type_decl: Type,
 
     // wether the variable is a declaration or initialization
     pub kind: InitType,
@@ -113,7 +113,7 @@ pub struct SymbolInfo {
 }
 
 impl SymbolInfo {
-    pub fn get_type(&self) -> NEWTypes {
+    pub fn get_type(&self) -> Type {
         self.type_decl.clone()
     }
     pub fn get_reg(&self) -> Register {
@@ -127,7 +127,7 @@ impl SymbolInfo {
 pub enum Symbols {
     // also includes enum-constants
     Variable(SymbolInfo),
-    TypeDef(NEWTypes),
+    TypeDef(Type),
     Func(Function),
 }
 impl Symbols {
@@ -494,7 +494,7 @@ pub mod tests {
         declare(&mut env,var_template("n", "long", InitType::Declaration),false).unwrap();
         assert!(matches!(
             env.symbols.get_current("n").map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {type_decl: NEWTypes::Primitive(Types::Long),..}))
+            Some(Symbols::Variable(SymbolInfo {type_decl: Type::Primitive(Primitive::Long),..}))
         ));
         assert!(env.symbols.get_current("s").is_some());
 
@@ -569,13 +569,13 @@ pub mod tests {
         assert!(env.symbols.get_current("a").is_none());
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {type_decl:NEWTypes::Primitive(Types::Int),..}))
+            Some(Symbols::Variable(SymbolInfo {type_decl:Type::Primitive(Primitive::Int),..}))
         ));
 
         declare(&mut env, var_template("a", "long", InitType::Declaration),false).unwrap();
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {type_decl:NEWTypes::Primitive(Types::Long),..}))
+            Some(Symbols::Variable(SymbolInfo {type_decl:Type::Primitive(Primitive::Long),..}))
         ));
         env.enter();
 
@@ -588,7 +588,7 @@ pub mod tests {
         assert!(env.symbols.get_current("a").is_none());
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {type_decl:NEWTypes::Primitive(Types::Long),..}))
+            Some(Symbols::Variable(SymbolInfo {type_decl:Type::Primitive(Primitive::Long),..}))
         ));
         assert!(env.symbols.get("foo".to_string()).is_some());
 
@@ -596,12 +596,12 @@ pub mod tests {
         assert!(env.symbols.get("foo".to_string()).is_none());
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {type_decl:NEWTypes::Primitive(Types::Long),..}))
+            Some(Symbols::Variable(SymbolInfo {type_decl:Type::Primitive(Primitive::Long),..}))
         ));
         env.exit();
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {type_decl:NEWTypes::Primitive(Types::Int),..}))
+            Some(Symbols::Variable(SymbolInfo {type_decl:Type::Primitive(Primitive::Int),..}))
         ));
         env.exit();
 

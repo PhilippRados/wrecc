@@ -7,16 +7,11 @@ pub struct IntervalEntry {
     start: usize,
     end: usize,
     arg: Option<ArgRegisterKind>,
-    type_decl: NEWTypes,
+    type_decl: Type,
     scratch: Option<TempKind>,
 }
 impl IntervalEntry {
-    pub fn new(
-        start: usize,
-        end: usize,
-        arg: Option<ArgRegisterKind>,
-        type_decl: NEWTypes,
-    ) -> Self {
+    pub fn new(start: usize, end: usize, arg: Option<ArgRegisterKind>, type_decl: Type) -> Self {
         IntervalEntry {
             start,
             end,
@@ -575,7 +570,7 @@ mod tests {
         ($reg:expr,$start:expr,$end:expr) => {
             (
                 Some(Box::new($reg)),
-                IntervalEntry::new($start, $end, None, NEWTypes::Primitive(Types::Int)),
+                IntervalEntry::new($start, $end, None, Type::Primitive(Primitive::Int)),
             )
         };
     }
@@ -583,7 +578,7 @@ mod tests {
         ($reg:expr,$start:expr,$end:expr) => {
             (
                 None,
-                IntervalEntry::new($start, $end, Some($reg), NEWTypes::Primitive(Types::Int)),
+                IntervalEntry::new($start, $end, Some($reg), Type::Primitive(Primitive::Int)),
             )
         };
     }
@@ -656,7 +651,7 @@ mod tests {
 
         // Reg0 is spilled because is Lir::Or there are no regs left.
         let spilled_reg =
-            Register::Stack(StackRegister::new(&mut 0, NEWTypes::Primitive(Types::Int)));
+            Register::Stack(StackRegister::new(&mut 0, Type::Primitive(Primitive::Int)));
 
         // When it is unspilled again because it is needed in instruction 6, %r10 is not available
         // because when Reg4 was freed %r10 was marked as available again and was assigned to Reg6.
@@ -740,13 +735,13 @@ mod tests {
 
         let mut bp = 0;
         let spilled_reg1 =
-            Register::Stack(StackRegister::new(&mut bp, NEWTypes::Primitive(Types::Int)));
+            Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
         let spilled_reg2 =
-            Register::Stack(StackRegister::new(&mut bp, NEWTypes::Primitive(Types::Int)));
+            Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
         let spilled_reg3 =
-            Register::Stack(StackRegister::new(&mut bp, NEWTypes::Primitive(Types::Int)));
+            Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
         let spilled_reg4 =
-            Register::Stack(StackRegister::new(&mut bp, NEWTypes::Primitive(Types::Int)));
+            Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
 
         let unspilled_reg_1 = if let Register::Temp(filled) = filled_regs[10].clone() {
             Register::Temp(TempRegister {

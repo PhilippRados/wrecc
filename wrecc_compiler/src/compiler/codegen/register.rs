@@ -23,9 +23,9 @@ pub enum Register {
     // Registers used in function calls for arguments, and in special operations
     Arg(ArgRegister),
     // Register used for return values
-    Return(NEWTypes),
+    Return(Type),
     // Numerical constants
-    Literal(i64, NEWTypes),
+    Literal(i64, Type),
     // Indicator register for functions returning void
     Void,
 }
@@ -52,7 +52,7 @@ impl Register {
             Register::Arg(reg) => reg.base_name(),
         }
     }
-    pub fn set_type(&mut self, type_decl: NEWTypes) {
+    pub fn set_type(&mut self, type_decl: Type) {
         match self {
             Register::Void | Register::Return(..) => unimplemented!(),
             Register::Label(reg) => reg.set_type(type_decl),
@@ -62,7 +62,7 @@ impl Register {
             Register::Arg(reg) => reg.type_decl = type_decl,
         }
     }
-    pub fn get_type(&self) -> NEWTypes {
+    pub fn get_type(&self) -> Type {
         match self {
             Register::Void => unimplemented!(),
             Register::Label(reg) => reg.get_type(),
@@ -85,18 +85,16 @@ impl Register {
 #[derive(Debug, PartialEq, Clone)]
 pub enum LabelRegister {
     String(usize),
-    Var(String, NEWTypes),
+    Var(String, Type),
 }
 impl LabelRegister {
-    pub fn get_type(&self) -> NEWTypes {
+    pub fn get_type(&self) -> Type {
         match self {
-            LabelRegister::String(_) => {
-                NEWTypes::Pointer(Box::new(NEWTypes::Primitive(Types::Char)))
-            }
+            LabelRegister::String(_) => Type::Pointer(Box::new(Type::Primitive(Primitive::Char))),
             LabelRegister::Var(_, type_decl) => type_decl.clone(),
         }
     }
-    fn set_type(&mut self, new_type: NEWTypes) {
+    fn set_type(&mut self, new_type: Type) {
         match self {
             LabelRegister::String(_) => (),
             LabelRegister::Var(_, type_decl) => *type_decl = new_type,
@@ -119,17 +117,17 @@ impl LabelRegister {
 pub enum StaticRegister {
     Label(LabelRegister),
     LabelOffset(LabelRegister, i64, TokenType),
-    Literal(i64, NEWTypes),
+    Literal(i64, Type),
 }
 impl StaticRegister {
-    pub fn set_type(&mut self, new: NEWTypes) {
+    pub fn set_type(&mut self, new: Type) {
         match self {
             StaticRegister::Label(reg) | StaticRegister::LabelOffset(reg, ..) => reg.set_type(new),
             StaticRegister::Literal(_, type_decl) => *type_decl = new,
         }
     }
 
-    pub fn get_type(&self) -> NEWTypes {
+    pub fn get_type(&self) -> Type {
         match self {
             StaticRegister::Label(reg) | StaticRegister::LabelOffset(reg, ..) => reg.get_type(),
             StaticRegister::Literal(_, type_decl) => type_decl.clone(),
@@ -162,10 +160,10 @@ enum StackKind {
 pub struct StackRegister {
     pub bp_offset: usize,
     kind: StackKind,
-    type_decl: NEWTypes,
+    type_decl: Type,
 }
 impl StackRegister {
-    pub fn new(bp_offset: &mut usize, type_decl: NEWTypes) -> Self {
+    pub fn new(bp_offset: &mut usize, type_decl: Type) -> Self {
         *bp_offset += type_decl.size();
         *bp_offset = crate::compiler::codegen::align(*bp_offset, &type_decl);
 
@@ -180,12 +178,12 @@ impl StackRegister {
         let arg_stack_index: usize = (arg_index as isize - ARG_REGS.len() as isize) as usize;
         const PUSHED_PARAM_OFFSET: usize = 16;
         let bp_offset =
-            PUSHED_PARAM_OFFSET + arg_stack_index * NEWTypes::Primitive(Types::Long).size();
+            PUSHED_PARAM_OFFSET + arg_stack_index * Type::Primitive(Primitive::Long).size();
 
         Self {
             bp_offset,
             kind: StackKind::Unsigned,
-            type_decl: NEWTypes::Primitive(Types::Long),
+            type_decl: Type::Primitive(Primitive::Long),
         }
     }
     pub fn name(&self) -> String {
@@ -205,7 +203,7 @@ pub enum TempKind {
 
 #[derive(Debug, Clone)]
 pub struct TempRegister {
-    pub type_decl: NEWTypes,
+    pub type_decl: Type,
     pub reg: Option<TempKind>,
     pub value_kind: ValueKind,
     pub start_idx: usize,
@@ -213,7 +211,7 @@ pub struct TempRegister {
     pub id: usize,
 }
 impl TempRegister {
-    pub fn new(type_decl: NEWTypes, key_counter: &mut usize, instr_counter: usize) -> Self {
+    pub fn new(type_decl: Type, key_counter: &mut usize, instr_counter: usize) -> Self {
         *key_counter += 1;
         TempRegister {
             id: *key_counter,
@@ -226,7 +224,7 @@ impl TempRegister {
     // boilerplate register that is only used to access it's base-name
     pub fn default(reg: Box<dyn ScratchRegister>) -> Self {
         TempRegister {
-            type_decl: NEWTypes::Primitive(Types::Int),
+            type_decl: Type::Primitive(Primitive::Int),
             id: 0,
             reg: Some(TempKind::Scratch(reg)),
             start_idx: 0,
@@ -256,7 +254,7 @@ impl TempRegister {
 
 pub trait ScratchRegister: ScratchClone {
     fn base_name(&self) -> &'static str;
-    fn name(&self, type_decl: &NEWTypes) -> String;
+    fn name(&self, type_decl: &Type) -> String;
     fn is_used(&self) -> bool;
     fn in_use(&mut self);
     fn free(&mut self);
@@ -302,7 +300,7 @@ impl ScratchRegister for RegularRegister {
     fn base_name(&self) -> &'static str {
         self.base_name
     }
-    fn name(&self, type_decl: &NEWTypes) -> String {
+    fn name(&self, type_decl: &Type) -> String {
         format!("{}{}", self.base_name, type_decl.reg_suffix())
     }
     fn is_used(&self) -> bool {
@@ -317,7 +315,7 @@ impl ScratchRegister for RegularRegister {
 }
 #[derive(Debug, PartialEq, Clone)]
 pub struct ArgRegister {
-    pub type_decl: NEWTypes,
+    pub type_decl: Type,
     pub start_idx: usize,
     pub id: usize,
     pub reg: ArgRegisterKind,
@@ -325,7 +323,7 @@ pub struct ArgRegister {
 impl ArgRegister {
     pub fn new(
         arg_index: usize,
-        type_decl: NEWTypes,
+        type_decl: Type,
         key_counter: &mut usize,
         instr_counter: usize,
     ) -> Self {
@@ -359,11 +357,11 @@ impl ScratchRegister for ArgRegisterKind {
     fn base_name(&self) -> &'static str {
         self.names[0]
     }
-    fn name(&self, type_decl: &NEWTypes) -> String {
+    fn name(&self, type_decl: &Type) -> String {
         match type_decl {
-            NEWTypes::Primitive(Types::Char) => self.names[2],
-            NEWTypes::Primitive(Types::Int) | NEWTypes::Enum(..) => self.names[1],
-            NEWTypes::Primitive(Types::Long) | NEWTypes::Pointer(_) | NEWTypes::Array { .. } => {
+            Type::Primitive(Primitive::Char) => self.names[2],
+            Type::Primitive(Primitive::Int) | Type::Enum(..) => self.names[1],
+            Type::Primitive(Primitive::Long) | Type::Pointer(_) | Type::Array { .. } => {
                 self.names[0]
             }
             _ => unimplemented!("aggregate types are not yet implemented as function args"),

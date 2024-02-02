@@ -442,7 +442,7 @@ impl Token {
         self.token == TokenType::Enum
             || self.token == TokenType::Union
             || self.token == TokenType::Struct
-            || Types::into_vec().contains(&TokenKind::from(&self.token))
+            || Primitive::into_vec().contains(&TokenKind::from(&self.token))
     }
 }
 impl PartialEq for Token {

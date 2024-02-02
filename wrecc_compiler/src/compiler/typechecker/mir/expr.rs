@@ -2,66 +2,20 @@ use crate::compiler::common::{token::TokenType, types::*};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExprKind {
-    Binary {
-        left: Box<Expr>,
-        operator: TokenType,
-        right: Box<Expr>,
-    },
-    Unary {
-        operator: TokenType,
-        right: Box<Expr>,
-    },
-    Grouping {
-        expr: Box<Expr>,
-    },
-    Assign {
-        l_expr: Box<Expr>,
-        r_expr: Box<Expr>,
-    },
-    CompoundAssign {
-        expr: Box<Expr>,
-        tmp_symbol: VarSymbol,
-    },
-    Logical {
-        left: Box<Expr>,
-        operator: TokenType,
-        right: Box<Expr>,
-    },
-    Comparison {
-        left: Box<Expr>,
-        operator: TokenType,
-        right: Box<Expr>,
-    },
-    Call {
-        name: String,
-        args: Vec<Expr>,
-    },
-    Cast {
-        new_type: NEWTypes,
-        direction: CastDirection,
-        expr: Box<Expr>,
-    },
-    ScaleUp {
-        by: usize,
-        expr: Box<Expr>,
-    },
-    ScaleDown {
-        shift_amount: usize,
-        expr: Box<Expr>,
-    },
-    MemberAccess {
-        member: String,
-        expr: Box<Expr>,
-    },
-    Ternary {
-        cond: Box<Expr>,
-        true_expr: Box<Expr>,
-        false_expr: Box<Expr>,
-    },
-    Comma {
-        left: Box<Expr>,
-        right: Box<Expr>,
-    },
+    Binary { left: Box<Expr>, operator: TokenType, right: Box<Expr> },
+    Unary { operator: TokenType, right: Box<Expr> },
+    Grouping { expr: Box<Expr> },
+    Assign { l_expr: Box<Expr>, r_expr: Box<Expr> },
+    CompoundAssign { expr: Box<Expr>, tmp_symbol: VarSymbol },
+    Logical { left: Box<Expr>, operator: TokenType, right: Box<Expr> },
+    Comparison { left: Box<Expr>, operator: TokenType, right: Box<Expr> },
+    Call { name: String, args: Vec<Expr> },
+    Cast { new_type: Type, direction: CastDirection, expr: Box<Expr> },
+    ScaleUp { by: usize, expr: Box<Expr> },
+    ScaleDown { shift_amount: usize, expr: Box<Expr> },
+    MemberAccess { member: String, expr: Box<Expr> },
+    Ternary { cond: Box<Expr>, true_expr: Box<Expr>, false_expr: Box<Expr> },
+    Comma { left: Box<Expr>, right: Box<Expr> },
     String(String),
     Literal(i64),
     Ident(VarSymbol),
@@ -84,12 +38,12 @@ pub enum ValueKind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Expr {
     pub kind: ExprKind,
-    pub type_decl: NEWTypes,
+    pub type_decl: Type,
     pub value_kind: ValueKind,
 }
 impl Expr {
     pub fn array_decay(self) -> Expr {
-        if let NEWTypes::Array { of, .. } = self.type_decl.clone() {
+        if let Type::Array { of, .. } = self.type_decl.clone() {
             Expr {
                 value_kind: self.value_kind.clone(),
                 type_decl: of.pointer_to(),
@@ -106,7 +60,7 @@ impl Expr {
     pub fn to_rval(&mut self) {
         self.value_kind = ValueKind::Rvalue;
     }
-    pub fn cast_to(self, new_type: NEWTypes, direction: CastDirection) -> Expr {
+    pub fn cast_to(self, new_type: Type, direction: CastDirection) -> Expr {
         Expr {
             type_decl: new_type.clone(),
             value_kind: self.value_kind.clone(),
@@ -122,8 +76,8 @@ impl Expr {
             return self;
         }
 
-        if self.type_decl.size() < NEWTypes::Primitive(Types::Int).size() {
-            self.cast_to(NEWTypes::Primitive(Types::Int), CastDirection::Up)
+        if self.type_decl.size() < Type::Primitive(Primitive::Int).size() {
+            self.cast_to(Type::Primitive(Primitive::Int), CastDirection::Up)
         } else {
             self
         }

@@ -30,99 +30,97 @@ pub trait TypeInfo {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub enum NEWTypes {
-    Primitive(Types),
+pub enum Type {
+    Primitive(Primitive),
     Array {
         amount: usize,
-        of: Box<NEWTypes>,
+        of: Box<Type>,
     },
-    Pointer(Box<NEWTypes>),
+    Pointer(Box<Type>),
     Struct(StructInfo),
     Union(StructInfo),
     Enum(Option<String>, Vec<(Token, i32)>),
     Function {
-        return_type: Box<NEWTypes>,
-        params: Vec<(NEWTypes, Option<Token>)>,
+        return_type: Box<Type>,
+        params: Vec<(Type, Option<Token>)>,
         variadic: bool,
     },
 }
 
-impl TypeInfo for NEWTypes {
+impl TypeInfo for Type {
     fn size(&self) -> usize {
         match self {
-            NEWTypes::Primitive(t) => t.size(),
-            NEWTypes::Struct(s) => s.members().iter().fold(0, |acc, (t, _)| acc + t.size()),
-            NEWTypes::Union(_) => self.union_biggest().size(),
-            NEWTypes::Pointer(_) => NEWTypes::Primitive(Types::Long).size(),
-            NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).size(),
-            NEWTypes::Array { amount, of: element_type } => amount * element_type.size(),
-            NEWTypes::Function { .. } => 1,
+            Type::Primitive(t) => t.size(),
+            Type::Struct(s) => s.members().iter().fold(0, |acc, (t, _)| acc + t.size()),
+            Type::Union(_) => self.union_biggest().size(),
+            Type::Pointer(_) => Type::Primitive(Primitive::Long).size(),
+            Type::Enum(..) => Type::Primitive(Primitive::Int).size(),
+            Type::Array { amount, of: element_type } => amount * element_type.size(),
+            Type::Function { .. } => 1,
         }
     }
     fn reg_suffix(&self) -> String {
         match self {
-            NEWTypes::Primitive(t) => t.reg_suffix(),
-            NEWTypes::Union(_) => self.union_biggest().reg_suffix(),
-            NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).reg_suffix(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => {
-                NEWTypes::Primitive(Types::Long).reg_suffix()
+            Type::Primitive(t) => t.reg_suffix(),
+            Type::Union(_) => self.union_biggest().reg_suffix(),
+            Type::Enum(..) => Type::Primitive(Primitive::Int).reg_suffix(),
+            Type::Pointer(_) | Type::Array { .. } | Type::Struct(..) => {
+                Type::Primitive(Primitive::Long).reg_suffix()
             }
-            NEWTypes::Function { .. } => unreachable!("no plain function type used"),
+            Type::Function { .. } => unreachable!("no plain function type used"),
         }
     }
     fn suffix(&self) -> String {
         match self {
-            NEWTypes::Primitive(t) => t.suffix(),
-            NEWTypes::Union(_) => self.union_biggest().suffix(),
-            NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).suffix(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => {
-                NEWTypes::Primitive(Types::Long).suffix()
+            Type::Primitive(t) => t.suffix(),
+            Type::Union(_) => self.union_biggest().suffix(),
+            Type::Enum(..) => Type::Primitive(Primitive::Int).suffix(),
+            Type::Pointer(_) | Type::Array { .. } | Type::Struct(..) => {
+                Type::Primitive(Primitive::Long).suffix()
             }
-            NEWTypes::Function { .. } => unreachable!("no plain function type used"),
+            Type::Function { .. } => unreachable!("no plain function type used"),
         }
     }
     fn complete_suffix(&self) -> String {
         match self {
-            NEWTypes::Primitive(t) => t.complete_suffix(),
-            NEWTypes::Union(_) => self.union_biggest().complete_suffix(),
-            NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).complete_suffix(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } | NEWTypes::Struct(..) => {
-                NEWTypes::Primitive(Types::Long).complete_suffix()
+            Type::Primitive(t) => t.complete_suffix(),
+            Type::Union(_) => self.union_biggest().complete_suffix(),
+            Type::Enum(..) => Type::Primitive(Primitive::Int).complete_suffix(),
+            Type::Pointer(_) | Type::Array { .. } | Type::Struct(..) => {
+                Type::Primitive(Primitive::Long).complete_suffix()
             }
-            NEWTypes::Function { .. } => unreachable!("no plain function type used"),
+            Type::Function { .. } => unreachable!("no plain function type used"),
         }
     }
     fn return_reg(&self) -> String {
         match self {
-            NEWTypes::Primitive(t) => t.return_reg(),
-            NEWTypes::Pointer(_) | NEWTypes::Array { .. } => {
-                NEWTypes::Primitive(Types::Long).return_reg()
-            }
-            NEWTypes::Enum(..) => NEWTypes::Primitive(Types::Int).return_reg(),
-            NEWTypes::Union(..) => self.union_biggest().return_reg(),
-            NEWTypes::Struct(..) => unimplemented!("currently can't return structs"),
-            NEWTypes::Function { .. } => unreachable!("no plain function type used"),
+            Type::Primitive(t) => t.return_reg(),
+            Type::Pointer(_) | Type::Array { .. } => Type::Primitive(Primitive::Long).return_reg(),
+            Type::Enum(..) => Type::Primitive(Primitive::Int).return_reg(),
+            Type::Union(..) => self.union_biggest().return_reg(),
+            Type::Struct(..) => unimplemented!("currently can't return structs"),
+            Type::Function { .. } => unreachable!("no plain function type used"),
         }
     }
 }
-impl Display for NEWTypes {
+impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fn suffix_exists(modifiers: &Vec<&NEWTypes>, i: usize) -> bool {
+        fn suffix_exists(modifiers: &Vec<&Type>, i: usize) -> bool {
             modifiers
                 .iter()
                 .skip(i)
-                .find(|m| matches!(m, NEWTypes::Array { .. } | NEWTypes::Function { .. }))
+                .find(|m| matches!(m, Type::Array { .. } | Type::Function { .. }))
                 .is_some()
         }
 
-        fn print_type(type_decl: &NEWTypes) -> String {
+        fn print_type(type_decl: &Type) -> String {
             let mut current = type_decl;
             let mut modifiers = Vec::new();
             loop {
                 match current {
-                    NEWTypes::Pointer(new)
-                    | NEWTypes::Array { of: new, .. }
-                    | NEWTypes::Function { return_type: new, .. } => {
+                    Type::Pointer(new)
+                    | Type::Array { of: new, .. }
+                    | Type::Function { return_type: new, .. } => {
                         modifiers.push(current);
                         current = new;
                     }
@@ -130,11 +128,11 @@ impl Display for NEWTypes {
                 }
             }
             let mut result = match current {
-                NEWTypes::Primitive(t) => t.fmt().to_string(),
-                NEWTypes::Union(s) => "union ".to_string() + &s.name(),
-                NEWTypes::Struct(s) => "struct ".to_string() + &s.name(),
-                NEWTypes::Enum(Some(name), ..) => "enum ".to_string() + name,
-                NEWTypes::Enum(None, ..) => "enum <anonymous>".to_string(),
+                Type::Primitive(t) => t.fmt().to_string(),
+                Type::Union(s) => "union ".to_string() + &s.name(),
+                Type::Struct(s) => "struct ".to_string() + &s.name(),
+                Type::Enum(Some(name), ..) => "enum ".to_string() + name,
+                Type::Enum(None, ..) => "enum <anonymous>".to_string(),
                 _ => unreachable!("all modifiers were removed"),
             };
             if !modifiers.is_empty() {
@@ -145,9 +143,9 @@ impl Display for NEWTypes {
 
             for (i, modifier) in modifiers.iter().enumerate() {
                 match modifier {
-                    NEWTypes::Array { amount, .. } => {
+                    Type::Array { amount, .. } => {
                         let closing_precedence =
-                            matches!(modifiers.get(i + 1), Some(NEWTypes::Pointer(_)))
+                            matches!(modifiers.get(i + 1), Some(Type::Pointer(_)))
                                 && suffix_exists(&modifiers, i + 1);
 
                         suffixes.push(format!(
@@ -156,10 +154,10 @@ impl Display for NEWTypes {
                             if closing_precedence { ")" } else { "" }
                         ))
                     }
-                    NEWTypes::Pointer(_) => {
+                    Type::Pointer(_) => {
                         let precedence = matches!(
                             modifiers.get(i + 1),
-                            Some(NEWTypes::Array { .. } | NEWTypes::Function { .. })
+                            Some(Type::Array { .. } | Type::Function { .. })
                         );
                         pointers.push(match precedence {
                             true if pointers.is_empty() && suffixes.is_empty() => "(*)",
@@ -174,7 +172,7 @@ impl Display for NEWTypes {
                             _ => "*",
                         });
                     }
-                    NEWTypes::Function { return_type, params, variadic } => suffixes.push(format!(
+                    Type::Function { return_type, params, variadic } => suffixes.push(format!(
                         "{}({}{})",
                         return_type,
                         params
@@ -200,113 +198,114 @@ impl Display for NEWTypes {
     }
 }
 
-impl NEWTypes {
-    pub fn pointer_to(self) -> NEWTypes {
-        NEWTypes::Pointer(Box::new(self.clone()))
+impl Type {
+    pub fn pointer_to(self) -> Type {
+        Type::Pointer(Box::new(self.clone()))
     }
-    pub fn array_of(self, amount: usize) -> NEWTypes {
-        NEWTypes::Array { amount, of: Box::new(self) }
+    pub fn array_of(self, amount: usize) -> Type {
+        Type::Array { amount, of: Box::new(self) }
     }
-    pub fn function_of(self, params: Vec<(NEWTypes, Option<Token>)>, variadic: bool) -> NEWTypes {
-        NEWTypes::Function {
+    pub fn function_of(self, params: Vec<(Type, Option<Token>)>, variadic: bool) -> Type {
+        Type::Function {
             return_type: Box::new(self),
             params,
             variadic,
         }
     }
-    pub fn deref_at(&self) -> Option<NEWTypes> {
+    pub fn deref_at(&self) -> Option<Type> {
         match self {
-            NEWTypes::Pointer(inner) => Some(*inner.clone()),
+            Type::Pointer(inner) => Some(*inner.clone()),
             _ => None,
         }
     }
     pub fn is_void(&self) -> bool {
-        *self == NEWTypes::Primitive(Types::Void)
+        *self == Type::Primitive(Primitive::Void)
     }
     pub fn is_func(&self) -> bool {
-        matches!(self, NEWTypes::Function { .. })
+        matches!(self, Type::Function { .. })
     }
     pub fn is_array(&self) -> bool {
-        matches!(self, NEWTypes::Array { .. })
+        matches!(self, Type::Array { .. })
     }
     pub fn is_ptr(&self) -> bool {
-        matches!(*self, NEWTypes::Pointer(_))
+        matches!(*self, Type::Pointer(_))
     }
-    pub fn type_compatible(&self, other: &NEWTypes, other_expr: &impl IsZero) -> bool {
+    pub fn type_compatible(&self, other: &Type, other_expr: &impl IsZero) -> bool {
         match (self, other) {
-            (NEWTypes::Primitive(Types::Void), NEWTypes::Primitive(Types::Void)) => true,
+            (Type::Primitive(Primitive::Void), Type::Primitive(Primitive::Void)) => true,
 
-            (NEWTypes::Primitive(Types::Void), NEWTypes::Primitive(_))
-            | (NEWTypes::Primitive(_), NEWTypes::Primitive(Types::Void)) => false,
+            (Type::Primitive(Primitive::Void), Type::Primitive(_))
+            | (Type::Primitive(_), Type::Primitive(Primitive::Void)) => false,
 
-            (NEWTypes::Primitive(_), NEWTypes::Primitive(_)) => true,
+            (Type::Primitive(_), Type::Primitive(_)) => true,
 
             // pointer to null-pointer-constant
-            (NEWTypes::Pointer(_), _) if other_expr.is_zero() => true,
+            (Type::Pointer(_), _) if other_expr.is_zero() => true,
 
-            (NEWTypes::Pointer(l), NEWTypes::Pointer(r))
-                if matches!(**l, NEWTypes::Struct(..)) && matches!(**r, NEWTypes::Struct(..)) =>
+            (Type::Pointer(l), Type::Pointer(r))
+                if matches!(**l, Type::Struct(..)) && matches!(**r, Type::Struct(..)) =>
             {
                 l.type_compatible(r, other_expr)
             }
             // void* is compatible to any other pointer
-            (NEWTypes::Pointer(t), NEWTypes::Pointer(_))
-            | (NEWTypes::Pointer(_), NEWTypes::Pointer(t))
-                if matches!(**t, NEWTypes::Primitive(Types::Void)) =>
+            (Type::Pointer(t), Type::Pointer(_)) | (Type::Pointer(_), Type::Pointer(t))
+                if matches!(**t, Type::Primitive(Primitive::Void)) =>
             {
                 true
             }
 
-            (NEWTypes::Pointer(_), NEWTypes::Pointer(_)) => *self == *other,
+            (Type::Pointer(_), Type::Pointer(_)) => *self == *other,
 
             // two structs/unions are compatible if they have the same name and members
-            (NEWTypes::Struct(s_l), NEWTypes::Struct(s_r))
-            | (NEWTypes::Union(s_l), NEWTypes::Union(s_r)) => match (s_l, s_r) {
-                (StructInfo::Named(name_l, _), StructInfo::Named(name_r, _)) => {
-                    let matching_members = s_l
-                        .members()
-                        .iter()
-                        .zip(s_r.members().iter())
-                        .filter(|(l, r)| l.0 == r.0 && l.1.unwrap_string() == r.1.unwrap_string())
-                        .count();
-                    *name_l == *name_r
-                        && matching_members == s_l.members().len()
-                        && matching_members == s_r.members().len()
+            (Type::Struct(s_l), Type::Struct(s_r)) | (Type::Union(s_l), Type::Union(s_r)) => {
+                match (s_l, s_r) {
+                    (StructInfo::Named(name_l, _), StructInfo::Named(name_r, _)) => {
+                        let matching_members = s_l
+                            .members()
+                            .iter()
+                            .zip(s_r.members().iter())
+                            .filter(|(l, r)| {
+                                l.0 == r.0 && l.1.unwrap_string() == r.1.unwrap_string()
+                            })
+                            .count();
+                        *name_l == *name_r
+                            && matching_members == s_l.members().len()
+                            && matching_members == s_r.members().len()
+                    }
+                    (StructInfo::Anonymous(name_l, _), StructInfo::Anonymous(name_r, _)) => {
+                        name_l == name_r
+                    }
+                    _ => false,
                 }
-                (StructInfo::Anonymous(name_l, _), StructInfo::Anonymous(name_r, _)) => {
-                    name_l == name_r
-                }
-                _ => false,
-            },
-            (NEWTypes::Enum(..), NEWTypes::Primitive(Types::Void))
-            | (NEWTypes::Primitive(Types::Void), NEWTypes::Enum(..)) => false,
+            }
+            (Type::Enum(..), Type::Primitive(Primitive::Void))
+            | (Type::Primitive(Primitive::Void), Type::Enum(..)) => false,
 
-            (NEWTypes::Enum(..), NEWTypes::Primitive(_))
-            | (NEWTypes::Primitive(_), NEWTypes::Enum(..)) => true,
+            (Type::Enum(..), Type::Primitive(_)) | (Type::Primitive(_), Type::Enum(..)) => true,
 
             _ => false,
         }
     }
     pub fn is_scalar(&self) -> bool {
         match self {
-            NEWTypes::Primitive(Types::Void) => false,
-            NEWTypes::Primitive(_) | NEWTypes::Pointer(_) | NEWTypes::Enum(..) => true,
+            Type::Primitive(Primitive::Void) => false,
+            Type::Primitive(_) | Type::Pointer(_) | Type::Enum(..) => true,
             _ => false,
         }
     }
     pub fn is_integer(&self) -> bool {
         match self {
-            NEWTypes::Primitive(Types::Void) => false,
-            NEWTypes::Primitive(_) | NEWTypes::Enum(..) => true,
+            Type::Primitive(Primitive::Void) => false,
+            Type::Primitive(_) | Type::Enum(..) => true,
             _ => false,
         }
     }
     pub fn is_aggregate(&self) -> bool {
-        matches!(self, NEWTypes::Struct(_) | NEWTypes::Union(_))
+        matches!(self, Type::Struct(_) | Type::Union(_))
     }
-    fn union_biggest(&self) -> NEWTypes {
+    fn union_biggest(&self) -> Type {
         match self {
-            NEWTypes::Union(s) => s
+            Type::Union(s) => s
                 .members()
                 .iter()
                 .max_by_key(|(type_decl, _)| type_decl.size())
@@ -318,8 +317,8 @@ impl NEWTypes {
     }
     pub fn is_complete(&self) -> bool {
         match self {
-            NEWTypes::Struct(s) | NEWTypes::Union(s) => s.is_complete(),
-            NEWTypes::Array { of: to, .. } => to.is_complete(),
+            Type::Struct(s) | Type::Union(s) => s.is_complete(),
+            Type::Array { of: to, .. } => to.is_complete(),
             _ if self.is_void() => false,
             _ => true,
         }
@@ -327,29 +326,29 @@ impl NEWTypes {
 
     pub fn max(&self) -> i64 {
         match self {
-            NEWTypes::Primitive(t) => t.max(),
-            NEWTypes::Pointer(_) => i64::MAX,
+            Type::Primitive(t) => t.max(),
+            Type::Pointer(_) => i64::MAX,
             _ => unreachable!(),
         }
     }
     pub fn min(&self) -> i64 {
         match self {
-            NEWTypes::Primitive(t) => t.min(),
-            NEWTypes::Pointer(_) => i64::MIN,
+            Type::Primitive(t) => t.min(),
+            Type::Pointer(_) => i64::MIN,
             _ => unreachable!(),
         }
     }
 
-    pub fn get_primitive(&self) -> Option<&Types> {
-        if let NEWTypes::Primitive(type_decl) = self {
+    pub fn get_primitive(&self) -> Option<&Primitive> {
+        if let Type::Primitive(type_decl) = self {
             Some(type_decl)
         } else {
             None
         }
     }
     pub fn is_char_array(&self) -> Option<usize> {
-        if let NEWTypes::Array { amount, of } = self {
-            if let NEWTypes::Primitive(Types::Char) = **of {
+        if let Type::Array { amount, of } = self {
+            if let Type::Primitive(Primitive::Char) = **of {
                 return Some(*amount);
             }
         }
@@ -358,11 +357,11 @@ impl NEWTypes {
     // returns the amount of scalar elements in a type
     pub fn element_amount(&self) -> usize {
         match self {
-            NEWTypes::Array { amount, of } => amount * of.element_amount(),
-            NEWTypes::Struct(s) => s.members().iter().fold(0, |acc, (member_type, _)| {
+            Type::Array { amount, of } => amount * of.element_amount(),
+            Type::Struct(s) => s.members().iter().fold(0, |acc, (member_type, _)| {
                 acc + member_type.element_amount()
             }),
-            NEWTypes::Union(s) => {
+            Type::Union(s) => {
                 if let Some((member_type, _)) = s.members().first() {
                     member_type.element_amount()
                 } else {
@@ -374,24 +373,24 @@ impl NEWTypes {
     }
     pub fn len(&self) -> usize {
         match self {
-            NEWTypes::Array { amount, .. } => *amount,
-            NEWTypes::Struct(s) => s.members().len(),
+            Type::Array { amount, .. } => *amount,
+            Type::Struct(s) => s.members().len(),
             _ => 1,
         }
     }
 
     // returns the type of the field at index
-    pub fn at(&self, index: usize) -> Option<NEWTypes> {
+    pub fn at(&self, index: usize) -> Option<Type> {
         match self {
-            NEWTypes::Array { of, amount } => {
+            Type::Array { of, amount } => {
                 if index >= *amount {
                     None
                 } else {
                     Some(of.as_ref().clone())
                 }
             }
-            NEWTypes::Struct(s) => s.members().get(index).map(|(ty, _)| ty.clone()),
-            NEWTypes::Union(s) => {
+            Type::Struct(s) => s.members().get(index).map(|(ty, _)| ty.clone()),
+            Type::Union(s) => {
                 if index > 0 {
                     None
                 } else {
@@ -403,17 +402,17 @@ impl NEWTypes {
     }
     pub fn offset(&self, index: i64) -> i64 {
         match self {
-            NEWTypes::Struct(s) => s
+            Type::Struct(s) => s
                 .members()
                 .iter()
                 .take(index as usize)
                 .fold(0, |acc, (m_type, _)| acc + m_type.size() as i64),
-            NEWTypes::Array { of, .. } => of.size() as i64 * index,
+            Type::Array { of, .. } => of.size() as i64 * index,
             _ => 0,
         }
     }
-    pub fn unwrap_primitive(self) -> Types {
-        if let NEWTypes::Primitive(primitive) = self {
+    pub fn unwrap_primitive(self) -> Primitive {
+        if let Type::Primitive(primitive) = self {
             primitive
         } else {
             unreachable!("unwrap on non-primitive type")
@@ -421,29 +420,29 @@ impl NEWTypes {
     }
 }
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
-pub enum Types {
+pub enum Primitive {
     Void,
     Char,
     Int,
     Long,
 }
 
-impl TypeInfo for Types {
+impl TypeInfo for Primitive {
     // returns type-size in bytes
     fn size(&self) -> usize {
         match self {
-            Types::Void => 0,
-            Types::Char => 1,
-            Types::Int => 4,
-            Types::Long => 8,
+            Primitive::Void => 0,
+            Primitive::Char => 1,
+            Primitive::Int => 4,
+            Primitive::Long => 8,
         }
     }
     fn reg_suffix(&self) -> String {
         String::from(match self {
-            Types::Void => unreachable!(),
-            Types::Char => "b",
-            Types::Int => "d",
-            Types::Long => "",
+            Primitive::Void => unreachable!(),
+            Primitive::Char => "b",
+            Primitive::Int => "d",
+            Primitive::Long => "",
         })
     }
     fn suffix(&self) -> String {
@@ -451,22 +450,22 @@ impl TypeInfo for Types {
     }
     fn complete_suffix(&self) -> String {
         String::from(match self {
-            Types::Void => "zero",
-            Types::Char => "byte",
-            Types::Int => "long",
-            Types::Long => "quad",
+            Primitive::Void => "zero",
+            Primitive::Char => "byte",
+            Primitive::Int => "long",
+            Primitive::Long => "quad",
         })
     }
     fn return_reg(&self) -> String {
         String::from(match self {
-            Types::Void => unreachable!("doesnt have return register when returning void"),
-            Types::Char => RETURN_REG[0],
-            Types::Int => RETURN_REG[1],
-            Types::Long => RETURN_REG[2],
+            Primitive::Void => unreachable!("doesnt have return register when returning void"),
+            Primitive::Char => RETURN_REG[0],
+            Primitive::Int => RETURN_REG[1],
+            Primitive::Long => RETURN_REG[2],
         })
     }
 }
-impl Types {
+impl Primitive {
     pub fn into_vec() -> Vec<TokenKind> {
         vec![
             TokenKind::Char,
@@ -477,46 +476,46 @@ impl Types {
     }
     fn fmt(&self) -> &str {
         match self {
-            Types::Void => "void",
-            Types::Char => "char",
-            Types::Int => "int",
-            Types::Long => "long",
+            Primitive::Void => "void",
+            Primitive::Char => "char",
+            Primitive::Int => "int",
+            Primitive::Long => "long",
         }
     }
 
     fn max(&self) -> i64 {
         match self {
-            Types::Void => unreachable!(),
-            Types::Char => i8::MAX as i64,
-            Types::Int => i32::MAX as i64,
-            Types::Long => i64::MAX,
+            Primitive::Void => unreachable!(),
+            Primitive::Char => i8::MAX as i64,
+            Primitive::Int => i32::MAX as i64,
+            Primitive::Long => i64::MAX,
         }
     }
     fn min(&self) -> i64 {
         match self {
-            Types::Void => unreachable!(),
-            Types::Char => i8::MIN as i64,
-            Types::Int => i32::MIN as i64,
-            Types::Long => i64::MIN,
+            Primitive::Void => unreachable!(),
+            Primitive::Char => i8::MIN as i64,
+            Primitive::Int => i32::MIN as i64,
+            Primitive::Long => i64::MIN,
         }
     }
 }
 
-pub fn integer_type(n: i64) -> Types {
+pub fn integer_type(n: i64) -> Primitive {
     if i32::try_from(n).is_ok() {
-        Types::Int
+        Primitive::Int
     } else {
-        Types::Long
+        Primitive::Long
     }
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum StructInfo {
     Named(String, StructRef),
-    Anonymous(Token, Vec<(NEWTypes, Token)>),
+    Anonymous(Token, Vec<(Type, Token)>),
 }
 impl StructInfo {
-    pub fn members(&self) -> Rc<Vec<(NEWTypes, Token)>> {
+    pub fn members(&self) -> Rc<Vec<(Type, Token)>> {
         match self {
             StructInfo::Named(_, s) => s.get(),
             StructInfo::Anonymous(_, m) => Rc::new(m.clone()),
@@ -528,7 +527,7 @@ impl StructInfo {
             .take_while(|(_, name)| name.unwrap_string() != member_to_find)
             .fold(0, |acc, (t, _)| acc + t.size())
     }
-    pub fn member_type(&self, member_to_find: &str) -> NEWTypes {
+    pub fn member_type(&self, member_to_find: &str) -> Type {
         self.members()
             .iter()
             .find(|(_, name)| name.unwrap_string() == member_to_find)
@@ -556,9 +555,9 @@ impl StructInfo {
 }
 
 mod struct_ref {
-    use super::NEWTypes;
     use super::Token;
     use super::TokenType;
+    use super::Type;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -566,7 +565,7 @@ mod struct_ref {
     type InDefinition = bool;
 
     thread_local! {
-        static CUSTOMS: RefCell<Vec<Rc<Vec<(NEWTypes, Token)>>>> = Default::default();
+        static CUSTOMS: RefCell<Vec<Rc<Vec<(Type, Token)>>>> = Default::default();
         static CUSTOMS_INFO: RefCell<Vec<(IsComplete,InDefinition)>> = Default::default();
     }
 
@@ -593,10 +592,10 @@ mod struct_ref {
             &self.kind
         }
 
-        pub fn get(&self) -> Rc<Vec<(NEWTypes, Token)>> {
+        pub fn get(&self) -> Rc<Vec<(Type, Token)>> {
             CUSTOMS.with(|list| list.borrow()[self.index].clone())
         }
-        pub(crate) fn update(&self, members: Vec<(NEWTypes, Token)>) {
+        pub(crate) fn update(&self, members: Vec<(Type, Token)>) {
             CUSTOMS_INFO.with(|list| {
                 let mut types = list.borrow_mut();
                 types[self.index].0 = true;
@@ -629,7 +628,7 @@ pub mod tests {
     use crate::compiler::parser::tests::*;
     use crate::compiler::typechecker::TypeChecker;
 
-    pub fn setup_type(input: &str) -> NEWTypes {
+    pub fn setup_type(input: &str) -> Type {
         if let Ok(ty) = setup(input).type_name() {
             if let Ok(actual_ty) = TypeChecker::new().parse_type(ty) {
                 return actual_ty;
@@ -644,11 +643,11 @@ pub mod tests {
 
     #[test]
     fn multidimensional_array_size() {
-        let input = NEWTypes::Array {
+        let input = Type::Array {
             amount: 2,
-            of: Box::new(NEWTypes::Array {
+            of: Box::new(Type::Array {
                 amount: 2,
-                of: Box::new(NEWTypes::Primitive(Types::Int)),
+                of: Box::new(Type::Primitive(Primitive::Int)),
             }),
         };
         let actual = input.element_amount();

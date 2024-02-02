@@ -1,4 +1,4 @@
-use crate::compiler::common::{token::Token, types::NEWTypes};
+use crate::compiler::common::{token::Token, types::Type};
 use crate::compiler::parser::hir::decl::*;
 use crate::compiler::typechecker::TypeChecker;
 use std::fmt;
@@ -73,7 +73,7 @@ pub enum ExprKind {
         expr: Box<ExprKind>,
     },
     String(Token),
-    Literal(i64, NEWTypes),
+    Literal(i64, Type),
     Ident(Token),
     Nop,
 }

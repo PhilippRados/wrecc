@@ -56,10 +56,7 @@ impl Function {
         if self.return_type != other.return_type {
             return Err(Error::new(
                 token,
-                ErrorKind::MismatchedFuncDeclReturn(
-                    self.return_type.clone(),
-                    other.return_type.clone(),
-                ),
+                ErrorKind::MismatchedFuncDeclReturn(self.return_type.clone(), other.return_type.clone()),
             ));
         }
         if self.arity() != other.arity() {
@@ -79,11 +76,7 @@ impl Function {
         {
             if my_type != other_type {
                 return Err(Error::new(
-                    if let Some(param) = my_token {
-                        param
-                    } else {
-                        token
-                    },
+                    if let Some(param) = my_token { param } else { token },
                     ErrorKind::TypeMismatchFuncDecl(i, other_type.clone(), my_type.clone()),
                 ));
             }
@@ -189,7 +182,7 @@ impl Symbols {
 
 impl PartialEq for Symbols {
     fn eq(&self, other: &Symbols) -> bool {
-        let placeholder = Token::default(TokenType::Semicolon);
+        let placeholder = Token::default(TokenKind::Semicolon);
         self.cmp(&placeholder, other).is_ok()
     }
 }
@@ -214,10 +207,10 @@ pub enum Tags {
     Enum(Vec<(Token, i32)>),
 }
 impl Tags {
-    pub fn get_kind(&self) -> &TokenType {
+    pub fn get_kind(&self) -> &TokenKind {
         match self {
             Tags::Aggregate(s) => s.get_kind(),
-            Tags::Enum(_) => &TokenType::Enum,
+            Tags::Enum(_) => &TokenKind::Enum,
         }
     }
     pub fn unwrap_aggr(self) -> StructRef {
@@ -276,10 +269,7 @@ impl<T> NameSpace<T> {
     }
     pub fn declare(&mut self, name: String, elem: T) -> Rc<RefCell<T>> {
         let kind = Rc::new(RefCell::new(elem));
-        self.elems
-            .last_mut()
-            .unwrap()
-            .insert(name, Rc::clone(&kind));
+        self.elems.last_mut().unwrap().insert(name, Rc::clone(&kind));
         Rc::clone(&kind)
     }
     pub fn get(&self, name: String) -> Option<Rc<RefCell<T>>> {
@@ -333,11 +323,7 @@ impl Environment {
         var_name: &Token,
         symbol: Symbols,
     ) -> Result<Rc<RefCell<Symbols>>, Error> {
-        let global_scope = self
-            .symbols
-            .elems
-            .get_mut(0)
-            .expect("always have a global scope");
+        let global_scope = self.symbols.elems.get_mut(0).expect("always have a global scope");
 
         if let Some(existing_symbol) = global_scope
             .get(&var_name.unwrap_string())
@@ -384,11 +370,7 @@ impl Environment {
         }
     }
 
-    pub fn declare_type(
-        &mut self,
-        var_name: &Token,
-        tag: Tags,
-    ) -> Result<Rc<RefCell<Tags>>, Error> {
+    pub fn declare_type(&mut self, var_name: &Token, tag: Tags) -> Result<Rc<RefCell<Tags>>, Error> {
         let name = var_name.unwrap_string();
         match self.tags.get_current(&name) {
             Some(existing_tag)
@@ -414,20 +396,14 @@ impl Environment {
         Ok(self.tags.declare(name, tag))
     }
     pub fn get_symbol(&self, var_name: &Token) -> Result<Rc<RefCell<Symbols>>, Error> {
-        self.symbols.get(var_name.unwrap_string()).ok_or_else(|| {
-            Error::new(
-                var_name,
-                ErrorKind::UndeclaredSymbol(var_name.unwrap_string()),
-            )
-        })
+        self.symbols
+            .get(var_name.unwrap_string())
+            .ok_or_else(|| Error::new(var_name, ErrorKind::UndeclaredSymbol(var_name.unwrap_string())))
     }
     pub fn get_type(&self, var_name: &Token) -> Result<Rc<RefCell<Tags>>, Error> {
-        self.tags.get(var_name.unwrap_string()).ok_or_else(|| {
-            Error::new(
-                var_name,
-                ErrorKind::UndeclaredType(var_name.unwrap_string()),
-            )
-        })
+        self.tags
+            .get(var_name.unwrap_string())
+            .ok_or_else(|| Error::new(var_name, ErrorKind::UndeclaredType(var_name.unwrap_string())))
     }
 }
 
@@ -438,14 +414,14 @@ pub mod tests {
     use crate::compiler::common::types::tests::setup_type;
 
     fn func_template(name: &str, kind: InitType) -> (Token, Symbols) {
-        let token = Token::default(TokenType::Ident(name.to_string()));
+        let token = Token::default(TokenKind::Ident(name.to_string()));
         let symbol = Symbols::Func(Function::new(setup_type("void"), Vec::new(), false, kind));
 
         (token, symbol)
     }
 
     pub fn var_template(name: &str, ty: &str, kind: InitType) -> (Token, Symbols) {
-        let token = Token::default(TokenType::Ident(name.to_string()));
+        let token = Token::default(TokenKind::Ident(name.to_string()));
         let symbol = Symbols::Variable(SymbolInfo {
             kind,
             token: token.clone(),

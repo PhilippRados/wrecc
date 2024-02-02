@@ -9,39 +9,39 @@ pub struct Scanner<'a> {
     // source used for iterating
     source: Peekable<std::vec::IntoIter<PPToken>>,
 
-    keywords: HashMap<&'a str, TokenType>,
+    keywords: HashMap<&'a str, TokenKind>,
 }
 impl<'a> Scanner<'a> {
     pub fn new(source: Vec<PPToken>) -> Self {
         Scanner {
             source: source.into_iter().peekable(),
             keywords: HashMap::from([
-                ("void", TokenType::Void),
-                ("int", TokenType::Int),
-                ("long", TokenType::Long),
-                ("char", TokenType::Char),
-                ("struct", TokenType::Struct),
-                ("union", TokenType::Union),
-                ("enum", TokenType::Enum),
-                ("typedef", TokenType::TypeDef),
-                ("if", TokenType::If),
-                ("switch", TokenType::Switch),
-                ("case", TokenType::Case),
-                ("default", TokenType::Default),
-                ("else", TokenType::Else),
-                ("for", TokenType::For),
-                ("while", TokenType::While),
-                ("do", TokenType::Do),
-                ("break", TokenType::Break),
-                ("continue", TokenType::Continue),
-                ("sizeof", TokenType::Sizeof),
-                ("return", TokenType::Return),
-                ("goto", TokenType::Goto),
+                ("void", TokenKind::Void),
+                ("int", TokenKind::Int),
+                ("long", TokenKind::Long),
+                ("char", TokenKind::Char),
+                ("struct", TokenKind::Struct),
+                ("union", TokenKind::Union),
+                ("enum", TokenKind::Enum),
+                ("typedef", TokenKind::TypeDef),
+                ("if", TokenKind::If),
+                ("switch", TokenKind::Switch),
+                ("case", TokenKind::Case),
+                ("default", TokenKind::Default),
+                ("else", TokenKind::Else),
+                ("for", TokenKind::For),
+                ("while", TokenKind::While),
+                ("do", TokenKind::Do),
+                ("break", TokenKind::Break),
+                ("continue", TokenKind::Continue),
+                ("sizeof", TokenKind::Sizeof),
+                ("return", TokenKind::Return),
+                ("goto", TokenKind::Goto),
             ]),
         }
     }
 
-    fn match_next(&mut self, expected: char, if_match: TokenType, if_not: TokenType) -> TokenType {
+    fn match_next(&mut self, expected: char, if_match: TokenKind, if_not: TokenKind) -> TokenKind {
         match self.matches(expected) {
             true => if_match,
             false => if_not,
@@ -55,123 +55,116 @@ impl<'a> Scanner<'a> {
             match pp_token.kind {
                 PPKind::Other(c) => {
                     match c {
-                        '[' => tokens.push(pp_token, TokenType::LeftBracket),
-                        ']' => tokens.push(pp_token, TokenType::RightBracket),
-                        '(' => tokens.push(pp_token, TokenType::LeftParen),
-                        ')' => tokens.push(pp_token, TokenType::RightParen),
-                        '{' => tokens.push(pp_token, TokenType::LeftBrace),
-                        '}' => tokens.push(pp_token, TokenType::RightBrace),
-                        ',' => tokens.push(pp_token, TokenType::Comma),
-                        ';' => tokens.push(pp_token, TokenType::Semicolon),
-                        '~' => tokens.push(pp_token, TokenType::Tilde),
-                        '?' => tokens.push(pp_token, TokenType::Question),
-                        ':' => tokens.push(pp_token, TokenType::Colon),
+                        '[' => tokens.push(pp_token, TokenKind::LeftBracket),
+                        ']' => tokens.push(pp_token, TokenKind::RightBracket),
+                        '(' => tokens.push(pp_token, TokenKind::LeftParen),
+                        ')' => tokens.push(pp_token, TokenKind::RightParen),
+                        '{' => tokens.push(pp_token, TokenKind::LeftBrace),
+                        '}' => tokens.push(pp_token, TokenKind::RightBrace),
+                        ',' => tokens.push(pp_token, TokenKind::Comma),
+                        ';' => tokens.push(pp_token, TokenKind::Semicolon),
+                        '~' => tokens.push(pp_token, TokenKind::Tilde),
+                        '?' => tokens.push(pp_token, TokenKind::Question),
+                        ':' => tokens.push(pp_token, TokenKind::Colon),
                         '.' => {
-                            if let Some(PPToken { kind: PPKind::Other('.'), .. }) =
-                                self.source.peek()
-                            {
+                            if let Some(PPToken { kind: PPKind::Other('.'), .. }) = self.source.peek() {
                                 let second_token = self.source.next().unwrap();
                                 if self.matches('.') {
-                                    tokens.push(pp_token, TokenType::Ellipsis);
+                                    tokens.push(pp_token, TokenKind::Ellipsis);
                                 } else {
                                     // since only single lookahead have to add two seperate dots
-                                    tokens.push(pp_token, TokenType::Dot);
-                                    tokens.push(second_token, TokenType::Dot);
+                                    tokens.push(pp_token, TokenKind::Dot);
+                                    tokens.push(second_token, TokenKind::Dot);
                                 }
                             } else {
-                                tokens.push(pp_token, TokenType::Dot)
+                                tokens.push(pp_token, TokenKind::Dot)
                             }
                         }
                         '-' => {
-                            let mut token = TokenType::Minus;
+                            let mut token = TokenKind::Minus;
                             if self.matches('-') {
-                                token = TokenType::MinusMinus;
+                                token = TokenKind::MinusMinus;
                             } else if self.matches('=') {
-                                token = TokenType::MinusEqual;
+                                token = TokenKind::MinusEqual;
                             } else if self.matches('>') {
-                                token = TokenType::Arrow;
+                                token = TokenKind::Arrow;
                             }
                             tokens.push(pp_token, token);
                         }
                         '+' => {
-                            let mut token = TokenType::Plus;
+                            let mut token = TokenKind::Plus;
                             if self.matches('+') {
-                                token = TokenType::PlusPlus;
+                                token = TokenKind::PlusPlus;
                             } else if self.matches('=') {
-                                token = TokenType::PlusEqual;
+                                token = TokenKind::PlusEqual;
                             }
                             tokens.push(pp_token, token);
                         }
                         '|' => {
-                            let mut token = TokenType::Pipe;
+                            let mut token = TokenKind::Pipe;
                             if self.matches('|') {
-                                token = TokenType::PipePipe;
+                                token = TokenKind::PipePipe;
                             } else if self.matches('=') {
-                                token = TokenType::PipeEqual;
+                                token = TokenKind::PipeEqual;
                             }
                             tokens.push(pp_token, token);
                         }
                         '&' => {
-                            let mut token = TokenType::Amp;
+                            let mut token = TokenKind::Amp;
                             if self.matches('&') {
-                                token = TokenType::AmpAmp;
+                                token = TokenKind::AmpAmp;
                             } else if self.matches('=') {
-                                token = TokenType::AmpEqual;
+                                token = TokenKind::AmpEqual;
                             }
                             tokens.push(pp_token, token);
                         }
                         '<' => {
-                            let mut token = TokenType::Less;
+                            let mut token = TokenKind::Less;
                             if self.matches('<') {
-                                token = self.match_next(
-                                    '=',
-                                    TokenType::LessLessEqual,
-                                    TokenType::LessLess,
-                                );
+                                token =
+                                    self.match_next('=', TokenKind::LessLessEqual, TokenKind::LessLess);
                             } else if self.matches('=') {
-                                token = TokenType::LessEqual;
+                                token = TokenKind::LessEqual;
                             }
                             tokens.push(pp_token, token);
                         }
                         '>' => {
-                            let mut token = TokenType::Greater;
+                            let mut token = TokenKind::Greater;
                             if self.matches('>') {
                                 token = self.match_next(
                                     '=',
-                                    TokenType::GreaterGreaterEqual,
-                                    TokenType::GreaterGreater,
+                                    TokenKind::GreaterGreaterEqual,
+                                    TokenKind::GreaterGreater,
                                 );
                             } else if self.matches('=') {
-                                token = TokenType::GreaterEqual;
+                                token = TokenKind::GreaterEqual;
                             }
                             tokens.push(pp_token, token);
                         }
                         '^' => {
-                            let token = self.match_next('=', TokenType::XorEqual, TokenType::Xor);
+                            let token = self.match_next('=', TokenKind::XorEqual, TokenKind::Xor);
                             tokens.push(pp_token, token);
                         }
                         '*' => {
-                            let token = self.match_next('=', TokenType::StarEqual, TokenType::Star);
+                            let token = self.match_next('=', TokenKind::StarEqual, TokenKind::Star);
                             tokens.push(pp_token, token);
                         }
                         '%' => {
-                            let token = self.match_next('=', TokenType::ModEqual, TokenType::Mod);
+                            let token = self.match_next('=', TokenKind::ModEqual, TokenKind::Mod);
                             tokens.push(pp_token, token);
                         }
 
                         '!' => {
-                            let token = self.match_next('=', TokenType::BangEqual, TokenType::Bang);
+                            let token = self.match_next('=', TokenKind::BangEqual, TokenKind::Bang);
                             tokens.push(pp_token, token);
                         }
                         '=' => {
-                            let token =
-                                self.match_next('=', TokenType::EqualEqual, TokenType::Equal);
+                            let token = self.match_next('=', TokenKind::EqualEqual, TokenKind::Equal);
                             tokens.push(pp_token, token);
                         }
 
                         '/' => {
-                            let token =
-                                self.match_next('=', TokenType::SlashEqual, TokenType::Slash);
+                            let token = self.match_next('=', TokenKind::SlashEqual, TokenKind::Slash);
                             tokens.push(pp_token, token);
                         }
                         _ => {
@@ -185,17 +178,17 @@ impl<'a> Scanner<'a> {
                     assert_eq!(first, '"');
 
                     if let Some('"') = s.pop() {
-                        tokens.push(pp_token, TokenType::String(s))
+                        tokens.push(pp_token, TokenKind::String(s))
                     } else {
                         errors.push(Error::new(&pp_token.clone(), ErrorKind::UnterminatedString))
                     }
                 }
                 PPKind::CharLit(ref c) => match self.char_lit(&pp_token, c.clone()) {
-                    Ok(char) => tokens.push(pp_token, TokenType::CharLit(char as i8)),
+                    Ok(char) => tokens.push(pp_token, TokenKind::CharLit(char as i8)),
                     Err(e) => errors.push(e),
                 },
                 PPKind::Number(ref num) => match num.parse::<i64>() {
-                    Ok(n) => tokens.push(pp_token, TokenType::Number(n)),
+                    Ok(n) => tokens.push(pp_token, TokenKind::Number(n)),
                     Err(e) => {
                         errors.push(Error::new(
                             &pp_token.clone(),
@@ -218,7 +211,7 @@ impl<'a> Scanner<'a> {
                     if let Some(kw) = self.keywords.get(ident.as_str()) {
                         tokens.push(pp_token, kw.clone());
                     } else {
-                        tokens.push(pp_token.clone(), TokenType::Ident(ident))
+                        tokens.push(pp_token.clone(), TokenKind::Ident(ident))
                     }
                 }
                 PPKind::Hash => errors.push(Error::new(&pp_token, ErrorKind::UnexpectedChar('#'))),
@@ -257,10 +250,9 @@ impl<'a> Scanner<'a> {
             let char_to_escape = char_iter
                 .next()
                 .ok_or(Error::new(pp_token, ErrorKind::Eof("character literal")))?;
-            c = self.escape_char(char_to_escape).ok_or(Error::new(
-                pp_token,
-                ErrorKind::InvalidEscape(char_to_escape),
-            ))?;
+            c = self
+                .escape_char(char_to_escape)
+                .ok_or(Error::new(pp_token, ErrorKind::InvalidEscape(char_to_escape)))?;
         }
         if !matches!(char_iter.next(), Some('\'')) {
             return Err(Error::new(pp_token, ErrorKind::CharLiteralQuotes));
@@ -287,7 +279,7 @@ impl<'a> Scanner<'a> {
 
 struct ScanResult(Vec<Token>);
 impl ScanResult {
-    fn push(&mut self, pp_token: PPToken, new_kind: TokenType) {
+    fn push(&mut self, pp_token: PPToken, new_kind: TokenKind) {
         self.0.push(Token::new(
             new_kind,
             pp_token.line,
@@ -322,9 +314,9 @@ mod tests {
             unreachable!("want to test errors")
         }
     }
-    fn test_token(token: TokenType, line_index: i32, column: i32, line_string: &str) -> Token {
+    fn test_token(token: TokenKind, line_index: i32, column: i32, line_string: &str) -> Token {
         Token {
-            token,
+            kind: token,
             line_index,
             column,
             line_string: line_string.to_string(),
@@ -333,26 +325,23 @@ mod tests {
     }
 
     // helper functions when other token-information isn't necessary
-    fn setup(input: &str) -> Vec<TokenType> {
-        setup_generic(input).into_iter().map(|e| e.token).collect()
+    fn setup(input: &str) -> Vec<TokenKind> {
+        setup_generic(input).into_iter().map(|e| e.kind).collect()
     }
 
     fn setup_err(input: &str) -> Vec<ErrorKind> {
-        setup_generic_err(input)
-            .into_iter()
-            .map(|e| e.kind)
-            .collect()
+        setup_generic_err(input).into_iter().map(|e| e.kind).collect()
     }
 
     #[test]
     fn basic_single_and_double_tokens() {
         let actual = setup_generic("!= = > == \n\n    ;");
         let expected = vec![
-            test_token(TokenType::BangEqual, 1, 1, "!= = > == "),
-            test_token(TokenType::Equal, 1, 4, "!= = > == "),
-            test_token(TokenType::Greater, 1, 6, "!= = > == "),
-            test_token(TokenType::EqualEqual, 1, 8, "!= = > == "),
-            test_token(TokenType::Semicolon, 3, 5, "    ;"),
+            test_token(TokenKind::BangEqual, 1, 1, "!= = > == "),
+            test_token(TokenKind::Equal, 1, 4, "!= = > == "),
+            test_token(TokenKind::Greater, 1, 6, "!= = > == "),
+            test_token(TokenKind::EqualEqual, 1, 8, "!= = > == "),
+            test_token(TokenKind::Semicolon, 3, 5, "    ;"),
         ];
         assert_eq!(actual, expected);
     }
@@ -360,8 +349,8 @@ mod tests {
     fn ignores_comments() {
         let actual = setup_generic("// this is a    comment\n\n!this");
         let expected = vec![
-            test_token(TokenType::Bang, 3, 1, "!this"),
-            test_token(TokenType::Ident("this".to_string()), 3, 2, "!this"),
+            test_token(TokenKind::Bang, 3, 1, "!this"),
+            test_token(TokenKind::Ident("this".to_string()), 3, 2, "!this"),
         ];
         assert_eq!(actual, expected);
     }
@@ -369,11 +358,11 @@ mod tests {
     fn token_basic_math_expression() {
         let actual = setup("3 + 1 / 4");
         let expected = vec![
-            TokenType::Number(3),
-            TokenType::Plus,
-            TokenType::Number(1),
-            TokenType::Slash,
-            TokenType::Number(4),
+            TokenKind::Number(3),
+            TokenKind::Plus,
+            TokenKind::Number(1),
+            TokenKind::Slash,
+            TokenKind::Number(4),
         ];
         assert_eq!(actual, expected);
     }
@@ -381,11 +370,11 @@ mod tests {
     fn basic_math_double_digit_nums() {
         let actual = setup("300 - 11 * 41");
         let expected = vec![
-            TokenType::Number(300),
-            TokenType::Minus,
-            TokenType::Number(11),
-            TokenType::Star,
-            TokenType::Number(41),
+            TokenKind::Number(300),
+            TokenKind::Minus,
+            TokenKind::Number(11),
+            TokenKind::Star,
+            TokenKind::Number(41),
         ];
         assert_eq!(actual, expected);
     }
@@ -393,10 +382,10 @@ mod tests {
     fn matches_keywords_and_strings() {
         let actual = setup("int some = \"this is a string\"");
         let expected = vec![
-            TokenType::Int,
-            TokenType::Ident("some".to_string()),
-            TokenType::Equal,
-            TokenType::String("this is a string".to_string()),
+            TokenKind::Int,
+            TokenKind::Ident("some".to_string()),
+            TokenKind::Equal,
+            TokenKind::String("this is a string".to_string()),
         ];
         assert_eq!(actual, expected);
     }
@@ -411,46 +400,36 @@ mod tests {
     fn matches_complex_keywords() {
         let actual = setup_generic("int some_long;\nwhile (val >= 12) {*p = val}");
         let expected = vec![
-            test_token(TokenType::Int, 1, 1, "int some_long;"),
+            test_token(TokenKind::Int, 1, 1, "int some_long;"),
+            test_token(TokenKind::Ident("some_long".to_string()), 1, 5, "int some_long;"),
+            test_token(TokenKind::Semicolon, 1, 14, "int some_long;"),
+            test_token(TokenKind::While, 2, 1, "while (val >= 12) {*p = val}"),
+            test_token(TokenKind::LeftParen, 2, 7, "while (val >= 12) {*p = val}"),
             test_token(
-                TokenType::Ident("some_long".to_string()),
-                1,
-                5,
-                "int some_long;",
-            ),
-            test_token(TokenType::Semicolon, 1, 14, "int some_long;"),
-            test_token(TokenType::While, 2, 1, "while (val >= 12) {*p = val}"),
-            test_token(TokenType::LeftParen, 2, 7, "while (val >= 12) {*p = val}"),
-            test_token(
-                TokenType::Ident("val".to_string()),
+                TokenKind::Ident("val".to_string()),
                 2,
                 8,
                 "while (val >= 12) {*p = val}",
             ),
+            test_token(TokenKind::GreaterEqual, 2, 12, "while (val >= 12) {*p = val}"),
+            test_token(TokenKind::Number(12), 2, 15, "while (val >= 12) {*p = val}"),
+            test_token(TokenKind::RightParen, 2, 17, "while (val >= 12) {*p = val}"),
+            test_token(TokenKind::LeftBrace, 2, 19, "while (val >= 12) {*p = val}"),
+            test_token(TokenKind::Star, 2, 20, "while (val >= 12) {*p = val}"),
             test_token(
-                TokenType::GreaterEqual,
-                2,
-                12,
-                "while (val >= 12) {*p = val}",
-            ),
-            test_token(TokenType::Number(12), 2, 15, "while (val >= 12) {*p = val}"),
-            test_token(TokenType::RightParen, 2, 17, "while (val >= 12) {*p = val}"),
-            test_token(TokenType::LeftBrace, 2, 19, "while (val >= 12) {*p = val}"),
-            test_token(TokenType::Star, 2, 20, "while (val >= 12) {*p = val}"),
-            test_token(
-                TokenType::Ident("p".to_string()),
+                TokenKind::Ident("p".to_string()),
                 2,
                 21,
                 "while (val >= 12) {*p = val}",
             ),
-            test_token(TokenType::Equal, 2, 23, "while (val >= 12) {*p = val}"),
+            test_token(TokenKind::Equal, 2, 23, "while (val >= 12) {*p = val}"),
             test_token(
-                TokenType::Ident("val".to_string()),
+                TokenKind::Ident("val".to_string()),
                 2,
                 25,
                 "while (val >= 12) {*p = val}",
             ),
-            test_token(TokenType::RightBrace, 2, 28, "while (val >= 12) {*p = val}"),
+            test_token(TokenKind::RightBrace, 2, 28, "while (val >= 12) {*p = val}"),
         ];
         assert_eq!(actual, expected);
     }
@@ -493,10 +472,10 @@ mod tests {
     fn can_handle_non_ascii_alphabet() {
         let actual = setup_generic("\nint ä = 123");
         let expected = vec![
-            test_token(TokenType::Int, 2, 1, "int ä = 123"),
-            test_token(TokenType::Ident("ä".to_string()), 2, 5, "int ä = 123"),
-            test_token(TokenType::Equal, 2, 8, "int ä = 123"), // ä len is 2 but thats fine because its the same when indexing
-            test_token(TokenType::Number(123), 2, 10, "int ä = 123"),
+            test_token(TokenKind::Int, 2, 1, "int ä = 123"),
+            test_token(TokenKind::Ident("ä".to_string()), 2, 5, "int ä = 123"),
+            test_token(TokenKind::Equal, 2, 8, "int ä = 123"), // ä len is 2 but thats fine because its the same when indexing
+            test_token(TokenKind::Number(123), 2, 10, "int ä = 123"),
         ];
         assert_eq!(actual, expected);
     }
@@ -516,10 +495,10 @@ mod tests {
     fn char_literal() {
         let actual = setup("char some = '1'");
         let expected = vec![
-            TokenType::Char,
-            TokenType::Ident("some".to_string()),
-            TokenType::Equal,
-            TokenType::CharLit('1' as i8),
+            TokenKind::Char,
+            TokenKind::Ident("some".to_string()),
+            TokenKind::Equal,
+            TokenKind::CharLit('1' as i8),
         ];
         assert_eq!(actual, expected);
     }
@@ -535,50 +514,46 @@ mod tests {
     fn ellipsis_dot_distinction() {
         let actual = setup(".....;...");
         let expected = vec![
-            TokenType::Ellipsis,
-            TokenType::Dot,
-            TokenType::Dot,
-            TokenType::Semicolon,
-            TokenType::Ellipsis,
+            TokenKind::Ellipsis,
+            TokenKind::Dot,
+            TokenKind::Dot,
+            TokenKind::Semicolon,
+            TokenKind::Ellipsis,
         ];
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn handle_newline_string() {
-        let input: String = vec!['"', 'h', 'a', '\\', 'n', 'l', '"']
-            .into_iter()
-            .collect();
+        let input: String = vec!['"', 'h', 'a', '\\', 'n', 'l', '"'].into_iter().collect();
 
         let pp_tokens = preprocess(Path::new(""), input).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
-        let actual: Vec<TokenType> = scanner
+        let actual: Vec<TokenKind> = scanner
             .scan_token()
             .unwrap()
             .into_iter()
-            .map(|e| e.token)
+            .map(|e| e.kind)
             .collect();
 
-        let expected = vec![TokenType::String("ha\\nl".to_string())];
+        let expected = vec![TokenKind::String("ha\\nl".to_string())];
 
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn handle_multiline_string() {
-        let input: String = vec!['"', 'h', 'a', '\\', '\n', 'l', '"']
-            .into_iter()
-            .collect();
+        let input: String = vec!['"', 'h', 'a', '\\', '\n', 'l', '"'].into_iter().collect();
 
         let pp_tokens = preprocess(Path::new(""), input).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
-        let actual: Vec<TokenType> = scanner
+        let actual: Vec<TokenKind> = scanner
             .scan_token()
             .unwrap()
             .into_iter()
-            .map(|e| e.token)
+            .map(|e| e.kind)
             .collect();
-        let expected = vec![TokenType::String("hal".to_string())];
+        let expected = vec![TokenKind::String("hal".to_string())];
 
         assert_eq!(actual, expected);
     }

@@ -16,16 +16,16 @@ pub enum ErrorKind {
     // parsing errors
     NotIntegerConstant(&'static str),
     NegativeArraySize,
-    IsEmpty(TokenType),
+    IsEmpty(TokenKind),
     EnumOverflow,
     IncompleteType(Type),
     IncompleteReturnType(String, Type),
     IncompleteFuncArg(String, Type),
     VoidFuncArg,
     IncompleteMemberAccess(Type),
-    TypeAlreadyExists(String, TokenType),
+    TypeAlreadyExists(String, TokenKind),
     EnumForwardDecl,
-    EmptyAggregate(TokenType),
+    EmptyAggregate(TokenKind),
     Redefinition(&'static str, String),
     RedefOtherSymbol(String, String),
     RedefTypeMismatch(String, Type, Type),
@@ -34,8 +34,8 @@ pub enum ErrorKind {
     InvalidArrayDesignator(Type),
     TooLong(&'static str, usize, usize),
     NonAggregateInitializer(Type, Type),
-    ExpectedExpression(TokenType),
-    NotType(TokenType),
+    ExpectedExpression(TokenKind),
+    NotType(TokenKind),
     UndeclaredType(String),
     InvalidVariadic,
 
@@ -65,12 +65,12 @@ pub enum ErrorKind {
     NotLvalue,
     MismatchedArity(String, usize, usize),
     MismatchedArgs(usize, String, Option<Token>, Type, Type),
-    InvalidLogical(TokenType, Type, Type),
-    InvalidBinary(TokenType, Type, Type),
-    InvalidComp(TokenType, Type, Type),
+    InvalidLogical(TokenKind, Type, Type),
+    InvalidBinary(TokenKind, Type, Type),
+    InvalidComp(TokenKind, Type, Type),
     InvalidDerefType(Type),
     MismatchedFunctionReturn(Type, Type),
-    InvalidUnary(TokenType, Type, &'static str),
+    InvalidUnary(TokenKind, Type, &'static str),
     UnnamedFuncParams,
     InvalidReturnType(Type),
     NonAggregateDesignator(Type),
@@ -122,10 +122,7 @@ impl ErrorKind {
                 )
             }
             ErrorKind::CharLiteralAscii(c) => {
-                format!(
-                    "Character literal must be valid ascii value. '{}' is not",
-                    c
-                )
+                format!("Character literal must be valid ascii value. '{}' is not", c)
             }
             ErrorKind::InvalidEscape(c) => format!("Can't escape character '{}'", c),
             ErrorKind::UnterminatedString => "Unterminated string".to_string(),
@@ -136,8 +133,7 @@ impl ErrorKind {
             ErrorKind::NegativeArraySize => "Array size has to be greater than zero".to_string(),
             ErrorKind::IsEmpty(t) => format!("Can't have empty {}", t),
             ErrorKind::EnumOverflow => {
-                "Enum constant overflow. Value has to be in range -2147483648 and 2147483647"
-                    .to_string()
+                "Enum constant overflow. Value has to be in range -2147483648 and 2147483647".to_string()
             }
             ErrorKind::IncompleteType(t) => format!("'{}' contains incomplete type", t),
             ErrorKind::IncompleteReturnType(name, t) => {
@@ -205,10 +201,9 @@ impl ErrorKind {
                     type_decl
                 )
             }
-            ErrorKind::TooLong(s, expected, actual) => format!(
-                "{} is too long. Expected: {}, Actual: {}",
-                s, expected, actual
-            ),
+            ErrorKind::TooLong(s, expected, actual) => {
+                format!("{} is too long. Expected: {}, Actual: {}", s, expected, actual)
+            }
             ErrorKind::NonAggregateInitializer(expected, actual) => format!(
                 "Can't initialize non-aggregate type '{}' with '{}'",
                 expected, actual
@@ -217,10 +212,9 @@ impl ErrorKind {
             ErrorKind::DuplicateMember(name) => format!("Duplicate member '{}'", name),
 
             ErrorKind::DivideByZero => "Can't divide by zero".to_string(),
-            ErrorKind::InvalidConstCast(old_type, new_type) => format!(
-                "Invalid constant-cast from '{}' to '{}'",
-                old_type, new_type,
-            ),
+            ErrorKind::InvalidConstCast(old_type, new_type) => {
+                format!("Invalid constant-cast from '{}' to '{}'", old_type, new_type,)
+            }
             ErrorKind::NegativeShift => "Shift amount has to positive".to_string(),
             ErrorKind::IntegerOverflow(type_decl) => {
                 format!("Integer overflow with type: '{}'", type_decl)
@@ -237,10 +231,7 @@ impl ErrorKind {
             }
             ErrorKind::DuplicateCase(n) => format!("Duplicate 'case'-statement with value {}", n),
             ErrorKind::NotIn(inner, outer) => {
-                format!(
-                    "'{}'-statements have to be inside a '{}'-statement",
-                    inner, outer
-                )
+                format!("'{}'-statements have to be inside a '{}'-statement", inner, outer)
             }
             ErrorKind::MultipleDefaults => {
                 "Can't have multiple 'default'-statements inside a 'switch'-statement".to_string()
@@ -256,18 +247,11 @@ impl ErrorKind {
                     "Invalid cast from '{}' to '{}'. '{}' is not a scalar type",
                     old_type,
                     new_type,
-                    if !old_type.is_scalar() {
-                        old_type
-                    } else {
-                        new_type
-                    }
+                    if !old_type.is_scalar() { old_type } else { new_type }
                 )
             }
             ErrorKind::NoReturnAllPaths(name) => {
-                format!(
-                    "Non-void function '{}' doesn't return in all code paths",
-                    name
-                )
+                format!("Non-void function '{}' doesn't return in all code paths", name)
             }
             ErrorKind::InvalidMainReturn(type_decl) => {
                 format!("Expected 'main' return type 'int', found: '{}'", type_decl)
@@ -279,10 +263,7 @@ impl ErrorKind {
                 format!("Symbol '{}' already exists, but not as {}", name, symbol)
             }
             ErrorKind::InvalidMemberAccess(type_decl) => {
-                format!(
-                    "Can only access members of structs/unions, not '{}'",
-                    type_decl
-                )
+                format!("Can only access members of structs/unions, not '{}'", type_decl)
             }
             ErrorKind::InvalidIncrementType(type_decl) => {
                 format!("Can't increment value of type '{}'", type_decl)
@@ -321,10 +302,7 @@ impl ErrorKind {
                 )
             }
             ErrorKind::InvalidComp(token, left_type, right_type) => {
-                format!(
-                    "Invalid comparsion: '{}' {} '{}'",
-                    left_type, token, right_type
-                )
+                format!("Invalid comparsion: '{}' {} '{}'", left_type, token, right_type)
             }
             ErrorKind::InvalidBinary(token, left_type, right_type) => {
                 format!(
@@ -354,7 +332,7 @@ impl ErrorKind {
             ErrorKind::MismatchedFuncDeclArity(expected, actual) => {
                 format!(
                     "Mismatched number of parameters in function-declarations: expected {}, found {}",
-                    expected,actual
+                    expected, actual
                 )
             }
 
@@ -400,9 +378,7 @@ impl ErrorKind {
                 format!("Unterminated '#{}'", if_kind)
             }
             ErrorKind::InvalidMacroName => "Macro name must be valid identifier".to_string(),
-            ErrorKind::DuplicateElse => {
-                "Can only have single '#else' in '#if'-directive".to_string()
-            }
+            ErrorKind::DuplicateElse => "Can only have single '#else' in '#if'-directive".to_string(),
             ErrorKind::MissingExpression(kind) => {
                 format!("'#{}' directive expects expression", kind)
             }

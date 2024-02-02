@@ -109,10 +109,7 @@ impl RegisterAllocation {
     fn alloc_arg(&mut self, result: &mut Vec<Lir>) {
         // get the interval if a new arg-register has been declared
         let new_arg_interval = self.live_intervals.iter_mut().find(|(_, v)| {
-            self.counter >= v.start
-                && self.counter < v.end
-                && v.arg.is_some()
-                && v.scratch.is_none()
+            self.counter >= v.start && self.counter < v.end && v.arg.is_some() && v.scratch.is_none()
         });
 
         if let Some((key, IntervalEntry { arg: Some(scratch), .. })) = new_arg_interval {
@@ -172,12 +169,7 @@ impl RegisterAllocation {
         // assign register to the interval
         self.live_intervals.get_mut(&reg.id).unwrap().scratch = Some(value);
     }
-    fn get_scratch(
-        &mut self,
-        ir: &mut Vec<Lir>,
-        reg: &mut TempRegister,
-        other: Vec<usize>,
-    ) -> TempKind {
+    fn get_scratch(&mut self, ir: &mut Vec<Lir>, reg: &mut TempRegister, other: Vec<usize>) -> TempKind {
         if let Some(scratch) = self.registers.alloc(&other) {
             TempKind::Scratch(self.registers.0.get(scratch).unwrap().clone())
         } else {
@@ -211,12 +203,7 @@ impl RegisterAllocation {
         prev.reg.unwrap()
     }
 
-    fn unspill(
-        &mut self,
-        ir: &mut Vec<Lir>,
-        reg: &mut TempRegister,
-        other: Vec<usize>,
-    ) -> TempKind {
+    fn unspill(&mut self, ir: &mut Vec<Lir>, reg: &mut TempRegister, other: Vec<usize>) -> TempKind {
         let Some(IntervalEntry{ type_decl, scratch:Some(entry),.. }) = self.live_intervals.get_mut(&reg.id) else {unreachable!()};
 
         let mut prev_reg = reg.clone();
@@ -227,10 +214,7 @@ impl RegisterAllocation {
         new.type_decl = type_decl.clone();
         new.reg = Some(self.get_scratch(ir, reg, other));
 
-        ir.push(Lir::Mov(
-            Register::Temp(prev_reg),
-            Register::Temp(new.clone()),
-        ));
+        ir.push(Lir::Mov(Register::Temp(prev_reg), Register::Temp(new.clone())));
         new.reg.unwrap()
     }
     // gets the corresponding scratch-register given the interval-id to a tempregister
@@ -314,9 +298,7 @@ impl RegisterAllocation {
                 if let Some(TempKind::Scratch(scratch)) = &expired_intervals.scratch {
                     if let Some(other_interval) = self.find_same_reg_pushed(key) {
                         // if there exists another interval where this reg is pushed, pop that instead of freeing physical
-                        result.push(Lir::Pop(Register::Temp(TempRegister::default(
-                            scratch.clone(),
-                        ))));
+                        result.push(Lir::Pop(Register::Temp(TempRegister::default(scratch.clone()))));
                         other_interval.scratch = expired_intervals.scratch.clone();
                     } else {
                         self.registers.free_reg(scratch.clone());
@@ -399,8 +381,7 @@ impl RegisterAllocation {
 
             // mark popped registers as used again
             self.registers.activate_reg(scratch.clone());
-            self.live_intervals.get_mut(key).unwrap().scratch =
-                Some(TempKind::Scratch(scratch.clone()));
+            self.live_intervals.get_mut(key).unwrap().scratch = Some(TempKind::Scratch(scratch.clone()));
         }
     }
     // backtrack trough result and update allocated stack-space
@@ -437,21 +418,13 @@ impl ScratchRegisters {
         }
     }
     fn activate_reg(&mut self, scratch: Box<dyn ScratchRegister>) {
-        if let Some(scratch) = self
-            .0
-            .iter_mut()
-            .find(|s| s.base_name() == scratch.base_name())
-        {
+        if let Some(scratch) = self.0.iter_mut().find(|s| s.base_name() == scratch.base_name()) {
             scratch.in_use()
         }
     }
 
     fn free_reg(&mut self, scratch: Box<dyn ScratchRegister>) {
-        if let Some(scratch) = self
-            .0
-            .iter_mut()
-            .find(|s| s.base_name() == scratch.base_name())
-        {
+        if let Some(scratch) = self.0.iter_mut().find(|s| s.base_name() == scratch.base_name()) {
             scratch.free()
         }
     }
@@ -476,10 +449,7 @@ mod tests {
     use crate::compiler::typechecker::mir::expr::ValueKind;
     use std::mem;
 
-    fn setup(
-        intervals: HashMap<usize, IntervalEntry>,
-        occupied_regs: Vec<usize>,
-    ) -> RegisterAllocation {
+    fn setup(intervals: HashMap<usize, IntervalEntry>, occupied_regs: Vec<usize>) -> RegisterAllocation {
         let mut reg_alloc = RegisterAllocation::new(intervals);
 
         for i in occupied_regs {
@@ -516,11 +486,7 @@ mod tests {
             .map(|(k, (_, v))| (k, v.clone()))
             .collect();
 
-        let regs: Vec<Register> = temps
-            .iter()
-            .enumerate()
-            .map(|(k, (_, v))| v.as_reg(k))
-            .collect();
+        let regs: Vec<Register> = temps.iter().enumerate().map(|(k, (_, v))| v.as_reg(k)).collect();
 
         let filled_regs = regs
             .clone()
@@ -650,8 +616,7 @@ mod tests {
         ];
 
         // Reg0 is spilled because is Lir::Or there are no regs left.
-        let spilled_reg =
-            Register::Stack(StackRegister::new(&mut 0, Type::Primitive(Primitive::Int)));
+        let spilled_reg = Register::Stack(StackRegister::new(&mut 0, Type::Primitive(Primitive::Int)));
 
         // When it is unspilled again because it is needed in instruction 6, %r10 is not available
         // because when Reg4 was freed %r10 was marked as available again and was assigned to Reg6.
@@ -734,14 +699,10 @@ mod tests {
         ];
 
         let mut bp = 0;
-        let spilled_reg1 =
-            Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
-        let spilled_reg2 =
-            Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
-        let spilled_reg3 =
-            Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
-        let spilled_reg4 =
-            Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
+        let spilled_reg1 = Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
+        let spilled_reg2 = Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
+        let spilled_reg3 = Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
+        let spilled_reg4 = Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
 
         let unspilled_reg_1 = if let Register::Temp(filled) = filled_regs[10].clone() {
             Register::Temp(TempRegister {

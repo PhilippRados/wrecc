@@ -46,11 +46,7 @@ impl PrintIndent for Stmt {
                 "If:\n{}\n{}\n{}",
                 indent_fmt(cond, indent_level + 1),
                 indent_fmt(then.as_ref(), indent_level + 1),
-                display_option(
-                    else_branch.as_ref().map(|t| t.as_ref()),
-                    indent_level + 1,
-                    false
-                )
+                display_option(else_branch.as_ref().map(|t| t.as_ref()), indent_level + 1, false)
             ),
             Stmt::While(_, cond, body) => format!(
                 "While:\n{}\n{}",
@@ -107,11 +103,7 @@ impl std::fmt::Display for Stmt {
     }
 }
 
-fn display_option<T: PrintIndent>(
-    object: Option<&T>,
-    indent_level: usize,
-    newline: bool,
-) -> String {
+fn display_option<T: PrintIndent>(object: Option<&T>, indent_level: usize, newline: bool) -> String {
     if let Some(object) = object {
         indent_fmt(object, indent_level) + if newline { "\n" } else { "" }
     } else {

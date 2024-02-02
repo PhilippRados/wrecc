@@ -144,9 +144,8 @@ impl Display for Type {
             for (i, modifier) in modifiers.iter().enumerate() {
                 match modifier {
                     Type::Array { amount, .. } => {
-                        let closing_precedence =
-                            matches!(modifiers.get(i + 1), Some(Type::Pointer(_)))
-                                && suffix_exists(&modifiers, i + 1);
+                        let closing_precedence = matches!(modifiers.get(i + 1), Some(Type::Pointer(_)))
+                            && suffix_exists(&modifiers, i + 1);
 
                         suffixes.push(format!(
                             "[{}]{}",
@@ -264,9 +263,7 @@ impl Type {
                             .members()
                             .iter()
                             .zip(s_r.members().iter())
-                            .filter(|(l, r)| {
-                                l.0 == r.0 && l.1.unwrap_string() == r.1.unwrap_string()
-                            })
+                            .filter(|(l, r)| l.0 == r.0 && l.1.unwrap_string() == r.1.unwrap_string())
                             .count();
                         *name_l == *name_r
                             && matching_members == s_l.members().len()
@@ -358,9 +355,10 @@ impl Type {
     pub fn element_amount(&self) -> usize {
         match self {
             Type::Array { amount, of } => amount * of.element_amount(),
-            Type::Struct(s) => s.members().iter().fold(0, |acc, (member_type, _)| {
-                acc + member_type.element_amount()
-            }),
+            Type::Struct(s) => s
+                .members()
+                .iter()
+                .fold(0, |acc, (member_type, _)| acc + member_type.element_amount()),
             Type::Union(s) => {
                 if let Some((member_type, _)) = s.members().first() {
                     member_type.element_amount()
@@ -466,14 +464,6 @@ impl TypeInfo for Primitive {
     }
 }
 impl Primitive {
-    pub fn into_vec() -> Vec<TokenKind> {
-        vec![
-            TokenKind::Char,
-            TokenKind::Int,
-            TokenKind::Void,
-            TokenKind::Long,
-        ]
-    }
     fn fmt(&self) -> &str {
         match self {
             Primitive::Void => "void",
@@ -556,7 +546,7 @@ impl StructInfo {
 
 mod struct_ref {
     use super::Token;
-    use super::TokenType;
+    use super::TokenKind;
     use super::Type;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -572,11 +562,11 @@ mod struct_ref {
     #[derive(Clone, PartialEq, Debug)]
     pub struct StructRef {
         index: usize,
-        kind: TokenType,
+        kind: TokenKind,
     }
 
     impl StructRef {
-        pub fn new(kind: TokenType, is_definition: bool) -> StructRef {
+        pub fn new(kind: TokenKind, is_definition: bool) -> StructRef {
             CUSTOMS_INFO.with(|list| {
                 list.borrow_mut().push((false, is_definition));
             });
@@ -588,7 +578,7 @@ mod struct_ref {
                 StructRef { index, kind }
             })
         }
-        pub fn get_kind(&self) -> &TokenType {
+        pub fn get_kind(&self) -> &TokenKind {
             &self.kind
         }
 

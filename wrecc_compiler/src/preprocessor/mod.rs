@@ -95,12 +95,9 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
-    fn paste_header(
-        &mut self,
-        (file_path, data): (PathBuf, String),
-    ) -> Result<Vec<PPToken>, Error> {
-        let (data, defines) = preprocess_included(&file_path, data, self.defines.clone())
-            .map_err(Error::new_multiple)?;
+    fn paste_header(&mut self, (file_path, data): (PathBuf, String)) -> Result<Vec<PPToken>, Error> {
+        let (data, defines) =
+            preprocess_included(&file_path, data, self.defines.clone()).map_err(Error::new_multiple)?;
 
         self.defines.extend(defines);
 
@@ -219,10 +216,7 @@ impl<'a> Preprocessor<'a> {
         replace_list
             .into_iter()
             .flat_map(|token| {
-                match (
-                    token.kind.to_string(),
-                    self.defines.get(&token.kind.to_string()),
-                ) {
+                match (token.kind.to_string(), self.defines.get(&token.kind.to_string())) {
                     (token_name, Some(replacement))
                         if token_name != macro_name.kind.as_ident().unwrap() =>
                     {
@@ -364,11 +358,7 @@ impl<'a> Preprocessor<'a> {
         let cond = self.fold_until_token(TokenKind::Newline);
         let cond = self.replace_define_expr(cond)?;
 
-        if cond.is_empty()
-            || cond
-                .iter()
-                .all(|t| matches!(t.kind, TokenKind::Whitespace(_)))
-        {
+        if cond.is_empty() || cond.iter().all(|t| matches!(t.kind, TokenKind::Whitespace(_))) {
             return Err(Error::new(
                 &PPToken::from(&if_kind, self.filename),
                 ErrorKind::MissingExpression(if_kind.kind.to_string()),
@@ -386,9 +376,7 @@ impl<'a> Preprocessor<'a> {
             .into_iter()
             .map(|t| PPToken::from(&t, self.filename))
             .collect();
-        let tokens = Scanner::new(cond)
-            .scan_token()
-            .map_err(Error::new_multiple)?;
+        let tokens = Scanner::new(cond).scan_token().map_err(Error::new_multiple)?;
         let mut parser = Parser::new(tokens);
         let mut expr = parser.expression().map_err(|mut err| {
             if let ErrorKind::Eof(msg) = err.kind {
@@ -418,12 +406,11 @@ impl<'a> Preprocessor<'a> {
                 TokenKind::Defined => {
                     skip_whitespace(&mut cond);
 
-                    let open_paren =
-                        if let Ok(TokenKind::Other('(')) = cond.peek("").map(|t| &t.kind) {
-                            cond.next()
-                        } else {
-                            None
-                        };
+                    let open_paren = if let Ok(TokenKind::Other('(')) = cond.peek("").map(|t| &t.kind) {
+                        cond.next()
+                    } else {
+                        None
+                    };
 
                     skip_whitespace(&mut cond);
                     if let Some(token) = cond.next() {
@@ -460,9 +447,7 @@ impl<'a> Preprocessor<'a> {
                             _ => {
                                 return Err(Error::new(
                                     &PPToken::from(&token, self.filename),
-                                    ErrorKind::Regular(
-                                        "Expect identifier after 'defined'-operator",
-                                    ),
+                                    ErrorKind::Regular("Expect identifier after 'defined'-operator"),
                                 ))
                             }
                         }
@@ -848,11 +833,8 @@ mod tests {
 
     #[test]
     fn macro_replacements() {
-        let actual = setup_macro_replacement(HashMap::from([
-            ("num", "3"),
-            ("foo", "num"),
-            ("bar", "foo"),
-        ]));
+        let actual =
+            setup_macro_replacement(HashMap::from([("num", "3"), ("foo", "num"), ("bar", "foo")]));
         let expected = HashMap::from([
             (String::from("num"), String::from("3")),
             (String::from("foo"), String::from("3")),

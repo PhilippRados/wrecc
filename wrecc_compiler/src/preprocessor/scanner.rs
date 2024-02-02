@@ -265,12 +265,7 @@ impl Scanner {
         }
         (newlines, column)
     }
-    fn add_token(
-        &mut self,
-        result: &mut Vec<Token>,
-        kind: TokenKind,
-        location: Option<(i32, i32)>,
-    ) {
+    fn add_token(&mut self, result: &mut Vec<Token>, kind: TokenKind, location: Option<(i32, i32)>) {
         let token = Token {
             column: self.column,
             line: self.line,

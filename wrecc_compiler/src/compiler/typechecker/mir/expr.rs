@@ -1,14 +1,14 @@
-use crate::compiler::common::{token::TokenType, types::*};
+use crate::compiler::common::{token::TokenKind, types::*};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExprKind {
-    Binary { left: Box<Expr>, operator: TokenType, right: Box<Expr> },
-    Unary { operator: TokenType, right: Box<Expr> },
+    Binary { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
+    Unary { operator: TokenKind, right: Box<Expr> },
     Grouping { expr: Box<Expr> },
     Assign { l_expr: Box<Expr>, r_expr: Box<Expr> },
     CompoundAssign { expr: Box<Expr>, tmp_symbol: VarSymbol },
-    Logical { left: Box<Expr>, operator: TokenType, right: Box<Expr> },
-    Comparison { left: Box<Expr>, operator: TokenType, right: Box<Expr> },
+    Logical { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
+    Comparison { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
     Call { name: String, args: Vec<Expr> },
     Cast { new_type: Type, direction: CastDirection, expr: Box<Expr> },
     ScaleUp { by: usize, expr: Box<Expr> },
@@ -49,7 +49,7 @@ impl Expr {
                 type_decl: of.pointer_to(),
 
                 kind: ExprKind::Unary {
-                    operator: TokenType::Amp,
+                    operator: TokenKind::Amp,
                     right: Box::new(self),
                 },
             }
@@ -97,23 +97,21 @@ impl Expr {
     }
     fn is_address_constant(&self, is_outer: bool) -> bool {
         match &self.kind {
-            ExprKind::Unary { operator, right } if matches!(operator, TokenType::Amp) => {
+            ExprKind::Unary { operator, right } if matches!(operator, TokenKind::Amp) => {
                 matches!(right.kind, ExprKind::Ident(_) | ExprKind::String(_))
                     || right.is_address_constant(false)
             }
             ExprKind::Unary { operator, right, .. }
-                if matches!(operator, TokenType::Star) && !is_outer =>
+                if matches!(operator, TokenKind::Star) && !is_outer =>
             {
                 right.is_address_constant(is_outer)
             }
             ExprKind::MemberAccess { .. } if !is_outer => true,
             ExprKind::Binary { left, operator, right }
-                if matches!(operator, TokenType::Plus | TokenType::Minus) =>
+                if matches!(operator, TokenKind::Plus | TokenKind::Minus) =>
             {
                 match (&left, &right) {
-                    (expr, n) | (n, expr) if n.is_const_literal() => {
-                        expr.is_address_constant(is_outer)
-                    }
+                    (expr, n) | (n, expr) if n.is_const_literal() => expr.is_address_constant(is_outer),
                     _ => false,
                 }
             }

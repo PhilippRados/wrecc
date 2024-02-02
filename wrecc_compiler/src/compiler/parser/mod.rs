@@ -8,6 +8,45 @@ use crate::compiler::parser::hir::{decl::*, expr::*, stmt::*};
 
 use std::collections::VecDeque;
 
+// helper macros that allow comparing enums without specifying their fields: TokenKind::Ident(_)
+macro_rules! match_next {
+    ($parser:expr, $expected:pat) => {{
+        let matched = match $parser.tokens.peek("") {
+            Ok(token) => matches!(token.kind, $expected),
+            Err(_) => false,
+        };
+        if matched {
+            $parser.tokens.next()
+        } else {
+            None
+        }
+    }};
+}
+macro_rules! consume {
+    ($parser:expr,$expected:pat,$msg:expr) => {
+        match $parser.tokens.peek("") {
+            Ok(token) => {
+                if matches!(token.kind, $expected) {
+                    Ok($parser.tokens.next().unwrap())
+                } else {
+                    Err(Error::new(token, ErrorKind::Regular($msg)))
+                }
+            }
+            Err((Some(token), _)) => Err(Error::new(&token, ErrorKind::Eof($msg))),
+            Err(_) => Err(Error::eof($msg)),
+        }
+    };
+}
+macro_rules! check {
+    ($parser:expr,$expected:pat) => {
+        if let Ok(token) = $parser.tokens.peek("") {
+            matches!(token.kind, $expected)
+        } else {
+            false
+        }
+    };
+}
+
 pub struct Parser {
     tokens: DoublePeek<Token>,
 
@@ -36,7 +75,7 @@ impl Parser {
                 }
                 Err(e) => {
                     errors.push(e);
-                    self.sync(TokenType::Semicolon);
+                    self.sync(TokenKind::Semicolon);
                 }
             }
         }
@@ -55,7 +94,7 @@ impl Parser {
         &mut self,
         result: Result<(), Error>,
         errors: &mut Vec<Error>,
-        until: TokenType,
+        until: TokenKind,
     ) -> bool {
         if let Err(err) = result {
             // if multiple errors then parser has already been synchronized
@@ -68,16 +107,16 @@ impl Parser {
         false
     }
     // skips tokens until the next synchronizing token is reached
-    fn sync(&mut self, until: TokenType) {
+    fn sync(&mut self, until: TokenKind) {
         let mut open_braces = 0;
 
         while let Some(token) = self.tokens.next() {
-            match token.token {
+            match token.kind {
                 tok if tok == until && open_braces <= 0 => {
                     break;
                 }
-                TokenType::LeftBrace => open_braces += 1,
-                TokenType::RightBrace => {
+                TokenKind::LeftBrace => open_braces += 1,
+                TokenKind::RightBrace => {
                     if open_braces <= 1 {
                         break;
                     }
@@ -93,23 +132,26 @@ impl Parser {
     pub fn external_declaration(&mut self) -> Result<ExternalDeclaration, Error> {
         let (specifiers, is_typedef) = self.declaration_specifiers(true)?;
 
-        if self.matches(&[TokenKind::Semicolon]).is_some() {
+        if match_next!(self, TokenKind::Semicolon).is_some() {
             return Ok(ExternalDeclaration::Declaration(Declaration {
                 specifiers,
                 is_typedef,
                 declarators: Vec::new(),
             }));
         }
+        // if self.matches(&[TokenKind::Semicolon]).is_some() {
+        //     return Ok(ExternalDeclaration::Declaration(Declaration {
+        //         specifiers,
+        //         is_typedef,
+        //         declarators: Vec::new(),
+        //     }));
+        // }
 
         let declarator = self.declarator(DeclaratorKind::NoAbstract)?;
 
-        if matches!(
-            declarator.modifiers.last(),
-            Some(DeclModifier::Function { .. })
-        ) && matches!(
-            self.tokens.peek(""),
-            Ok(Token { token: TokenType::LeftBrace, .. })
-        ) {
+        if matches!(declarator.modifiers.last(), Some(DeclModifier::Function { .. }))
+            && matches!(self.tokens.peek(""), Ok(Token { kind: TokenKind::LeftBrace, .. }))
+        {
             return self.function_definition(specifiers, is_typedef, declarator);
         }
 
@@ -133,7 +175,7 @@ impl Parser {
 
         while let Ok(token) = self.tokens.peek("") {
             if self.is_type(token) {
-                if matches!(token.token, TokenType::Ident(..)) && !specifiers.is_empty() {
+                if matches!(token.kind, TokenKind::Ident(..)) && !specifiers.is_empty() {
                     break;
                 }
 
@@ -141,7 +183,7 @@ impl Parser {
                     token: token.clone(),
                     kind: self.type_specifier()?,
                 });
-            } else if let Some(token) = self.matches(&[TokenKind::TypeDef]) {
+            } else if let Some(token) = match_next!(self, TokenKind::TypeDef) {
                 if !allow_storage_classes {
                     return Err(Error::new(
                         &token,
@@ -173,7 +215,7 @@ impl Parser {
     }
 
     fn pointers(&mut self, modifiers: &mut Vec<DeclModifier>) {
-        while self.matches(&[TokenKind::Star]).is_some() {
+        while match_next!(self, TokenKind::Star).is_some() {
             modifiers.push(DeclModifier::Pointer)
         }
     }
@@ -184,21 +226,23 @@ impl Parser {
         &mut self,
         kind: DeclaratorKind,
     ) -> Result<(Option<Token>, Option<Vec<DeclModifier>>), Error> {
-        if self.matches(&[TokenKind::LeftParen]).is_some() {
+        if match_next!(self, TokenKind::LeftParen).is_some() {
             let declarator = self.declarator(kind)?;
-            self.consume(
+            consume!(
+                self,
                 TokenKind::RightParen,
-                "Expected closing ')' after declarator",
+                "Expected closing ')' after declarator"
             )?;
             return Ok((declarator.name, Some(declarator.modifiers)));
         }
 
         let name = match kind {
-            DeclaratorKind::NoAbstract => Some(self.consume(
-                TokenKind::Ident,
-                "Expected identifier following type-specifier",
+            DeclaratorKind::NoAbstract => Some(consume!(
+                self,
+                TokenKind::Ident(_),
+                "Expected identifier following type-specifier"
             )?),
-            DeclaratorKind::MaybeAbstract => self.matches(&[TokenKind::Ident]),
+            DeclaratorKind::MaybeAbstract => match_next!(self, TokenKind::Ident(_)),
             DeclaratorKind::Abstract => None,
         };
 
@@ -210,8 +254,8 @@ impl Parser {
     fn type_suffix(&mut self, modifiers: &mut Vec<DeclModifier>) -> Result<(), Error> {
         let mut suffixes = Vec::new();
 
-        while let Some(token) = self.matches(&[TokenKind::LeftParen, TokenKind::LeftBracket]) {
-            suffixes.push(if let TokenType::LeftParen = token.token {
+        while let Some(token) = match_next!(self, TokenKind::LeftParen | TokenKind::LeftBracket) {
+            suffixes.push(if let TokenKind::LeftParen = token.kind {
                 self.parameter_type_list(token)?
             } else {
                 self.parse_arr(token)?
@@ -227,9 +271,10 @@ impl Parser {
     fn parse_arr(&mut self, token: Token) -> Result<DeclModifier, Error> {
         let size = self.assignment()?;
 
-        self.consume(
+        consume!(
+            self,
             TokenKind::RightBracket,
-            "Expect closing ']' after array initialization",
+            "Expect closing ']' after array initialization"
         )?;
         Ok(DeclModifier::Array(token, size))
     }
@@ -243,11 +288,11 @@ impl Parser {
         let mut params = Vec::new();
         let mut variadic = false;
 
-        if self.matches(&[TokenKind::RightParen]).is_some() {
+        if match_next!(self, TokenKind::RightParen).is_some() {
             return Ok(DeclModifier::Function { token, params, variadic });
         }
         loop {
-            match (self.matches(&[TokenKind::Ellipsis]), params.len()) {
+            match (match_next!(self, TokenKind::Ellipsis), params.len()) {
                 (Some(t), 0) => return Err(Error::new(&t, ErrorKind::InvalidVariadic)),
                 (Some(_), _) => {
                     variadic = true;
@@ -258,13 +303,14 @@ impl Parser {
 
             params.push(self.parameter_declaration()?);
 
-            if self.matches(&[TokenKind::Comma]).is_none() {
+            if match_next!(self, TokenKind::Comma).is_none() {
                 break;
             }
         }
-        self.consume(
+        consume!(
+            self,
             TokenKind::RightParen,
-            "Expect ')' after function parameters",
+            "Expect ')' after function parameters"
         )?;
 
         Ok(DeclModifier::Function { token, params, variadic })
@@ -328,13 +374,13 @@ impl Parser {
 
         declarators.push((declarator, init));
 
-        while self.matches(&[TokenKind::Comma]).is_some() {
+        while match_next!(self, TokenKind::Comma).is_some() {
             let declarator = self.declarator(DeclaratorKind::NoAbstract)?;
             let init = self.init_declarator(is_typedef, &declarator)?;
 
             declarators.push((declarator, init));
         }
-        self.consume(TokenKind::Semicolon, "Expect ';' after declaration")?;
+        consume!(self, TokenKind::Semicolon, "Expect ';' after declaration")?;
 
         Ok(ExternalDeclaration::Declaration(Declaration {
             specifiers,
@@ -353,7 +399,7 @@ impl Parser {
             self.typedefs.declare(name.unwrap_string(), ());
         }
 
-        let init = if self.matches(&[TokenKind::Equal]).is_some() {
+        let init = if match_next!(self, TokenKind::Equal).is_some() {
             Some(self.initializers(&name, None)?)
         } else {
             None
@@ -366,7 +412,7 @@ impl Parser {
         token: &Token,
         designator: Option<VecDeque<Designator>>,
     ) -> Result<Init, Error> {
-        if self.matches(&[TokenKind::LeftBrace]).is_some() {
+        if match_next!(self, TokenKind::LeftBrace).is_some() {
             let init_list = self.initializer_list(token, designator)?;
 
             Ok(init_list)
@@ -389,11 +435,11 @@ impl Parser {
         let mut init_list = Vec::new();
         let mut errors = Vec::new();
 
-        while !self.check(TokenKind::RightBrace) {
+        while !check!(self, TokenKind::RightBrace) {
             let result = || -> Result<(), Error> {
                 let designator = self.parse_designator()?;
                 if designator.is_some() {
-                    self.consume(TokenKind::Equal, "Expect '=' after array designator")?;
+                    consume!(self, TokenKind::Equal, "Expect '=' after array designator")?;
                 }
 
                 let token = self.tokens.peek("Expected expression")?.clone();
@@ -401,25 +447,27 @@ impl Parser {
 
                 init_list.push(Box::new(init));
 
-                if !self.check(TokenKind::RightBrace) {
-                    self.consume(
+                if !check!(self, TokenKind::RightBrace) {
+                    consume!(
+                        self,
                         TokenKind::Comma,
-                        "Expect ',' seperating expressions in initializer-list",
+                        "Expect ',' seperating expressions in initializer-list"
                     )?;
                 }
 
                 Ok(())
             }();
 
-            if self.maybe_sync(result, &mut errors, TokenType::RightBrace) {
+            if self.maybe_sync(result, &mut errors, TokenKind::RightBrace) {
                 break;
             }
         }
 
         if errors.is_empty() {
-            self.consume(
+            consume!(
+                self,
                 TokenKind::RightBrace,
-                "Expected closing '}' after initializer-list",
+                "Expected closing '}' after initializer-list"
             )?;
 
             Ok(Init {
@@ -435,9 +483,9 @@ impl Parser {
     fn parse_designator(&mut self) -> Result<Option<VecDeque<Designator>>, Error> {
         let mut result = VecDeque::new();
 
-        while let Some(token) = self.matches(&[TokenKind::Dot, TokenKind::LeftBracket]) {
-            if let TokenType::Dot = token.token {
-                if let Some(ident) = self.matches(&[TokenKind::Ident]) {
+        while let Some(token) = match_next!(self, TokenKind::Dot | TokenKind::LeftBracket) {
+            if let TokenKind::Dot = token.kind {
+                if let Some(ident) = match_next!(self, TokenKind::Ident(_)) {
                     result.push_back(Designator {
                         token: ident.clone(),
                         kind: DesignatorKind::Member(ident.unwrap_string()),
@@ -451,9 +499,10 @@ impl Parser {
             } else {
                 let designator_expr = self.assignment()?;
 
-                self.consume(
+                consume!(
+                    self,
                     TokenKind::RightBracket,
-                    "Expect closing ']' after array designator",
+                    "Expect closing ']' after array designator"
                 )?;
 
                 result.push_back(Designator {
@@ -476,41 +525,42 @@ impl Parser {
         let mut constants = Vec::new();
         let mut errors = Vec::new();
 
-        if self.check(TokenKind::RightBrace) {
-            return Err(Error::new(token, ErrorKind::IsEmpty(token.token.clone())));
+        if check!(self, TokenKind::RightBrace) {
+            return Err(Error::new(token, ErrorKind::IsEmpty(token.kind.clone())));
         }
 
         while let Ok(token) = self.tokens.peek("") {
-            if let TokenType::RightBrace = token.token {
+            if let TokenKind::RightBrace = token.kind {
                 break;
             }
             let result = || -> Result<(), Error> {
-                let ident =
-                    self.consume(TokenKind::Ident, "Expect identifier in enum definition")?;
-                let init = if self.matches(&[TokenKind::Equal]).is_some() {
+                let ident = consume!(self, TokenKind::Ident(_), "Expect identifier in enum definition")?;
+                let init = if match_next!(self, TokenKind::Equal).is_some() {
                     Some(self.ternary_conditional()?)
                 } else {
                     None
                 };
                 constants.push((ident.clone(), init));
 
-                if !self.check(TokenKind::RightBrace) {
-                    self.consume(
+                if !check!(self, TokenKind::RightBrace) {
+                    consume!(
+                        self,
                         TokenKind::Comma,
-                        "Expect ',' seperating expressions in enum-specifier",
+                        "Expect ',' seperating expressions in enum-specifier"
                     )?;
                 }
                 Ok(())
             }();
 
-            if self.maybe_sync(result, &mut errors, TokenType::RightBrace) {
+            if self.maybe_sync(result, &mut errors, TokenKind::RightBrace) {
                 break;
             }
         }
 
-        if let Err(e) = self.consume(
+        if let Err(e) = consume!(
+            self,
             TokenKind::RightBrace,
-            "Expected closing '}' after enum definition",
+            "Expected closing '}' after enum definition"
         ) {
             errors.push(e);
         }
@@ -530,7 +580,7 @@ impl Parser {
         let mut errors = Vec::new();
 
         while let Ok(token) = self.tokens.peek("") {
-            if let TokenType::RightBrace = token.token {
+            if let TokenKind::RightBrace = token.kind {
                 break;
             }
             let result = || -> Result<(), Error> {
@@ -539,20 +589,17 @@ impl Parser {
 
                 loop {
                     // allows `int;` but not `int *;`
-                    if let TokenType::Semicolon =
-                        self.tokens.peek("Expected member-declarator")?.token
-                    {
+                    if let TokenKind::Semicolon = self.tokens.peek("Expected member-declarator")?.kind {
                         break;
                     }
 
-                    let Declarator { name, modifiers } =
-                        self.declarator(DeclaratorKind::NoAbstract)?;
+                    let Declarator { name, modifiers } = self.declarator(DeclaratorKind::NoAbstract)?;
                     declarators.push(MemberDeclarator {
                         name: name.expect("member cannot be abstract declarator"),
                         modifiers,
                     });
 
-                    if self.matches(&[TokenKind::Comma]).is_none() {
+                    if match_next!(self, TokenKind::Comma).is_none() {
                         break;
                     }
                 }
@@ -560,23 +607,24 @@ impl Parser {
 
                 // dont return Error directly because then then can't sync properly
                 if let Err(e) =
-                    self.consume(TokenKind::Semicolon, "Expect ';' after member declaration")
+                    consume!(self, TokenKind::Semicolon, "Expect ';' after member declaration")
                 {
                     errors.push(e);
                 }
                 Ok(())
             }();
 
-            self.maybe_sync(result, &mut errors, TokenType::Semicolon);
+            self.maybe_sync(result, &mut errors, TokenKind::Semicolon);
         }
 
         if members.iter().all(|(_, decl)| decl.is_empty()) {
-            errors.push(Error::new(token, ErrorKind::IsEmpty(token.token.clone())))
+            errors.push(Error::new(token, ErrorKind::IsEmpty(token.kind.clone())))
         }
 
-        if let Err(e) = self.consume(
+        if let Err(e) = consume!(
+            self,
             TokenKind::RightBrace,
-            "Expected closing '}' after struct declaration",
+            "Expected closing '}' after struct declaration"
         ) {
             errors.push(e);
         }
@@ -591,17 +639,17 @@ impl Parser {
     //                               | <struct-or-union> { {<parse-members>}+ }
     //                               | <struct-or-union> <identifier>
     fn struct_or_union_specifier(&mut self, token: &Token) -> Result<SpecifierKind, Error> {
-        let name = self.matches(&[TokenKind::Ident]);
+        let name = match_next!(self, TokenKind::Ident(_));
 
-        let members = if self.matches(&[TokenKind::LeftBrace]).is_some() {
+        let members = if match_next!(self, TokenKind::LeftBrace).is_some() {
             Some(self.struct_declaration(token)?)
         } else {
             None
         };
 
-        Ok(match token.token {
-            TokenType::Struct => SpecifierKind::Struct(name, members),
-            TokenType::Union => SpecifierKind::Union(name, members),
+        Ok(match token.kind {
+            TokenKind::Struct => SpecifierKind::Struct(name, members),
+            TokenKind::Union => SpecifierKind::Union(name, members),
             _ => unreachable!("not struct/union specifier"),
         })
     }
@@ -610,9 +658,9 @@ impl Parser {
     //                    | enum { <enumerator-list> }
     //                    | enum <identifier>
     fn enum_specifier(&mut self, token: &Token) -> Result<SpecifierKind, Error> {
-        let name = self.matches(&[TokenKind::Ident]);
+        let name = match_next!(self, TokenKind::Ident(_));
 
-        let members = if self.matches(&[TokenKind::LeftBrace]).is_some() {
+        let members = if match_next!(self, TokenKind::LeftBrace).is_some() {
             Some(self.enumerator_list(token)?)
         } else {
             None
@@ -622,40 +670,41 @@ impl Parser {
     }
 
     fn statement(&mut self) -> Result<Stmt, Error> {
-        if let Some(token) = self.matches(&[
-            TokenKind::For,
-            TokenKind::Return,
-            TokenKind::If,
-            TokenKind::While,
-            TokenKind::Break,
-            TokenKind::Continue,
-            TokenKind::LeftBrace,
-            TokenKind::Do,
-            TokenKind::Switch,
-            TokenKind::Case,
-            TokenKind::Default,
-            TokenKind::Semicolon,
-            TokenKind::Goto,
-        ]) {
-            return match token.token {
-                TokenType::For => self.for_statement(),
-                TokenType::Return => self.return_statement(token),
-                TokenType::If => self.if_statement(token),
-                TokenType::While => self.while_statement(),
-                TokenType::Do => self.do_statement(token),
-                TokenType::Break => self.break_statement(token),
-                TokenType::Continue => self.continue_statement(token),
-                TokenType::LeftBrace => Ok(Stmt::Block(self.block()?)),
-                TokenType::Switch => self.switch_statement(token),
-                TokenType::Case => self.case_statement(token),
-                TokenType::Default => self.default_statement(token),
-                TokenType::Goto => self.goto_statement(),
-                TokenType::Semicolon => Ok(Stmt::Expr(ExprKind::Nop)),
+        if let Some(token) = match_next!(
+            self,
+            TokenKind::For
+                | TokenKind::Return
+                | TokenKind::If
+                | TokenKind::While
+                | TokenKind::Break
+                | TokenKind::Continue
+                | TokenKind::LeftBrace
+                | TokenKind::Do
+                | TokenKind::Switch
+                | TokenKind::Case
+                | TokenKind::Default
+                | TokenKind::Semicolon
+                | TokenKind::Goto
+        ) {
+            return match token.kind {
+                TokenKind::For => self.for_statement(),
+                TokenKind::Return => self.return_statement(token),
+                TokenKind::If => self.if_statement(token),
+                TokenKind::While => self.while_statement(),
+                TokenKind::Do => self.do_statement(token),
+                TokenKind::Break => self.break_statement(token),
+                TokenKind::Continue => self.continue_statement(token),
+                TokenKind::LeftBrace => Ok(Stmt::Block(self.block()?)),
+                TokenKind::Switch => self.switch_statement(token),
+                TokenKind::Case => self.case_statement(token),
+                TokenKind::Default => self.default_statement(token),
+                TokenKind::Goto => self.goto_statement(),
+                TokenKind::Semicolon => Ok(Stmt::Expr(ExprKind::Nop)),
                 _ => unreachable!(),
             };
         }
-        if let TokenType::Ident(..) = self.tokens.peek("Expected expression")?.token {
-            if let TokenType::Colon = self.tokens.double_peek("Expected expression")?.token {
+        if let TokenKind::Ident(..) = self.tokens.peek("Expected expression")?.kind {
+            if let TokenKind::Colon = self.tokens.double_peek("Expected expression")?.kind {
                 let ident = self.tokens.next().expect("value is peeked");
                 self.tokens.next();
 
@@ -665,8 +714,8 @@ impl Parser {
         self.expression_statement()
     }
     fn goto_statement(&mut self) -> Result<Stmt, Error> {
-        let ident = self.consume(TokenKind::Ident, "Expect identifier following 'goto'")?;
-        self.consume(TokenKind::Semicolon, "Expect ';' after goto-statement")?;
+        let ident = consume!(self, TokenKind::Ident(_), "Expect identifier following 'goto'")?;
+        consume!(self, TokenKind::Semicolon, "Expect ';' after goto-statement")?;
 
         Ok(Stmt::Goto(ident))
     }
@@ -676,10 +725,10 @@ impl Parser {
         Ok(Stmt::Label(token, Box::new(body)))
     }
     fn switch_statement(&mut self, token: Token) -> Result<Stmt, Error> {
-        self.consume(TokenKind::LeftParen, "Expect '(' after switch keyword")?;
+        consume!(self, TokenKind::LeftParen, "Expect '(' after switch keyword")?;
         let cond = self.expression()?;
 
-        self.consume(TokenKind::RightParen, "Expect ')' after switch condition")?;
+        consume!(self, TokenKind::RightParen, "Expect ')' after switch condition")?;
 
         let body = self.statement()?;
 
@@ -688,14 +737,14 @@ impl Parser {
     fn case_statement(&mut self, token: Token) -> Result<Stmt, Error> {
         let value = self.assignment()?;
 
-        self.consume(TokenKind::Colon, "Expect ':' following case-statement")?;
+        consume!(self, TokenKind::Colon, "Expect ':' following case-statement")?;
 
         let body = self.statement()?;
 
         Ok(Stmt::Case(token, value, Box::new(body)))
     }
     fn default_statement(&mut self, token: Token) -> Result<Stmt, Error> {
-        self.consume(TokenKind::Colon, "Expect ':' following default-statement")?;
+        consume!(self, TokenKind::Colon, "Expect ':' following default-statement")?;
 
         let body = self.statement()?;
 
@@ -704,38 +753,39 @@ impl Parser {
     fn do_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
         let body = self.statement()?;
 
-        self.consume(TokenKind::While, "Expect 'while' after do/while loop-body")?;
-        self.consume(TokenKind::LeftParen, "Expect '(' after while keyword")?;
+        consume!(self, TokenKind::While, "Expect 'while' after do/while loop-body")?;
+        consume!(self, TokenKind::LeftParen, "Expect '(' after while keyword")?;
 
         let cond = self.expression()?;
 
-        self.consume(
+        consume!(
+            self,
             TokenKind::RightParen,
-            "Expected closing ')' after do/while-condition",
+            "Expected closing ')' after do/while-condition"
         )?;
-        self.consume(TokenKind::Semicolon, "Expect ';' after do/while statement")?;
+        consume!(self, TokenKind::Semicolon, "Expect ';' after do/while statement")?;
 
         Ok(Stmt::Do(keyword, Box::new(body), cond))
     }
     fn break_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
-        self.consume(TokenKind::Semicolon, "Expect ';' after break statement")?;
+        consume!(self, TokenKind::Semicolon, "Expect ';' after break statement")?;
         Ok(Stmt::Break(keyword))
     }
     fn continue_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
-        self.consume(TokenKind::Semicolon, "Expect ';' after continue statement")?;
+        consume!(self, TokenKind::Semicolon, "Expect ';' after continue statement")?;
         Ok(Stmt::Continue(keyword))
     }
     fn return_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
-        let value = match self.check(TokenKind::Semicolon) {
+        let value = match check!(self, TokenKind::Semicolon) {
             false => Some(self.expression()?),
             true => None,
         };
 
-        self.consume(TokenKind::Semicolon, "Expect ';' after return statement")?;
+        consume!(self, TokenKind::Semicolon, "Expect ';' after return statement")?;
         Ok(Stmt::Return(keyword, value))
     }
     fn for_statement(&mut self) -> Result<Stmt, Error> {
-        let left_paren = self.consume(TokenKind::LeftParen, "Expect '(' after for-statement")?;
+        let left_paren = consume!(self, TokenKind::LeftParen, "Expect '(' after for-statement")?;
 
         self.typedefs.enter();
 
@@ -758,26 +808,26 @@ impl Parser {
                     ));
                 }
             }),
-            false if !self.check(TokenKind::Semicolon) => {
+            false if !check!(self, TokenKind::Semicolon) => {
                 Ok(Some(Box::new(self.expression_statement()?)))
             }
             false => {
-                self.consume(TokenKind::Semicolon, "Expect ';' in 'for'-statement")?;
+                consume!(self, TokenKind::Semicolon, "Expect ';' in 'for'-statement")?;
                 Ok(None)
             }
         }?;
 
-        let cond = match self.check(TokenKind::Semicolon) {
+        let cond = match check!(self, TokenKind::Semicolon) {
             false => Some(self.expression()?),
             true => None,
         };
-        self.consume(TokenKind::Semicolon, "Expect ';' after for condition")?;
+        consume!(self, TokenKind::Semicolon, "Expect ';' after for condition")?;
 
-        let inc = match self.check(TokenKind::RightParen) {
+        let inc = match check!(self, TokenKind::RightParen) {
             false => Some(self.expression()?),
             true => None,
         };
-        self.consume(TokenKind::RightParen, "Expect ')' after for increment")?;
+        consume!(self, TokenKind::RightParen, "Expect ')' after for increment")?;
 
         let body = Box::new(self.statement()?);
 
@@ -786,11 +836,12 @@ impl Parser {
         Ok(Stmt::For(left_paren, init, cond, inc, body))
     }
     fn while_statement(&mut self) -> Result<Stmt, Error> {
-        let left_paren = self.consume(TokenKind::LeftParen, "Expect '(' after while-statement")?;
+        let left_paren = consume!(self, TokenKind::LeftParen, "Expect '(' after while-statement")?;
         let cond = self.expression()?;
-        self.consume(
+        consume!(
+            self,
             TokenKind::RightParen,
-            "Expected closing ')' after while-condition",
+            "Expected closing ')' after while-condition"
         )?;
 
         let body = self.statement()?;
@@ -804,7 +855,7 @@ impl Parser {
         self.typedefs.enter();
 
         while let Ok(token) = self.tokens.peek("").map(|tok| tok.clone()) {
-            if token.token == TokenType::RightBrace {
+            if token.kind == TokenKind::RightBrace {
                 break;
             }
             let result = || -> Result<(), Error> {
@@ -823,10 +874,10 @@ impl Parser {
                 Ok(())
             }();
 
-            self.maybe_sync(result, &mut errors, TokenType::Semicolon);
+            self.maybe_sync(result, &mut errors, TokenKind::Semicolon);
         }
 
-        if let Err(e) = self.consume(TokenKind::RightBrace, "Expected closing '}' after block") {
+        if let Err(e) = consume!(self, TokenKind::RightBrace, "Expected closing '}' after block") {
             errors.push(e);
         }
 
@@ -840,29 +891,25 @@ impl Parser {
     }
     fn expression_statement(&mut self) -> Result<Stmt, Error> {
         let expr = self.expression()?;
-        self.consume(TokenKind::Semicolon, "Expect ';' after expression")?;
+        consume!(self, TokenKind::Semicolon, "Expect ';' after expression")?;
         Ok(Stmt::Expr(expr))
     }
     fn if_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
-        self.consume(TokenKind::LeftParen, "Expect '(' after 'if'")?;
+        consume!(self, TokenKind::LeftParen, "Expect '(' after 'if'")?;
         let condition = self.expression()?;
-        self.consume(
+        consume!(
+            self,
             TokenKind::RightParen,
-            "Expect closing ')' after if condition",
+            "Expect closing ')' after if condition"
         )?;
 
         let then_branch = self.statement()?;
-        let else_branch = if self.matches(&[TokenKind::Else]).is_some() {
+        let else_branch = if match_next!(self, TokenKind::Else).is_some() {
             Some(Box::new(self.statement()?))
         } else {
             None
         };
-        Ok(Stmt::If(
-            keyword,
-            condition,
-            Box::new(then_branch),
-            else_branch,
-        ))
+        Ok(Stmt::If(keyword, condition, Box::new(then_branch), else_branch))
     }
 
     pub fn expression(&mut self) -> Result<ExprKind, Error> {
@@ -871,7 +918,7 @@ impl Parser {
     fn comma(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.assignment()?;
 
-        while self.matches(&[TokenKind::Comma]).is_some() {
+        while match_next!(self, TokenKind::Comma).is_some() {
             expr = ExprKind::Comma {
                 left: Box::new(expr),
                 right: Box::new(self.assignment()?),
@@ -883,25 +930,26 @@ impl Parser {
     fn assignment(&mut self) -> Result<ExprKind, Error> {
         let expr = self.ternary_conditional()?;
 
-        if let Some(t) = self.matches(&[TokenKind::Equal]) {
+        if let Some(t) = match_next!(self, TokenKind::Equal) {
             let value = self.assignment()?;
             return Ok(ExprKind::Assign {
                 l_expr: Box::new(expr),
                 token: t,
                 r_expr: Box::new(value),
             });
-        } else if let Some(t) = self.matches(&[
-            TokenKind::PlusEqual,
-            TokenKind::MinusEqual,
-            TokenKind::StarEqual,
-            TokenKind::SlashEqual,
-            TokenKind::ModEqual,
-            TokenKind::PipeEqual,
-            TokenKind::AmpEqual,
-            TokenKind::XorEqual,
-            TokenKind::GreaterGreaterEqual,
-            TokenKind::LessLessEqual,
-        ]) {
+        } else if let Some(t) = match_next!(
+            self,
+            TokenKind::PlusEqual
+                | TokenKind::MinusEqual
+                | TokenKind::StarEqual
+                | TokenKind::SlashEqual
+                | TokenKind::ModEqual
+                | TokenKind::PipeEqual
+                | TokenKind::AmpEqual
+                | TokenKind::XorEqual
+                | TokenKind::GreaterGreaterEqual
+                | TokenKind::LessLessEqual
+        ) {
             let value = self.assignment()?;
 
             return Ok(ExprKind::CompoundAssign {
@@ -915,11 +963,12 @@ impl Parser {
     fn ternary_conditional(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.or()?;
 
-        while let Some(token) = self.matches(&[TokenKind::Question]) {
+        while let Some(token) = match_next!(self, TokenKind::Question) {
             let true_expr = self.expression()?;
-            self.consume(
+            consume!(
+                self,
                 TokenKind::Colon,
-                "Expect ':' to seperate ternary expression",
+                "Expect ':' to seperate ternary expression"
             )?;
             let false_expr = self.expression()?;
 
@@ -935,7 +984,7 @@ impl Parser {
     fn or(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.and()?;
 
-        while let Some(token) = self.matches(&[TokenKind::PipePipe]) {
+        while let Some(token) = match_next!(self, TokenKind::PipePipe) {
             let right = self.and()?;
             expr = ExprKind::Logical {
                 left: Box::new(expr),
@@ -948,7 +997,7 @@ impl Parser {
     fn and(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.bit_or()?;
 
-        while let Some(token) = self.matches(&[TokenKind::AmpAmp]) {
+        while let Some(token) = match_next!(self, TokenKind::AmpAmp) {
             let right = self.bit_or()?;
             expr = ExprKind::Logical {
                 left: Box::new(expr),
@@ -961,7 +1010,7 @@ impl Parser {
     fn bit_or(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.bit_xor()?;
 
-        while let Some(token) = self.matches(&[TokenKind::Pipe]) {
+        while let Some(token) = match_next!(self, TokenKind::Pipe) {
             let right = self.bit_xor()?;
             expr = ExprKind::Binary {
                 left: Box::new(expr),
@@ -974,7 +1023,7 @@ impl Parser {
     fn bit_xor(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.bit_and()?;
 
-        while let Some(token) = self.matches(&[TokenKind::Xor]) {
+        while let Some(token) = match_next!(self, TokenKind::Xor) {
             let right = self.bit_and()?;
             expr = ExprKind::Binary {
                 left: Box::new(expr),
@@ -987,7 +1036,7 @@ impl Parser {
     fn bit_and(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.equality()?;
 
-        while let Some(token) = self.matches(&[TokenKind::Amp]) {
+        while let Some(token) = match_next!(self, TokenKind::Amp) {
             let right = self.equality()?;
             expr = ExprKind::Binary {
                 left: Box::new(expr),
@@ -1000,7 +1049,7 @@ impl Parser {
     fn equality(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.comparison()?;
 
-        while let Some(token) = self.matches(&[TokenKind::BangEqual, TokenKind::EqualEqual]) {
+        while let Some(token) = match_next!(self, TokenKind::BangEqual | TokenKind::EqualEqual) {
             let operator = token;
             let right = self.comparison()?;
             expr = ExprKind::Comparison {
@@ -1014,12 +1063,10 @@ impl Parser {
     fn comparison(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.shift()?;
 
-        while let Some(token) = self.matches(&[
-            TokenKind::Greater,
-            TokenKind::GreaterEqual,
-            TokenKind::Less,
-            TokenKind::LessEqual,
-        ]) {
+        while let Some(token) = match_next!(
+            self,
+            TokenKind::Greater | TokenKind::GreaterEqual | TokenKind::Less | TokenKind::LessEqual
+        ) {
             let operator = token;
             let right = self.shift()?;
             expr = ExprKind::Comparison {
@@ -1033,7 +1080,7 @@ impl Parser {
     fn shift(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.term()?;
 
-        while let Some(token) = self.matches(&[TokenKind::GreaterGreater, TokenKind::LessLess]) {
+        while let Some(token) = match_next!(self, TokenKind::GreaterGreater | TokenKind::LessLess) {
             let operator = token;
             let right = self.term()?;
             expr = ExprKind::Binary {
@@ -1048,7 +1095,7 @@ impl Parser {
     fn term(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.factor()?;
 
-        while let Some(token) = self.matches(&[TokenKind::Minus, TokenKind::Plus]) {
+        while let Some(token) = match_next!(self, TokenKind::Minus | TokenKind::Plus) {
             let operator = token;
             let right = self.factor()?;
             expr = ExprKind::Binary {
@@ -1062,7 +1109,7 @@ impl Parser {
     fn factor(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.unary()?;
 
-        while let Some(token) = self.matches(&[TokenKind::Slash, TokenKind::Star, TokenKind::Mod]) {
+        while let Some(token) = match_next!(self, TokenKind::Slash | TokenKind::Star | TokenKind::Mod) {
             let operator = token;
             let right = self.unary()?;
             expr = ExprKind::Binary {
@@ -1074,20 +1121,20 @@ impl Parser {
         Ok(expr)
     }
     fn unary(&mut self) -> Result<ExprKind, Error> {
-        if let kind @ (TokenType::Star
-        | TokenType::Amp
-        | TokenType::Bang
-        | TokenType::Tilde
-        | TokenType::Minus
-        | TokenType::Plus
-        | TokenType::PlusPlus
-        | TokenType::MinusMinus
-        | TokenType::LeftParen
-        | TokenType::Sizeof) = self.tokens.peek("Expected expression")?.token.clone()
+        if let kind @ (TokenKind::Star
+        | TokenKind::Amp
+        | TokenKind::Bang
+        | TokenKind::Tilde
+        | TokenKind::Minus
+        | TokenKind::Plus
+        | TokenKind::PlusPlus
+        | TokenKind::MinusMinus
+        | TokenKind::LeftParen
+        | TokenKind::Sizeof) = self.tokens.peek("Expected expression")?.kind.clone()
         {
             return Ok(match kind {
                 // ++a or --a is equivalent to a += 1 or a -= 1
-                TokenType::PlusPlus | TokenType::MinusMinus => {
+                TokenKind::PlusPlus | TokenKind::MinusMinus => {
                     let token = self.tokens.next().unwrap();
                     let right = self.unary()?;
 
@@ -1099,7 +1146,7 @@ impl Parser {
                 }
                 // typecast
                 // have to check whether expression or type inside of parentheses
-                TokenType::LeftParen => {
+                TokenKind::LeftParen => {
                     if self.is_type(self.tokens.double_peek("Expected expression")?) {
                         let token = self.tokens.next().unwrap();
                         let decl_type = self.type_name()?;
@@ -1109,18 +1156,17 @@ impl Parser {
                         self.postfix()?
                     }
                 }
-                TokenType::Sizeof => {
+                TokenKind::Sizeof => {
                     // sizeof expr doesnt need parentheses but sizeof type does
                     self.tokens.next().unwrap();
-                    if let TokenType::LeftParen = self.tokens.peek("Expected expression")?.token {
-                        if self.is_type(
-                            self.tokens
-                                .double_peek("Expected expression or type-specifier")?,
-                        ) {
+                    if let TokenKind::LeftParen = self.tokens.peek("Expected expression")?.kind {
+                        if self
+                            .is_type(self.tokens.double_peek("Expected expression or type-specifier")?)
+                        {
                             self.tokens.next().unwrap();
                             let decl_type = self.type_name()?;
 
-                            self.consume(TokenKind::RightParen, "Expect closing ')' after sizeof")?;
+                            consume!(self, TokenKind::RightParen, "Expect closing ')' after sizeof")?;
                             return Ok(ExprKind::SizeofType { decl_type });
                         }
                     }
@@ -1142,7 +1188,7 @@ impl Parser {
         self.postfix()
     }
     fn typecast(&mut self, token: Token, decl_type: DeclType) -> Result<ExprKind, Error> {
-        self.consume(TokenKind::RightParen, "Expect closing ')' after type-cast")?;
+        consume!(self, TokenKind::RightParen, "Expect closing ')' after type-cast")?;
         let expr = self.unary()?;
 
         Ok(ExprKind::Cast { token, decl_type, expr: Box::new(expr) })
@@ -1150,36 +1196,38 @@ impl Parser {
     fn postfix(&mut self) -> Result<ExprKind, Error> {
         let mut expr = self.primary()?;
 
-        while let Some(token) = self.matches(&[
-            TokenKind::LeftBracket,
-            TokenKind::LeftParen,
-            TokenKind::PlusPlus,
-            TokenKind::MinusMinus,
-            TokenKind::Dot,
-            TokenKind::Arrow,
-        ]) {
-            match token.token {
+        while let Some(token) = match_next!(
+            self,
+            TokenKind::LeftBracket
+                | TokenKind::LeftParen
+                | TokenKind::PlusPlus
+                | TokenKind::MinusMinus
+                | TokenKind::Dot
+                | TokenKind::Arrow
+        ) {
+            match token.kind {
                 // a[expr]
-                TokenType::LeftBracket => {
+                TokenKind::LeftBracket => {
                     let index = self.expression()?;
-                    self.consume(
+                    consume!(
+                        self,
                         TokenKind::RightBracket,
-                        "Expect closing ']' after array-index",
+                        "Expect closing ']' after array-index"
                     )?;
                     expr = index_sugar(token, expr, index);
                 }
                 // a()
-                TokenType::LeftParen => {
+                TokenKind::LeftParen => {
                     expr = self.call(token, expr)?;
                 }
                 // some.member or some->member
-                TokenType::Dot | TokenType::Arrow => {
-                    if let Some(member) = self.matches(&[TokenKind::Ident]) {
-                        expr = match token.token {
-                            TokenType::Dot => {
+                TokenKind::Dot | TokenKind::Arrow => {
+                    if let Some(member) = match_next!(self, TokenKind::Ident(_)) {
+                        expr = match token.kind {
+                            TokenKind::Dot => {
                                 ExprKind::MemberAccess { token, member, expr: Box::new(expr) }
                             }
-                            TokenType::Arrow => arrow_sugar(expr, member, token),
+                            TokenKind::Arrow => arrow_sugar(expr, member, token),
                             _ => unreachable!(),
                         }
                     } else {
@@ -1199,15 +1247,15 @@ impl Parser {
     }
     fn call(&mut self, left_paren: Token, callee: ExprKind) -> Result<ExprKind, Error> {
         let mut args = Vec::new();
-        if !self.check(TokenKind::RightParen) {
+        if !check!(self, TokenKind::RightParen) {
             loop {
                 args.push(self.assignment()?);
-                if self.matches(&[TokenKind::Comma]).is_none() {
+                if match_next!(self, TokenKind::Comma).is_none() {
                     break;
                 }
             }
         }
-        self.consume(TokenKind::RightParen, "Expect ')' after function call")?;
+        consume!(self, TokenKind::RightParen, "Expect ')' after function call")?;
         if let ExprKind::Ident(name) = callee {
             Ok(ExprKind::Call { left_paren, name, args })
         } else {
@@ -1218,26 +1266,26 @@ impl Parser {
         }
     }
     fn primary(&mut self) -> Result<ExprKind, Error> {
-        if let Some(n) = self.matches(&[TokenKind::Number]) {
+        if let Some(n) = match_next!(self, TokenKind::Number(_)) {
             let n = n.unwrap_num();
             return Ok(ExprKind::Literal(n, Type::Primitive(integer_type(n))));
         }
-        if let Some(c) = self.matches(&[TokenKind::CharLit]) {
+        if let Some(c) = match_next!(self, TokenKind::CharLit(_)) {
             return Ok(ExprKind::Literal(
                 c.unwrap_char() as i64,
                 Type::Primitive(Primitive::Char),
             ));
         }
-        if let Some(s) = self.matches(&[TokenKind::Ident]) {
+        if let Some(s) = match_next!(self, TokenKind::Ident(_)) {
             return Ok(ExprKind::Ident(s));
         }
-        if let Some(s) = self.matches(&[TokenKind::String]) {
+        if let Some(s) = match_next!(self, TokenKind::String(_)) {
             return Ok(ExprKind::String(s));
         }
 
-        if self.matches(&[TokenKind::LeftParen]).is_some() {
+        if match_next!(self, TokenKind::LeftParen).is_some() {
             let expr = self.expression()?;
-            self.consume(TokenKind::RightParen, "missing closing ')'")?;
+            consume!(self, TokenKind::RightParen, "missing closing ')'")?;
 
             return Ok(ExprKind::Grouping { expr: Box::new(expr.clone()) });
         }
@@ -1245,63 +1293,30 @@ impl Parser {
         let token = self.tokens.peek("Expected expression")?;
         Err(Error::new(
             token,
-            ErrorKind::ExpectedExpression(token.token.clone()),
+            ErrorKind::ExpectedExpression(token.kind.clone()),
         ))
-    }
-    fn consume(&mut self, token: TokenKind, msg: &'static str) -> Result<Token, Error> {
-        match self.tokens.peek("") {
-            Ok(v) => {
-                if TokenKind::from(&v.token) != token {
-                    Err(Error::new(v, ErrorKind::Regular(msg)))
-                } else {
-                    Ok(self.tokens.next().unwrap())
-                }
-            }
-            Err((Some(token), _)) => Err(Error::new(&token, ErrorKind::Eof(msg))),
-            Err(_) => Err(Error::eof(msg)),
-        }
-    }
-    fn check(&mut self, expected: TokenKind) -> bool {
-        if let Ok(token) = self.tokens.peek("") {
-            return TokenKind::from(&token.token) == expected;
-        }
-        false
-    }
-
-    fn matches(&mut self, expected: &[TokenKind]) -> Option<Token> {
-        match self.tokens.peek("") {
-            Ok(v) => {
-                if !expected.contains(&TokenKind::from(&v.token)) {
-                    return None;
-                }
-            }
-            Err(_) => return None,
-        }
-        self.tokens.next()
     }
     fn type_specifier(&mut self) -> Result<SpecifierKind, Error> {
         let token = self.tokens.peek("Expected type-specifier")?;
-        match token.token {
-            TokenType::Struct | TokenType::Union => {
+        match token.kind {
+            TokenKind::Struct | TokenKind::Union => {
                 let token = self.tokens.next().unwrap();
                 self.struct_or_union_specifier(&token)
             }
-            TokenType::Enum => {
+            TokenKind::Enum => {
                 let token = self.tokens.next().unwrap();
                 self.enum_specifier(&token)
             }
             // typedefed type
-            TokenType::Ident(..) => {
+            TokenKind::Ident(..) => {
                 if self.typedefs.get(token.unwrap_string()).is_some() {
                     self.tokens.next().unwrap();
                     Ok(SpecifierKind::UserType)
                 } else {
-                    Err(Error::new(token, ErrorKind::NotType(token.token.clone())))
+                    Err(Error::new(token, ErrorKind::NotType(token.kind.clone())))
                 }
             }
-            _ if !token.is_type() => {
-                Err(Error::new(token, ErrorKind::NotType(token.token.clone())))
-            }
+            _ if !token.is_type() => Err(Error::new(token, ErrorKind::NotType(token.kind.clone()))),
             // otherwise parse primitive
             _ => Ok(self
                 .tokens
@@ -1311,13 +1326,13 @@ impl Parser {
         }
     }
     fn is_type(&self, token: &Token) -> bool {
-        if let TokenType::Ident(..) = token.token {
+        if let TokenKind::Ident(..) = token.kind {
             return self.typedefs.get(token.unwrap_string()).is_some();
         }
         token.is_type()
     }
     fn is_specifier(&self, token: &Token) -> bool {
-        self.is_type(token) || matches!(token.token, TokenType::TypeDef)
+        self.is_type(token) || matches!(token.kind, TokenKind::TypeDef)
     }
 }
 
@@ -1341,7 +1356,7 @@ fn arrow_sugar(left: ExprKind, member: Token, arrow_token: Token) -> ExprKind {
         member: member.clone(),
         expr: Box::new(ExprKind::Grouping {
             expr: Box::new(ExprKind::Unary {
-                token: Token { token: TokenType::Star, ..member },
+                token: Token { kind: TokenKind::Star, ..member },
                 right: Box::new(left),
             }),
         }),
@@ -1351,11 +1366,11 @@ fn arrow_sugar(left: ExprKind, member: Token, arrow_token: Token) -> ExprKind {
 // a[i] <=> *(a + i)
 pub fn index_sugar(token: Token, expr: ExprKind, index: ExprKind) -> ExprKind {
     ExprKind::Unary {
-        token: Token { token: TokenType::Star, ..token.clone() },
+        token: Token { kind: TokenKind::Star, ..token.clone() },
         right: Box::new(ExprKind::Grouping {
             expr: Box::new(ExprKind::Binary {
                 left: Box::new(expr),
-                token: Token { token: TokenType::Plus, ..token },
+                token: Token { kind: TokenKind::Plus, ..token },
                 right: Box::new(index),
             }),
         }),
@@ -1582,13 +1597,13 @@ FuncDef: 'main'
     #[test]
     fn matches_works_on_enums_with_values() {
         let tokens = vec![
-            token_default!(TokenType::Number(2)),
-            token_default!(TokenType::Plus),
+            token_default!(TokenKind::Number(2)),
+            token_default!(TokenKind::Plus),
         ];
         let mut p = Parser::new(tokens);
 
-        let result = p.matches(&[TokenKind::Number, TokenKind::String]);
-        let expected = Some(token_default!(TokenType::Number(2)));
+        let result = match_next!(p, TokenKind::Number(_) | TokenKind::String(_));
+        let expected = Some(token_default!(TokenKind::Number(2)));
 
         assert_eq!(result, expected);
     }

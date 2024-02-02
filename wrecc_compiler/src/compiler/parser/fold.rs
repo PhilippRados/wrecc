@@ -59,9 +59,7 @@ impl ExprKind {
             ExprKind::Binary { left, token, right } => {
                 Self::binary_fold(typechecker, left, token.clone(), right)?
             }
-            ExprKind::Unary { token, right, .. } => {
-                Self::unary_fold(typechecker, token.clone(), right)?
-            }
+            ExprKind::Unary { token, right, .. } => Self::unary_fold(typechecker, token.clone(), right)?,
             ExprKind::Logical { left, token, right } => {
                 Self::logical_fold(typechecker, token.clone(), left, right)?
             }
@@ -84,10 +82,7 @@ impl ExprKind {
                     (*true_expr.clone(), *false_expr.clone())
                 {
                     if !true_type.type_compatible(&false_type, false_expr.as_ref()) {
-                        return Err(Error::new(
-                            token,
-                            ErrorKind::TypeMismatch(true_type, false_type),
-                        ));
+                        return Err(Error::new(token, ErrorKind::TypeMismatch(true_type, false_type)));
                     }
                 }
 
@@ -146,20 +141,18 @@ impl ExprKind {
         left.integer_const_fold(typechecker)?;
         right.integer_const_fold(typechecker)?;
 
-        if let (
-            ExprKind::Literal(mut left_n, left_type),
-            ExprKind::Literal(mut right_n, right_type),
-        ) = (*left.clone(), *right.clone())
+        if let (ExprKind::Literal(mut left_n, left_type), ExprKind::Literal(mut right_n, right_type)) =
+            (*left.clone(), *right.clone())
         {
             if !crate::compiler::typechecker::is_valid_bin(
-                &token.token,
+                &token.kind,
                 &left_type,
                 &right_type,
                 right.as_ref(),
             ) {
                 return Err(Error::new(
                     &token,
-                    ErrorKind::InvalidBinary(token.token.clone(), left_type, right_type),
+                    ErrorKind::InvalidBinary(token.kind.clone(), left_type, right_type),
                 ));
             }
 
@@ -169,39 +162,39 @@ impl ExprKind {
                 *literal *= amount as i64;
             }
 
-            Ok(Some(match token.token {
-                TokenType::Plus => Self::literal_type(
+            Ok(Some(match token.kind {
+                TokenKind::Plus => Self::literal_type(
                     token,
                     left_type,
                     right_type,
                     i64::overflowing_add(left_n, right_n),
                 )?,
-                TokenType::Minus => Self::literal_type(
+                TokenKind::Minus => Self::literal_type(
                     token,
                     left_type,
                     right_type,
                     i64::overflowing_sub(left_n, right_n),
                 )?,
-                TokenType::Star => Self::literal_type(
+                TokenKind::Star => Self::literal_type(
                     token,
                     left_type,
                     right_type,
                     i64::overflowing_mul(left_n, right_n),
                 )?,
-                TokenType::Slash | TokenType::Mod => {
+                TokenKind::Slash | TokenKind::Mod => {
                     Self::div_fold(token, left_type, right_type, left_n, right_n)?
                 }
-                TokenType::GreaterGreater | TokenType::LessLess => {
+                TokenKind::GreaterGreater | TokenKind::LessLess => {
                     Self::shift_fold(token, left_type, left_n, right_n)?
                 }
 
-                TokenType::Pipe => {
+                TokenKind::Pipe => {
                     Self::literal_type(token, left_type, right_type, (left_n | right_n, false))?
                 }
-                TokenType::Xor => {
+                TokenKind::Xor => {
                     Self::literal_type(token, left_type, right_type, (left_n ^ right_n, false))?
                 }
-                TokenType::Amp => {
+                TokenKind::Amp => {
                     Self::literal_type(token, left_type, right_type, (left_n & right_n, false))?
                 }
 
@@ -222,9 +215,9 @@ impl ExprKind {
             return Err(Error::new(&token, ErrorKind::NegativeShift));
         }
 
-        let (value, overflow) = match token.token {
-            TokenType::GreaterGreater => i64::overflowing_shr(left, right as u32),
-            TokenType::LessLess => i64::overflowing_shl(left, right as u32),
+        let (value, overflow) = match token.kind {
+            TokenKind::GreaterGreater => i64::overflowing_shr(left, right as u32),
+            TokenKind::LessLess => i64::overflowing_shl(left, right as u32),
             _ => unreachable!("not shift operation"),
         };
 
@@ -245,9 +238,9 @@ impl ExprKind {
             return Err(Error::new(&token, ErrorKind::DivideByZero));
         }
 
-        let operation = match token.token {
-            TokenType::Slash => i64::overflowing_div(left, right),
-            TokenType::Mod => i64::overflowing_rem(left, right),
+        let operation = match token.kind {
+            TokenKind::Slash => i64::overflowing_div(left, right),
+            TokenKind::Mod => i64::overflowing_rem(left, right),
             _ => unreachable!("not shift operation"),
         };
         Self::literal_type(token, left_type, right_type, operation)
@@ -287,19 +280,18 @@ impl ExprKind {
     ) -> Result<Option<ExprKind>, Error> {
         right.integer_const_fold(typechecker)?;
 
-        Ok(match (right.as_ref(), &token.token) {
-            (ExprKind::Literal(n, _), TokenType::Bang) => Some(ExprKind::new_literal(
-                if *n == 0 { 1 } else { 0 },
-                Primitive::Int,
-            )),
+        Ok(match (right.as_ref(), &token.kind) {
+            (ExprKind::Literal(n, _), TokenKind::Bang) => {
+                Some(ExprKind::new_literal(if *n == 0 { 1 } else { 0 }, Primitive::Int))
+            }
             (
                 ExprKind::Literal(n, right_type),
-                TokenType::Minus | TokenType::Plus | TokenType::Tilde,
+                TokenKind::Minus | TokenKind::Plus | TokenKind::Tilde,
             ) => {
                 if !right_type.is_integer() {
                     return Err(Error::new(
                         &token,
-                        ErrorKind::InvalidUnary(token.token.clone(), right_type.clone(), "integer"),
+                        ErrorKind::InvalidUnary(token.kind.clone(), right_type.clone(), "integer"),
                     ));
                 }
 
@@ -307,9 +299,9 @@ impl ExprKind {
                     token.clone(),
                     right_type.clone(),
                     right_type.clone(),
-                    if token.token == TokenType::Plus {
+                    if token.kind == TokenKind::Plus {
                         (*n, false)
-                    } else if token.token == TokenType::Tilde {
+                    } else if token.kind == TokenKind::Tilde {
                         (!n, false)
                     } else {
                         n.overflowing_neg()
@@ -328,8 +320,8 @@ impl ExprKind {
         left.integer_const_fold(typechecker)?;
         right.integer_const_fold(typechecker)?;
 
-        Ok(match token.token {
-            TokenType::AmpAmp => match (left.as_ref(), right.as_ref()) {
+        Ok(match token.kind {
+            TokenKind::AmpAmp => match (left.as_ref(), right.as_ref()) {
                 (ExprKind::Literal(0, _), _) => Some(ExprKind::new_literal(0, Primitive::Int)),
                 (ExprKind::Literal(left_n, _), ExprKind::Literal(right_n, _))
                     if *left_n != 0 && *right_n != 0 =>
@@ -342,7 +334,7 @@ impl ExprKind {
                 _ => None,
             },
 
-            TokenType::PipePipe => match (left.as_ref(), right.as_ref()) {
+            TokenKind::PipePipe => match (left.as_ref(), right.as_ref()) {
                 (ExprKind::Literal(1, _), _) => Some(ExprKind::new_literal(1, Primitive::Int)),
                 (ExprKind::Literal(left, _), ExprKind::Literal(right, _))
                     if *left == 0 && *right == 0 =>
@@ -375,30 +367,24 @@ impl ExprKind {
             {
                 return Err(Error::new(
                     &token,
-                    ErrorKind::InvalidComp(
-                        token.token.clone(),
-                        left_type.clone(),
-                        right_type.clone(),
-                    ),
+                    ErrorKind::InvalidComp(token.kind.clone(), left_type.clone(), right_type.clone()),
                 ));
             }
 
-            Ok(Some(match token.token {
-                TokenType::BangEqual => {
+            Ok(Some(match token.kind {
+                TokenKind::BangEqual => {
                     ExprKind::new_literal((left_n != right_n).into(), Primitive::Int)
                 }
-                TokenType::EqualEqual => {
+                TokenKind::EqualEqual => {
                     ExprKind::new_literal((left_n == right_n).into(), Primitive::Int)
                 }
 
-                TokenType::Greater => {
-                    ExprKind::new_literal((left_n > right_n).into(), Primitive::Int)
-                }
-                TokenType::GreaterEqual => {
+                TokenKind::Greater => ExprKind::new_literal((left_n > right_n).into(), Primitive::Int),
+                TokenKind::GreaterEqual => {
                     ExprKind::new_literal((left_n >= right_n).into(), Primitive::Int)
                 }
-                TokenType::Less => ExprKind::new_literal((left_n < right_n).into(), Primitive::Int),
-                TokenType::LessEqual => {
+                TokenKind::Less => ExprKind::new_literal((left_n < right_n).into(), Primitive::Int),
+                TokenKind::LessEqual => {
                     ExprKind::new_literal((left_n <= right_n).into(), Primitive::Int)
                 }
                 _ => unreachable!("not valid comparison token"),
@@ -461,9 +447,7 @@ mod tests {
         actual.integer_const_fold(&mut TypeChecker::new()).unwrap();
 
         let mut expected = setup(expected).expression().unwrap();
-        expected
-            .integer_const_fold(&mut TypeChecker::new())
-            .unwrap();
+        expected.integer_const_fold(&mut TypeChecker::new()).unwrap();
 
         assert_eq!(actual, expected);
     }
@@ -472,9 +456,7 @@ mod tests {
         actual.integer_const_fold(&mut TypeChecker::new()).unwrap();
 
         let mut expected = setup(expected).expression().unwrap();
-        expected
-            .integer_const_fold(&mut TypeChecker::new())
-            .unwrap();
+        expected.integer_const_fold(&mut TypeChecker::new()).unwrap();
 
         assert_eq!(actual, expected);
 

@@ -1,4 +1,4 @@
-use crate::compiler::common::token::TokenType;
+use crate::compiler::common::token::TokenKind;
 use crate::compiler::common::types::*;
 use crate::compiler::typechecker::mir::expr::ValueKind;
 
@@ -116,7 +116,7 @@ impl LabelRegister {
 #[derive(Debug)]
 pub enum StaticRegister {
     Label(LabelRegister),
-    LabelOffset(LabelRegister, i64, TokenType),
+    LabelOffset(LabelRegister, i64, TokenKind),
     Literal(i64, Type),
 }
 impl StaticRegister {
@@ -140,8 +140,8 @@ impl StaticRegister {
                 "{}{}{}",
                 reg.base_name(),
                 match term {
-                    TokenType::Plus => '+',
-                    TokenType::Minus => '-',
+                    TokenKind::Plus => '+',
+                    TokenKind::Minus => '-',
                     _ => unreachable!(),
                 },
                 offset
@@ -177,8 +177,7 @@ impl StackRegister {
         assert!(arg_index >= 6);
         let arg_stack_index: usize = (arg_index as isize - ARG_REGS.len() as isize) as usize;
         const PUSHED_PARAM_OFFSET: usize = 16;
-        let bp_offset =
-            PUSHED_PARAM_OFFSET + arg_stack_index * Type::Primitive(Primitive::Long).size();
+        let bp_offset = PUSHED_PARAM_OFFSET + arg_stack_index * Type::Primitive(Primitive::Long).size();
 
         Self {
             bp_offset,
@@ -361,9 +360,7 @@ impl ScratchRegister for ArgRegisterKind {
         match type_decl {
             Type::Primitive(Primitive::Char) => self.names[2],
             Type::Primitive(Primitive::Int) | Type::Enum(..) => self.names[1],
-            Type::Primitive(Primitive::Long) | Type::Pointer(_) | Type::Array { .. } => {
-                self.names[0]
-            }
+            Type::Primitive(Primitive::Long) | Type::Pointer(_) | Type::Array { .. } => self.names[0],
             _ => unimplemented!("aggregate types are not yet implemented as function args"),
         }
         .to_string()

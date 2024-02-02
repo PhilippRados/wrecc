@@ -209,10 +209,7 @@ impl TypeChecker {
 
         Ok(parsed_type)
     }
-    fn parse_specifiers(
-        &mut self,
-        specifiers: Vec<hir::decl::DeclSpecifier>,
-    ) -> Result<Type, Error> {
+    fn parse_specifiers(&mut self, specifiers: Vec<hir::decl::DeclSpecifier>) -> Result<Type, Error> {
         if specifiers.is_empty() {
             return Ok(Type::Primitive(Primitive::Int));
         }
@@ -233,10 +230,8 @@ impl TypeChecker {
                 self.enum_specifier(token, name, enum_constants)
             }
             [hir::decl::SpecifierKind::UserType] => {
-                if let Ok(Symbols::TypeDef(type_decl)) = self
-                    .env
-                    .get_symbol(&token)
-                    .map(|symbol| symbol.borrow().clone())
+                if let Ok(Symbols::TypeDef(type_decl)) =
+                    self.env.get_symbol(&token).map(|symbol| symbol.borrow().clone())
                 {
                     Ok(type_decl)
                 } else {
@@ -300,10 +295,7 @@ impl TypeChecker {
                     self.env.exit();
 
                     if parsed_type.is_func() || parsed_type.is_array() {
-                        return Err(Error::new(
-                            &token,
-                            ErrorKind::InvalidReturnType(parsed_type),
-                        ));
+                        return Err(Error::new(&token, ErrorKind::InvalidReturnType(parsed_type)));
                     }
 
                     parsed_type.function_of(params, variadic)
@@ -321,10 +313,9 @@ impl TypeChecker {
     ) -> Result<Type, Error> {
         let members = match (&name, members) {
             (Some(name), Some(members)) => {
-                let custom_type = self.env.declare_type(
-                    name,
-                    Tags::Aggregate(StructRef::new(token.clone().token, true)),
-                )?;
+                let custom_type = self
+                    .env
+                    .declare_type(name, Tags::Aggregate(StructRef::new(token.clone().kind, true)))?;
 
                 let members = self.struct_declaration(members.clone())?;
 
@@ -338,16 +329,14 @@ impl TypeChecker {
 
             (Some(name), None) => {
                 let custom_type = self.env.get_type(name).or_else(|_| {
-                    self.env.declare_type(
-                        name,
-                        Tags::Aggregate(StructRef::new(token.clone().token, false)),
-                    )
+                    self.env
+                        .declare_type(name, Tags::Aggregate(StructRef::new(token.clone().kind, false)))
                 })?;
 
-                if &token.token != custom_type.borrow().get_kind() {
+                if &token.kind != custom_type.borrow().get_kind() {
                     return Err(Error::new(
                         name,
-                        ErrorKind::TypeAlreadyExists(name.unwrap_string(), token.token.clone()),
+                        ErrorKind::TypeAlreadyExists(name.unwrap_string(), token.kind.clone()),
                     ));
                 }
 
@@ -360,16 +349,13 @@ impl TypeChecker {
                 StructInfo::Anonymous(token.clone(), members)
             }
             (None, None) => {
-                return Err(Error::new(
-                    &token,
-                    ErrorKind::EmptyAggregate(token.token.clone()),
-                ));
+                return Err(Error::new(&token, ErrorKind::EmptyAggregate(token.kind.clone())));
             }
         };
 
-        Ok(match token.token {
-            TokenType::Struct => Type::Struct(members),
-            TokenType::Union => Type::Union(members),
+        Ok(match token.kind {
+            TokenKind::Struct => Type::Struct(members),
+            TokenKind::Union => Type::Union(members),
             _ => unreachable!("not struct/union specifier"),
         })
     }
@@ -431,10 +417,10 @@ impl TypeChecker {
                     .get_type(name)
                     .map_err(|_| Error::new(name, ErrorKind::EnumForwardDecl))?;
 
-                if &token.token != custom_type.borrow().get_kind() {
+                if &token.kind != custom_type.borrow().get_kind() {
                     return Err(Error::new(
                         name,
-                        ErrorKind::TypeAlreadyExists(name.unwrap_string(), token.token.clone()),
+                        ErrorKind::TypeAlreadyExists(name.unwrap_string(), token.kind.clone()),
                     ));
                 }
                 let constants = custom_type.borrow().clone().unwrap_enum();
@@ -442,10 +428,7 @@ impl TypeChecker {
                 Ok(Type::Enum(Some(name.unwrap_string()), constants))
             }
             (None, Some(values)) => Ok(Type::Enum(None, self.enumerator_list(values.clone())?)),
-            (None, None) => Err(Error::new(
-                &token,
-                ErrorKind::EmptyAggregate(token.token.clone()),
-            )),
+            (None, None) => Err(Error::new(&token, ErrorKind::EmptyAggregate(token.kind.clone()))),
         }
     }
     fn enumerator_list(
@@ -468,10 +451,7 @@ impl TypeChecker {
                     type_decl: Type::Primitive(Primitive::Int),
                     kind: InitType::Definition,
                     is_global: self.env.is_global(),
-                    reg: Some(Register::Literal(
-                        index as i64,
-                        Type::Primitive(Primitive::Int),
-                    )),
+                    reg: Some(Register::Literal(index as i64, Type::Primitive(Primitive::Int))),
                 }),
             )?;
 
@@ -526,10 +506,7 @@ impl TypeChecker {
         // single unnamed void param is equivalent to empty params
         if let [(Type::Primitive(Primitive::Void), None)] = parsed_params.as_slice() {
             parsed_params.pop();
-        } else if parsed_params
-            .iter()
-            .any(|(type_decl, _)| type_decl.is_void())
-        {
+        } else if parsed_params.iter().any(|(type_decl, _)| type_decl.is_void()) {
             return Err(Error::new(token, ErrorKind::VoidFuncArg));
         }
 
@@ -563,10 +540,7 @@ impl TypeChecker {
         let expr = Self::maybe_cast(type_decl.clone(), expr);
 
         if self.env.is_global() && !expr.is_constant() {
-            return Err(Error::new(
-                token,
-                ErrorKind::NotConstantInit("Global variables"),
-            ));
+            return Err(Error::new(token, ErrorKind::NotConstantInit("Global variables")));
         }
 
         Ok(mir::decl::Init::Scalar(expr))
@@ -589,8 +563,7 @@ impl TypeChecker {
                         objects.clear();
 
                         while let Some(d) = designator.pop_front() {
-                            let designator_info =
-                                self.designator_index(objects.current_type(), d)?;
+                            let designator_info = self.designator_index(objects.current_type(), d)?;
                             objects.update(designator_info);
                         }
 
@@ -646,12 +619,12 @@ impl TypeChecker {
                     let init_offset = objects.offset();
 
                     // remove overriding elements
-                    let init_interval =
-                        if let Some((offset, size)) = objects.find_same_union(&new_list) {
-                            offset..offset + size as i64
-                        } else {
-                            init_offset..init_offset + sub_type.size() as i64
-                        };
+                    let init_interval = if let Some((offset, size)) = objects.find_same_union(&new_list)
+                    {
+                        offset..offset + size as i64
+                    } else {
+                        init_offset..init_offset + sub_type.size() as i64
+                    };
                     new_list.retain(|(.., offset)| !init_interval.contains(offset));
 
                     // push init elements into new_list
@@ -687,9 +660,7 @@ impl TypeChecker {
                     &single_init.token,
                     ErrorKind::Regular("Too many braces around scalar initializer"),
                 )),
-                [_, second_init, ..] => {
-                    Err(Error::new(&second_init.token, ErrorKind::ScalarOverflow))
-                }
+                [_, second_init, ..] => Err(Error::new(&second_init.token, ErrorKind::ScalarOverflow)),
                 [] => Err(Error::new(
                     &token,
                     ErrorKind::Regular("Scalar initializer cannot be empty"),
@@ -705,8 +676,7 @@ impl TypeChecker {
     ) -> Result<(i64, i64, Type), Error> {
         match (designator.kind, type_decl) {
             (hir::decl::DesignatorKind::Array(mut expr), Type::Array { amount, of }) => {
-                let literal =
-                    expr.get_literal_constant(self, &designator.token, "Array designator")?;
+                let literal = expr.get_literal_constant(self, &designator.token, "Array designator")?;
                 if literal < 0 {
                     return Err(Error::new(
                         &designator.token,
@@ -730,12 +700,10 @@ impl TypeChecker {
                 ),
             )),
 
-            (hir::decl::DesignatorKind::Array(_), Type::Struct(_) | Type::Union(_)) => {
-                Err(Error::new(
-                    &designator.token,
-                    ErrorKind::InvalidArrayDesignator(type_decl.clone()),
-                ))
-            }
+            (hir::decl::DesignatorKind::Array(_), Type::Struct(_) | Type::Union(_)) => Err(Error::new(
+                &designator.token,
+                ErrorKind::InvalidArrayDesignator(type_decl.clone()),
+            )),
             (hir::decl::DesignatorKind::Member(m), Type::Struct(s) | Type::Union(s)) => {
                 if let Some(i) = s
                     .members()
@@ -800,11 +768,7 @@ impl TypeChecker {
         }
         Ok(None)
     }
-    fn char_array(
-        token: Token,
-        mut s: String,
-        amount: usize,
-    ) -> Result<hir::decl::InitKind, Error> {
+    fn char_array(token: Token, mut s: String, amount: usize) -> Result<hir::decl::InitKind, Error> {
         // char s[] = "abc" identical to char s[] = {'a','b','c','\0'} (6.7.8)
         if amount < s.len() {
             return Err(Error::new(
@@ -847,10 +811,7 @@ impl TypeChecker {
         let return_type = self.parse_type(decl_type)?;
 
         if return_type.is_func() || return_type.is_array() {
-            return Err(Error::new(
-                &token,
-                ErrorKind::InvalidReturnType(return_type),
-            ));
+            return Err(Error::new(&token, ErrorKind::InvalidReturnType(return_type)));
         }
 
         if !return_type.is_complete() && !return_type.is_void() {
@@ -986,12 +947,8 @@ impl TypeChecker {
             }
             hir::stmt::Stmt::Break(keyword) => self.break_statement(keyword),
             hir::stmt::Stmt::Continue(keyword) => self.continue_statement(keyword),
-            hir::stmt::Stmt::Switch(keyword, cond, body) => {
-                self.switch_statement(keyword, cond, *body)
-            }
-            hir::stmt::Stmt::Case(keyword, value, body) => {
-                self.case_statement(keyword, value, *body)
-            }
+            hir::stmt::Stmt::Switch(keyword, cond, body) => self.switch_statement(keyword, cond, *body),
+            hir::stmt::Stmt::Case(keyword, value, body) => self.case_statement(keyword, value, *body),
             hir::stmt::Stmt::Default(keyword, body) => self.default_statement(keyword, *body),
             hir::stmt::Stmt::Goto(label) => self.goto_statement(label),
             hir::stmt::Stmt::Label(name, body) => self.label_statement(name, *body),
@@ -1292,10 +1249,7 @@ impl TypeChecker {
         }
     }
 
-    pub fn visit_expr(
-        &mut self,
-        mut parse_tree: hir::expr::ExprKind,
-    ) -> Result<mir::expr::Expr, Error> {
+    pub fn visit_expr(&mut self, mut parse_tree: hir::expr::ExprKind) -> Result<mir::expr::Expr, Error> {
         parse_tree.integer_const_fold(self)?;
 
         match parse_tree {
@@ -1463,18 +1417,18 @@ impl TypeChecker {
         let true_expr = true_expr.maybe_int_promote();
         let false_expr = false_expr.maybe_int_promote();
 
-        let (true_expr, false_expr) =
-            match true_expr.type_decl.size().cmp(&false_expr.type_decl.size()) {
-                Ordering::Greater => (
-                    true_expr.clone(),
-                    false_expr.cast_to(true_expr.type_decl, CastDirection::Up),
-                ),
-                Ordering::Less => (
-                    true_expr.cast_to(false_expr.type_decl.clone(), CastDirection::Up),
-                    false_expr,
-                ),
-                Ordering::Equal => (true_expr, false_expr),
-            };
+        let (true_expr, false_expr) = match true_expr.type_decl.size().cmp(&false_expr.type_decl.size())
+        {
+            Ordering::Greater => (
+                true_expr.clone(),
+                false_expr.cast_to(true_expr.type_decl, CastDirection::Up),
+            ),
+            Ordering::Less => (
+                true_expr.cast_to(false_expr.type_decl.clone(), CastDirection::Up),
+                false_expr,
+            ),
+            Ordering::Equal => (true_expr, false_expr),
+        };
 
         Ok(mir::expr::Expr {
             type_decl: true_expr.type_decl.clone(),
@@ -1537,10 +1491,7 @@ impl TypeChecker {
                     ))
                 }
             }
-            _ => Err(Error::new(
-                &token,
-                ErrorKind::InvalidMemberAccess(expr.type_decl),
-            )),
+            _ => Err(Error::new(&token, ErrorKind::InvalidMemberAccess(expr.type_decl))),
         }
     }
     fn evaluate_postunary(
@@ -1550,9 +1501,9 @@ impl TypeChecker {
     ) -> Result<mir::expr::Expr, Error> {
         let type_decl = self.visit_expr(expr.clone())?.type_decl;
 
-        let (comp_op, bin_op) = match token.token {
-            TokenType::PlusPlus => (TokenType::PlusEqual, TokenType::Minus),
-            TokenType::MinusMinus => (TokenType::MinusEqual, TokenType::Plus),
+        let (comp_op, bin_op) = match token.kind {
+            TokenKind::PlusPlus => (TokenKind::PlusEqual, TokenKind::Minus),
+            TokenKind::MinusMinus => (TokenKind::MinusEqual, TokenKind::Plus),
             _ => unreachable!("not a postunary token"),
         };
 
@@ -1560,25 +1511,16 @@ impl TypeChecker {
         let postunary_sugar = hir::expr::ExprKind::Binary {
             left: Box::new(hir::expr::ExprKind::CompoundAssign {
                 l_expr: Box::new(expr),
-                token: Token { token: comp_op, ..token.clone() },
-                r_expr: Box::new(hir::expr::ExprKind::Literal(
-                    1,
-                    Type::Primitive(Primitive::Int),
-                )),
+                token: Token { kind: comp_op, ..token.clone() },
+                r_expr: Box::new(hir::expr::ExprKind::Literal(1, Type::Primitive(Primitive::Int))),
             }),
-            token: Token { token: bin_op, ..token },
-            right: Box::new(hir::expr::ExprKind::Literal(
-                1,
-                Type::Primitive(Primitive::Int),
-            )),
+            token: Token { kind: bin_op, ..token },
+            right: Box::new(hir::expr::ExprKind::Literal(1, Type::Primitive(Primitive::Int))),
         };
 
         // need to cast back to left-type since binary operation integer promotes
         // char c; typeof(c--) == char
-        Ok(Self::maybe_cast(
-            type_decl,
-            self.visit_expr(postunary_sugar)?,
-        ))
+        Ok(Self::maybe_cast(type_decl, self.visit_expr(postunary_sugar)?))
     }
     fn string(&mut self, data: String) -> Result<mir::expr::Expr, Error> {
         let len = data.len() + 1; // extra byte for \0-Terminator
@@ -1605,7 +1547,7 @@ impl TypeChecker {
         // to not evaluate l-expr twice convert `A op= B` to `tmp = &A, *tmp = *tmp op B`
         self.env.enter();
         let tmp_token = Token {
-            token: TokenType::Ident("tmp".to_string()),
+            kind: TokenKind::Ident("tmp".to_string()),
             ..token.clone()
         };
         let tmp_type = type_decl.pointer_to();
@@ -1632,23 +1574,23 @@ impl TypeChecker {
                 l_expr: Box::new(hir::expr::ExprKind::Ident(tmp_token.clone())),
                 token: token.clone(),
                 r_expr: Box::new(hir::expr::ExprKind::Unary {
-                    token: Token { token: TokenType::Amp, ..token.clone() },
+                    token: Token { kind: TokenKind::Amp, ..token.clone() },
                     right: Box::new(l_expr),
                 }),
             }),
             right: Box::new(hir::expr::ExprKind::Assign {
                 l_expr: Box::new(hir::expr::ExprKind::Unary {
-                    token: Token { token: TokenType::Star, ..token.clone() },
+                    token: Token { kind: TokenKind::Star, ..token.clone() },
                     right: Box::new(hir::expr::ExprKind::Ident(tmp_token.clone())),
                 }),
                 token: token.clone(),
                 r_expr: Box::new(hir::expr::ExprKind::Binary {
                     left: Box::new(hir::expr::ExprKind::Unary {
-                        token: Token { token: TokenType::Star, ..token.clone() },
+                        token: Token { kind: TokenKind::Star, ..token.clone() },
                         right: Box::new(hir::expr::ExprKind::Ident(tmp_token.clone())),
                     }),
                     token: Token {
-                        token: token.token.comp_to_binary(),
+                        kind: token.kind.comp_to_binary(),
                         ..token
                     },
                     right: Box::new(r_expr),
@@ -1770,13 +1712,11 @@ impl TypeChecker {
             )))?;
 
             // cast argument to the correct parameter type
-            new_args.push(
-                if param_type.size() > Type::Primitive(Primitive::Char).size() {
-                    Self::maybe_cast(param_type.clone(), arg)
-                } else {
-                    arg
-                },
-            );
+            new_args.push(if param_type.size() > Type::Primitive(Primitive::Char).size() {
+                Self::maybe_cast(param_type.clone(), arg)
+            } else {
+                arg
+            });
         }
 
         new_args.extend(remaining_args);
@@ -1799,7 +1739,7 @@ impl TypeChecker {
         if !left.type_decl.is_scalar() || !right.type_decl.is_scalar() {
             return Err(Error::new(
                 &token,
-                ErrorKind::InvalidLogical(token.token.clone(), left.type_decl, right.type_decl),
+                ErrorKind::InvalidLogical(token.kind.clone(), left.type_decl, right.type_decl),
             ));
         }
 
@@ -1807,7 +1747,7 @@ impl TypeChecker {
             kind: mir::expr::ExprKind::Logical {
                 left: Box::new(left),
                 right: Box::new(right),
-                operator: token.token,
+                operator: token.kind,
             },
             type_decl: Type::Primitive(Primitive::Int),
             value_kind: ValueKind::Rvalue,
@@ -1831,7 +1771,7 @@ impl TypeChecker {
         if Self::check_type_compatibility(&token, &left.type_decl, &right).is_err() {
             return Err(Error::new(
                 &token,
-                ErrorKind::InvalidComp(token.token.clone(), left.type_decl, right.type_decl),
+                ErrorKind::InvalidComp(token.kind.clone(), left.type_decl, right.type_decl),
             ));
         }
 
@@ -1846,7 +1786,7 @@ impl TypeChecker {
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Comparison {
-                operator: token.token,
+                operator: token.kind,
                 left: Box::new(left),
                 right: Box::new(right),
             },
@@ -1870,10 +1810,10 @@ impl TypeChecker {
         let right = right.array_decay();
 
         // check valid operations
-        if !is_valid_bin(&token.token, &left.type_decl, &right.type_decl, &right) {
+        if !is_valid_bin(&token.kind, &left.type_decl, &right.type_decl, &right) {
             return Err(Error::new(
                 &token,
-                ErrorKind::InvalidBinary(token.token.clone(), left.type_decl, right.type_decl),
+                ErrorKind::InvalidBinary(token.kind.clone(), left.type_decl, right.type_decl),
             ));
         }
 
@@ -1889,17 +1829,17 @@ impl TypeChecker {
             expr.kind = mir::expr::ExprKind::ScaleUp { by: amount, expr: Box::new(expr.clone()) };
         }
 
-        Ok(Self::binary_type_promotion(token.token, left, right))
+        Ok(Self::binary_type_promotion(token.kind, left, right))
     }
     fn binary_type_promotion(
-        operator: TokenType,
+        operator: TokenKind,
         left: mir::expr::Expr,
         right: mir::expr::Expr,
     ) -> mir::expr::Expr {
         let (left, right, scale_factor) =
             match (left.type_decl.clone(), right.type_decl.clone(), &operator) {
                 // shift operations always have the type of the left operand
-                (.., TokenType::GreaterGreater | TokenType::LessLess) => (left, right, None),
+                (.., TokenKind::GreaterGreater | TokenKind::LessLess) => (left, right, None),
 
                 // if pointer - pointer, scale result before operation to match left-pointers type
                 (Type::Pointer(inner), Type::Pointer(_), _) => (left, right, Some(inner.size())),
@@ -1951,49 +1891,45 @@ impl TypeChecker {
     ) -> Result<mir::expr::Expr, Error> {
         let right = self.visit_expr(right)?;
 
-        if matches!(token.token, TokenType::Amp) {
+        if matches!(token.kind, TokenKind::Amp) {
             // array doesn't decay during '&' expression
             self.check_address(token, right)
         } else {
             let mut right = right.array_decay();
 
-            match token.token {
-                TokenType::Star => self.check_deref(token, right),
-                TokenType::Bang => {
+            match token.kind {
+                TokenKind::Star => self.check_deref(token, right),
+                TokenKind::Bang => {
                     right.to_rval();
                     let right = Box::new(right.maybe_int_promote());
 
                     if !right.type_decl.is_scalar() {
                         return Err(Error::new(
                             &token,
-                            ErrorKind::InvalidUnary(token.token.clone(), right.type_decl, "scalar"),
+                            ErrorKind::InvalidUnary(token.kind.clone(), right.type_decl, "scalar"),
                         ));
                     }
 
                     Ok(mir::expr::Expr {
-                        kind: mir::expr::ExprKind::Unary { operator: token.token, right },
+                        kind: mir::expr::ExprKind::Unary { operator: token.kind, right },
                         type_decl: Type::Primitive(Primitive::Int),
                         value_kind: ValueKind::Rvalue,
                     })
                 }
-                TokenType::Minus | TokenType::Tilde | TokenType::Plus => {
+                TokenKind::Minus | TokenKind::Tilde | TokenKind::Plus => {
                     right.to_rval();
                     let right = Box::new(right.maybe_int_promote());
 
                     if !right.type_decl.is_integer() {
                         return Err(Error::new(
                             &token,
-                            ErrorKind::InvalidUnary(
-                                token.token.clone(),
-                                right.type_decl,
-                                "integer",
-                            ),
+                            ErrorKind::InvalidUnary(token.kind.clone(), right.type_decl, "integer"),
                         ));
                     }
 
                     Ok(mir::expr::Expr {
                         type_decl: right.type_decl.clone(),
-                        kind: mir::expr::ExprKind::Unary { operator: token.token, right },
+                        kind: mir::expr::ExprKind::Unary { operator: token.kind, right },
                         value_kind: ValueKind::Rvalue,
                     })
                 }
@@ -2001,18 +1937,14 @@ impl TypeChecker {
             }
         }
     }
-    fn check_address(
-        &self,
-        token: Token,
-        right: mir::expr::Expr,
-    ) -> Result<mir::expr::Expr, Error> {
+    fn check_address(&self, token: Token, right: mir::expr::Expr) -> Result<mir::expr::Expr, Error> {
         if right.value_kind == ValueKind::Lvalue {
             Ok(mir::expr::Expr {
                 type_decl: right.type_decl.clone().pointer_to(),
                 value_kind: ValueKind::Rvalue,
                 kind: mir::expr::ExprKind::Unary {
                     right: Box::new(right),
-                    operator: token.token,
+                    operator: token.kind,
                 },
             })
         } else {
@@ -2029,14 +1961,11 @@ impl TypeChecker {
                 type_decl: inner,
                 kind: mir::expr::ExprKind::Unary {
                     right: Box::new(right),
-                    operator: token.token,
+                    operator: token.kind,
                 },
             })
         } else {
-            Err(Error::new(
-                &token,
-                ErrorKind::InvalidDerefType(right.type_decl),
-            ))
+            Err(Error::new(&token, ErrorKind::InvalidDerefType(right.type_decl)))
         }
     }
 }
@@ -2072,16 +2001,8 @@ impl Scope {
         let ScopeKind::Function(func_symbol, _) = find_scope!(self,ScopeKind::Function(..))
             .expect("ensured by parser that label is always inside function") else {unreachable!()};
 
-        if func_symbol
-            .borrow()
-            .unwrap_func()
-            .labels
-            .contains_key(&name)
-        {
-            return Err(Error::new(
-                name_token,
-                ErrorKind::Redefinition("Label", name),
-            ));
+        if func_symbol.borrow().unwrap_func().labels.contains_key(&name) {
+            return Err(Error::new(name_token, ErrorKind::Redefinition("Label", name)));
         }
         let len = func_symbol.borrow().unwrap_func().labels.len();
         func_symbol
@@ -2105,12 +2026,7 @@ impl Scope {
 
         for g in gotos {
             let label = g.unwrap_string();
-            if !func_symbol
-                .borrow()
-                .unwrap_func()
-                .labels
-                .contains_key(&label)
-            {
+            if !func_symbol.borrow().unwrap_func().labels.contains_key(&label) {
                 return Err(Error::new(g, ErrorKind::UndeclaredLabel(label)));
             }
         }
@@ -2200,7 +2116,7 @@ pub fn create_label(index: &mut usize) -> usize {
 }
 
 pub fn is_valid_bin(
-    operator: &TokenType,
+    operator: &TokenKind,
     left_type: &Type,
     right_type: &Type,
     right_expr: &impl hir::expr::IsZero,
@@ -2209,17 +2125,16 @@ pub fn is_valid_bin(
         (Type::Primitive(Primitive::Void), _) | (_, Type::Primitive(Primitive::Void)) => false,
         (Type::Pointer(_), Type::Pointer(_)) => {
             if left_type.type_compatible(right_type, right_expr) {
-                operator == &TokenType::Minus
+                operator == &TokenKind::Minus
             } else {
                 false
             }
         }
-        (_, Type::Pointer(_)) => operator == &TokenType::Plus,
-        (Type::Pointer(_), _) => operator == &TokenType::Plus || operator == &TokenType::Minus,
-        (Type::Struct(..), _)
-        | (_, Type::Struct(..))
-        | (Type::Union(..), _)
-        | (_, Type::Union(..)) => false,
+        (_, Type::Pointer(_)) => operator == &TokenKind::Plus,
+        (Type::Pointer(_), _) => operator == &TokenKind::Plus || operator == &TokenKind::Minus,
+        (Type::Struct(..), _) | (_, Type::Struct(..)) | (Type::Union(..), _) | (_, Type::Union(..)) => {
+            false
+        }
         _ => true,
     }
 }
@@ -2232,12 +2147,8 @@ pub fn maybe_scale_index<'a, T>(
     right_expr: &'a mut T,
 ) -> Option<(&'a mut T, usize)> {
     match (left_type, right_type) {
-        (t, Type::Pointer(inner)) if !t.is_ptr() && inner.size() > 1 => {
-            Some((left_expr, inner.size()))
-        }
-        (Type::Pointer(inner), t) if !t.is_ptr() && inner.size() > 1 => {
-            Some((right_expr, inner.size()))
-        }
+        (t, Type::Pointer(inner)) if !t.is_ptr() && inner.size() > 1 => Some((left_expr, inner.size())),
+        (Type::Pointer(inner), t) if !t.is_ptr() && inner.size() > 1 => Some((right_expr, inner.size())),
         _ => None,
     }
 }
@@ -2310,7 +2221,7 @@ mod tests {
             // have to do manual array decay because is constant expects array to be decayed already
             if let Type::Array { .. } = expr.type_decl {
                 expr.kind = mir::expr::ExprKind::Unary {
-                    operator: TokenType::Amp,
+                    operator: TokenKind::Amp,
                     right: Box::new(expr.clone()),
                 };
             }

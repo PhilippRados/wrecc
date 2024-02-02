@@ -95,14 +95,14 @@ impl PrintIndent for ExprKind {
         match &self {
             ExprKind::Binary { left, token, right } => format!(
                 "Binary: {}\n{}\n{}",
-                token.token,
+                token.kind,
                 indent_fmt(left.as_ref(), indent_level + 1),
                 indent_fmt(right.as_ref(), indent_level + 1)
             ),
             ExprKind::Unary { token, right, .. } => {
                 format!(
                     "Unary: {}\n{}",
-                    token.token,
+                    token.kind,
                     indent_fmt(right.as_ref(), indent_level + 1)
                 )
             }
@@ -121,13 +121,13 @@ impl PrintIndent for ExprKind {
             ExprKind::String(token) => format!("String: '{}'", token.unwrap_string()),
             ExprKind::Logical { token, left, right } => format!(
                 "Logical: {}\n{}\n{}",
-                token.token,
+                token.kind,
                 indent_fmt(left.as_ref(), indent_level + 1),
                 indent_fmt(right.as_ref(), indent_level + 1)
             ),
             ExprKind::Comparison { token, left, right } => format!(
                 "Comparison: {}\n{}\n{}",
-                token.token,
+                token.kind,
                 indent_fmt(left.as_ref(), indent_level + 1),
                 indent_fmt(right.as_ref(), indent_level + 1)
             ),
@@ -155,7 +155,7 @@ impl PrintIndent for ExprKind {
             }
             ExprKind::PostUnary { token, left, .. } => format!(
                 "PostUnary: {}\n{}",
-                token.token,
+                token.kind,
                 indent_fmt(left.as_ref(), indent_level + 1)
             ),
             ExprKind::MemberAccess { member, expr, .. } => format!(
@@ -166,7 +166,7 @@ impl PrintIndent for ExprKind {
             ExprKind::CompoundAssign { token, l_expr, r_expr } => {
                 format!(
                     "CompoundAssign: {}\n{}\n{}",
-                    token.token,
+                    token.kind,
                     indent_fmt(l_expr.as_ref(), indent_level + 1),
                     indent_fmt(r_expr.as_ref(), indent_level + 1)
                 )

@@ -1,2 +1,3 @@
+max_width = 105
 struct_lit_width = 40
 struct_variant_width  = 60

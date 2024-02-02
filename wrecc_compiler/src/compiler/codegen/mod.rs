@@ -404,13 +404,7 @@ impl Compiler {
             }
         }
     }
-    fn init_global_var(
-        &mut self,
-        name: String,
-        type_decl: Type,
-        var_symbol: VarSymbol,
-        init: Init,
-    ) {
+    fn init_global_var(&mut self, name: String, type_decl: Type, var_symbol: VarSymbol, init: Init) {
         var_symbol
             .borrow_mut()
             .unwrap_var_mut()
@@ -528,12 +522,7 @@ impl Compiler {
         func_symbol.borrow_mut().unwrap_func_mut().epilogue_index = function_epilogue;
 
         // create a label for all goto-labels inside a function
-        for value in func_symbol
-            .borrow_mut()
-            .unwrap_func_mut()
-            .labels
-            .values_mut()
-        {
+        for value in func_symbol.borrow_mut().unwrap_func_mut().labels.values_mut() {
             *value = create_label(&mut self.label_index);
         }
 
@@ -630,8 +619,8 @@ impl Compiler {
             ExprKind::Unary { operator, right } => {
                 let mut reg = self.execute_global_expr(*right);
                 match operator {
-                    TokenType::Amp => reg.set_type(Type::Pointer(Box::new(reg.get_type()))),
-                    TokenType::Star => reg.set_type(expr.type_decl),
+                    TokenKind::Amp => reg.set_type(Type::Pointer(Box::new(reg.get_type()))),
+                    TokenKind::Star => reg.set_type(expr.type_decl),
                     _ => unreachable!("non-constant unary expression"),
                 }
                 reg
@@ -646,17 +635,15 @@ impl Compiler {
 
                         reg.set_type(member_type);
                         match reg {
-                            StaticRegister::Label(label_reg) => StaticRegister::LabelOffset(
-                                label_reg,
-                                offset as i64,
-                                TokenType::Plus,
-                            ),
+                            StaticRegister::Label(label_reg) => {
+                                StaticRegister::LabelOffset(label_reg, offset as i64, TokenKind::Plus)
+                            }
                             StaticRegister::LabelOffset(reg, existant_offset, _) => {
                                 let offset = existant_offset + offset as i64;
                                 if offset < 0 {
-                                    StaticRegister::LabelOffset(reg, offset.abs(), TokenType::Minus)
+                                    StaticRegister::LabelOffset(reg, offset.abs(), TokenKind::Minus)
                                 } else {
-                                    StaticRegister::LabelOffset(reg, offset, TokenType::Plus)
+                                    StaticRegister::LabelOffset(reg, offset, TokenKind::Plus)
                                 }
                             }
                             _ => unreachable!("Literal can't be struct address"),
@@ -680,19 +667,13 @@ impl Compiler {
                         StaticRegister::LabelOffset(reg, n, operator)
                     }
 
-                    (
-                        StaticRegister::LabelOffset(reg, offset, _),
-                        StaticRegister::Literal(n, _),
-                    )
-                    | (
-                        StaticRegister::Literal(n, _),
-                        StaticRegister::LabelOffset(reg, offset, _),
-                    ) => {
+                    (StaticRegister::LabelOffset(reg, offset, _), StaticRegister::Literal(n, _))
+                    | (StaticRegister::Literal(n, _), StaticRegister::LabelOffset(reg, offset, _)) => {
                         let offset = n + offset;
                         if offset < 0 {
-                            StaticRegister::LabelOffset(reg, offset.abs(), TokenType::Minus)
+                            StaticRegister::LabelOffset(reg, offset.abs(), TokenKind::Minus)
                         } else {
-                            StaticRegister::LabelOffset(reg, offset, TokenType::Plus)
+                            StaticRegister::LabelOffset(reg, offset, TokenKind::Plus)
                         }
                     }
                     _ => unreachable!(),
@@ -732,9 +713,7 @@ impl Compiler {
             ExprKind::CompoundAssign { expr, tmp_symbol } => self.cg_comp_assign(*expr, tmp_symbol),
             ExprKind::Ident(var_symbol) => var_symbol.borrow().unwrap_var().get_reg(),
             ExprKind::Call { name, args } => self.cg_call(name, args, expr.type_decl),
-            ExprKind::Cast { expr, direction, new_type } => {
-                self.cg_cast(new_type, *expr, direction)
-            }
+            ExprKind::Cast { expr, direction, new_type } => self.cg_cast(new_type, *expr, direction),
             ExprKind::ScaleUp { expr, by } => self.cg_scale_up(*expr, by),
             ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(*expr, shift_amount),
             ExprKind::String(name) => self.cg_string(name),
@@ -975,14 +954,14 @@ impl Compiler {
         }
     }
 
-    fn cg_logical(&mut self, left: Expr, operator: TokenType, right: Expr) -> Register {
+    fn cg_logical(&mut self, left: Expr, operator: TokenKind, right: Expr) -> Register {
         match operator {
-            TokenType::AmpAmp => self.cg_and(left, right),
-            TokenType::PipePipe => self.cg_or(left, right),
+            TokenKind::AmpAmp => self.cg_and(left, right),
+            TokenKind::PipePipe => self.cg_or(left, right),
             _ => unreachable!(),
         }
     }
-    fn compare(&mut self, left: Expr, operator: TokenType, right: Expr) -> Register {
+    fn compare(&mut self, left: Expr, operator: TokenKind, right: Expr) -> Register {
         let left_reg = self.execute_expr(left);
         let right_reg = self.execute_expr(right);
 
@@ -990,22 +969,17 @@ impl Compiler {
         let right_reg = self.convert_to_rval(right_reg);
 
         match operator {
-            TokenType::EqualEqual => self.cg_comparison("sete", left_reg, right_reg),
-            TokenType::BangEqual => self.cg_comparison("setne", left_reg, right_reg),
-            TokenType::Greater => self.cg_comparison("setg", left_reg, right_reg),
-            TokenType::GreaterEqual => self.cg_comparison("setge", left_reg, right_reg),
-            TokenType::Less => self.cg_comparison("setl", left_reg, right_reg),
-            TokenType::LessEqual => self.cg_comparison("setle", left_reg, right_reg),
+            TokenKind::EqualEqual => self.cg_comparison("sete", left_reg, right_reg),
+            TokenKind::BangEqual => self.cg_comparison("setne", left_reg, right_reg),
+            TokenKind::Greater => self.cg_comparison("setg", left_reg, right_reg),
+            TokenKind::GreaterEqual => self.cg_comparison("setge", left_reg, right_reg),
+            TokenKind::Less => self.cg_comparison("setl", left_reg, right_reg),
+            TokenKind::LessEqual => self.cg_comparison("setle", left_reg, right_reg),
             _ => unreachable!(),
         }
     }
 
-    fn cg_comparison(
-        &mut self,
-        operator: &'static str,
-        left: Register,
-        right: Register,
-    ) -> Register {
+    fn cg_comparison(&mut self, operator: &'static str, left: Register, right: Register) -> Register {
         let left = convert_reg!(
             self,
             left,
@@ -1129,18 +1103,18 @@ impl Compiler {
 
         result
     }
-    fn cg_unary(&mut self, operator: TokenType, right: Expr, new_type: Type) -> Register {
+    fn cg_unary(&mut self, operator: TokenKind, right: Expr, new_type: Type) -> Register {
         let mut reg = self.execute_expr(right);
         // can't have literal as only operand to unary expression
         reg = convert_reg!(self, reg, Register::Literal(..));
 
         match operator {
-            TokenType::Bang => self.cg_bang(reg),
-            TokenType::Minus => self.cg_negate(reg),
-            TokenType::Plus => reg,
-            TokenType::Amp => self.cg_address_at(reg, true),
-            TokenType::Star => self.cg_deref(reg, new_type),
-            TokenType::Tilde => self.cg_bit_not(reg),
+            TokenKind::Bang => self.cg_bang(reg),
+            TokenKind::Minus => self.cg_negate(reg),
+            TokenKind::Plus => reg,
+            TokenKind::Amp => self.cg_address_at(reg, true),
+            TokenKind::Star => self.cg_deref(reg, new_type),
+            TokenKind::Tilde => self.cg_bit_not(reg),
             _ => unreachable!(),
         }
     }
@@ -1344,28 +1318,20 @@ impl Compiler {
 
         left
     }
-    fn cg_binary(
-        &mut self,
-        left_reg: Register,
-        token: &TokenType,
-        right_reg: Register,
-    ) -> Register {
-        let (left_reg, right_reg) = (
-            self.convert_to_rval(left_reg),
-            self.convert_to_rval(right_reg),
-        );
+    fn cg_binary(&mut self, left_reg: Register, token: &TokenKind, right_reg: Register) -> Register {
+        let (left_reg, right_reg) = (self.convert_to_rval(left_reg), self.convert_to_rval(right_reg));
 
         match token {
-            TokenType::Plus => self.cg_add(left_reg, right_reg),
-            TokenType::Minus => self.cg_sub(left_reg, right_reg),
-            TokenType::Star => self.cg_mult(left_reg, right_reg),
-            TokenType::Slash => self.cg_div(left_reg, right_reg),
-            TokenType::Mod => self.cg_mod(left_reg, right_reg),
-            TokenType::Xor => self.cg_bit_xor(left_reg, right_reg),
-            TokenType::Pipe => self.cg_bit_or(left_reg, right_reg),
-            TokenType::Amp => self.cg_bit_and(left_reg, right_reg),
-            TokenType::LessLess => self.cg_shift("l", left_reg, right_reg),
-            TokenType::GreaterGreater => self.cg_shift("r", left_reg, right_reg),
+            TokenKind::Plus => self.cg_add(left_reg, right_reg),
+            TokenKind::Minus => self.cg_sub(left_reg, right_reg),
+            TokenKind::Star => self.cg_mult(left_reg, right_reg),
+            TokenKind::Slash => self.cg_div(left_reg, right_reg),
+            TokenKind::Mod => self.cg_mod(left_reg, right_reg),
+            TokenKind::Xor => self.cg_bit_xor(left_reg, right_reg),
+            TokenKind::Pipe => self.cg_bit_or(left_reg, right_reg),
+            TokenKind::Amp => self.cg_bit_and(left_reg, right_reg),
+            TokenKind::LessLess => self.cg_shift("l", left_reg, right_reg),
+            TokenKind::GreaterGreater => self.cg_shift("r", left_reg, right_reg),
             _ => unreachable!(),
         }
     }
@@ -1401,12 +1367,7 @@ impl Compiler {
                 assert!(!self.live_intervals.contains_key(&reg.id));
                 self.live_intervals.insert(
                     reg.id,
-                    IntervalEntry::new(
-                        reg.start_idx,
-                        self.instr_counter,
-                        Some(reg.reg),
-                        reg.type_decl,
-                    ),
+                    IntervalEntry::new(reg.start_idx, self.instr_counter, Some(reg.reg), reg.type_decl),
                 );
             }
             _ => (),

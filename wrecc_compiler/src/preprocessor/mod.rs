@@ -506,6 +506,8 @@ impl<'a> Preprocessor<'a> {
 
         Ok(result)
     }
+    // skip_to_end is set if a branch has already been taken before-hand and nothing in that #if
+    // should still be evaluated
     fn skip_branch(&mut self, skip_to_end: bool) -> Result<Token, Error> {
         let matching_if = self.ifs.len();
 
@@ -542,7 +544,7 @@ impl<'a> Preprocessor<'a> {
                                 }
                                 _ => (),
                             }
-                            if !skip_to_end {
+                            if !skip_to_end && self.ifs.len() == matching_if {
                                 return Ok(token);
                             }
                         }
@@ -915,6 +917,28 @@ char empty = 0;
 ",
         );
         let expected = "\n\nchar empty = 0;\n";
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn nested_if_else() {
+        let actual = setup_complete(
+            "
+#if 0
+#if 1
+char e;
+#else
+char f;
+#endif
+#else
+#if 1
+char g;
+#else
+char h;
+#endif
+#endif",
+        );
+        let expected = "\n\n\nchar g;\n\n";
 
         assert_eq!(actual, expected);
     }

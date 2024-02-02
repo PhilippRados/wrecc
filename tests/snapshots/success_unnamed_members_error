@@ -1,0 +1,16 @@
+error: Can't have empty 'struct'
+|  --> in tests/fixtures/unnamed_members_error.c:1:1
+|
+1 struct {
+| ^
+error: Expected identifier following type-specifier
+|  --> in tests/fixtures/unnamed_members_error.c:13:8
+|
+13   int *;
+|         ^
+error: Can't have empty 'union'
+|  --> in tests/fixtures/unnamed_members_error.c:12:1
+|
+12 union {
+|  ^
+3 errors generated.

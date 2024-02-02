@@ -43,6 +43,11 @@ error: Storage classes not allowed in this specifier
 |
 28     typedef long b;
 |      ^
+error: Can't have empty 'struct'
+|  --> in tests/fixtures/parser_recovery.c:27:3
+|
+27   struct {
+|    ^
 error: Expect ';' after member declaration
 |  --> in tests/fixtures/parser_recovery.c:32:1
 |
@@ -103,4 +108,4 @@ error: Expect ';' after declaration
 |
 64 int x, x(){};
 |            ^
-21 errors generated.
+22 errors generated.

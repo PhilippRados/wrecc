@@ -383,9 +383,8 @@ impl TypeChecker {
         for (spec, declarators) in members {
             let specifier_type = self.parse_specifiers(spec)?;
 
-            for hir::decl::Declarator { name, modifiers } in declarators {
+            for hir::decl::MemberDeclarator { name, modifiers } in declarators {
                 let parsed_type = self.parse_modifiers(specifier_type.clone(), modifiers)?;
-                let name = name.expect("cannot have abstract declarators in structs");
 
                 if !parsed_type.is_complete() {
                     return Err(Error::new(&name, ErrorKind::IncompleteType(parsed_type)));

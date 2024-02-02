@@ -28,7 +28,13 @@ pub struct DeclSpecifier {
     pub kind: SpecifierKind,
 }
 
-pub type MemberDeclaration = (Vec<DeclSpecifier>, Vec<Declarator>);
+pub type MemberDeclaration = (Vec<DeclSpecifier>, Vec<MemberDeclarator>);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemberDeclarator {
+    pub name: Token,
+    pub modifiers: Vec<DeclModifier>,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SpecifierKind {

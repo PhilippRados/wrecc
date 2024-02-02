@@ -519,18 +519,23 @@ impl Parser {
         let mut members = Vec::new();
         let mut errors = Vec::new();
 
-        if self.check(TokenKind::RightBrace) {
-            return Err(Error::new(token, ErrorKind::IsEmpty(token.token.clone())));
-        }
-
         while self.matches(&[TokenKind::RightBrace]).is_none() {
             let result = || -> Result<(), Error> {
                 let (specifiers, _) = self.declaration_specifiers(false)?;
                 let mut declarators = Vec::new();
 
                 loop {
-                    let declarator = self.declarator(DeclaratorKind::NoAbstract)?;
-                    declarators.push(declarator);
+                    // allows `int;` but not `int *;`
+                    if let TokenType::Semicolon = self.tokens.peek()?.token {
+                        break;
+                    }
+
+                    let Declarator { name, modifiers } =
+                        self.declarator(DeclaratorKind::NoAbstract)?;
+                    declarators.push(MemberDeclarator {
+                        name: name.expect("member cannot be abstract declarator"),
+                        modifiers,
+                    });
 
                     if self.matches(&[TokenKind::Comma]).is_none() {
                         break;
@@ -547,6 +552,10 @@ impl Parser {
             }();
 
             self.maybe_sync(result, &mut errors, TokenType::Semicolon);
+        }
+
+        if members.iter().all(|(_, decl)| decl.is_empty()) {
+            errors.push(Error::new(token, ErrorKind::IsEmpty(token.token.clone())))
         }
 
         if errors.is_empty() {

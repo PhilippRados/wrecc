@@ -23,19 +23,14 @@ macro_rules! match_next {
     }};
 }
 macro_rules! consume {
-    ($parser:expr,$expected:pat,$msg:expr) => {
-        match $parser.tokens.peek("") {
-            Ok(token) => {
-                if matches!(token.kind, $expected) {
-                    Ok($parser.tokens.next().unwrap())
-                } else {
-                    Err(Error::new(token, ErrorKind::Regular($msg)))
-                }
-            }
-            Err((Some(token), _)) => Err(Error::new(&token, ErrorKind::Eof($msg))),
-            Err(_) => Err(Error::eof($msg)),
+    ($parser:expr,$expected:pat,$msg:expr) => {{
+        let token = $parser.tokens.peek($msg)?;
+        if matches!(token.kind, $expected) {
+            Ok($parser.tokens.next().unwrap())
+        } else {
+            Err(Error::new(token, ErrorKind::Regular($msg)))
         }
-    };
+    }};
 }
 macro_rules! check {
     ($parser:expr,$expected:pat) => {
@@ -139,13 +134,6 @@ impl Parser {
                 declarators: Vec::new(),
             }));
         }
-        // if self.matches(&[TokenKind::Semicolon]).is_some() {
-        //     return Ok(ExternalDeclaration::Declaration(Declaration {
-        //         specifiers,
-        //         is_typedef,
-        //         declarators: Vec::new(),
-        //     }));
-        // }
 
         let declarator = self.declarator(DeclaratorKind::NoAbstract)?;
 
@@ -226,14 +214,24 @@ impl Parser {
         &mut self,
         kind: DeclaratorKind,
     ) -> Result<(Option<Token>, Option<Vec<DeclModifier>>), Error> {
-        if match_next!(self, TokenKind::LeftParen).is_some() {
-            let declarator = self.declarator(kind)?;
-            consume!(
-                self,
-                TokenKind::RightParen,
-                "Expected closing ')' after declarator"
-            )?;
-            return Ok((declarator.name, Some(declarator.modifiers)));
+        if let Ok(left_paren @ Token { kind: TokenKind::LeftParen, .. }) = self.tokens.peek("") {
+            // have to check that abstract function-decl `int (<type>)` is not mistaken as `int (<declarator>)`
+            // also have to catch that `int ()` is not `int` with missing declarator but a
+            // function `int (void)`.
+            match self.tokens.first_token_after(left_paren) {
+                Some(Token { kind: TokenKind::RightParen, .. }) => (),
+                Some(token) if !self.is_type(token) => {
+                    self.tokens.next();
+                    let declarator = self.declarator(kind)?;
+                    consume!(
+                        self,
+                        TokenKind::RightParen,
+                        "Expected closing ')' after declarator"
+                    )?;
+                    return Ok((declarator.name, Some(declarator.modifiers)));
+                }
+                _ => (),
+            }
         }
 
         let name = match kind {
@@ -1245,7 +1243,7 @@ impl Parser {
         }
         Ok(expr)
     }
-    fn call(&mut self, left_paren: Token, callee: ExprKind) -> Result<ExprKind, Error> {
+    fn call(&mut self, left_paren: Token, caller: ExprKind) -> Result<ExprKind, Error> {
         let mut args = Vec::new();
         if !check!(self, TokenKind::RightParen) {
             loop {
@@ -1256,14 +1254,11 @@ impl Parser {
             }
         }
         consume!(self, TokenKind::RightParen, "Expect ')' after function call")?;
-        if let ExprKind::Ident(name) = callee {
-            Ok(ExprKind::Call { left_paren, name, args })
-        } else {
-            Err(Error::new(
-                &left_paren,
-                ErrorKind::Regular("Function-name has to be identifier"),
-            ))
-        }
+        Ok(ExprKind::Call {
+            left_paren,
+            caller: Box::new(caller),
+            args,
+        })
     }
     fn primary(&mut self) -> Result<ExprKind, Error> {
         if let Some(n) = match_next!(self, TokenKind::Number(_)) {
@@ -1333,17 +1328,6 @@ impl Parser {
     }
     fn is_specifier(&self, token: &Token) -> bool {
         self.is_type(token) || matches!(token.kind, TokenKind::TypeDef)
-    }
-}
-
-impl From<(Option<Token>, ErrorKind)> for Error {
-    fn from((eof_token, kind): (Option<Token>, ErrorKind)) -> Self {
-        if let Some(eof_token) = eof_token {
-            Error::new(&eof_token, kind)
-        } else {
-            // QUESTION: is this ever reached?
-            Error::eof("Expected expression")
-        }
     }
 }
 
@@ -1558,12 +1542,14 @@ FuncDef: 'main'
 -------Literal: 2
 ------Block:
 -------Expr:
---------FuncCall: 'printf'
+--------FuncCall:
+---------Ident: 'printf'
 ---------String: 'case'
 -------Break
 -----Default:
 ------Expr:
--------FuncCall: 'printf'
+-------FuncCall:
+--------Ident: 'printf'
 --------String: 'hello'
 --Block:
 ---For:

@@ -9,7 +9,7 @@ pub enum ExprKind {
     CompoundAssign { expr: Box<Expr>, tmp_symbol: VarSymbol },
     Logical { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
     Comparison { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
-    Call { name: String, args: Vec<Expr> },
+    Call { caller: Box<Expr>, args: Vec<Expr> },
     Cast { new_type: Type, direction: CastDirection, expr: Box<Expr> },
     ScaleUp { by: usize, expr: Box<Expr> },
     ScaleDown { shift_amount: usize, expr: Box<Expr> },
@@ -42,9 +42,12 @@ pub struct Expr {
     pub value_kind: ValueKind,
 }
 impl Expr {
-    pub fn array_decay(self) -> Expr {
-        if let Type::Array { of, .. } = self.type_decl.clone() {
-            Expr {
+    // both arrays and function types decay into:
+    // int a[4] => int *a;
+    // int f() => int (*f)()
+    pub fn decay(self) -> Expr {
+        match self.type_decl.clone() {
+            Type::Array { of, .. } => Expr {
                 value_kind: self.value_kind.clone(),
                 type_decl: of.pointer_to(),
 
@@ -52,9 +55,17 @@ impl Expr {
                     operator: TokenKind::Amp,
                     right: Box::new(self),
                 },
-            }
-        } else {
-            self
+            },
+            ty @ Type::Function(_) => Expr {
+                value_kind: self.value_kind.clone(),
+                type_decl: ty.pointer_to(),
+
+                kind: ExprKind::Unary {
+                    operator: TokenKind::Amp,
+                    right: Box::new(self),
+                },
+            },
+            _ => self,
         }
     }
     pub fn to_rval(&mut self) {

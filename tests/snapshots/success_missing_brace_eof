@@ -1,11 +1,6 @@
 error: Expected closing '}' after block, found end of file
-|  --> in tests/fixtures/missing_brace_eof.c:3:21
+|  --> in tests/fixtures/missing_brace_eof.c:5:21
 |
-3     { int age = 12; }
+5     { int age = 12; }
 |                     ^
-error: Expected closing '}' after block, found end of file
-|  --> in tests/fixtures/missing_brace_eof.c:3:21
-|
-3     { int age = 12; }
-|                     ^
-2 errors generated.
+1 error generated.

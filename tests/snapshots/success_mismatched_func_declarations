@@ -1,6 +1,6 @@
-error: Mismatched parameter-types in function-declarations: expected 1st parameter to be of type 'char', found 'int'
-|  --> in tests/fixtures/mismatched_func_declarations.c:2:14
+error: Conflicting types for 'some': 'int (int)' vs 'int (char)'
+|  --> in tests/fixtures/mismatched_func_declarations.c:2:5
 |
 2 int some(int i);
-|              ^
+|     ^
 1 error generated.

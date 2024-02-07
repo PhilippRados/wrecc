@@ -39,7 +39,7 @@ pub enum ExprKind {
     },
     Call {
         left_paren: Token,
-        name: Token,
+        caller: Box<ExprKind>,
         args: Vec<ExprKind>,
     },
     Cast {
@@ -131,7 +131,7 @@ impl PrintIndent for ExprKind {
                 indent_fmt(left.as_ref(), indent_level + 1),
                 indent_fmt(right.as_ref(), indent_level + 1)
             ),
-            ExprKind::Call { name, args, .. } => {
+            ExprKind::Call { caller, args, .. } => {
                 let mut args: String = args
                     .iter()
                     .map(|arg| indent_fmt(arg, indent_level + 1))
@@ -140,7 +140,11 @@ impl PrintIndent for ExprKind {
                 if !args.is_empty() {
                     args.insert(0, '\n');
                 }
-                format!("FuncCall: '{}'{}", name.unwrap_string(), args)
+                format!(
+                    "FuncCall:\n{}{}",
+                    indent_fmt(caller.as_ref(), indent_level + 1),
+                    args
+                )
             }
             ExprKind::Cast { decl_type, expr, .. } => {
                 let type_string = TypeChecker::new()
@@ -185,10 +189,7 @@ impl PrintIndent for ExprKind {
                 )
             }
             ExprKind::SizeofExpr { expr, .. } => {
-                format!(
-                    "SizeofExpr:\n{}",
-                    indent_fmt(expr.as_ref(), indent_level + 1)
-                )
+                format!("SizeofExpr:\n{}", indent_fmt(expr.as_ref(), indent_level + 1))
             }
             ExprKind::SizeofType { decl_type } => {
                 let type_string = TypeChecker::new()

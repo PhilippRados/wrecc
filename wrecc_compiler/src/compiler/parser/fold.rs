@@ -700,7 +700,7 @@ mod tests {
             "(struct {int age;})2",
             ErrorKind::InvalidConstCast(
                 Type::Primitive(Primitive::Int),
-                Type::Struct(StructInfo::Anonymous(..)),
+                Type::Struct(StructInfo::Unnamed(..)),
             )
         );
     }

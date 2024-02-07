@@ -1,4 +1,4 @@
-void printf(char* f,int d, int d2);
+void printf(char *f, int d, int d2);
 
 struct Emp {
   int age;
@@ -8,7 +8,8 @@ struct Emp {
 };
 
 int main() {
-  struct Emp arr[3] = {[1].age = 1, [2] = {.age = 1, .some[1].other = 3}, [0] = 2, 3};
+  struct Emp arr[3] = {
+      [1].age = 1, [2] = {.age = 1, .some[1].other = 3}, [0] = 2, 3};
 
   for (int i = 0; i < 3; i++) {
     printf("%d: %d\n", i, arr[i].age);

@@ -63,8 +63,8 @@ pub enum ErrorKind {
     InvalidRvalueIncrement,
     NotAssignable(Type),
     NotLvalue,
-    MismatchedArity(String, usize, usize),
-    MismatchedArgs(usize, String, Option<Token>, Type, Type),
+    MismatchedArity(Type, usize, usize),
+    MismatchedArgs(usize, Type, Type, Type),
     InvalidLogical(TokenKind, Type, Type),
     InvalidBinary(TokenKind, Type, Type),
     InvalidComp(TokenKind, Type, Type),
@@ -78,12 +78,10 @@ pub enum ErrorKind {
     InitializerOverflow(Type),
     ScalarOverflow,
     InvalidArray(Type),
+    InvalidCaller(Type),
+    FunctionMember(String, Type),
 
     // environment errors
-    MismatchedFuncDeclReturn(Type, Type),
-    MismatchedFuncDeclArity(usize, usize),
-    TypeMismatchFuncDecl(usize, Type, Type),
-    MismatchedVariadic(bool, bool),
     UndeclaredSymbol(String),
     IntegerOverflow(Type),
 
@@ -172,10 +170,9 @@ impl ErrorKind {
                 "Redefinition of '{}' as different symbol. Already exists as '{}'",
                 name, kind
             ),
-            ErrorKind::RedefTypeMismatch(name, new, old) => format!(
-                "Redefinition of '{}' with different type: '{}' vs '{}'",
-                name, new, old
-            ),
+            ErrorKind::RedefTypeMismatch(name, new, old) => {
+                format!("Conflicting types for '{}': '{}' vs '{}'", name, new, old)
+            }
             ErrorKind::NonExistantMember(member, type_decl) => {
                 format!("No member '{}' in '{}'", member, type_decl)
             }
@@ -194,6 +191,16 @@ impl ErrorKind {
             }
             ErrorKind::ScalarOverflow => "Excess elements in scalar initializer".to_string(),
             ErrorKind::InvalidArray(type_decl) => format!("Invalid array-type: '{}'", type_decl),
+            ErrorKind::InvalidCaller(type_decl) => format!(
+                "Called object type: '{}' is not function or function pointer",
+                type_decl
+            ),
+            ErrorKind::FunctionMember(member_name, member_type) => {
+                format!(
+                    "Field '{}' has illegal function-type: '{}'",
+                    member_name, member_type
+                )
+            }
 
             ErrorKind::NonAggregateDesignator(type_decl) => {
                 format!(
@@ -273,27 +280,17 @@ impl ErrorKind {
                 format!("Type '{}' is not assignable", type_decl)
             }
             ErrorKind::NotLvalue => "Expect Lvalue left of assignment".to_string(),
-            ErrorKind::MismatchedArity(name, expected, actual) => {
+            ErrorKind::MismatchedArity(type_decl, expected, actual) => {
                 format!(
-                    "Function '{}' expected {} argument(s) found {}",
-                    name, expected, actual
+                    "Function of type '{}' expected {} argument(s) found {}",
+                    type_decl, expected, actual
                 )
             }
-            ErrorKind::MismatchedArgs(index, func_name, param_name, expected, actual) => {
-                match param_name {
-                    Some(name) => {
-                        format!(
-                            "Mismatched arguments in function '{}': expected parameter '{}' to be of type '{}', found '{}'",
-                            func_name,name.unwrap_string(), expected, actual
+            ErrorKind::MismatchedArgs(index, type_decl, expected, actual) => {
+                format!(
+                            "Mismatched arguments in function of type '{}': expected {} parameter to be of type '{}', found '{}'",
+                            type_decl,num_to_ord(index + 1),  expected, actual
                         )
-                    }
-                    None => {
-                        format!(
-                            "Mismatched arguments in function '{}': expected {} parameter to be of type '{}', found '{}'",
-                            func_name,num_to_ord(index + 1),  expected, actual
-                        )
-                    }
-                }
             }
             ErrorKind::InvalidLogical(token, left_type, right_type) => {
                 format!(
@@ -323,37 +320,6 @@ impl ErrorKind {
                 )
             }
 
-            ErrorKind::MismatchedFuncDeclReturn(expected, actual) => {
-                format!(
-                    "Conflicting return-types in function-declarations: expected {}, found {}",
-                    expected, actual
-                )
-            }
-            ErrorKind::MismatchedFuncDeclArity(expected, actual) => {
-                format!(
-                    "Mismatched number of parameters in function-declarations: expected {}, found {}",
-                    expected, actual
-                )
-            }
-
-            ErrorKind::MismatchedVariadic(expected, actual) => {
-                let bool_to_msg = |val| {
-                    if val {
-                        "variadic args"
-                    } else {
-                        "no variadic args"
-                    }
-                };
-                format!(
-                    "Mismatched function-declarations: expected {}, found {}",
-                    bool_to_msg(*expected),
-                    bool_to_msg(*actual),
-                )
-            }
-            ErrorKind::TypeMismatchFuncDecl(index, expected, actual) => {
-                format!("Mismatched parameter-types in function-declarations: expected {} parameter to be of type '{}', found '{}'",
-                            num_to_ord(index + 1),expected,actual)
-            }
             ErrorKind::UndeclaredSymbol(name) => {
                 format!("Undeclared symbol '{}'", name)
             }
@@ -447,8 +413,8 @@ impl Error {
             kind: ErrorKind::Multiple(errors),
         }
     }
+    // HACK: should never be used because in theory there is always an eof-token
     pub fn eof(expected: &'static str) -> Self {
-        // TODO: have correct location info
         Error {
             line_index: -1,
             line_string: String::from(""),

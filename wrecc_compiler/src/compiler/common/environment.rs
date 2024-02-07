@@ -9,82 +9,6 @@ pub enum InitType {
     Declaration,
     Definition,
 }
-#[derive(Clone, PartialEq, Debug)]
-pub struct Function {
-    // parameters to a function with it's corresponding name
-    // a parameter-name is optional in a function declaration
-    pub params: Vec<(Type, Option<Token>)>,
-
-    pub return_type: Type,
-
-    // if function contains var-args
-    pub variadic: bool,
-
-    // how much stack space a function needs to allocate info given in typechecker
-    pub stack_size: usize,
-
-    // can either be definition/declaration
-    pub kind: InitType,
-
-    // all the goto-labels that are unique to that function
-    pub labels: HashMap<String, usize>,
-
-    // index of epilogue label in function
-    pub epilogue_index: usize,
-}
-impl Function {
-    pub fn new(
-        return_type: Type,
-        params: Vec<(Type, Option<Token>)>,
-        variadic: bool,
-        kind: InitType,
-    ) -> Self {
-        Function {
-            variadic,
-            return_type,
-            kind,
-            params,
-            stack_size: 0,
-            epilogue_index: 0,
-            labels: HashMap::new(),
-        }
-    }
-    pub fn arity(&self) -> usize {
-        self.params.len()
-    }
-    fn cmp(&self, token: &Token, other: &Function) -> Result<(), Error> {
-        if self.return_type != other.return_type {
-            return Err(Error::new(
-                token,
-                ErrorKind::MismatchedFuncDeclReturn(self.return_type.clone(), other.return_type.clone()),
-            ));
-        }
-        if self.arity() != other.arity() {
-            return Err(Error::new(
-                token,
-                ErrorKind::MismatchedFuncDeclArity(self.arity(), other.arity()),
-            ));
-        }
-        if self.variadic != other.variadic {
-            return Err(Error::new(
-                token,
-                ErrorKind::MismatchedVariadic(self.variadic, other.variadic),
-            ));
-        }
-        for (i, ((my_type, my_token), (other_type, _))) in
-            self.params.iter().zip(&other.params).enumerate()
-        {
-            if my_type != other_type {
-                return Err(Error::new(
-                    if let Some(param) = my_token { param } else { token },
-                    ErrorKind::TypeMismatchFuncDecl(i, other_type.clone(), my_type.clone()),
-                ));
-            }
-        }
-
-        Ok(())
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct SymbolInfo {
@@ -97,9 +21,6 @@ pub struct SymbolInfo {
     // optional because info isn't known at moment of insertion
     // can be label-register or stack-register
     pub reg: Option<Register>,
-
-    // used in codegen to indicate if declaration needs to be declared as global
-    pub is_global: bool,
 
     // used in codegen to ensure only single declaration of same symbol
     pub token: Token,
@@ -118,60 +39,46 @@ impl SymbolInfo {
 }
 #[derive(Clone, Debug)]
 pub enum Symbols {
-    // also includes enum-constants
+    // includes functions, enum-constants and variables
     Variable(SymbolInfo),
+    // in `typedef int a` a is stored
     TypeDef(Type),
-    Func(Function),
 }
 impl Symbols {
     pub fn unwrap_var_mut(&mut self) -> &mut SymbolInfo {
         match self {
             Symbols::Variable(s) => s,
-            _ => unreachable!("cant unwrap var on func"),
+            _ => unreachable!("cant unwrap var on other symbol"),
         }
     }
     pub fn unwrap_var(&self) -> &SymbolInfo {
         match self {
             Symbols::Variable(s) => s,
-            _ => unreachable!("cant unwrap var on func"),
-        }
-    }
-    pub fn unwrap_func_mut(&mut self) -> &mut Function {
-        match self {
-            Symbols::Func(f) => f,
-            _ => unreachable!(),
-        }
-    }
-    pub fn unwrap_func(&self) -> &Function {
-        match self {
-            Symbols::Func(f) => f,
-            _ => unreachable!(),
+            _ => unreachable!("cant unwrap var on other symbol"),
         }
     }
     fn get_kind(&self) -> &InitType {
         match self {
             Symbols::Variable(v) => &v.kind,
-            Symbols::Func(f) => &f.kind,
             Symbols::TypeDef(_) => &InitType::Declaration,
         }
     }
     fn cmp(&self, name: &Token, other: &Symbols) -> Result<(), Error> {
         match (self, other) {
             (
-                Symbols::Variable(SymbolInfo { type_decl: t1, .. }),
-                Symbols::Variable(SymbolInfo { type_decl: t2, .. }),
+                Symbols::Variable(SymbolInfo { type_decl: ty1, .. }),
+                Symbols::Variable(SymbolInfo { type_decl: ty2, .. }),
             )
-            | (Symbols::TypeDef(t1), Symbols::TypeDef(t2)) => {
-                if t1 != t2 {
+            | (Symbols::TypeDef(ty1), Symbols::TypeDef(ty2)) => {
+                if ty1 != ty2 {
                     Err(Error::new(
                         name,
-                        ErrorKind::RedefTypeMismatch(name.unwrap_string(), t1.clone(), t2.clone()),
+                        ErrorKind::RedefTypeMismatch(name.unwrap_string(), ty1.clone(), ty2.clone()),
                     ))
                 } else {
                     Ok(())
                 }
             }
-            (Symbols::Func(f1), Symbols::Func(f2)) => f1.cmp(name, f2),
             _ => Err(Error::new(
                 name,
                 ErrorKind::RedefOtherSymbol(name.unwrap_string(), other.to_string()),
@@ -193,7 +100,6 @@ impl std::fmt::Display for Symbols {
             "{}",
             match self {
                 Symbols::Variable(_) => "variable",
-                Symbols::Func(_) => "function",
                 Symbols::TypeDef(_) => "typedef",
             }
         )
@@ -346,11 +252,14 @@ impl Environment {
     ) -> Result<Rc<RefCell<Symbols>>, Error> {
         symbol.cmp(var_name, &existing_symbol.borrow())?;
 
-        if matches!(symbol, Symbols::Variable(_)) && !self.is_global() {
-            return Err(Error::new(
-                var_name,
-                ErrorKind::Redefinition("symbol", var_name.unwrap_string()),
-            ));
+        if let Symbols::Variable(symbol_info) = &symbol {
+            // functions and typedefs can be redeclared even inside functions
+            if !self.is_global() && !symbol_info.type_decl.is_func() {
+                return Err(Error::new(
+                    var_name,
+                    ErrorKind::Redefinition("symbol", var_name.unwrap_string()),
+                ));
+            }
         }
 
         let existing_kind = existing_symbol.borrow().get_kind().clone();
@@ -413,13 +322,6 @@ pub mod tests {
     use super::*;
     use crate::compiler::common::types::tests::setup_type;
 
-    fn func_template(name: &str, kind: InitType) -> (Token, Symbols) {
-        let token = Token::default(TokenKind::Ident(name.to_string()));
-        let symbol = Symbols::Func(Function::new(setup_type("void"), Vec::new(), false, kind));
-
-        (token, symbol)
-    }
-
     pub fn var_template(name: &str, ty: &str, kind: InitType) -> (Token, Symbols) {
         let token = Token::default(TokenKind::Ident(name.to_string()));
         let symbol = Symbols::Variable(SymbolInfo {
@@ -427,7 +329,6 @@ pub mod tests {
             token: token.clone(),
             type_decl: setup_type(ty),
             reg: None,
-            is_global: false,
         });
 
         (token, symbol)
@@ -453,7 +354,7 @@ pub mod tests {
         let mut env = Environment::new();
 
         env.enter();
-        declare(&mut env, func_template("main", InitType::Definition), true).unwrap();
+        declare(&mut env, var_template("main","int()", InitType::Definition), true).unwrap();
         assert!(env.symbols.get_current("main").is_none());
 
         declare(&mut env,var_template("s", "char*", InitType::Declaration),false).unwrap();
@@ -498,7 +399,7 @@ pub mod tests {
         declare(&mut env,var_template("a", "int", InitType::Declaration),false).unwrap();
         declare(&mut env,var_template("b", "int", InitType::Declaration),false).unwrap();
 
-        declare(&mut env, func_template("foo", InitType::Definition), true).unwrap();
+        declare(&mut env, var_template("foo","int (int,int)", InitType::Definition), true).unwrap();
         assert!(env.symbols.get_current("foo").is_none());
         assert!(env.symbols.get_current("a").is_some());
         assert!(env.symbols.get_current("b").is_some());
@@ -517,7 +418,7 @@ pub mod tests {
         env.exit();
         env.exit();
 
-        declare(&mut env, func_template("main", InitType::Definition), true).unwrap();
+        declare(&mut env, var_template("main","int ()", InitType::Definition), true).unwrap();
 
         assert!(env.symbols.get_current("a").is_none());
         assert!(env.symbols.get_current("foo").is_some());
@@ -539,7 +440,7 @@ pub mod tests {
         let mut env = Environment::new();
 
         env.enter();
-        declare(&mut env, func_template("main", InitType::Definition), true).unwrap();
+        declare(&mut env, var_template("main","int ()", InitType::Definition), true).unwrap();
         declare(&mut env, var_template("a", "int", InitType::Declaration),false).unwrap();
         env.enter();
         assert!(env.symbols.get_current("a").is_none());
@@ -559,7 +460,7 @@ pub mod tests {
         declare(&mut env,var_template("a", "char", InitType::Declaration),false).unwrap();
         declare(&mut env,var_template("b", "int", InitType::Declaration),false).unwrap();
         env.exit();
-        declare(&mut env, func_template("foo", InitType::Declaration), false).unwrap();
+        declare(&mut env, var_template("foo","int (char, int)", InitType::Declaration), false).unwrap();
 
         assert!(env.symbols.get_current("a").is_none());
         assert!(matches!(
@@ -589,21 +490,21 @@ pub mod tests {
     fn redeclarations() {
         let mut env = Environment::new();
 
-        declare(&mut env, func_template("foo", InitType::Declaration), true).unwrap();
-        declare(&mut env, func_template("foo", InitType::Definition), true).unwrap();
-        declare(&mut env, func_template("foo", InitType::Declaration), true).unwrap();
+        declare(&mut env, var_template("foo","int ()",InitType::Declaration), true).unwrap();
+        declare(&mut env, var_template("foo","int ()",InitType::Definition), true).unwrap();
+        declare(&mut env, var_template("foo","int ()",InitType::Declaration), true).unwrap();
 
-        assert!(declare(&mut env, func_template("foo", InitType::Definition), true).is_err());
+        assert!(declare(&mut env, var_template("foo","int ()", InitType::Definition), true).is_err());
 
         env.enter();
         assert!(matches!(
             env.symbols.get("foo".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbols::Func(Function {kind:InitType::Definition,..})
+            Some(Symbols::Variable(SymbolInfo {kind:InitType::Definition,type_decl:Type::Function(_),..})
         )));
         assert!(env.symbols.get_current("foo").is_none());
 
-        declare(&mut env, func_template("bar", InitType::Declaration), false).unwrap();
-        assert!(declare(&mut env, func_template("bar", InitType::Declaration), false).is_ok());
+        declare(&mut env, var_template("bar","void ()", InitType::Declaration), false).unwrap();
+        assert!(declare(&mut env, var_template("bar","void ()", InitType::Declaration), false).is_ok());
 
         declare(&mut env, var_template("baz", "int", InitType::Declaration), false).unwrap();
         assert!(declare(&mut env, var_template("baz", "int", InitType::Declaration), false).is_err());

@@ -446,6 +446,7 @@ impl ScratchRegisters {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::common::types::tests::setup_type;
     use crate::compiler::typechecker::mir::expr::ValueKind;
     use std::mem;
 
@@ -694,7 +695,10 @@ mod tests {
             Lir::Add(regs[13].clone(), regs[14].clone()),
             Lir::Mov(regs[10].clone(), regs[20].clone()),
             Lir::Mov(regs[15].clone(), regs[21].clone()),
-            Lir::Call("foo".to_string()),
+            Lir::Call(Register::Label(LabelRegister::Var(
+                "foo".to_string(),
+                setup_type("void (int, int)"),
+            ))),
             Lir::RestoreRegs,
         ];
 
@@ -735,7 +739,10 @@ mod tests {
             Lir::Mov(spilled_reg1, unspilled_reg_1.clone()), // unspill filled_reg[10]
             Lir::Mov(unspilled_reg_1, filled_regs[20].clone()),
             Lir::Mov(filled_regs[15].clone(), filled_regs[21].clone()),
-            Lir::Call("foo".to_string()),
+            Lir::Call(Register::Label(LabelRegister::Var(
+                "foo".to_string(),
+                setup_type("void (int, int)"),
+            ))),
         ];
 
         assert_regalloc(input, expected, reg_alloc);

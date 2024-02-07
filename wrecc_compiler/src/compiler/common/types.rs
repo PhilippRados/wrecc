@@ -32,19 +32,12 @@ pub trait TypeInfo {
 #[derive(Clone, PartialEq, Debug)]
 pub enum Type {
     Primitive(Primitive),
-    Array {
-        amount: usize,
-        of: Box<Type>,
-    },
+    Array { amount: usize, of: Box<Type> },
     Pointer(Box<Type>),
     Struct(StructInfo),
     Union(StructInfo),
     Enum(Option<String>, Vec<(Token, i32)>),
-    Function {
-        return_type: Box<Type>,
-        params: Vec<(Type, Option<Token>)>,
-        variadic: bool,
-    },
+    Function(FuncType),
 }
 
 impl TypeInfo for Type {
@@ -103,100 +96,6 @@ impl TypeInfo for Type {
         }
     }
 }
-impl Display for Type {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fn suffix_exists(modifiers: &Vec<&Type>, i: usize) -> bool {
-            modifiers
-                .iter()
-                .skip(i)
-                .find(|m| matches!(m, Type::Array { .. } | Type::Function { .. }))
-                .is_some()
-        }
-
-        fn print_type(type_decl: &Type) -> String {
-            let mut current = type_decl;
-            let mut modifiers = Vec::new();
-            loop {
-                match current {
-                    Type::Pointer(new)
-                    | Type::Array { of: new, .. }
-                    | Type::Function { return_type: new, .. } => {
-                        modifiers.push(current);
-                        current = new;
-                    }
-                    _ => break,
-                }
-            }
-            let mut result = match current {
-                Type::Primitive(t) => t.fmt().to_string(),
-                Type::Union(s) => "union ".to_string() + &s.name(),
-                Type::Struct(s) => "struct ".to_string() + &s.name(),
-                Type::Enum(Some(name), ..) => "enum ".to_string() + name,
-                Type::Enum(None, ..) => "enum <anonymous>".to_string(),
-                _ => unreachable!("all modifiers were removed"),
-            };
-            if !modifiers.is_empty() {
-                result.push(' ');
-            }
-            let mut pointers = Vec::new();
-            let mut suffixes = Vec::new();
-
-            for (i, modifier) in modifiers.iter().enumerate() {
-                match modifier {
-                    Type::Array { amount, .. } => {
-                        let closing_precedence = matches!(modifiers.get(i + 1), Some(Type::Pointer(_)))
-                            && suffix_exists(&modifiers, i + 1);
-
-                        suffixes.push(format!(
-                            "[{}]{}",
-                            amount,
-                            if closing_precedence { ")" } else { "" }
-                        ))
-                    }
-                    Type::Pointer(_) => {
-                        let precedence = matches!(
-                            modifiers.get(i + 1),
-                            Some(Type::Array { .. } | Type::Function { .. })
-                        );
-                        pointers.push(match precedence {
-                            true if pointers.is_empty() && suffixes.is_empty() => "(*)",
-                            true => "(*",
-                            false
-                                if suffixes.is_empty()
-                                    && suffix_exists(&modifiers, i)
-                                    && pointers.is_empty() =>
-                            {
-                                "*)"
-                            }
-                            _ => "*",
-                        });
-                    }
-                    Type::Function { return_type, params, variadic } => suffixes.push(format!(
-                        "{}({}{})",
-                        return_type,
-                        params
-                            .iter()
-                            .map(|(ty, _)| ty.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        if *variadic { "..." } else { "" }
-                    )),
-                    _ => unreachable!("not modifier"),
-                }
-            }
-            for s in pointers.iter().rev() {
-                result.push_str(s);
-            }
-            for s in suffixes {
-                result.push_str(&s);
-            }
-
-            result
-        }
-        write!(f, "{}", print_type(self))
-    }
-}
-
 impl Type {
     pub fn pointer_to(self) -> Type {
         Type::Pointer(Box::new(self.clone()))
@@ -204,12 +103,12 @@ impl Type {
     pub fn array_of(self, amount: usize) -> Type {
         Type::Array { amount, of: Box::new(self) }
     }
-    pub fn function_of(self, params: Vec<(Type, Option<Token>)>, variadic: bool) -> Type {
-        Type::Function {
+    pub fn function_of(self, params: Vec<Type>, variadic: bool) -> Type {
+        Type::Function(FuncType {
             return_type: Box::new(self),
             params,
             variadic,
-        }
+        })
     }
     pub fn deref_at(&self) -> Option<Type> {
         match self {
@@ -269,9 +168,7 @@ impl Type {
                             && matching_members == s_l.members().len()
                             && matching_members == s_r.members().len()
                     }
-                    (StructInfo::Anonymous(name_l, _), StructInfo::Anonymous(name_r, _)) => {
-                        name_l == name_r
-                    }
+                    (StructInfo::Unnamed(name_l, _), StructInfo::Unnamed(name_r, _)) => name_l == name_r,
                     _ => false,
                 }
             }
@@ -279,6 +176,9 @@ impl Type {
             | (Type::Primitive(Primitive::Void), Type::Enum(..)) => false,
 
             (Type::Enum(..), Type::Primitive(_)) | (Type::Primitive(_), Type::Enum(..)) => true,
+
+            // func is compatible to func if they have the exact same signature
+            (Type::Function(f1), Type::Function(f2)) => f1 == f2,
 
             _ => false,
         }
@@ -417,6 +317,14 @@ impl Type {
         }
     }
 }
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct FuncType {
+    pub return_type: Box<Type>,
+    pub params: Vec<Type>,
+    pub variadic: bool,
+}
+
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Primitive {
     Void,
@@ -502,13 +410,13 @@ pub fn integer_type(n: i64) -> Primitive {
 #[derive(Clone, PartialEq, Debug)]
 pub enum StructInfo {
     Named(String, StructRef),
-    Anonymous(Token, Vec<(Type, Token)>),
+    Unnamed(Token, Vec<(Type, Token)>),
 }
 impl StructInfo {
     pub fn members(&self) -> Rc<Vec<(Type, Token)>> {
         match self {
             StructInfo::Named(_, s) => s.get(),
-            StructInfo::Anonymous(_, m) => Rc::new(m.clone()),
+            StructInfo::Unnamed(_, m) => Rc::new(m.clone()),
         }
     }
     pub fn member_offset(&self, member_to_find: &str) -> usize {
@@ -528,7 +436,7 @@ impl StructInfo {
     fn name(&self) -> String {
         match self {
             StructInfo::Named(name, _) => name.to_string(),
-            StructInfo::Anonymous(token, _) => format!(
+            StructInfo::Unnamed(token, _) => format!(
                 "(<anonymous> at {}:{}:{})",
                 token.filename.display(),
                 token.line_index,
@@ -539,7 +447,7 @@ impl StructInfo {
     pub fn is_complete(&self) -> bool {
         match self {
             Self::Named(_, s) => s.is_complete(),
-            Self::Anonymous(..) => true,
+            Self::Unnamed(..) => true,
         }
     }
 }
@@ -612,6 +520,99 @@ mod struct_ref {
     }
 }
 
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn suffix_exists(modifiers: &Vec<&Type>, i: usize) -> bool {
+            modifiers
+                .iter()
+                .skip(i)
+                .find(|m| matches!(m, Type::Array { .. } | Type::Function { .. }))
+                .is_some()
+        }
+
+        fn print_type(type_decl: &Type) -> String {
+            let mut current = type_decl;
+            let mut modifiers = Vec::new();
+            loop {
+                match current {
+                    Type::Pointer(new)
+                    | Type::Array { of: new, .. }
+                    | Type::Function(FuncType { return_type: new, .. }) => {
+                        modifiers.push(current);
+                        current = new;
+                    }
+                    _ => break,
+                }
+            }
+            let mut result = match current {
+                Type::Primitive(t) => t.fmt().to_string(),
+                Type::Union(s) => "union ".to_string() + &s.name(),
+                Type::Struct(s) => "struct ".to_string() + &s.name(),
+                Type::Enum(Some(name), ..) => "enum ".to_string() + name,
+                Type::Enum(None, ..) => "enum <anonymous>".to_string(),
+                _ => unreachable!("all modifiers were removed"),
+            };
+            if !modifiers.is_empty() {
+                result.push(' ');
+            }
+            let mut pointers = Vec::new();
+            let mut suffixes = Vec::new();
+
+            for (i, modifier) in modifiers.iter().enumerate() {
+                match modifier {
+                    Type::Array { amount, .. } => {
+                        let closing_precedence = matches!(modifiers.get(i + 1), Some(Type::Pointer(_)))
+                            && suffix_exists(&modifiers, i + 1);
+
+                        suffixes.push(format!(
+                            "[{}]{}",
+                            amount,
+                            if closing_precedence { ")" } else { "" }
+                        ))
+                    }
+                    Type::Pointer(_) => {
+                        let precedence = matches!(
+                            modifiers.get(i + 1),
+                            Some(Type::Array { .. } | Type::Function { .. })
+                        );
+                        pointers.push(match precedence {
+                            true if pointers.is_empty() && suffixes.is_empty() => "(*)",
+                            true => "(*",
+                            false
+                                if suffixes.is_empty()
+                                    && suffix_exists(&modifiers, i)
+                                    && pointers.is_empty() =>
+                            {
+                                "*)"
+                            }
+                            _ => "*",
+                        });
+                    }
+                    Type::Function(FuncType { params, variadic, .. }) => suffixes.push(format!(
+                        "({}{})",
+                        params
+                            .iter()
+                            .map(|ty| ty.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        if *variadic { ", ..." } else { "" }
+                    )),
+                    _ => unreachable!("not modifier"),
+                }
+            }
+            for s in pointers.iter().rev() {
+                result.push_str(s);
+            }
+            for s in suffixes {
+                result.push_str(&s);
+            }
+
+            result
+        }
+        write!(f, "{}", print_type(self))
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -633,13 +634,7 @@ pub mod tests {
 
     #[test]
     fn multidimensional_array_size() {
-        let input = Type::Array {
-            amount: 2,
-            of: Box::new(Type::Array {
-                amount: 2,
-                of: Box::new(Type::Primitive(Primitive::Int)),
-            }),
-        };
+        let input = setup_type("int[2][2]");
         let actual = input.element_amount();
 
         assert_eq!(actual, 4);
@@ -666,6 +661,11 @@ pub mod tests {
     }
     #[test]
     fn function_type_print() {
-        todo!()
+        assert_type_print("int ()", "int ()");
+        assert_type_print("int (int)", "int (int)");
+        assert_type_print("int (int ())", "int (int (*)())");
+
+        assert_type_print("int ((()))", "int (int (*)(int (*)()))");
+        assert_type_print("int (char[2])", "int (char *)");
     }
 }

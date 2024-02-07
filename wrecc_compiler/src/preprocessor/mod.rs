@@ -406,7 +406,9 @@ impl<'a> Preprocessor<'a> {
                 TokenKind::Defined => {
                     skip_whitespace(&mut cond);
 
-                    let open_paren = if let Ok(TokenKind::Other('(')) = cond.peek("").map(|t| &t.kind) {
+                    let open_paren = if let Ok(TokenKind::Other('(')) =
+                        cond.peek("", self.filename).map(|t| &t.kind)
+                    {
                         cond.next()
                     } else {
                         None
@@ -631,7 +633,7 @@ impl<'a> Preprocessor<'a> {
     fn fold_until_token(&mut self, end: TokenKind) -> Vec<Token> {
         let mut result = Vec::new();
 
-        while let Ok(token) = self.tokens.peek("") {
+        while let Ok(token) = self.tokens.peek("", self.filename) {
             match &token.kind {
                 TokenKind::Newline => break,
                 token if token == &end => break,
@@ -643,20 +645,16 @@ impl<'a> Preprocessor<'a> {
         result
     }
 
-    // wrapper for easier access
     fn skip_whitespace(&mut self) -> Result<(), Error> {
         if !skip_whitespace(&mut self.tokens) {
-            match self.tokens.peek("") {
-                Ok(token) => Err(Error::new(
-                    &PPToken::from(token, self.filename),
-                    ErrorKind::Regular("Expect whitespace after preprocessing directive"),
-                )),
-                Err((Some(eof_token), _)) => Err(Error::new(
-                    &PPToken::from(&eof_token, self.filename),
-                    ErrorKind::Eof("Expected whitespace"),
-                )),
-                _ => Err(Error::eof("Expected whitespace")),
-            }
+            self.tokens
+                .peek("Expected whitespace", self.filename)
+                .and_then(|token| {
+                    Err(Error::new(
+                        &PPToken::from(token, self.filename),
+                        ErrorKind::Regular("Expect whitespace after preprocessing directive"),
+                    ))
+                })
         } else {
             Ok(())
         }
@@ -678,6 +676,18 @@ impl<'a> Preprocessor<'a> {
         }
     }
 }
+impl DoublePeek<Token> {
+    pub fn peek(&self, expected: &'static str, filename: &Path) -> Result<&Token, Error> {
+        self.inner.front().ok_or_else(|| {
+            if let Some(eof_token) = &self.eof {
+                Error::new(&PPToken::from(eof_token, filename), ErrorKind::Eof(expected))
+            } else {
+                Error::eof(expected)
+            }
+        })
+    }
+}
+
 struct PPResult {
     inner: Vec<PPToken>,
     filename: PathBuf,
@@ -720,7 +730,7 @@ fn trim_trailing_whitespace(mut tokens: Vec<Token>) -> Vec<Token> {
 }
 
 fn skip_whitespace(tokens: &mut DoublePeek<Token>) -> bool {
-    if let Ok(Token { kind: TokenKind::Whitespace(_), .. }) = tokens.peek("") {
+    if let Ok(Token { kind: TokenKind::Whitespace(_), .. }) = tokens.peek("", Path::new("")) {
         tokens.next();
         true
     } else {

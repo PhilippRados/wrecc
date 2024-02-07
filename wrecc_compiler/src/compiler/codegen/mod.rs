@@ -40,29 +40,21 @@ pub struct Compiler {
     // map containing Strings and their corresponding label-index
     const_labels: HashMap<String, usize>,
 
-    // offset from base-pointer where variable stays
-    current_bp_offset: usize,
-
     // loop labels saved so that break and continue jump to them
     jump_labels: Vec<(usize, usize)>,
-
-    // switch information, about cases and defaults
-    switches: VecDeque<Vec<Option<i64>>>,
 
     // case/default-labels get defined in each switch and then the
     // respective case/default-statements pop them in order of appearance
     switch_labels: VecDeque<usize>,
 }
 impl Compiler {
-    pub fn new(const_labels: HashMap<String, usize>, switches: Vec<Vec<Option<i64>>>) -> Self {
+    pub fn new(const_labels: HashMap<String, usize>) -> Self {
         Compiler {
-            switches: switches.into(),
             const_labels,
             output: Vec::with_capacity(100),
             live_intervals: HashMap::with_capacity(30),
             interval_counter: 0,
             instr_counter: 0,
-            current_bp_offset: 0,
             label_index: 0,
             jump_labels: Vec::new(),
             switch_labels: VecDeque::new(),
@@ -92,67 +84,65 @@ impl Compiler {
             self.visit_decl(decl)
         }
     }
-    fn cg_stmts(&mut self, statements: Vec<Stmt>) {
+    fn cg_stmts(&mut self, func: &mut Function, statements: Vec<Stmt>) {
         for stmt in statements {
-            self.visit_stmt(stmt)
+            self.visit_stmt(func, stmt)
         }
     }
     fn visit_decl(&mut self, external_decl: ExternalDeclaration) {
         match external_decl {
-            ExternalDeclaration::Declaration(decls) => self.declaration(decls),
-            ExternalDeclaration::Function(name, func_symbol, params, body) => {
-                self.function_definition(name, func_symbol, params, body)
-            }
+            ExternalDeclaration::Declaration(decls) => self.global_declaration(decls),
+            ExternalDeclaration::Function(func, stmts) => self.function_definition(func, stmts),
         }
     }
-    fn visit_stmt(&mut self, statement: Stmt) {
+    fn visit_stmt(&mut self, func: &mut Function, statement: Stmt) {
         match statement {
             Stmt::Expr(expr) => {
-                let reg = self.execute_expr(expr);
+                let reg = self.execute_expr(func, expr);
                 self.free(reg); // result isn't used
             }
-            Stmt::Declaration(decls) => self.declaration(decls),
-            Stmt::Block(statements) => self.block(statements),
-            Stmt::Return(func_symbol, expr) => self.return_statement(func_symbol, expr),
+            Stmt::Declaration(decls) => self.declaration(func, decls),
+            Stmt::Block(statements) => self.block(func, statements),
+            Stmt::Return(expr) => self.return_statement(func, expr),
             Stmt::If(cond, then_branch, else_branch) => {
-                self.if_statement(cond, *then_branch, else_branch)
+                self.if_statement(func, cond, *then_branch, else_branch)
             }
-            Stmt::While(cond, body) => self.while_statement(cond, *body),
-            Stmt::Do(body, cond) => self.do_statement(*body, cond),
-            Stmt::For(init, cond, inc, body) => self.for_statement(init, cond, inc, *body),
+            Stmt::While(cond, body) => self.while_statement(func, cond, *body),
+            Stmt::Do(body, cond) => self.do_statement(func, *body, cond),
+            Stmt::For(init, cond, inc, body) => self.for_statement(func, init, cond, inc, *body),
             Stmt::Break => self.jump_statement(self.jump_labels.last().expect("typechecker").0),
             Stmt::Continue => self.jump_statement(self.jump_labels.last().expect("typechecker").1),
-            Stmt::Switch(cond, body) => self.switch_statement(cond, *body),
-            Stmt::Case(body) | Stmt::Default(body) => self.case_statement(*body),
-            Stmt::Goto(func_symbol, label) => self.goto_statement(func_symbol, label),
-            Stmt::Label(func_symbol, name, body) => self.label_statement(func_symbol, name, *body),
+            Stmt::Switch(cond, body) => self.switch_statement(func, cond, *body),
+            Stmt::Case(body) | Stmt::Default(body) => self.case_statement(func, *body),
+            Stmt::Goto(label) => self.goto_statement(func, label),
+            Stmt::Label(name, body) => self.label_statement(func, name, *body),
         }
     }
-    fn goto_statement(&mut self, func_symbol: FuncSymbol, label: String) {
-        let label_index = func_symbol.borrow().unwrap_func().labels[&label];
+    fn goto_statement(&mut self, func: &Function, label: String) {
+        let label_index = func.labels[&label];
 
         self.write_out(Lir::Jmp(label_index));
     }
-    fn label_statement(&mut self, func_symbol: FuncSymbol, name: String, body: Stmt) {
-        let label_index = func_symbol.borrow().unwrap_func().labels[&name];
+    fn label_statement(&mut self, func: &mut Function, name: String, body: Stmt) {
+        let label_index = func.labels[&name];
 
         self.write_out(Lir::LabelDefinition(label_index));
-        self.visit_stmt(body);
+        self.visit_stmt(func, body);
     }
 
-    fn switch_statement(&mut self, cond: Expr, body: Stmt) {
-        let switch_labels = self.switches.pop_front().unwrap();
+    fn switch_statement(&mut self, func: &mut Function, cond: Expr, body: Stmt) {
+        let switch_labels = func.switches.pop_front().unwrap();
 
         let jump_labels: Vec<usize> = (0..switch_labels.len())
             .map(|_| create_label(&mut self.label_index))
             .collect();
 
-        let mut cond_reg = self.execute_expr(cond);
+        let mut cond_reg = self.execute_expr(func, cond);
 
         let mut default_label = None;
         for (kind, label) in switch_labels.iter().zip(jump_labels.clone()) {
             match kind {
-                Some(case_value) => {
+                CaseKind::Case(case_value) => {
                     // WARN: literal can also be negative so needs type i64
                     cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
@@ -162,7 +152,7 @@ impl Compiler {
                     ));
                     self.write_out(Lir::JmpCond("e", label));
                 }
-                None => default_label = Some(label),
+                CaseKind::Default => default_label = Some(label),
             }
         }
         // default label has to be jumped to at the end (even if there are cases following it) if no other cases match
@@ -176,20 +166,20 @@ impl Compiler {
         self.jump_labels.push((break_label, 0));
         self.switch_labels.append(&mut jump_labels.into());
 
-        self.visit_stmt(body);
+        self.visit_stmt(func, body);
 
         self.write_out(Lir::LabelDefinition(break_label));
 
         self.jump_labels.pop();
     }
-    fn case_statement(&mut self, body: Stmt) {
+    fn case_statement(&mut self, func: &mut Function, body: Stmt) {
         let label = self.switch_labels.pop_front().unwrap();
 
         self.write_out(Lir::LabelDefinition(label));
 
-        self.visit_stmt(body);
+        self.visit_stmt(func, body);
     }
-    fn do_statement(&mut self, body: Stmt, cond: Expr) {
+    fn do_statement(&mut self, func: &mut Function, body: Stmt, cond: Expr) {
         let body_label = create_label(&mut self.label_index);
         let cond_label = create_label(&mut self.label_index);
         let end_label = create_label(&mut self.label_index);
@@ -197,10 +187,10 @@ impl Compiler {
         self.jump_labels.push((end_label, cond_label));
 
         self.write_out(Lir::LabelDefinition(body_label));
-        self.visit_stmt(body);
+        self.visit_stmt(func, body);
 
         self.write_out(Lir::LabelDefinition(cond_label));
-        let mut cond_reg = self.execute_expr(cond);
+        let mut cond_reg = self.execute_expr(func, cond);
         cond_reg = self.convert_to_rval(cond_reg);
         cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
@@ -222,6 +212,7 @@ impl Compiler {
     }
     fn for_statement(
         &mut self,
+        func: &mut Function,
         init: Option<Box<Stmt>>,
         cond: Option<Expr>,
         inc: Option<Expr>,
@@ -235,17 +226,17 @@ impl Compiler {
 
         self.jump_labels.push((end_label, inc_label));
         if let Some(init) = init {
-            self.visit_stmt(*init);
+            self.visit_stmt(func, *init);
         }
         self.write_out(Lir::Jmp(cond_label));
         self.write_out(Lir::LabelDefinition(body_label));
 
-        self.visit_stmt(body);
+        self.visit_stmt(func, body);
 
         self.write_out(Lir::LabelDefinition(inc_label));
 
         if let Some(inc) = inc {
-            let reg = self.execute_expr(inc);
+            let reg = self.execute_expr(func, inc);
             self.free(reg);
         }
 
@@ -253,7 +244,7 @@ impl Compiler {
 
         match cond {
             Some(cond) => {
-                let mut cond_reg = self.execute_expr(cond);
+                let mut cond_reg = self.execute_expr(func, cond);
                 cond_reg = self.convert_to_rval(cond_reg);
                 cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
@@ -271,7 +262,7 @@ impl Compiler {
 
         self.jump_labels.pop();
     }
-    fn while_statement(&mut self, cond: Expr, body: Stmt) {
+    fn while_statement(&mut self, func: &mut Function, cond: Expr, body: Stmt) {
         let body_label = create_label(&mut self.label_index);
         let cond_label = create_label(&mut self.label_index);
         let end_label = create_label(&mut self.label_index);
@@ -281,11 +272,11 @@ impl Compiler {
         self.write_out(Lir::Jmp(cond_label));
         self.write_out(Lir::LabelDefinition(body_label));
 
-        self.visit_stmt(body);
+        self.visit_stmt(func, body);
 
         self.write_out(Lir::LabelDefinition(cond_label));
 
-        let mut cond_reg = self.execute_expr(cond);
+        let mut cond_reg = self.execute_expr(func, cond);
         cond_reg = self.convert_to_rval(cond_reg);
         cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
@@ -301,8 +292,14 @@ impl Compiler {
         self.jump_labels.pop();
     }
 
-    fn if_statement(&mut self, cond: Expr, then_branch: Stmt, else_branch: Option<Box<Stmt>>) {
-        let cond_reg = self.execute_expr(cond);
+    fn if_statement(
+        &mut self,
+        func: &mut Function,
+        cond: Expr,
+        then_branch: Stmt,
+        else_branch: Option<Box<Stmt>>,
+    ) {
+        let cond_reg = self.execute_expr(func, cond);
         let cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
         let done_label = create_label(&mut self.label_index);
@@ -319,21 +316,21 @@ impl Compiler {
         }
         self.write_out(Lir::JmpCond("e", else_label));
 
-        self.visit_stmt(then_branch);
+        self.visit_stmt(func, then_branch);
 
         if let Some(else_branch) = else_branch {
             self.write_out(Lir::Jmp(done_label));
             self.write_out(Lir::LabelDefinition(else_label));
-            self.visit_stmt(*else_branch);
+            self.visit_stmt(func, *else_branch);
         }
         self.write_out(Lir::LabelDefinition(done_label));
     }
-    fn return_statement(&mut self, func_symbol: FuncSymbol, value: Option<Expr>) {
-        let function_epilogue = func_symbol.borrow().unwrap_func().epilogue_index;
+    fn return_statement(&mut self, func: &mut Function, value: Option<Expr>) {
+        let function_epilogue = func.epilogue_index;
 
         match value {
             Some(expr) => {
-                let return_value = self.execute_expr(expr);
+                let return_value = self.execute_expr(func, expr);
                 self.write_out(Lir::Mov(
                     return_value.clone(),
                     Register::Return(return_value.get_type()),
@@ -344,24 +341,21 @@ impl Compiler {
             None => self.write_out(Lir::Jmp(function_epilogue)),
         }
     }
-    fn declaration(&mut self, declarators: Vec<Declarator>) {
+    fn global_declaration(&mut self, declarators: Vec<Declarator>) {
         for declarator in declarators {
             let var_symbol = declarator.entry.borrow().unwrap_var().clone();
 
             if declarator.name == var_symbol.token {
-                if var_symbol.is_global {
-                    self.declare_global_var(
-                        declarator.name.unwrap_string(),
-                        var_symbol.type_decl,
-                        declarator.entry,
-                        declarator.init,
-                    )
-                } else {
-                    self.declare_var(declarator.entry, declarator.init)
-                }
+                self.declare_global_var(
+                    declarator.name.unwrap_string(),
+                    var_symbol.type_decl,
+                    declarator.entry,
+                    declarator.init,
+                )
             }
         }
     }
+
     fn declare_global_var(
         &mut self,
         name: String,
@@ -381,27 +375,6 @@ impl Compiler {
             let reg = Register::Label(LabelRegister::Var(name, type_decl));
 
             var_symbol.borrow_mut().unwrap_var_mut().set_reg(reg);
-        }
-    }
-    fn declare_var(&mut self, var_symbol: VarSymbol, init: Option<Init>) {
-        let type_decl = var_symbol.borrow().unwrap_var().type_decl.clone();
-        let size = align(type_decl.size(), &type_decl);
-
-        let reg = Register::Stack(StackRegister::new(&mut self.current_bp_offset, type_decl));
-        var_symbol.borrow_mut().unwrap_var_mut().set_reg(reg);
-
-        if let Some(init) = init {
-            match init {
-                Init::Scalar(expr) => self.init_scalar(var_symbol, expr, 0),
-                Init::Aggr(list) => {
-                    // first overwrite all entries with 0
-                    self.clear_mem(Rc::clone(&var_symbol), size);
-
-                    for (expr, offset) in list {
-                        self.init_scalar(Rc::clone(&var_symbol), expr, offset)
-                    }
-                }
-            }
         }
     }
     fn init_global_var(&mut self, name: String, type_decl: Type, var_symbol: VarSymbol, init: Init) {
@@ -451,8 +424,40 @@ impl Compiler {
         }
     }
 
-    fn init_scalar(&mut self, var_symbol: VarSymbol, expr: Expr, offset: usize) {
-        let value_reg = self.execute_expr(expr);
+    fn declaration(&mut self, func: &mut Function, declarators: Vec<Declarator>) {
+        for declarator in declarators {
+            let var_symbol = declarator.entry.borrow().unwrap_var().clone();
+
+            if declarator.name == var_symbol.token {
+                self.declare_var(func, declarator.entry, declarator.init)
+            }
+        }
+    }
+
+    fn declare_var(&mut self, func: &mut Function, var_symbol: VarSymbol, init: Option<Init>) {
+        let type_decl = var_symbol.borrow().unwrap_var().type_decl.clone();
+        let size = align(type_decl.size(), &type_decl);
+
+        let reg = Register::Stack(StackRegister::new(&mut func.current_bp_offset, type_decl));
+        var_symbol.borrow_mut().unwrap_var_mut().set_reg(reg);
+
+        if let Some(init) = init {
+            match init {
+                Init::Scalar(expr) => self.init_scalar(func, var_symbol, expr, 0),
+                Init::Aggr(list) => {
+                    // first overwrite all entries with 0
+                    self.clear_mem(Rc::clone(&var_symbol), size);
+
+                    for (expr, offset) in list {
+                        self.init_scalar(func, Rc::clone(&var_symbol), expr, offset)
+                    }
+                }
+            }
+        }
+    }
+
+    fn init_scalar(&mut self, func: &mut Function, var_symbol: VarSymbol, expr: Expr, offset: usize) {
+        let value_reg = self.execute_expr(func, expr);
         let mut var_reg = var_symbol.borrow().unwrap_var().get_reg();
 
         var_reg.set_type(value_reg.get_type());
@@ -504,41 +509,31 @@ impl Compiler {
         self.free(rdi_reg);
     }
 
-    fn init_arg(&mut self, var_symbol: VarSymbol, arg_reg: Register) {
-        self.declare_var(Rc::clone(&var_symbol), None);
+    fn init_arg(&mut self, func: &mut Function, var_symbol: VarSymbol, arg_reg: Register) {
+        self.declare_var(func, Rc::clone(&var_symbol), None);
 
         let reg = self.cg_assign(var_symbol.borrow().unwrap_var().get_reg(), arg_reg);
         self.free(reg);
     }
 
-    fn function_definition(
-        &mut self,
-        name: String,
-        func_symbol: FuncSymbol,
-        params: Vec<VarSymbol>,
-        body: Vec<Stmt>,
-    ) {
-        let function_epilogue = create_label(&mut self.label_index);
-        func_symbol.borrow_mut().unwrap_func_mut().epilogue_index = function_epilogue;
+    fn function_definition(&mut self, mut func: Function, stmts: Vec<Stmt>) {
+        func.epilogue_index = create_label(&mut self.label_index);
 
         // create a label for all goto-labels inside a function
-        for value in func_symbol.borrow_mut().unwrap_func_mut().labels.values_mut() {
+        for value in func.labels.values_mut() {
             *value = create_label(&mut self.label_index);
         }
 
-        self.current_bp_offset = 0;
-
         // generate function code
-        self.cg_func_preamble(Rc::clone(&func_symbol), params, name);
-        self.cg_stmts(body);
-        self.cg_func_postamble(func_symbol, function_epilogue);
+        self.cg_func_preamble(&mut func);
+        self.cg_stmts(&mut func, stmts);
+        self.cg_func_postamble(func);
     }
-    fn cg_func_preamble(&mut self, func_symbol: FuncSymbol, params: Vec<VarSymbol>, name: String) {
-        let stack_size = func_symbol.borrow().unwrap_func().stack_size;
-        self.write_out(Lir::FuncSetup(name, stack_size));
+    fn cg_func_preamble(&mut self, func: &mut Function) {
+        self.write_out(Lir::FuncSetup(func.name.clone(), func.stack_size));
 
         // initialize parameters
-        for (i, param_symbol) in params.into_iter().enumerate() {
+        for (i, param_symbol) in func.params.clone().into_iter().enumerate() {
             let type_decl = param_symbol.borrow().unwrap_var().type_decl.clone();
             if i < ARG_REGS.len() {
                 let arg = Register::Arg(ArgRegister::new(
@@ -547,7 +542,7 @@ impl Compiler {
                     &mut self.interval_counter,
                     self.instr_counter,
                 ));
-                self.init_arg(param_symbol, arg);
+                self.init_arg(func, param_symbol, arg);
             } else {
                 // if not in designated arg-register get from stack
                 let reg = Register::Temp(TempRegister::new(
@@ -558,19 +553,18 @@ impl Compiler {
                 let pushed = Register::Stack(StackRegister::new_pushed(i));
 
                 self.write_out(Lir::Mov(pushed, reg.clone()));
-                self.init_arg(param_symbol, reg);
+                self.init_arg(func, param_symbol, reg);
             }
         }
     }
-    fn cg_func_postamble(&mut self, func_symbol: FuncSymbol, epilogue_index: usize) {
-        self.write_out(Lir::LabelDefinition(epilogue_index));
+    fn cg_func_postamble(&mut self, func: Function) {
+        self.write_out(Lir::LabelDefinition(func.epilogue_index));
 
-        let stack_size = func_symbol.borrow().unwrap_func().stack_size;
-        self.write_out(Lir::FuncTeardown(stack_size))
+        self.write_out(Lir::FuncTeardown(func.stack_size))
     }
 
-    pub fn block(&mut self, statements: Vec<Stmt>) {
-        self.cg_stmts(statements)
+    pub fn block(&mut self, func: &mut Function, statements: Vec<Stmt>) {
+        self.cg_stmts(func, statements)
     }
 
     fn cg_literal(&mut self, n: i64, type_decl: Type) -> Register {
@@ -691,52 +685,66 @@ impl Compiler {
             _ => unreachable!("non global-constant expr"),
         }
     }
-    pub fn execute_expr(&mut self, expr: Expr) -> Register {
+    pub fn execute_expr(&mut self, func: &mut Function, expr: Expr) -> Register {
         match expr.kind {
             ExprKind::Binary { left, operator, right } => {
-                let left_reg = self.execute_expr(*left);
-                let right_reg = self.execute_expr(*right);
+                let left_reg = self.execute_expr(func, *left);
+                let right_reg = self.execute_expr(func, *right);
 
                 self.cg_binary(left_reg, &operator, right_reg)
             }
             ExprKind::Literal(n) => self.cg_literal(n, expr.type_decl),
-            ExprKind::Grouping { expr } => self.execute_expr(*expr),
-            ExprKind::Unary { operator, right } => self.cg_unary(operator, *right, expr.type_decl),
-            ExprKind::Logical { left, operator, right } => self.cg_logical(*left, operator, *right),
-            ExprKind::Comparison { left, operator, right } => self.compare(*left, operator, *right),
+            ExprKind::Grouping { expr } => self.execute_expr(func, *expr),
+            ExprKind::Unary { operator, right } => self.cg_unary(func, operator, *right, expr.type_decl),
+            ExprKind::Logical { left, operator, right } => {
+                self.cg_logical(func, *left, operator, *right)
+            }
+            ExprKind::Comparison { left, operator, right } => {
+                self.compare(func, *left, operator, *right)
+            }
             ExprKind::Assign { l_expr, r_expr } => {
-                let left_reg = self.execute_expr(*l_expr);
-                let right_reg = self.execute_expr(*r_expr);
+                let left_reg = self.execute_expr(func, *l_expr);
+                let right_reg = self.execute_expr(func, *r_expr);
 
                 self.cg_assign(left_reg, right_reg)
             }
-            ExprKind::CompoundAssign { expr, tmp_symbol } => self.cg_comp_assign(*expr, tmp_symbol),
+            ExprKind::CompoundAssign { expr, tmp_symbol } => {
+                self.cg_comp_assign(func, *expr, tmp_symbol)
+            }
             ExprKind::Ident(var_symbol) => var_symbol.borrow().unwrap_var().get_reg(),
-            ExprKind::Call { name, args } => self.cg_call(name, args, expr.type_decl),
-            ExprKind::Cast { expr, direction, new_type } => self.cg_cast(new_type, *expr, direction),
-            ExprKind::ScaleUp { expr, by } => self.cg_scale_up(*expr, by),
-            ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(*expr, shift_amount),
+            ExprKind::Call { caller, args } => self.cg_call(func, *caller, args, expr.type_decl),
+            ExprKind::Cast { expr, direction, new_type } => {
+                self.cg_cast(func, new_type, *expr, direction)
+            }
+            ExprKind::ScaleUp { expr, by } => self.cg_scale_up(func, *expr, by),
+            ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(func, *expr, shift_amount),
             ExprKind::String(name) => self.cg_string(name),
             ExprKind::MemberAccess { expr, member } => {
-                let reg = self.execute_expr(*expr);
+                let reg = self.execute_expr(func, *expr);
                 self.cg_member_access(reg, &member, true)
             }
             ExprKind::Ternary { cond, true_expr, false_expr, .. } => {
-                self.cg_ternary(*cond, *true_expr, *false_expr)
+                self.cg_ternary(func, *cond, *true_expr, *false_expr)
             }
-            ExprKind::Comma { left, right } => self.cg_comma(*left, *right),
+            ExprKind::Comma { left, right } => self.cg_comma(func, *left, *right),
             ExprKind::Nop => Register::Void,
         }
     }
-    fn cg_comma(&mut self, left: Expr, right: Expr) -> Register {
-        let reg = self.execute_expr(left);
+    fn cg_comma(&mut self, func: &mut Function, left: Expr, right: Expr) -> Register {
+        let reg = self.execute_expr(func, left);
         self.free(reg);
 
-        self.execute_expr(right)
+        self.execute_expr(func, right)
     }
 
-    fn cg_ternary(&mut self, cond: Expr, true_expr: Expr, false_expr: Expr) -> Register {
-        let mut cond_reg = self.execute_expr(cond);
+    fn cg_ternary(
+        &mut self,
+        func: &mut Function,
+        cond: Expr,
+        true_expr: Expr,
+        false_expr: Expr,
+    ) -> Register {
+        let mut cond_reg = self.execute_expr(func, cond);
         cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
         let done_label = create_label(&mut self.label_index);
@@ -754,7 +762,7 @@ impl Compiler {
             &mut self.interval_counter,
             self.instr_counter,
         ));
-        let true_reg = self.execute_expr(true_expr);
+        let true_reg = self.execute_expr(func, true_expr);
 
         // copy both expressions into result register
         self.write_out(Lir::Mov(true_reg.clone(), result.clone()));
@@ -763,7 +771,7 @@ impl Compiler {
         self.write_out(Lir::Jmp(done_label));
         self.write_out(Lir::LabelDefinition(else_label));
 
-        let false_reg = self.execute_expr(false_expr);
+        let false_reg = self.execute_expr(func, false_expr);
 
         self.write_out(Lir::Mov(false_reg.clone(), result.clone()));
         self.free(false_reg);
@@ -802,16 +810,16 @@ impl Compiler {
             unreachable!("{:?}", reg.get_type())
         }
     }
-    fn cg_comp_assign(&mut self, expr: Expr, tmp_symbol: VarSymbol) -> Register {
+    fn cg_comp_assign(&mut self, func: &mut Function, expr: Expr, tmp_symbol: VarSymbol) -> Register {
         // only have to declare tmp var, since compound assign is only syntax sugar
-        self.declare_var(tmp_symbol, None);
-        self.execute_expr(expr)
+        self.declare_var(func, tmp_symbol, None);
+        self.execute_expr(func, expr)
     }
     fn cg_string(&mut self, name: String) -> Register {
         Register::Label(LabelRegister::String(self.const_labels[&name]))
     }
-    fn cg_scale_down(&mut self, expr: Expr, by_amount: usize) -> Register {
-        let value_reg = self.execute_expr(expr);
+    fn cg_scale_down(&mut self, func: &mut Function, expr: Expr, by_amount: usize) -> Register {
+        let value_reg = self.execute_expr(func, expr);
         let value_reg = convert_reg!(self, value_reg, Register::Literal(..));
 
         // right shift number, equivalent to division (works bc type-size is 2^n)
@@ -823,29 +831,35 @@ impl Compiler {
 
         value_reg
     }
-    fn cg_scale_up(&mut self, expr: Expr, by_amount: usize) -> Register {
-        let value_reg = self.execute_expr(expr);
+    fn cg_scale_up(&mut self, func: &mut Function, expr: Expr, by_amount: usize) -> Register {
+        let value_reg = self.execute_expr(func, expr);
 
         self.cg_mult(
             Register::Literal(by_amount as i64, Type::Primitive(Primitive::Int)),
             value_reg,
         )
     }
-    fn cg_cast(&mut self, new_type: Type, expr: Expr, direction: CastDirection) -> Register {
+    fn cg_cast(
+        &mut self,
+        func: &mut Function,
+        new_type: Type,
+        expr: Expr,
+        direction: CastDirection,
+    ) -> Register {
         match direction {
-            CastDirection::Up => self.cg_cast_up(expr, new_type),
-            CastDirection::Down => self.cg_cast_down(expr, new_type),
-            CastDirection::Equal => self.execute_expr(expr),
+            CastDirection::Up => self.cg_cast_up(func, expr, new_type),
+            CastDirection::Down => self.cg_cast_down(func, expr, new_type),
+            CastDirection::Equal => self.execute_expr(func, expr),
         }
     }
-    fn cg_cast_down(&mut self, expr: Expr, new_type: Type) -> Register {
-        let mut value_reg = self.execute_expr(expr);
+    fn cg_cast_down(&mut self, func: &mut Function, expr: Expr, new_type: Type) -> Register {
+        let mut value_reg = self.execute_expr(func, expr);
         value_reg.set_type(new_type);
 
         value_reg
     }
-    fn cg_cast_up(&mut self, expr: Expr, new_type: Type) -> Register {
-        let mut value_reg = self.execute_expr(expr);
+    fn cg_cast_up(&mut self, func: &mut Function, expr: Expr, new_type: Type) -> Register {
+        let mut value_reg = self.execute_expr(func, expr);
 
         if matches!(
             value_reg,
@@ -890,7 +904,13 @@ impl Compiler {
             l_value
         }
     }
-    fn cg_call(&mut self, name: String, args: Vec<Expr>, return_type: Type) -> Register {
+    fn cg_call(
+        &mut self,
+        func: &mut Function,
+        caller: Expr,
+        args: Vec<Expr>,
+        return_type: Type,
+    ) -> Register {
         self.write_out(Lir::SaveRegs);
 
         let args_len = args.len();
@@ -903,7 +923,7 @@ impl Compiler {
 
         // moving the arguments into their designated registers
         for (i, expr) in args.into_iter().enumerate().rev() {
-            let mut reg = self.execute_expr(expr);
+            let mut reg = self.execute_expr(func, expr);
             let type_decl = reg.get_type();
 
             // put first six registers into designated argument-registers; others pushed onto stack
@@ -925,7 +945,9 @@ impl Compiler {
             self.free(reg);
         }
 
-        self.write_out(Lir::Call(name));
+        let caller = self.execute_expr(func, caller);
+        self.write_out(Lir::Call(caller.clone()));
+        self.free(caller);
 
         self.remove_spilled_args(args_len);
         for reg in arg_regs {
@@ -954,16 +976,28 @@ impl Compiler {
         }
     }
 
-    fn cg_logical(&mut self, left: Expr, operator: TokenKind, right: Expr) -> Register {
+    fn cg_logical(
+        &mut self,
+        func: &mut Function,
+        left: Expr,
+        operator: TokenKind,
+        right: Expr,
+    ) -> Register {
         match operator {
-            TokenKind::AmpAmp => self.cg_and(left, right),
-            TokenKind::PipePipe => self.cg_or(left, right),
+            TokenKind::AmpAmp => self.cg_and(func, left, right),
+            TokenKind::PipePipe => self.cg_or(func, left, right),
             _ => unreachable!(),
         }
     }
-    fn compare(&mut self, left: Expr, operator: TokenKind, right: Expr) -> Register {
-        let left_reg = self.execute_expr(left);
-        let right_reg = self.execute_expr(right);
+    fn compare(
+        &mut self,
+        func: &mut Function,
+        left: Expr,
+        operator: TokenKind,
+        right: Expr,
+    ) -> Register {
+        let left_reg = self.execute_expr(func, left);
+        let right_reg = self.execute_expr(func, right);
 
         let left_reg = self.convert_to_rval(left_reg);
         let right_reg = self.convert_to_rval(right_reg);
@@ -1003,8 +1037,8 @@ impl Compiler {
         right
     }
 
-    fn cg_or(&mut self, left: Expr, right: Expr) -> Register {
-        let mut left = self.execute_expr(left);
+    fn cg_or(&mut self, func: &mut Function, left: Expr, right: Expr) -> Register {
+        let mut left = self.execute_expr(func, left);
         left = convert_reg!(self, left, Register::Literal(..));
 
         let true_label = create_label(&mut self.label_index);
@@ -1017,7 +1051,7 @@ impl Compiler {
         self.write_out(Lir::JmpCond("ne", true_label));
         self.free(left);
 
-        let mut right = self.execute_expr(right);
+        let mut right = self.execute_expr(func, right);
         right = convert_reg!(self, right, Register::Literal(..));
 
         let false_label = create_label(&mut self.label_index);
@@ -1055,8 +1089,8 @@ impl Compiler {
 
         result
     }
-    fn cg_and(&mut self, left: Expr, right: Expr) -> Register {
-        let left = self.execute_expr(left);
+    fn cg_and(&mut self, func: &mut Function, left: Expr, right: Expr) -> Register {
+        let left = self.execute_expr(func, left);
         let left = convert_reg!(self, left, Register::Literal(..));
 
         let false_label = create_label(&mut self.label_index);
@@ -1070,7 +1104,7 @@ impl Compiler {
         self.free(left);
 
         // left is true if right false jump to false label
-        let right = self.execute_expr(right);
+        let right = self.execute_expr(func, right);
         let right = convert_reg!(self, right, Register::Literal(..));
 
         self.write_out(Lir::Cmp(
@@ -1103,8 +1137,14 @@ impl Compiler {
 
         result
     }
-    fn cg_unary(&mut self, operator: TokenKind, right: Expr, new_type: Type) -> Register {
-        let mut reg = self.execute_expr(right);
+    fn cg_unary(
+        &mut self,
+        func: &mut Function,
+        operator: TokenKind,
+        right: Expr,
+        new_type: Type,
+    ) -> Register {
+        let mut reg = self.execute_expr(func, right);
         // can't have literal as only operand to unary expression
         reg = convert_reg!(self, reg, Register::Literal(..));
 

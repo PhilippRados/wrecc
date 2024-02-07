@@ -22,7 +22,7 @@ pub enum Lir {
     Push(Register),
     Pop(Register),
 
-    Call(String),
+    Call(Register),
 
     // Function stuff
     // usize to allocate/deallocate stack-space
@@ -65,8 +65,7 @@ pub enum Lir {
 impl Lir {
     pub fn get_regs_mut(&mut self) -> (Option<&mut Register>, Option<&mut Register>) {
         match self {
-            Lir::Push(reg) => (None, Some(reg)),
-            Lir::Pop(reg) => (None, Some(reg)),
+            Lir::Call(reg) | Lir::Push(reg) | Lir::Pop(reg) => (None, Some(reg)),
             Lir::Mov(left, right)
             | Lir::Movs(left, right)
             | Lir::Movz(left, right)
@@ -89,8 +88,7 @@ impl Lir {
     #[allow(unused)]
     pub fn get_regs(&self) -> (Option<&Register>, Option<&Register>) {
         match self {
-            Lir::Push(reg) => (None, Some(reg)),
-            Lir::Pop(reg) => (None, Some(reg)),
+            Lir::Call(reg) | Lir::Push(reg) | Lir::Pop(reg) => (None, Some(reg)),
             Lir::Mov(left, right)
             | Lir::Movs(left, right)
             | Lir::Movz(left, right)
@@ -156,7 +154,15 @@ impl Display for Lir {
                 Lir::AddSp(value) => format!("\taddq    ${},%rsp", value),
                 Lir::Push(reg) => format!("\tpushq   {}", reg.base_name()),
                 Lir::Pop(reg) => format!("\tpopq    {}", reg.base_name()),
-                Lir::Call(name) => format!("\tcall    _{}", name),
+                Lir::Call(reg) => format!(
+                    "\tcall    {}{}",
+                    if !matches!(reg, Register::Label(_)) {
+                        "*"
+                    } else {
+                        ""
+                    },
+                    reg.base_name()
+                ),
                 Lir::Mov(from, to) => format!(
                     "\tmov{}    {}, {}",
                     to.get_type().suffix(),

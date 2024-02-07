@@ -5,72 +5,41 @@ use crate::compiler::codegen::register::*;
 use crate::compiler::common::{environment::*, error::*, token::*, types::*};
 use crate::compiler::parser::hir;
 
+use self::mir::decl::{CaseKind, ScopeKind};
 use self::mir::expr::{CastDirection, ValueKind};
+use crate::find_scope;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-macro_rules! find_scope {
-    ($scope:expr,$($expected:pat_param)|+) => {{
-        let mut result = None;
-        for current in $scope.0.iter_mut().rev() {
-            if matches!(current, $($expected)|+) {
-                result = Some(current);
-                break;
-            }
-        }
-        result
-    }};
-}
-
 pub struct TypeChecker {
-    // keeps track of current scope-kind
-    scope: Scope,
-
+    // TODO: shouldn't be public
     // symbol table
     pub env: Environment,
-
-    // TODO: this should be done via control-flow-graph
-    // checks if all paths return from a function
-    returns_all_paths: bool,
 
     // label with its associated label index
     const_labels: HashMap<String, usize>,
 
     // label index counter
     const_label_count: usize,
-
-    // save encountered switch-statements together with info about their cases and defaults,
-    // allows for simpler codegen
-    switches: Vec<Vec<Option<i64>>>,
 }
 
 // Converts hir-parsetree to type-annotated mir-ast. Also does typechecking and semantic analysis
 impl TypeChecker {
     pub fn new() -> Self {
         TypeChecker {
-            scope: Scope(vec![ScopeKind::Global]),
             env: Environment::new(),
-            returns_all_paths: false,
             const_labels: HashMap::new(),
             const_label_count: 0,
-            switches: Vec::new(),
         }
     }
     pub fn check(
         mut self,
         external_decls: Vec<hir::decl::ExternalDeclaration>,
-    ) -> Result<
-        (
-            Vec<mir::decl::ExternalDeclaration>,
-            HashMap<String, usize>,
-            Vec<Vec<Option<i64>>>,
-        ),
-        Vec<Error>,
-    > {
+    ) -> Result<(Vec<mir::decl::ExternalDeclaration>, HashMap<String, usize>), Vec<Error>> {
         match self.check_declarations(external_decls) {
-            Ok(mir) => Ok((mir, self.const_labels, self.switches)),
+            Ok(mir) => Ok((mir, self.const_labels)),
             Err(e) => Err(e.flatten_multiple()),
         }
     }
@@ -100,7 +69,7 @@ impl TypeChecker {
     ) -> Result<mir::decl::ExternalDeclaration, Error> {
         match external_decl {
             hir::decl::ExternalDeclaration::Declaration(decl) => self
-                .declaration(decl)
+                .declaration(decl, None)
                 .map(mir::decl::ExternalDeclaration::Declaration),
             hir::decl::ExternalDeclaration::Function(decl_type, name, body) => {
                 self.function_definition(decl_type, name, body)
@@ -111,12 +80,15 @@ impl TypeChecker {
     fn declaration(
         &mut self,
         decl: hir::decl::Declaration,
+        mut func: Option<&mut mir::decl::Function>,
     ) -> Result<Vec<mir::decl::Declarator>, Error> {
         let mut declarators = Vec::new();
         let specifier_type = self.parse_specifiers(decl.specifiers.clone())?;
 
         for declarator in decl.declarators {
-            if let Some(d) = self.declarator(specifier_type.clone(), decl.is_typedef, declarator)? {
+            if let Some(d) =
+                self.declarator(specifier_type.clone(), decl.is_typedef, declarator, &mut func)?
+            {
                 declarators.push(d);
             }
         }
@@ -128,15 +100,13 @@ impl TypeChecker {
         specifier_type: Type,
         is_typedef: bool,
         (declarator, init): (hir::decl::Declarator, Option<hir::decl::Init>),
+        func: &mut Option<&mut mir::decl::Function>,
     ) -> Result<Option<mir::decl::Declarator>, Error> {
         let parsed_type = self.parse_modifiers(specifier_type, declarator.modifiers)?;
 
         if let Some(name) = declarator.name {
             let symbol = if is_typedef {
                 Symbols::TypeDef(parsed_type.clone())
-            } else if let Type::Function { return_type, params, variadic } = parsed_type.clone() {
-                let func = Function::new(*return_type, params, variadic, InitType::Declaration);
-                Symbols::Func(func)
             } else {
                 Symbols::Variable(SymbolInfo {
                     kind: if init.is_some() {
@@ -146,10 +116,11 @@ impl TypeChecker {
                     },
                     token: name.clone(),
                     type_decl: parsed_type.clone(),
-                    is_global: self.env.is_global(),
                     // since global variable declarations can be used before initialization already
-                    // insert its register
-                    reg: if self.env.is_global() {
+                    // insert its register.
+                    // also have to insert function-labels otherwise their registers are never filled,
+                    // since they are ignored in codegen.
+                    reg: if self.env.is_global() || parsed_type.is_func() {
                         Some(Register::Label(LabelRegister::Var(
                             name.unwrap_string(),
                             parsed_type.clone(),
@@ -163,14 +134,24 @@ impl TypeChecker {
             let entry = self.env.declare_symbol(&name, symbol)?;
 
             return match (&*entry.borrow(), init) {
+                (Symbols::Variable(_), init) if parsed_type.is_func() => {
+                    if init.is_some() {
+                        return Err(Error::new(
+                            &name,
+                            ErrorKind::Regular("Only variables can be initialized"),
+                        ));
+                    }
+                    // function declarations don't need any codegen
+                    Ok(None)
+                }
                 (Symbols::Variable(_), Some(init)) => {
                     if !parsed_type.is_complete() {
                         return Err(Error::new(&name, ErrorKind::IncompleteType(parsed_type)));
                     }
-                    let init = self.init_check(&parsed_type, init)?;
+                    let init = self.init_check(func, &parsed_type, init)?;
 
-                    if !self.env.is_global() {
-                        self.scope.increment_stack_size(&parsed_type);
+                    if let Some(func) = func {
+                        func.increment_stack_size(&parsed_type);
                     }
 
                     Ok(Some(mir::decl::Declarator {
@@ -184,9 +165,10 @@ impl TypeChecker {
                     if !parsed_type.is_complete() && !tentative_decl {
                         return Err(Error::new(&name, ErrorKind::IncompleteType(parsed_type)));
                     }
-                    if !self.env.is_global() {
-                        self.scope.increment_stack_size(&parsed_type);
+                    if let Some(func) = func {
+                        func.increment_stack_size(&parsed_type);
                     }
+
                     Ok(Some(mir::decl::Declarator {
                         name,
                         entry: Rc::clone(&entry),
@@ -229,10 +211,8 @@ impl TypeChecker {
             [hir::decl::SpecifierKind::Enum(name, enum_constants)] => {
                 self.enum_specifier(token, name, enum_constants)
             }
-            [hir::decl::SpecifierKind::UserType] => {
-                if let Ok(Symbols::TypeDef(type_decl)) =
-                    self.env.get_symbol(&token).map(|symbol| symbol.borrow().clone())
-                {
+            [hir::decl::SpecifierKind::UserType] => self.env.get_symbol(&token).and_then(|symbol| {
+                if let Symbols::TypeDef(type_decl) = symbol.borrow().clone() {
                     Ok(type_decl)
                 } else {
                     Err(Error::new(
@@ -240,7 +220,7 @@ impl TypeChecker {
                         ErrorKind::InvalidSymbol(token.unwrap_string(), "user-type"),
                     ))
                 }
-            }
+            }),
 
             [hir::decl::SpecifierKind::Void] => Ok(Type::Primitive(Primitive::Void)),
             [hir::decl::SpecifierKind::Char] => Ok(Type::Primitive(Primitive::Char)),
@@ -284,13 +264,7 @@ impl TypeChecker {
                     let params = self
                         .parse_params(&token, params)?
                         .into_iter()
-                        .map(|(type_decl, name)| {
-                            if let Some((token, _)) = name {
-                                (type_decl, Some(token))
-                            } else {
-                                (type_decl, None)
-                            }
-                        })
+                        .map(|(type_decl, _)| type_decl)
                         .collect();
                     self.env.exit();
 
@@ -346,7 +320,7 @@ impl TypeChecker {
             }
             (None, Some(members)) => {
                 let members = self.struct_declaration(members.clone())?;
-                StructInfo::Anonymous(token.clone(), members)
+                StructInfo::Unnamed(token.clone(), members)
             }
             (None, None) => {
                 return Err(Error::new(&token, ErrorKind::EmptyAggregate(token.kind.clone())));
@@ -374,7 +348,12 @@ impl TypeChecker {
                 if !parsed_type.is_complete() {
                     return Err(Error::new(&name, ErrorKind::IncompleteType(parsed_type)));
                 }
-                // TODO: also cant have pure function
+                if parsed_type.is_func() {
+                    return Err(Error::new(
+                        &name,
+                        ErrorKind::FunctionMember(name.unwrap_string(), parsed_type),
+                    ));
+                }
 
                 parsed_members.push((parsed_type, name));
             }
@@ -450,7 +429,6 @@ impl TypeChecker {
                     token: name.clone(),
                     type_decl: Type::Primitive(Primitive::Int),
                     kind: InitType::Definition,
-                    is_global: self.env.is_global(),
                     reg: Some(Register::Literal(index as i64, Type::Primitive(Primitive::Int))),
                 }),
             )?;
@@ -490,7 +468,6 @@ impl TypeChecker {
                         token: name.clone(),
                         type_decl: parsed_type.clone(),
                         kind: InitType::Declaration,
-                        is_global: false,
                         reg: None,
                     }),
                 )?;
@@ -515,6 +492,7 @@ impl TypeChecker {
 
     fn init_check(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         type_decl: &Type,
         mut init: hir::decl::Init,
     ) -> Result<mir::decl::Init, Error> {
@@ -523,19 +501,20 @@ impl TypeChecker {
         }
 
         match init.kind {
-            hir::decl::InitKind::Scalar(expr) => self.init_scalar(type_decl, &init.token, expr),
-            hir::decl::InitKind::Aggr(list) => self.init_aggregate(type_decl, init.token, list),
+            hir::decl::InitKind::Scalar(expr) => self.init_scalar(func, type_decl, &init.token, expr),
+            hir::decl::InitKind::Aggr(list) => self.init_aggregate(func, type_decl, init.token, list),
         }
     }
     fn init_scalar(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         type_decl: &Type,
         token: &Token,
         expr: hir::expr::ExprKind,
     ) -> Result<mir::decl::Init, Error> {
-        let expr = self.visit_expr(expr)?;
+        let expr = self.visit_expr(func, expr)?;
 
-        let expr = expr.array_decay();
+        let expr = expr.decay();
         Self::check_type_compatibility(token, type_decl, &expr)?;
         let expr = Self::maybe_cast(type_decl.clone(), expr);
 
@@ -547,6 +526,7 @@ impl TypeChecker {
     }
     fn init_aggregate(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         type_decl: &Type,
         token: Token,
         mut list: Vec<Box<hir::decl::Init>>,
@@ -600,7 +580,7 @@ impl TypeChecker {
                             type_decl: sub_type.clone(),
                             value_kind: ValueKind::Lvalue,
                         };
-                        let right = self.visit_expr(expr)?;
+                        let right = self.visit_expr(func, expr)?;
 
                         while !sub_type.is_scalar()
                             && Self::is_string_init(sub_type, first)?.is_none()
@@ -615,7 +595,7 @@ impl TypeChecker {
                         }
                     }
 
-                    let init = self.init_check(sub_type, *list.remove(0))?;
+                    let init = self.init_check(func, sub_type, *list.remove(0))?;
                     let init_offset = objects.offset();
 
                     // remove overriding elements
@@ -654,7 +634,7 @@ impl TypeChecker {
             }
             _ => match list.as_slice() {
                 [single_init] if matches!(single_init.kind, hir::decl::InitKind::Scalar(_)) => {
-                    self.init_check(type_decl, *single_init.clone())
+                    self.init_check(func, type_decl, *single_init.clone())
                 }
                 [single_init] => Err(Error::new(
                     &single_init.token,
@@ -805,6 +785,9 @@ impl TypeChecker {
         name: Token,
         body: Vec<hir::stmt::Stmt>,
     ) -> Result<mir::decl::ExternalDeclaration, Error> {
+        let name_string = name.unwrap_string();
+
+        // have to pop of last modifier first so that params can have other scope than return type
         let Some(hir::decl::DeclModifier::Function { params, variadic,token }) = decl_type.modifiers.pop() else {
             unreachable!("last modifier has to be function to be func-def");
         };
@@ -817,7 +800,7 @@ impl TypeChecker {
         if !return_type.is_complete() && !return_type.is_void() {
             return Err(Error::new(
                 &name,
-                ErrorKind::IncompleteReturnType(name.unwrap_string(), return_type),
+                ErrorKind::IncompleteReturnType(name_string, return_type),
             ));
         }
 
@@ -826,189 +809,159 @@ impl TypeChecker {
 
         let params = self.parse_params(&token, params)?;
 
-        let func = Function::new(
-            return_type.clone(),
-            params
-                .clone()
-                .into_iter()
-                .map(|(type_decl, name)| {
-                    if let Some((token, _)) = name {
-                        (type_decl, Some(token))
-                    } else {
-                        (type_decl, None)
-                    }
-                })
-                .collect(),
+        let mut func = mir::decl::Function::new(name_string.clone(), return_type.clone(), variadic);
+
+        let type_decl = Type::Function(FuncType {
+            return_type: Box::new(return_type),
+            params: params.iter().map(|(ty, _)| ty.clone()).collect(),
             variadic,
-            InitType::Definition,
-        );
+        });
+        self.env.declare_global(
+            &name,
+            Symbols::Variable(SymbolInfo {
+                type_decl: type_decl.clone(),
+                kind: InitType::Definition,
+                reg: Some(Register::Label(LabelRegister::Var(
+                    name_string.clone(),
+                    type_decl,
+                ))),
+                token: name.clone(),
+            }),
+        )?;
 
-        let symbol = self.env.declare_global(&name, Symbols::Func(func))?;
-
-        self.scope
-            .0
-            .push(ScopeKind::Function(Rc::clone(&symbol), Vec::new()));
-
-        let mut mir_params = Vec::new();
         for (type_decl, param_name) in params.into_iter() {
             if !type_decl.is_complete() {
                 return Err(Error::new(
                     &name,
-                    ErrorKind::IncompleteFuncArg(name.unwrap_string(), type_decl),
+                    ErrorKind::IncompleteFuncArg(name_string, type_decl),
                 ));
             }
             if let Some((_, var_symbol)) = param_name {
-                self.scope.increment_stack_size(&type_decl);
+                func.increment_stack_size(&type_decl);
 
-                mir_params.push(var_symbol);
+                func.params.push(var_symbol);
             } else {
                 return Err(Error::new(&name, ErrorKind::UnnamedFuncParams));
             }
         }
 
         // check function body
-        let body = self.block(body);
+        let body = self.block(&mut func, body);
 
-        self.scope.compare_gotos()?;
-        self.scope.0.pop();
+        func.compare_gotos()?;
 
         let mir::stmt::Stmt::Block(mut body) = body? else {unreachable!()};
 
-        Self::main_returns_int(&name, &return_type)?;
-        self.implicit_return_main(Rc::clone(&symbol), &name, &mut body);
+        func.main_return(&name, &mut body)?;
 
-        if !return_type.is_void() && !self.returns_all_paths {
-            self.returns_all_paths = false;
+        if !func.return_type.is_void() && !func.returns_all_paths {
+            func.returns_all_paths = false;
 
-            Err(Error::new(
-                &name,
-                ErrorKind::NoReturnAllPaths(name.unwrap_string()),
-            ))
+            Err(Error::new(&name, ErrorKind::NoReturnAllPaths(name_string)))
         } else {
-            self.returns_all_paths = false;
+            func.returns_all_paths = false;
 
-            Ok(mir::decl::ExternalDeclaration::Function(
-                name.unwrap_string(),
-                symbol,
-                mir_params,
-                body,
-            ))
+            Ok(mir::decl::ExternalDeclaration::Function(func, body))
         }
     }
-    fn main_returns_int(name_token: &Token, return_type: &Type) -> Result<(), Error> {
-        if name_token.unwrap_string() == "main" && *return_type != Type::Primitive(Primitive::Int) {
-            Err(Error::new(
-                name_token,
-                ErrorKind::InvalidMainReturn(return_type.clone()),
-            ))
-        } else {
-            Ok(())
-        }
-    }
-    fn implicit_return_main(
+    fn visit_stmt(
         &mut self,
-        func_symbol: FuncSymbol,
-        name_token: &Token,
-        body: &mut Vec<mir::stmt::Stmt>,
-    ) {
-        if name_token.unwrap_string() == "main" && !self.returns_all_paths {
-            self.returns_all_paths = true;
-
-            body.push(mir::stmt::Stmt::Return(
-                func_symbol,
-                Some(mir::expr::Expr {
-                    kind: mir::expr::ExprKind::Literal(0),
-                    type_decl: Type::Primitive(Primitive::Int),
-                    value_kind: ValueKind::Rvalue,
-                }),
-            ));
-        }
-    }
-    fn visit_stmt(&mut self, statement: hir::stmt::Stmt) -> Result<mir::stmt::Stmt, Error> {
+        func: &mut mir::decl::Function,
+        statement: hir::stmt::Stmt,
+    ) -> Result<mir::stmt::Stmt, Error> {
         match statement {
-            hir::stmt::Stmt::Declaration(decls) => {
-                self.declaration(decls).map(mir::stmt::Stmt::Declaration)
+            hir::stmt::Stmt::Declaration(decls) => self
+                .declaration(decls, Some(func))
+                .map(mir::stmt::Stmt::Declaration),
+            hir::stmt::Stmt::Return(keyword, value) => self.return_statement(func, keyword, value),
+            hir::stmt::Stmt::Expr(expr) => {
+                Ok(mir::stmt::Stmt::Expr(self.visit_expr(&mut Some(func), expr)?))
             }
-            hir::stmt::Stmt::Return(keyword, value) => self.return_statement(keyword, value),
-            hir::stmt::Stmt::Expr(expr) => Ok(mir::stmt::Stmt::Expr(self.visit_expr(expr)?)),
             hir::stmt::Stmt::Block(statements) => {
                 self.env.enter();
-                self.block(statements)
+                self.block(func, statements)
             }
             hir::stmt::Stmt::If(keyword, cond, then_branch, else_branch) => {
-                self.if_statement(keyword, cond, *then_branch, else_branch)
+                self.if_statement(func, keyword, cond, *then_branch, else_branch)
             }
             hir::stmt::Stmt::While(left_paren, cond, body) => {
-                self.while_statement(left_paren, cond, *body)
+                self.while_statement(func, left_paren, cond, *body)
             }
-            hir::stmt::Stmt::Do(keyword, body, cond) => self.do_statement(keyword, *body, cond),
+            hir::stmt::Stmt::Do(keyword, body, cond) => self.do_statement(func, keyword, *body, cond),
             hir::stmt::Stmt::For(left_paren, init, cond, inc, body) => {
-                self.for_statement(left_paren, init, cond, inc, *body)
+                self.for_statement(func, left_paren, init, cond, inc, *body)
             }
-            hir::stmt::Stmt::Break(keyword) => self.break_statement(keyword),
-            hir::stmt::Stmt::Continue(keyword) => self.continue_statement(keyword),
-            hir::stmt::Stmt::Switch(keyword, cond, body) => self.switch_statement(keyword, cond, *body),
-            hir::stmt::Stmt::Case(keyword, value, body) => self.case_statement(keyword, value, *body),
-            hir::stmt::Stmt::Default(keyword, body) => self.default_statement(keyword, *body),
-            hir::stmt::Stmt::Goto(label) => self.goto_statement(label),
-            hir::stmt::Stmt::Label(name, body) => self.label_statement(name, *body),
+            hir::stmt::Stmt::Break(keyword) => self.break_statement(func, keyword),
+            hir::stmt::Stmt::Continue(keyword) => self.continue_statement(func, keyword),
+            hir::stmt::Stmt::Switch(keyword, cond, body) => {
+                self.switch_statement(func, keyword, cond, *body)
+            }
+            hir::stmt::Stmt::Case(keyword, value, body) => {
+                self.case_statement(func, keyword, value, *body)
+            }
+            hir::stmt::Stmt::Default(keyword, body) => self.default_statement(func, keyword, *body),
+            hir::stmt::Stmt::Goto(label) => self.goto_statement(func, label),
+            hir::stmt::Stmt::Label(name, body) => self.label_statement(func, name, *body),
         }
     }
-    fn goto_statement(&mut self, label: Token) -> Result<mir::stmt::Stmt, Error> {
-        let func_symbol = self.scope.insert_goto(label.clone())?;
+    fn goto_statement(
+        &mut self,
+        func: &mut mir::decl::Function,
+        label: Token,
+    ) -> Result<mir::stmt::Stmt, Error> {
+        func.gotos.push(label.clone());
 
-        Ok(mir::stmt::Stmt::Goto(func_symbol, label.unwrap_string()))
+        Ok(mir::stmt::Stmt::Goto(label.unwrap_string()))
     }
     fn label_statement(
         &mut self,
+        func: &mut mir::decl::Function,
         name_token: Token,
         body: hir::stmt::Stmt,
     ) -> Result<mir::stmt::Stmt, Error> {
-        let func_symbol = self.scope.insert_label(&name_token)?;
-        let body = self.visit_stmt(body)?;
+        func.insert_label(&name_token)?;
+        let body = self.visit_stmt(func, body)?;
 
-        Ok(mir::stmt::Stmt::Label(
-            func_symbol,
-            name_token.unwrap_string(),
-            Box::new(body),
-        ))
+        Ok(mir::stmt::Stmt::Label(name_token.unwrap_string(), Box::new(body)))
     }
     fn switch_statement(
         &mut self,
+        func: &mut mir::decl::Function,
         token: Token,
         cond: hir::expr::ExprKind,
         body: hir::stmt::Stmt,
     ) -> Result<mir::stmt::Stmt, Error> {
-        let cond = self.visit_expr(cond)?;
+        let cond = self.visit_expr(&mut Some(func), cond)?;
         if !cond.type_decl.is_integer() {
             return Err(Error::new(
                 &token,
                 ErrorKind::NotInteger("Switch conditional", cond.type_decl),
             ));
         }
-        self.scope.0.push(ScopeKind::Switch(vec![]));
-        let stmt = self.visit_stmt(body);
+        func.scope.push(ScopeKind::Switch(Vec::new()));
+        let stmt = self.visit_stmt(func, body);
 
-        let Some(ScopeKind::Switch(labels)) = self.scope.0.pop() else {
+        let Some(ScopeKind::Switch(labels)) = func.scope.pop() else {
             unreachable!("all other scopes should be popped off by themselves")
         };
 
-        self.switches.push(labels);
+        func.switches.push_back(labels);
 
         Ok(mir::stmt::Stmt::Switch(cond, Box::new(stmt?)))
     }
     fn case_statement(
         &mut self,
+        func: &mut mir::decl::Function,
         token: Token,
         mut value: hir::expr::ExprKind,
         body: hir::stmt::Stmt,
     ) -> Result<mir::stmt::Stmt, Error> {
         let value = value.get_literal_constant(self, &token, "Case value")?;
 
-        match find_scope!(&mut self.scope, ScopeKind::Switch(..)) {
+        match find_scope!(&mut func.scope, ScopeKind::Switch(..)) {
             Some(ScopeKind::Switch(labels)) => {
-                if !labels.contains(&Some(value)) {
-                    labels.push(Some(value))
+                if !labels.contains(&CaseKind::Case(value)) {
+                    labels.push(CaseKind::Case(value))
                 } else {
                     return Err(Error::new(&token, ErrorKind::DuplicateCase(value)));
                 }
@@ -1018,19 +971,20 @@ impl TypeChecker {
             }
         }
 
-        let body = self.visit_stmt(body)?;
+        let body = self.visit_stmt(func, body)?;
 
         Ok(mir::stmt::Stmt::Case(Box::new(body)))
     }
     fn default_statement(
         &mut self,
+        func: &mut mir::decl::Function,
         token: Token,
         body: hir::stmt::Stmt,
     ) -> Result<mir::stmt::Stmt, Error> {
-        match find_scope!(&mut self.scope, ScopeKind::Switch(..)) {
+        match find_scope!(&mut func.scope, ScopeKind::Switch(..)) {
             Some(ScopeKind::Switch(labels)) => {
-                if !labels.contains(&None) {
-                    labels.push(None)
+                if !labels.contains(&CaseKind::Default) {
+                    labels.push(CaseKind::Default)
                 } else {
                     return Err(Error::new(&token, ErrorKind::MultipleDefaults));
                 }
@@ -1039,21 +993,22 @@ impl TypeChecker {
                 return Err(Error::new(&token, ErrorKind::NotIn("default", "switch")));
             }
         }
-        let body = self.visit_stmt(body)?;
+        let body = self.visit_stmt(func, body)?;
 
         Ok(mir::stmt::Stmt::Default(Box::new(body)))
     }
     fn do_statement(
         &mut self,
+        func: &mut mir::decl::Function,
         token: Token,
         body: hir::stmt::Stmt,
         cond: hir::expr::ExprKind,
     ) -> Result<mir::stmt::Stmt, Error> {
-        self.scope.0.push(ScopeKind::Loop);
-        let body = self.visit_stmt(body)?;
-        self.scope.0.pop();
+        func.scope.push(ScopeKind::Loop);
+        let body = self.visit_stmt(func, body)?;
+        func.scope.pop();
 
-        let cond = self.visit_expr(cond)?;
+        let cond = self.visit_expr(&mut Some(func), cond)?;
         if !cond.type_decl.is_scalar() {
             return Err(Error::new(
                 &token,
@@ -1061,12 +1016,13 @@ impl TypeChecker {
             ));
         }
 
-        self.returns_all_paths = false;
+        func.returns_all_paths = false;
 
         Ok(mir::stmt::Stmt::Do(Box::new(body), cond))
     }
     fn for_statement(
         &mut self,
+        func: &mut mir::decl::Function,
         left_paren: Token,
         init: Option<Box<hir::stmt::Stmt>>,
         cond: Option<hir::expr::ExprKind>,
@@ -1075,10 +1031,10 @@ impl TypeChecker {
     ) -> Result<mir::stmt::Stmt, Error> {
         self.env.enter();
 
-        let init = init.map(|init| self.visit_stmt(*init)).transpose()?;
+        let init = init.map(|init| self.visit_stmt(func, *init)).transpose()?;
 
         let cond = if let Some(cond) = cond {
-            let cond = self.visit_expr(cond)?;
+            let cond = self.visit_expr(&mut Some(func), cond)?;
             if !cond.type_decl.is_scalar() {
                 return Err(Error::new(
                     &left_paren,
@@ -1090,15 +1046,15 @@ impl TypeChecker {
             None
         };
 
-        self.scope.0.push(ScopeKind::Loop);
-        let body = self.visit_stmt(body)?;
+        func.scope.push(ScopeKind::Loop);
+        let body = self.visit_stmt(func, body)?;
 
-        let inc = inc.map(|inc| self.visit_expr(inc)).transpose()?;
+        let inc = inc.map(|inc| self.visit_expr(&mut Some(func), inc)).transpose()?;
 
-        self.scope.0.pop();
+        func.scope.pop();
         self.env.exit();
 
-        self.returns_all_paths = false;
+        func.returns_all_paths = false;
 
         Ok(mir::stmt::Stmt::For(
             init.map(Box::new),
@@ -1107,8 +1063,12 @@ impl TypeChecker {
             Box::new(body),
         ))
     }
-    fn break_statement(&mut self, token: Token) -> Result<mir::stmt::Stmt, Error> {
-        if find_scope!(&mut self.scope, ScopeKind::Loop | ScopeKind::Switch(..)).is_none() {
+    fn break_statement(
+        &mut self,
+        func: &mut mir::decl::Function,
+        token: Token,
+    ) -> Result<mir::stmt::Stmt, Error> {
+        if find_scope!(&mut func.scope, ScopeKind::Loop | ScopeKind::Switch(..)).is_none() {
             Err(Error::new(
                 &token,
                 ErrorKind::NotIn("break", "loop/switch-statement"),
@@ -1117,8 +1077,12 @@ impl TypeChecker {
             Ok(mir::stmt::Stmt::Break)
         }
     }
-    fn continue_statement(&mut self, token: Token) -> Result<mir::stmt::Stmt, Error> {
-        if find_scope!(&mut self.scope, ScopeKind::Loop).is_none() {
+    fn continue_statement(
+        &mut self,
+        func: &mut mir::decl::Function,
+        token: Token,
+    ) -> Result<mir::stmt::Stmt, Error> {
+        if find_scope!(&mut func.scope, ScopeKind::Loop).is_none() {
             Err(Error::new(&token, ErrorKind::NotIn("continue", "loop")))
         } else {
             Ok(mir::stmt::Stmt::Continue)
@@ -1127,11 +1091,12 @@ impl TypeChecker {
 
     fn while_statement(
         &mut self,
+        func: &mut mir::decl::Function,
         left_paren: Token,
         cond: hir::expr::ExprKind,
         body: hir::stmt::Stmt,
     ) -> Result<mir::stmt::Stmt, Error> {
-        let cond = self.visit_expr(cond)?;
+        let cond = self.visit_expr(&mut Some(func), cond)?;
         if !cond.type_decl.is_scalar() {
             return Err(Error::new(
                 &left_paren,
@@ -1139,23 +1104,24 @@ impl TypeChecker {
             ));
         }
 
-        self.scope.0.push(ScopeKind::Loop);
-        let body = self.visit_stmt(body)?;
-        self.scope.0.pop();
+        func.scope.push(ScopeKind::Loop);
+        let body = self.visit_stmt(func, body)?;
+        func.scope.pop();
 
-        self.returns_all_paths = false;
+        func.returns_all_paths = false;
 
         Ok(mir::stmt::Stmt::While(cond, Box::new(body)))
     }
 
     fn if_statement(
         &mut self,
+        func: &mut mir::decl::Function,
         keyword: Token,
         cond: hir::expr::ExprKind,
         then_branch: hir::stmt::Stmt,
         else_branch: Option<Box<hir::stmt::Stmt>>,
     ) -> Result<mir::stmt::Stmt, Error> {
-        let cond = self.visit_expr(cond)?;
+        let cond = self.visit_expr(&mut Some(func), cond)?;
         if !cond.type_decl.is_scalar() {
             return Err(Error::new(
                 &keyword,
@@ -1163,17 +1129,17 @@ impl TypeChecker {
             ));
         }
 
-        let then_branch = self.visit_stmt(then_branch)?;
-        let then_return = self.returns_all_paths;
-        self.returns_all_paths = false;
+        let then_branch = self.visit_stmt(func, then_branch)?;
+        let then_return = func.returns_all_paths;
+        func.returns_all_paths = false;
 
         let else_branch = else_branch
             .map(|stmt| {
-                let else_branch = self.visit_stmt(*stmt);
-                let else_return = self.returns_all_paths;
+                let else_branch = self.visit_stmt(func, *stmt);
+                let else_return = func.returns_all_paths;
 
                 if !then_return || !else_return {
-                    self.returns_all_paths = false;
+                    func.returns_all_paths = false;
                 }
                 else_branch
             })
@@ -1188,53 +1154,52 @@ impl TypeChecker {
 
     fn return_statement(
         &mut self,
+        func: &mut mir::decl::Function,
         keyword: Token,
         expr: Option<hir::expr::ExprKind>,
     ) -> Result<mir::stmt::Stmt, Error> {
-        self.returns_all_paths = true;
-
-        let Some(ScopeKind::Function(func_symbol,..)) = find_scope!(&mut self.scope, ScopeKind::Function(..)) else {
-            unreachable!("parser ensures that statements can only be contained in functions");
-        };
-        let function_type = func_symbol.borrow().unwrap_func().return_type.clone();
-        let func_symbol = Rc::clone(func_symbol);
+        func.returns_all_paths = true;
 
         let expr = if let Some(expr) = expr {
-            let expr = self.visit_expr(expr)?;
+            let expr = self.visit_expr(&mut Some(func), expr)?;
 
-            let expr = expr.array_decay();
-            if !function_type.type_compatible(&expr.type_decl, &expr) {
+            let expr = expr.decay();
+            if !func.return_type.type_compatible(&expr.type_decl, &expr) {
                 return Err(Error::new(
                     &keyword,
-                    ErrorKind::MismatchedFunctionReturn(function_type, expr.type_decl),
+                    ErrorKind::MismatchedFunctionReturn(func.return_type.clone(), expr.type_decl),
                 ));
             }
-            let expr = Self::maybe_cast(function_type, expr);
+            let expr = Self::maybe_cast(func.return_type.clone(), expr);
 
             Some(expr)
         } else {
             let return_type = Type::Primitive(Primitive::Void);
             let return_expr = hir::expr::ExprKind::Nop;
 
-            if !function_type.type_compatible(&return_type, &return_expr) {
+            if !func.return_type.type_compatible(&return_type, &return_expr) {
                 return Err(Error::new(
                     &keyword,
-                    ErrorKind::MismatchedFunctionReturn(function_type, return_type),
+                    ErrorKind::MismatchedFunctionReturn(func.return_type.clone(), return_type),
                 ));
             }
 
             None
         };
 
-        Ok(mir::stmt::Stmt::Return(func_symbol, expr))
+        Ok(mir::stmt::Stmt::Return(expr))
     }
 
-    fn block(&mut self, body: Vec<hir::stmt::Stmt>) -> Result<mir::stmt::Stmt, Error> {
+    fn block(
+        &mut self,
+        func: &mut mir::decl::Function,
+        body: Vec<hir::stmt::Stmt>,
+    ) -> Result<mir::stmt::Stmt, Error> {
         let mut errors = Vec::new();
         let mut stmts = Vec::new();
 
         for stmt in body {
-            match self.visit_stmt(stmt) {
+            match self.visit_stmt(func, stmt) {
                 Ok(s) => stmts.push(s),
                 Err(e) => errors.push(e),
             }
@@ -1249,15 +1214,19 @@ impl TypeChecker {
         }
     }
 
-    pub fn visit_expr(&mut self, mut parse_tree: hir::expr::ExprKind) -> Result<mir::expr::Expr, Error> {
+    pub fn visit_expr(
+        &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
+        mut parse_tree: hir::expr::ExprKind,
+    ) -> Result<mir::expr::Expr, Error> {
         parse_tree.integer_const_fold(self)?;
 
         match parse_tree {
             hir::expr::ExprKind::Binary { left, token, right } => {
-                self.evaluate_binary(*left, token, *right)
+                self.evaluate_binary(func, *left, token, *right)
             }
-            hir::expr::ExprKind::Unary { token, right } => self.evaluate_unary(token, *right),
-            hir::expr::ExprKind::Grouping { expr } => self.visit_expr(*expr),
+            hir::expr::ExprKind::Unary { token, right } => self.evaluate_unary(func, token, *right),
+            hir::expr::ExprKind::Grouping { expr } => self.visit_expr(func, *expr),
             hir::expr::ExprKind::Literal(n, type_decl) => Ok(mir::expr::Expr {
                 kind: mir::expr::ExprKind::Literal(n),
                 type_decl,
@@ -1265,37 +1234,39 @@ impl TypeChecker {
             }),
             hir::expr::ExprKind::String(token) => self.string(token.unwrap_string()),
             hir::expr::ExprKind::Logical { left, token, right } => {
-                self.evaluate_logical(*left, token, *right)
+                self.evaluate_logical(func, *left, token, *right)
             }
             hir::expr::ExprKind::Comparison { left, token, right } => {
-                self.evaluate_comparison(*left, token, *right)
+                self.evaluate_comparison(func, *left, token, *right)
             }
             hir::expr::ExprKind::Ident(token) => self.ident(token),
             hir::expr::ExprKind::Assign { l_expr, token, r_expr } => {
-                let left = self.visit_expr(*l_expr)?;
-                let right = self.visit_expr(*r_expr)?;
+                let left = self.visit_expr(func, *l_expr)?;
+                let right = self.visit_expr(func, *r_expr)?;
 
                 self.assign_var(left, token, right)
             }
             hir::expr::ExprKind::CompoundAssign { l_expr, token, r_expr } => {
-                self.compound_assign(*l_expr, token, *r_expr)
+                self.compound_assign(func, *l_expr, token, *r_expr)
             }
-            hir::expr::ExprKind::Call { left_paren, name, args } => {
-                self.evaluate_call(left_paren, name, args)
+            hir::expr::ExprKind::Call { left_paren, caller, args } => {
+                self.evaluate_call(func, left_paren, *caller, args)
             }
-            hir::expr::ExprKind::PostUnary { left, token } => self.evaluate_postunary(token, *left),
+            hir::expr::ExprKind::PostUnary { left, token } => {
+                self.evaluate_postunary(func, token, *left)
+            }
             hir::expr::ExprKind::MemberAccess { token, expr, member } => {
-                self.member_access(token, member, *expr)
+                self.member_access(func, token, member, *expr)
             }
             hir::expr::ExprKind::Cast { token, decl_type, expr } => {
-                self.explicit_cast(token, *expr, decl_type)
+                self.explicit_cast(func, token, *expr, decl_type)
             }
             hir::expr::ExprKind::Ternary { token, cond, true_expr, false_expr } => {
-                self.ternary(token, *cond, *true_expr, *false_expr)
+                self.ternary(func, token, *cond, *true_expr, *false_expr)
             }
-            hir::expr::ExprKind::Comma { left, right } => self.comma(*left, *right),
+            hir::expr::ExprKind::Comma { left, right } => self.comma(func, *left, *right),
             hir::expr::ExprKind::SizeofType { decl_type } => self.sizeof_type(decl_type),
-            hir::expr::ExprKind::SizeofExpr { expr } => self.sizeof_expr(*expr),
+            hir::expr::ExprKind::SizeofExpr { expr } => self.sizeof_expr(func, *expr),
             hir::expr::ExprKind::Nop => Ok(mir::expr::Expr {
                 kind: mir::expr::ExprKind::Nop,
                 type_decl: Type::Primitive(Primitive::Void),
@@ -1323,11 +1294,12 @@ impl TypeChecker {
     // TODO: display warning when casting down
     fn explicit_cast(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         token: Token,
         expr: hir::expr::ExprKind,
         decl_type: hir::decl::DeclType,
     ) -> Result<mir::expr::Expr, Error> {
-        let expr = self.visit_expr(expr)?.array_decay();
+        let expr = self.visit_expr(func, expr)?.decay();
         let new_type = self.parse_type(decl_type)?;
 
         if !new_type.is_void() && (!expr.type_decl.is_scalar() || !new_type.is_scalar()) {
@@ -1361,8 +1333,12 @@ impl TypeChecker {
         })
     }
 
-    fn sizeof_expr(&mut self, expr: hir::expr::ExprKind) -> Result<mir::expr::Expr, Error> {
-        let expr = self.visit_expr(expr)?;
+    fn sizeof_expr(
+        &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
+        expr: hir::expr::ExprKind,
+    ) -> Result<mir::expr::Expr, Error> {
+        let expr = self.visit_expr(func, expr)?;
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Literal(expr.type_decl.size() as i64),
@@ -1372,11 +1348,12 @@ impl TypeChecker {
     }
     fn comma(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         left: hir::expr::ExprKind,
         right: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let left = self.visit_expr(left)?;
-        let right = self.visit_expr(right)?;
+        let left = self.visit_expr(func, left)?;
+        let right = self.visit_expr(func, right)?;
 
         Ok(mir::expr::Expr {
             value_kind: ValueKind::Rvalue,
@@ -1389,20 +1366,21 @@ impl TypeChecker {
     }
     fn ternary(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         token: Token,
         cond: hir::expr::ExprKind,
         true_expr: hir::expr::ExprKind,
         false_expr: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let cond = self.visit_expr(cond)?;
+        let cond = self.visit_expr(func, cond)?;
         if !cond.type_decl.is_scalar() {
             return Err(Error::new(
                 &token,
                 ErrorKind::NotScalar("Conditional", cond.type_decl),
             ));
         }
-        let true_expr = self.visit_expr(true_expr)?;
-        let false_expr = self.visit_expr(false_expr)?;
+        let true_expr = self.visit_expr(func, true_expr)?;
+        let false_expr = self.visit_expr(func, false_expr)?;
 
         if !true_expr
             .type_decl
@@ -1449,7 +1427,7 @@ impl TypeChecker {
                 kind: mir::expr::ExprKind::Ident(Rc::clone(&symbol)),
                 value_kind: ValueKind::Lvalue,
             }),
-            Symbols::TypeDef(..) | Symbols::Func(..) => Err(Error::new(
+            Symbols::TypeDef(..) => Err(Error::new(
                 &token,
                 ErrorKind::InvalidSymbol(token.unwrap_string(), "variable"),
             )),
@@ -1457,11 +1435,12 @@ impl TypeChecker {
     }
     fn member_access(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         token: Token,
         member: Token,
         expr: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let expr = self.visit_expr(expr)?;
+        let expr = self.visit_expr(func, expr)?;
 
         if !expr.type_decl.is_complete() {
             return Err(Error::new(
@@ -1496,10 +1475,11 @@ impl TypeChecker {
     }
     fn evaluate_postunary(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         token: Token,
         expr: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let type_decl = self.visit_expr(expr.clone())?.type_decl;
+        let type_decl = self.visit_expr(func, expr.clone())?.type_decl;
 
         let (comp_op, bin_op) = match token.kind {
             TokenKind::PlusPlus => (TokenKind::PlusEqual, TokenKind::Minus),
@@ -1520,7 +1500,10 @@ impl TypeChecker {
 
         // need to cast back to left-type since binary operation integer promotes
         // char c; typeof(c--) == char
-        Ok(Self::maybe_cast(type_decl, self.visit_expr(postunary_sugar)?))
+        Ok(Self::maybe_cast(
+            type_decl,
+            self.visit_expr(func, postunary_sugar)?,
+        ))
     }
     fn string(&mut self, data: String) -> Result<mir::expr::Expr, Error> {
         let len = data.len() + 1; // extra byte for \0-Terminator
@@ -1538,35 +1521,38 @@ impl TypeChecker {
     }
     fn compound_assign(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         l_expr: hir::expr::ExprKind,
         token: Token,
         r_expr: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let type_decl = self.visit_expr(l_expr.clone())?.type_decl;
+        let type_decl = self.visit_expr(func, l_expr.clone())?.type_decl;
 
         // to not evaluate l-expr twice convert `A op= B` to `tmp = &A, *tmp = *tmp op B`
         self.env.enter();
         let tmp_token = Token {
-            kind: TokenKind::Ident("tmp".to_string()),
+            // have to generate unique name so normal variables are not confused for tmp
+            kind: TokenKind::Ident(format!("tmp{}{}", token.line_index, token.column)),
             ..token.clone()
         };
         let tmp_type = type_decl.pointer_to();
-
-        self.scope.increment_stack_size(&tmp_type);
 
         let tmp_symbol = self
             .env
             .declare_symbol(
                 &tmp_token,
                 Symbols::Variable(SymbolInfo {
-                    type_decl: tmp_type,
+                    type_decl: tmp_type.clone(),
                     kind: InitType::Declaration,
                     reg: None,
-                    is_global: false,
                     token: token.clone(),
                 }),
             )
             .expect("always valid to declare tmp in new scope");
+
+        if let Some(func) = func {
+            func.increment_stack_size(&tmp_type);
+        }
 
         // tmp = &A, *tmp = *tmp op B
         let compound_sugar = hir::expr::ExprKind::Comma {
@@ -1598,13 +1584,14 @@ impl TypeChecker {
             }),
         };
 
-        let expr = self.visit_expr(compound_sugar).map_err(|err| {
+        let expr = self.visit_expr(func, compound_sugar).map_err(|err| {
             self.env.exit();
             err
         })?;
 
         self.env.exit();
 
+        // INFO: still need to pass var-symbol here so that codegen declares var when it has the correct base-pointer offset
         Ok(mir::expr::Expr {
             type_decl: expr.type_decl.clone(),
             kind: mir::expr::ExprKind::CompoundAssign { tmp_symbol, expr: Box::new(expr) },
@@ -1617,7 +1604,7 @@ impl TypeChecker {
         token: Token,
         right: mir::expr::Expr,
     ) -> Result<mir::expr::Expr, Error> {
-        if matches!(left.type_decl, Type::Array { .. }) {
+        if left.type_decl.is_array() || left.type_decl.is_func() {
             return Err(Error::new(&token, ErrorKind::NotAssignable(left.type_decl)));
         }
 
@@ -1625,7 +1612,7 @@ impl TypeChecker {
             return Err(Error::new(&token, ErrorKind::NotLvalue));
         }
 
-        let right = right.array_decay();
+        let right = right.decay();
         Self::check_type_compatibility(&token, &left.type_decl, &right)?;
         let right = Self::maybe_cast(left.type_decl.clone(), right);
 
@@ -1641,57 +1628,60 @@ impl TypeChecker {
 
     fn evaluate_call(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         left_paren: Token,
-        func_name: Token,
+        caller: hir::expr::ExprKind,
         parsed_args: Vec<hir::expr::ExprKind>,
     ) -> Result<mir::expr::Expr, Error> {
+        let caller = self.visit_expr(func, caller)?;
+
         let mut args: Vec<mir::expr::Expr> = Vec::new();
         for expr in parsed_args.into_iter() {
-            let arg = self.visit_expr(expr)?.array_decay().maybe_int_promote();
+            let arg = self.visit_expr(func, expr)?.decay().maybe_int_promote();
             args.push(arg);
         }
 
-        let symbol = self.env.get_symbol(&func_name)?;
-
-        return match &*symbol.borrow() {
-            Symbols::Variable(_) | Symbols::TypeDef(..) => Err(Error::new(
-                &left_paren,
-                ErrorKind::InvalidSymbol(func_name.unwrap_string(), "function"),
-            )),
-            Symbols::Func(function) => {
-                if (function.variadic && function.arity() <= args.len())
-                    || (!function.variadic && function.arity() == args.len())
-                {
-                    let args = self.args_and_params_match(
-                        &left_paren,
-                        func_name.unwrap_string(),
-                        &function.clone().params,
-                        args,
-                    )?;
-
-                    Ok(mir::expr::Expr {
-                        kind: mir::expr::ExprKind::Call { name: func_name.unwrap_string(), args },
-                        type_decl: function.return_type.clone(),
-                        value_kind: ValueKind::Rvalue,
-                    })
+        let func_type = match caller.type_decl.clone() {
+            Type::Function(func_type) => func_type,
+            ty => {
+                let mut pointer_to_func = None;
+                if let Type::Pointer(to) = ty {
+                    if let Type::Function(func_type) = *to {
+                        pointer_to_func = Some(func_type)
+                    }
+                }
+                if let Some(pointer_to_func) = pointer_to_func {
+                    pointer_to_func
                 } else {
-                    Err(Error::new(
+                    return Err(Error::new(
                         &left_paren,
-                        ErrorKind::MismatchedArity(
-                            func_name.unwrap_string(),
-                            function.arity(),
-                            args.len(),
-                        ),
-                    ))
+                        ErrorKind::InvalidCaller(caller.type_decl),
+                    ));
                 }
             }
         };
+
+        if (!func_type.variadic && func_type.params.len() != args.len())
+            || (func_type.variadic && func_type.params.len() > args.len())
+        {
+            return Err(Error::new(
+                &left_paren,
+                ErrorKind::MismatchedArity(caller.type_decl, func_type.params.len(), args.len()),
+            ));
+        }
+        let args = self.args_and_params_match(&left_paren, &caller.type_decl, func_type.params, args)?;
+
+        Ok(mir::expr::Expr {
+            kind: mir::expr::ExprKind::Call { caller: Box::new(caller), args },
+            type_decl: *func_type.return_type,
+            value_kind: ValueKind::Rvalue,
+        })
     }
     fn args_and_params_match(
         &self,
         left_paren: &Token,
-        func_name: String,
-        params: &[(Type, Option<Token>)],
+        type_decl: &Type,
+        params: Vec<Type>,
         mut args: Vec<mir::expr::Expr>,
     ) -> Result<Vec<mir::expr::Expr>, Error> {
         let mut new_args = Vec::new();
@@ -1699,13 +1689,12 @@ impl TypeChecker {
         // previously checked that args >= params, can be more args because of variadic params
         let remaining_args: Vec<mir::expr::Expr> = args.drain(params.len()..).collect();
 
-        for (index, (arg, (param_type, param_token))) in args.into_iter().zip(params).enumerate() {
-            Self::check_type_compatibility(left_paren, param_type, &arg).or(Err(Error::new(
+        for (index, (arg, param_type)) in args.into_iter().zip(params).enumerate() {
+            Self::check_type_compatibility(left_paren, &param_type, &arg).or(Err(Error::new(
                 left_paren,
                 ErrorKind::MismatchedArgs(
                     index,
-                    func_name.clone(),
-                    param_token.clone(),
+                    type_decl.clone(),
                     param_type.clone(),
                     arg.type_decl.clone(),
                 ),
@@ -1713,7 +1702,7 @@ impl TypeChecker {
 
             // cast argument to the correct parameter type
             new_args.push(if param_type.size() > Type::Primitive(Primitive::Char).size() {
-                Self::maybe_cast(param_type.clone(), arg)
+                Self::maybe_cast(param_type, arg)
             } else {
                 arg
             });
@@ -1726,12 +1715,13 @@ impl TypeChecker {
 
     fn evaluate_logical(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         left: hir::expr::ExprKind,
         token: Token,
         right: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let mut left = self.visit_expr(left)?;
-        let mut right = self.visit_expr(right)?;
+        let mut left = self.visit_expr(func, left)?;
+        let mut right = self.visit_expr(func, right)?;
 
         left.to_rval();
         right.to_rval();
@@ -1755,18 +1745,19 @@ impl TypeChecker {
     }
     fn evaluate_comparison(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         left: hir::expr::ExprKind,
         token: Token,
         right: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let mut left = self.visit_expr(left)?;
-        let mut right = self.visit_expr(right)?;
+        let mut left = self.visit_expr(func, left)?;
+        let mut right = self.visit_expr(func, right)?;
 
         left.to_rval();
         right.to_rval();
 
-        let left = left.array_decay();
-        let right = right.array_decay();
+        let left = left.decay();
+        let right = right.decay();
 
         if Self::check_type_compatibility(&token, &left.type_decl, &right).is_err() {
             return Err(Error::new(
@@ -1796,18 +1787,19 @@ impl TypeChecker {
     }
     fn evaluate_binary(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         left: hir::expr::ExprKind,
         token: Token,
         right: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let mut left = self.visit_expr(left)?;
-        let mut right = self.visit_expr(right)?;
+        let mut left = self.visit_expr(func, left)?;
+        let mut right = self.visit_expr(func, right)?;
 
         left.to_rval();
         right.to_rval();
 
-        let left = left.array_decay();
-        let right = right.array_decay();
+        let left = left.decay();
+        let right = right.decay();
 
         // check valid operations
         if !is_valid_bin(&token.kind, &left.type_decl, &right.type_decl, &right) {
@@ -1886,16 +1878,17 @@ impl TypeChecker {
     }
     fn evaluate_unary(
         &mut self,
+        func: &mut Option<&mut mir::decl::Function>,
         token: Token,
         right: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let right = self.visit_expr(right)?;
+        let right = self.visit_expr(func, right)?;
 
         if matches!(token.kind, TokenKind::Amp) {
             // array doesn't decay during '&' expression
             self.check_address(token, right)
         } else {
-            let mut right = right.array_decay();
+            let mut right = right.decay();
 
             match token.kind {
                 TokenKind::Star => self.check_deref(token, right),
@@ -1967,70 +1960,6 @@ impl TypeChecker {
         } else {
             Err(Error::new(&token, ErrorKind::InvalidDerefType(right.type_decl)))
         }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-enum ScopeKind {
-    Global,
-    Loop,
-    // (function entry in symbol table, save all gotos so that can error if no matching label)
-    Function(FuncSymbol, Vec<Token>),
-    // all cases and defaults that are in a switch
-    // if Some(value) then case, if None then default
-    Switch(Vec<Option<i64>>),
-}
-
-// vector to go through and check if certain statements are
-// enclosed by others. eg: return only in functions, break only in switch/loops
-#[derive(Debug, PartialEq)]
-struct Scope(Vec<ScopeKind>);
-impl Scope {
-    fn increment_stack_size(&mut self, type_decl: &Type) {
-        let ScopeKind::Function(func_symbol, _) = find_scope!(self, ScopeKind::Function(..))
-            .expect("can only be called inside a function") else {unreachable!()};
-        let stack_size = func_symbol.borrow().unwrap_func().stack_size;
-
-        let mut size = stack_size + type_decl.size();
-        size = align(size, type_decl);
-
-        func_symbol.borrow_mut().unwrap_func_mut().stack_size = size;
-    }
-    fn insert_label(&mut self, name_token: &Token) -> Result<FuncSymbol, Error> {
-        let name = name_token.unwrap_string();
-        let ScopeKind::Function(func_symbol, _) = find_scope!(self,ScopeKind::Function(..))
-            .expect("ensured by parser that label is always inside function") else {unreachable!()};
-
-        if func_symbol.borrow().unwrap_func().labels.contains_key(&name) {
-            return Err(Error::new(name_token, ErrorKind::Redefinition("Label", name)));
-        }
-        let len = func_symbol.borrow().unwrap_func().labels.len();
-        func_symbol
-            .borrow_mut()
-            .unwrap_func_mut()
-            .labels
-            .insert(name, len);
-
-        Ok(Rc::clone(&func_symbol))
-    }
-    fn insert_goto(&mut self, name_token: Token) -> Result<FuncSymbol, Error> {
-        let ScopeKind::Function(func_symbol, gotos) = find_scope!(self,ScopeKind::Function(..))
-            .expect("ensured by parser that label is always inside function") else {unreachable!()};
-
-        gotos.push(name_token);
-        Ok(Rc::clone(&func_symbol))
-    }
-    fn compare_gotos(&mut self) -> Result<(), Error> {
-        let ScopeKind::Function(func_symbol, gotos) = find_scope!(self,ScopeKind::Function(..))
-            .expect("ensured by parser that label is always inside function") else {unreachable!()};
-
-        for g in gotos {
-            let label = g.unwrap_string();
-            if !func_symbol.borrow().unwrap_func().labels.contains_key(&label) {
-                return Err(Error::new(g, ErrorKind::UndeclaredLabel(label)));
-            }
-        }
-        Ok(())
     }
 }
 
@@ -2122,7 +2051,13 @@ pub fn is_valid_bin(
     right_expr: &impl hir::expr::IsZero,
 ) -> bool {
     match (&left_type, &right_type) {
-        (Type::Primitive(Primitive::Void), _) | (_, Type::Primitive(Primitive::Void)) => false,
+        (Type::Primitive(Primitive::Void), _)
+        | (_, Type::Primitive(Primitive::Void))
+        | (Type::Struct(..), _)
+        | (_, Type::Struct(..))
+        | (Type::Union(..), _)
+        | (_, Type::Union(..)) => false,
+
         (Type::Pointer(_), Type::Pointer(_)) => {
             if left_type.type_compatible(right_type, right_expr) {
                 operator == &TokenKind::Minus
@@ -2132,9 +2067,6 @@ pub fn is_valid_bin(
         }
         (_, Type::Pointer(_)) => operator == &TokenKind::Plus,
         (Type::Pointer(_), _) => operator == &TokenKind::Plus || operator == &TokenKind::Minus,
-        (Type::Struct(..), _) | (_, Type::Struct(..)) | (Type::Union(..), _) | (_, Type::Union(..)) => {
-            false
-        }
         _ => true,
     }
 }
@@ -2176,7 +2108,7 @@ mod tests {
             let expr = parser.expression().unwrap();
 
             let mut typechecker = TypeChecker::new();
-            let actual = typechecker.visit_expr(expr).unwrap();
+            let actual = typechecker.visit_expr(&mut None, expr).unwrap();
             let expected_type = setup_type($expected_type);
 
             assert!(
@@ -2194,7 +2126,7 @@ mod tests {
             let expr = parser.expression().unwrap();
 
             let mut typechecker = TypeChecker::new();
-            let actual = typechecker.visit_expr(expr).unwrap_err();
+            let actual = typechecker.visit_expr(&mut None, expr).unwrap_err();
 
             assert!(
                 matches!(actual.kind, $expected_err),
@@ -2216,15 +2148,7 @@ mod tests {
                 typechecker.env.declare_symbol(&token, symbol).unwrap();
             }
 
-            let mut expr = typechecker.visit_expr(expr).unwrap();
-
-            // have to do manual array decay because is constant expects array to be decayed already
-            if let Type::Array { .. } = expr.type_decl {
-                expr.kind = mir::expr::ExprKind::Unary {
-                    operator: TokenKind::Amp,
-                    right: Box::new(expr.clone()),
-                };
-            }
+            let expr = typechecker.visit_expr(&mut None, expr).unwrap().decay();
 
             let actual = expr.is_constant();
 
@@ -2241,7 +2165,7 @@ mod tests {
 
         let decl = declarators[0].clone();
         let specifier_type = typechecker.parse_specifiers(specifiers).unwrap();
-        let declarator = typechecker.declarator(specifier_type, is_typedef, decl)?;
+        let declarator = typechecker.declarator(specifier_type, is_typedef, decl, &mut None)?;
 
         Ok(declarator.unwrap().init.unwrap())
     }
@@ -2257,7 +2181,7 @@ mod tests {
             let expected_expr = TypeChecker::maybe_cast(
                 expected_type,
                 typechecker
-                    .visit_expr(setup(expected.1).expression().unwrap())
+                    .visit_expr(&mut None, setup(expected.1).expression().unwrap())
                     .unwrap(),
             );
 
@@ -2377,12 +2301,11 @@ mod tests {
     }
     #[test]
     fn finds_nested_loop() {
-        let mut scopes = Scope(vec![
-            ScopeKind::Global,
+        let mut scopes = vec![
             ScopeKind::Loop,
-            ScopeKind::Switch(vec![]),
-            ScopeKind::Switch(vec![]),
-        ]);
+            ScopeKind::Switch(Vec::new()),
+            ScopeKind::Switch(Vec::new()),
+        ];
         let expected = true;
         let actual = find_scope!(scopes, ScopeKind::Loop).is_some();
 
@@ -2390,7 +2313,7 @@ mod tests {
     }
     #[test]
     fn doesnt_find_switch() {
-        let mut scopes = Scope(vec![ScopeKind::Global, ScopeKind::Loop, ScopeKind::Loop]);
+        let mut scopes = vec![ScopeKind::Loop, ScopeKind::Loop];
         let expected = false;
         let actual = find_scope!(scopes, ScopeKind::Switch(..)).is_some();
 
@@ -2398,33 +2321,25 @@ mod tests {
     }
     #[test]
     fn finds_and_mutates_scope() {
-        let mut scopes = Scope(vec![
-            ScopeKind::Global,
+        let mut scopes = vec![
             ScopeKind::Loop,
-            ScopeKind::Switch(vec![]),
-            ScopeKind::Switch(vec![]),
+            ScopeKind::Switch(Vec::new()),
+            ScopeKind::Switch(Vec::new()),
             ScopeKind::Loop,
-        ]);
-        let expected = Scope(vec![
-            ScopeKind::Global,
+        ];
+        let expected = vec![
             ScopeKind::Loop,
-            ScopeKind::Switch(vec![]),
-            ScopeKind::Switch(vec![Some(1), None, Some(3)]),
+            ScopeKind::Switch(Vec::new()),
+            ScopeKind::Switch(vec![CaseKind::Case(1), CaseKind::Default, CaseKind::Case(3)]),
             ScopeKind::Loop,
-        ]);
+        ];
         let ScopeKind::Switch(labels) =
             find_scope!(scopes, ScopeKind::Switch(..)).unwrap() else {unreachable!()};
-        labels.push(Some(1));
-        labels.push(None);
-        labels.push(Some(3));
+        labels.push(CaseKind::Case(1));
+        labels.push(CaseKind::Default);
+        labels.push(CaseKind::Case(3));
 
-        assert_eq!(scopes.0.len(), expected.0.len());
-        for (actual, expected) in scopes.0.into_iter().zip(expected.0) {
-            assert!(match (actual, expected) {
-                (ScopeKind::Function(_, g1), ScopeKind::Function(_, g2)) => g1 == g2,
-                (l, r) => l == r,
-            });
-        }
+        assert_eq!(scopes, expected);
     }
 
     #[test]

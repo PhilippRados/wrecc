@@ -529,6 +529,14 @@ impl Display for Type {
                 .find(|m| matches!(m, Type::Array { .. } | Type::Function { .. }))
                 .is_some()
         }
+        fn closing_precedence(modifiers: &Vec<&Type>, i: usize) -> &'static str {
+            if matches!(modifiers.get(i + 1), Some(Type::Pointer(_))) && suffix_exists(&modifiers, i + 1)
+            {
+                ")"
+            } else {
+                ""
+            }
+        }
 
         fn print_type(type_decl: &Type) -> String {
             let mut current = type_decl;
@@ -561,14 +569,7 @@ impl Display for Type {
             for (i, modifier) in modifiers.iter().enumerate() {
                 match modifier {
                     Type::Array { amount, .. } => {
-                        let closing_precedence = matches!(modifiers.get(i + 1), Some(Type::Pointer(_)))
-                            && suffix_exists(&modifiers, i + 1);
-
-                        suffixes.push(format!(
-                            "[{}]{}",
-                            amount,
-                            if closing_precedence { ")" } else { "" }
-                        ))
+                        suffixes.push(format!("[{}]{}", amount, closing_precedence(&modifiers, i)))
                     }
                     Type::Pointer(_) => {
                         let precedence = matches!(
@@ -589,13 +590,14 @@ impl Display for Type {
                         });
                     }
                     Type::Function(FuncType { params, variadic, .. }) => suffixes.push(format!(
-                        "({}{})",
+                        "({}{}){}",
                         params
                             .iter()
                             .map(|ty| ty.to_string())
                             .collect::<Vec<_>>()
                             .join(", "),
-                        if *variadic { ", ..." } else { "" }
+                        if *variadic { ", ..." } else { "" },
+                        closing_precedence(&modifiers, i)
                     )),
                     _ => unreachable!("not modifier"),
                 }
@@ -661,11 +663,20 @@ pub mod tests {
     }
     #[test]
     fn function_type_print() {
-        assert_type_print("int ()", "int ()");
+        assert_type_print("int ()", "int ()"); // should this rather be `int (int)`?
         assert_type_print("int (int)", "int (int)");
         assert_type_print("int (int ())", "int (int (*)())");
 
         assert_type_print("int ((()))", "int (int (*)(int (*)()))");
         assert_type_print("int (char[2])", "int (char *)");
+
+        assert_type_print("void *(*(int[2], char (void)))", "void **(int *, char (*)())");
+        assert_type_print("int (*(void))[3]", "int (*())[3]");
+        assert_type_print(
+            "int (**(int[2], char(void)))[3];",
+            "int (**(int *, char (*)()))[3]",
+        );
+
+        assert_type_print("int *(int**, ...)", "int *(int **, ...)");
     }
 }

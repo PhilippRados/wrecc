@@ -10,5 +10,13 @@ int main() {
 
   void (*next3)(int) = 1 + foo;
 
+  int a = foo > bar;
+  int b = foo == bar;
+  int c = foo == foo;
+
+  printf("%d\n", a);
+  printf("%d\n", b);
+  printf("%d\n", c);
+
   return 0;
 }

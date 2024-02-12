@@ -141,9 +141,7 @@ impl Type {
             (Type::Pointer(_), _) if other_expr.is_zero() => true,
 
             // have to catch this since otherwise pointers are compared deeply
-            (Type::Pointer(l), Type::Pointer(r))
-                if matches!(**l, Type::Struct(..)) && matches!(**r, Type::Struct(..)) =>
-            {
+            (Type::Pointer(l), Type::Pointer(r)) if l.is_aggregate() && r.is_aggregate() => {
                 l.type_compatible(r, other_expr)
             }
             // void* is compatible to any other pointer
@@ -155,22 +153,10 @@ impl Type {
 
             (Type::Pointer(_), Type::Pointer(_)) => *self == *other,
 
-            // two structs/unions are compatible if they have the same name and members
+            // two structs/unions are compatible if they refer to the same definition
             (Type::Struct(s_l), Type::Struct(s_r)) | (Type::Union(s_l), Type::Union(s_r)) => {
                 match (s_l, s_r) {
-                    (StructInfo::Named(name_l, _), StructInfo::Named(name_r, _)) => {
-                        let matching_members = s_l
-                            .members()
-                            .iter()
-                            .zip(s_r.members().iter())
-                            .filter(|((l_type, l_tok), (r_type, r_tok))| {
-                                l_type == r_type && l_tok.unwrap_string() == r_tok.unwrap_string()
-                            })
-                            .count();
-                        *name_l == *name_r
-                            && matching_members == s_l.members().len()
-                            && matching_members == s_r.members().len()
-                    }
+                    (StructInfo::Named(_, l_ref), StructInfo::Named(_, r_ref)) => l_ref == r_ref,
                     (StructInfo::Unnamed(name_l, _), StructInfo::Unnamed(name_r, _)) => name_l == name_r,
                     _ => false,
                 }
@@ -496,7 +482,7 @@ mod struct_ref {
         pub fn get(&self) -> Rc<Vec<(Type, Token)>> {
             CUSTOMS.with(|list| list.borrow()[self.index].clone())
         }
-        pub(crate) fn update(&self, members: Vec<(Type, Token)>) {
+        pub fn update(&self, members: Vec<(Type, Token)>) {
             CUSTOMS_INFO.with(|list| {
                 let mut types = list.borrow_mut();
                 types[self.index].0 = true;

@@ -1,0 +1,16 @@
+error: Can't assign to type 'struct Foo' with type 'struct Foo'
+|  --> in tests/fixtures/struct_compatibility.c:19:5
+|
+19   a = d;
+|      ^
+error: Can't assign to type 'union Bar' with type 'union Bar'
+|  --> in tests/fixtures/struct_compatibility.c:27:6
+|
+27   u4 = u3;
+|       ^
+error: Invalid binary expression: 'struct Foo *' '-' 'struct Foo *'
+|  --> in tests/fixtures/struct_compatibility.c:31:18
+|
+31   int diff1 = &a - &z;
+|                   ^
+3 errors generated.

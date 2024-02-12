@@ -1726,6 +1726,9 @@ impl TypeChecker {
         left.to_rval();
         right.to_rval();
 
+        let left = left.decay();
+        let right = right.decay();
+
         if !left.type_decl.is_scalar() || !right.type_decl.is_scalar() {
             return Err(Error::new(
                 &token,
@@ -2268,6 +2271,39 @@ mod tests {
         assert_type_err!("s1 && 1", ErrorKind::InvalidLogical(..), env);
         assert_type_err!("s1 - u1", ErrorKind::InvalidBinary(..), env);
         assert_type_err!("&s1 - &u1", ErrorKind::InvalidBinary(..), env);
+    }
+    #[test]
+    fn func_expr() {
+        let env = "
+void foo(int a) {}
+void bar(int a) {}
+int baz(int a) { return a; }
+int a;";
+
+        assert_type!("foo - bar", "long", env);
+        assert_type!("foo + 1", "void (*)(int)", env);
+        assert_type!("foo - 1", "void (*)(int)", env);
+        assert_type!("1 + foo", "void (*)(int)", env);
+
+        assert_type!("foo && bar", "int", env);
+        assert_type!("foo >= bar", "int", env);
+        assert_type!("foo != bar", "int", env);
+        assert_type!("!bar", "int", env);
+        assert_type!("(int (*)())1", "int (*)(void)", env);
+
+        assert_type_err!("foo - baz", ErrorKind::InvalidBinary(..), env);
+        assert_type_err!("foo + baz", ErrorKind::InvalidBinary(..), env);
+        assert_type_err!("foo * baz", ErrorKind::InvalidBinary(..), env);
+        assert_type_err!("foo * 1", ErrorKind::InvalidBinary(..), env);
+        assert_type_err!("1 - foo", ErrorKind::InvalidBinary(..), env);
+        assert_type_err!("(int *())a", ErrorKind::InvalidExplicitCast(..), env);
+        assert_type_err!("~foo", ErrorKind::InvalidUnary(..), env);
+        assert_type_err!("foo--", ErrorKind::NotAssignable(..), env);
+        assert_type_err!("*baz = 1", ErrorKind::NotAssignable(..), env);
+
+        // WARN: doesnt catch this because `foo[3]` is syntax sugar for `*(foo + 3)`
+        // and the latter doesn't error
+        // assert_type_err!("foo[3]",ErrorKind::InvalidSubscript(..),env);
     }
 
     #[test]

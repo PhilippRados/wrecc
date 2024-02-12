@@ -446,8 +446,8 @@ impl ScratchRegisters {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::common::types::tests::setup_type;
     use crate::compiler::typechecker::mir::expr::ValueKind;
+    use crate::setup_type;
     use std::mem;
 
     fn setup(intervals: HashMap<usize, IntervalEntry>, occupied_regs: Vec<usize>) -> RegisterAllocation {
@@ -697,7 +697,7 @@ mod tests {
             Lir::Mov(regs[15].clone(), regs[21].clone()),
             Lir::Call(Register::Label(LabelRegister::Var(
                 "foo".to_string(),
-                setup_type("void (int, int)"),
+                setup_type!("void (int, int)"),
             ))),
             Lir::RestoreRegs,
         ];
@@ -741,7 +741,7 @@ mod tests {
             Lir::Mov(filled_regs[15].clone(), filled_regs[21].clone()),
             Lir::Call(Register::Label(LabelRegister::Var(
                 "foo".to_string(),
-                setup_type("void (int, int)"),
+                setup_type!("void (int, int)"),
             ))),
         ];
 

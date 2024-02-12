@@ -1759,7 +1759,7 @@ impl TypeChecker {
         let left = left.decay();
         let right = right.decay();
 
-        if Self::check_type_compatibility(&token, &left.type_decl, &right).is_err() {
+        if !is_valid_comp(&left.type_decl, &left, &right.type_decl, &right) {
             return Err(Error::new(
                 &token,
                 ErrorKind::InvalidComp(token.kind.clone(), left.type_decl, right.type_decl),
@@ -1801,7 +1801,6 @@ impl TypeChecker {
         let left = left.decay();
         let right = right.decay();
 
-        // check valid operations
         if !is_valid_bin(&token.kind, &left.type_decl, &right.type_decl, &right) {
             return Err(Error::new(
                 &token,
@@ -2044,6 +2043,7 @@ pub fn create_label(index: &mut usize) -> usize {
     prev
 }
 
+// cannot just pass mir-expr since also used in fold which uses hir
 pub fn is_valid_bin(
     operator: &TokenKind,
     left_type: &Type,
@@ -2069,6 +2069,20 @@ pub fn is_valid_bin(
         (Type::Pointer(_), _) => operator == &TokenKind::Plus || operator == &TokenKind::Minus,
         _ => true,
     }
+}
+pub fn is_valid_comp(
+    left_type: &Type,
+    left_expr: &impl hir::expr::IsZero,
+    right_type: &Type,
+    right_expr: &impl hir::expr::IsZero,
+) -> bool {
+    let integer_operands = left_type.is_integer() && right_type.is_integer();
+    let compatible_pointers = (left_type.is_ptr() || right_type.is_ptr())
+                // have to unfortunately check in both directions since either expr can be 0 literal
+            && (left_type.type_compatible(right_type, right_expr)
+            || right_type.type_compatible(left_type, left_expr));
+
+    integer_operands || compatible_pointers
 }
 
 // scale index when pointer arithmetic
@@ -2098,34 +2112,41 @@ fn log_2(x: i32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::common::environment::tests::var_template;
-    use crate::compiler::common::types::tests::setup_type;
     use crate::compiler::parser::tests::setup;
+    use crate::setup_type;
+
+    // setup environment (declare variables/types)
+    fn setup_env(typechecker: &mut TypeChecker, env: &str) {
+        let env = setup(env).parse().unwrap();
+        typechecker.check_declarations(env).unwrap();
+    }
 
     macro_rules! assert_type {
-        ($input:expr,$expected_type:expr) => {
-            let mut parser = setup($input);
-            let expr = parser.expression().unwrap();
+        ($input:expr,$expected_type:expr,$env:expr) => {
+            let expr = setup($input).expression().unwrap();
 
             let mut typechecker = TypeChecker::new();
+            setup_env(&mut typechecker, $env);
+
             let actual = typechecker.visit_expr(&mut None, expr).unwrap();
-            let expected_type = setup_type($expected_type);
+            let expected_type = setup_type!($expected_type, typechecker);
 
             assert!(
                 actual.type_decl == expected_type,
-                "actual: {:?}, expected: {}",
-                actual,
+                "actual: {}, expected: {}",
+                actual.type_decl,
                 expected_type.to_string(),
             );
         };
     }
 
     macro_rules! assert_type_err {
-        ($input:expr,$expected_err:pat) => {
-            let mut parser = setup($input);
-            let expr = parser.expression().unwrap();
+        ($input:expr,$expected_err:pat,$env:expr) => {
+            let expr = setup($input).expression().unwrap();
 
             let mut typechecker = TypeChecker::new();
+            setup_env(&mut typechecker, $env);
+
             let actual = typechecker.visit_expr(&mut None, expr).unwrap_err();
 
             assert!(
@@ -2138,15 +2159,11 @@ mod tests {
     }
 
     macro_rules! assert_const_expr {
-        ($input: expr, $expected: expr, $symbols: expr) => {
-            let mut parser = setup($input);
-            let expr = parser.expression().unwrap();
+        ($input: expr, $expected: expr, $env: expr) => {
+            let expr = setup($input).expression().unwrap();
 
             let mut typechecker = TypeChecker::new();
-            for (name, ty) in $symbols {
-                let (token, symbol) = var_template(name, ty, InitType::Declaration);
-                typechecker.env.declare_symbol(&token, symbol).unwrap();
-            }
+            setup_env(&mut typechecker, $env);
 
             let expr = typechecker.visit_expr(&mut None, expr).unwrap().decay();
 
@@ -2177,7 +2194,7 @@ mod tests {
         for (actual, expected) in actual.into_iter().zip(expected) {
             assert_eq!(actual.1, expected.0);
 
-            let expected_type = setup_type(expected.2);
+            let expected_type = setup_type!(expected.2);
             let expected_expr = TypeChecker::maybe_cast(
                 expected_type,
                 typechecker
@@ -2190,85 +2207,98 @@ mod tests {
     }
 
     #[test]
-    fn binary_integer_promotion() {
-        assert_type!("'1' + '2'", "int");
+    fn binary_type() {
+        assert_type!("a + '2'", "int", "char a;");
     }
 
     #[test]
     fn shift_type() {
-        assert_type!("1 << (long)2", "int");
-        assert_type!("(long)1 << (char)2", "long");
-        assert_type!("'1' << (char)2", "int");
+        assert_type!("1 << a", "int", "long a;");
+        assert_type!("a << b", "long", "long a; char b;");
+        assert_type!("'1' << a", "int", "char a;");
     }
 
     #[test]
     fn comp_type() {
-        assert_type!("1 == (long)2", "int");
-        assert_type!("(char*)1 == (char*)2", "int");
-        assert_type!("1 <= (long)2", "int");
-        assert_type!("(char*)1 > (char*)2", "int");
-        assert_type!("(void*)1 == (long*)2", "int");
+        assert_type!("1 == a", "int", "long a;");
+        assert_type!("a == b", "int", "char *a,*b;");
+        assert_type!("1 <= a", "int", "long a;");
+        assert_type!("a > b", "int", "char *a,*b;");
+        assert_type!("(void*)1 == a", "int", "long* a;");
+        assert_type!("0 == a", "int", "long* a;");
+        assert_type!("a == 0", "int", "int* a;");
 
-        assert_type_err!("1 == (long*)2", ErrorKind::InvalidComp(..));
-        assert_type_err!("(int*)1 == (long*)2", ErrorKind::InvalidComp(..));
+        assert_type_err!("1 == a", ErrorKind::InvalidComp(..), "long *a;");
+        assert_type_err!("a == b", ErrorKind::InvalidComp(..), "int *a; long *b;");
+    }
+    #[test]
+    fn struct_union_expr() {
+        let env = "struct Foo {
+            int age;
+        } s1, s2;
+        union Bar {
+            int age;
+            char c;
+        } u1, u2;
+        union Bar u3;
+        void* a;";
+
+        assert_type_err!("s1 - 1", ErrorKind::InvalidBinary(..), env);
+        assert_type!("&s1 + 1", "struct Foo*", env);
+        assert_type!("1 + &s2", "struct Foo*", env);
+        assert_type!("&s1 - &s2", "long", env);
+        assert_type!("&u1 - &u3", "long", env);
+        assert_type_err!("s1 + s2", ErrorKind::InvalidBinary(..), env);
+        assert_type_err!("s1 - &s2", ErrorKind::InvalidBinary(..), env);
+        assert_type_err!("&s1 - s2", ErrorKind::InvalidBinary(..), env);
+        assert_type_err!("(struct Foo*)s2", ErrorKind::InvalidExplicitCast(..), env);
+        assert_type!("a = (union Bar*)&s2", "void*", env);
+
+        assert_type!("&s1 == &s2", "int", env);
+        assert_type!("&u1 == &u2", "int", env);
+        assert_type_err!("u1 == u3", ErrorKind::InvalidComp(..), env);
+        assert_type!("&u1 == &u3", "int", env);
+        assert_type_err!("&s1 == &u2", ErrorKind::InvalidComp(..), env);
+        assert_type!("&s1 == 0", "int", env);
+        assert_type!("0 == &s2", "int", env);
+        assert_type_err!("s1 == s2", ErrorKind::InvalidComp(..), env);
+        assert_type_err!("1 == &s2", ErrorKind::InvalidComp(..), env);
+        assert_type_err!("!s1", ErrorKind::InvalidUnary(..), env);
+        assert_type_err!("s1 && s2", ErrorKind::InvalidLogical(..), env);
+        assert_type_err!("s1 && 1", ErrorKind::InvalidLogical(..), env);
+        assert_type_err!("s1 - u1", ErrorKind::InvalidBinary(..), env);
+        assert_type_err!("&s1 - &u1", ErrorKind::InvalidBinary(..), env);
     }
 
     #[test]
     fn static_constant_test() {
-        assert_const_expr!("&a + (int)(3 * 1)", true, vec![("a", "int")]);
+        assert_const_expr!("&a + (int)(3 * 1)", true, "int a;");
 
-        assert_const_expr!("a + (int)(3 * 1)", false, vec![("a", "int*")]);
-        assert_const_expr!("\"hi\" + (int)(3 * 1)", true, Vec::new());
-        assert_const_expr!("&\"hi\" + (int)(3 * 1)", true, Vec::new());
+        assert_const_expr!("a + (int)(3 * 1)", false, "int *a;");
+        assert_const_expr!("\"hi\" + (int)(3 * 1)", true, "");
+        assert_const_expr!("&\"hi\" + (int)(3 * 1)", true, "");
 
-        assert_const_expr!("(long*)&a", true, vec![("a", "int")]);
+        assert_const_expr!("(long*)&a", true, "int a;");
 
-        assert_const_expr!("(long*)1 + 3", true, Vec::new());
+        assert_const_expr!("(long*)1 + 3", true, "");
 
-        assert_const_expr!("&a[3]", true, vec![("a", "int[4]")]);
+        assert_const_expr!("&a[3]", true, "int a[4];");
 
-        assert_const_expr!("*&a[3]", false, vec![("a", "int[4]")]);
+        assert_const_expr!("*&a[3]", false, "int a[4];");
 
-        assert_const_expr!(
-            "&a.age",
-            true,
-            vec![(
-                "a",
-                "struct {
-                    int age;
-                }"
-            )]
-        );
+        assert_const_expr!("&a.age", true, "struct { int age; } a;");
 
-        assert_const_expr!(
-            "a.age",
-            false,
-            vec![(
-                "a",
-                "struct {
-                    int age;
-                }"
-            )]
-        );
-        assert_const_expr!("*a", false, vec![("a", "int*")]);
+        assert_const_expr!("a.age", false, "struct { int age; } a;");
+        assert_const_expr!("*a", false, "int* a;");
 
-        assert_const_expr!("(int *)*a", false, vec![("a", "int*")]);
+        assert_const_expr!("(int *)*a", false, "int* a;");
 
-        assert_const_expr!("*a", true, vec![("a", "int[4][4]")]);
-        assert_const_expr!("*&a[3]", true, vec![("a", "int[4][4]")]);
+        assert_const_expr!("*a", true, "int a[4][4];");
+        assert_const_expr!("*&a[3]", true, "int a[4][4];");
 
-        assert_const_expr!(
-            "&a->age",
-            true,
-            vec![(
-                "a",
-                "struct {
-                    int age;
-                }[4]"
-            )]
-        );
+        assert_const_expr!("&a->age", true, "struct { int age; } a[4];");
 
-        assert_const_expr!("a", false, vec![("a", "int")]);
+        assert_const_expr!("a", false, "int a;");
     }
 
     #[test]

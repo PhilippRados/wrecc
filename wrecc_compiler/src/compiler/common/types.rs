@@ -140,6 +140,7 @@ impl Type {
             // pointer to null-pointer-constant
             (Type::Pointer(_), _) if other_expr.is_zero() => true,
 
+            // have to catch this since otherwise pointers are compared deeply
             (Type::Pointer(l), Type::Pointer(r))
                 if matches!(**l, Type::Struct(..)) && matches!(**r, Type::Struct(..)) =>
             {
@@ -162,7 +163,9 @@ impl Type {
                             .members()
                             .iter()
                             .zip(s_r.members().iter())
-                            .filter(|(l, r)| l.0 == r.0 && l.1.unwrap_string() == r.1.unwrap_string())
+                            .filter(|((l_type, l_tok), (r_type, r_tok))| {
+                                l_type == r_type && l_tok.unwrap_string() == r_tok.unwrap_string()
+                            })
                             .count();
                         *name_l == *name_r
                             && matching_members == s_l.members().len()
@@ -617,26 +620,41 @@ impl Display for Type {
 
 #[cfg(test)]
 pub mod tests {
-    use super::*;
-    use crate::compiler::parser::tests::*;
-    use crate::compiler::typechecker::TypeChecker;
 
-    pub fn setup_type(input: &str) -> Type {
-        if let Ok(ty) = setup(input).type_name() {
-            if let Ok(actual_ty) = TypeChecker::new().parse_type(ty) {
-                return actual_ty;
+    #[macro_export]
+    macro_rules! setup_type {
+        ($input:expr) => {
+            if let Ok(ty) = crate::compiler::parser::tests::setup($input).type_name() {
+                if let Ok(actual_ty) = crate::compiler::typechecker::TypeChecker::new().parse_type(ty) {
+                    actual_ty
+                } else {
+                    unreachable!("not type declaration")
+                }
+            } else {
+                unreachable!("not type declaration")
             }
-        }
-        unreachable!("not type declaration")
+        };
+        // if type depends on an already existing environment, supply said environment
+        ($input:expr,$typechecker:expr) => {
+            if let Ok(ty) = crate::compiler::parser::tests::setup($input).type_name() {
+                if let Ok(actual_ty) = $typechecker.parse_type(ty) {
+                    actual_ty
+                } else {
+                    unreachable!("not type declaration")
+                }
+            } else {
+                unreachable!("not type declaration")
+            }
+        };
     }
     fn assert_type_print(input: &str, expected: &str) {
-        let type_string = setup_type(input);
+        let type_string = setup_type!(input);
         assert_eq!(type_string.to_string(), expected);
     }
 
     #[test]
     fn multidimensional_array_size() {
-        let input = setup_type("int[2][2]");
+        let input = setup_type!("int[2][2]");
         let actual = input.element_amount();
 
         assert_eq!(actual, 4);

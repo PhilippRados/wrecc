@@ -320,14 +320,14 @@ impl Environment {
 #[rustfmt::skip]
 pub mod tests {
     use super::*;
-    use crate::compiler::common::types::tests::setup_type;
+    use crate::setup_type;
 
     pub fn var_template(name: &str, ty: &str, kind: InitType) -> (Token, Symbols) {
         let token = Token::default(TokenKind::Ident(name.to_string()));
         let symbol = Symbols::Variable(SymbolInfo {
             kind,
             token: token.clone(),
-            type_decl: setup_type(ty),
+            type_decl: setup_type!(ty),
             reg: None,
         });
 

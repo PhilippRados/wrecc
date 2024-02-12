@@ -361,10 +361,12 @@ impl ExprKind {
         if let (ExprKind::Literal(left_n, left_type), ExprKind::Literal(right_n, right_type)) =
             (left.as_ref(), right.as_ref())
         {
-            if !left_type.type_compatible(&right_type, right.as_ref())
-                || left_type.is_void()
-                || right_type.is_void()
-            {
+            if !crate::compiler::typechecker::is_valid_comp(
+                &left_type,
+                left.as_ref(),
+                &right_type,
+                right.as_ref(),
+            ) {
                 return Err(Error::new(
                     &token,
                     ErrorKind::InvalidComp(token.kind.clone(), left_type.clone(), right_type.clone()),
@@ -439,8 +441,8 @@ impl ExprKind {
 mod tests {
 
     use super::*;
-    use crate::compiler::common::types::tests::setup_type;
     use crate::compiler::parser::tests::setup;
+    use crate::setup_type;
 
     fn assert_fold(input: &str, expected: &str) {
         let mut actual = setup(input).expression().unwrap();
@@ -461,7 +463,7 @@ mod tests {
         assert_eq!(actual, expected);
 
         if let ExprKind::Literal(_, actual_type) = actual {
-            assert_eq!(actual_type, setup_type(expected_type));
+            assert_eq!(actual_type, setup_type!(expected_type));
         } else {
             unreachable!("only literals have type")
         }
@@ -535,6 +537,8 @@ mod tests {
 
         assert_fold("(long*)4 == (long*)1", "0");
         assert_fold("(long*)4 > (long*)1", "1");
+        assert_fold("(long*)4 > 0", "1");
+
         assert_fold_error!("(int*)4 <= 1", ErrorKind::InvalidComp(..));
         assert_fold_error!("(long*)4 > (char*)1", ErrorKind::InvalidComp(..));
     }

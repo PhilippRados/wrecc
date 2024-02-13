@@ -858,14 +858,21 @@ impl Parser {
             }
             let result = || -> Result<(), Error> {
                 let stmt = match self.is_specifier(&token) {
-                    true => self.external_declaration().and_then(|decl| match decl {
-                        ExternalDeclaration::Declaration(decl) => Ok(Stmt::Declaration(decl)),
-                        ExternalDeclaration::Function(_, name, _) => Err(Error::new(
-                            &name,
-                            ErrorKind::Regular("Cannot define functions in 'block'-statement"),
-                        )),
-                    }),
-                    false => self.statement(),
+                    // have to catch label-statement that might be mistaken for type
+                    true if !matches!(
+                        self.tokens.double_peek(""),
+                        Ok(Token { kind: TokenKind::Colon, .. })
+                    ) =>
+                    {
+                        self.external_declaration().and_then(|decl| match decl {
+                            ExternalDeclaration::Declaration(decl) => Ok(Stmt::Declaration(decl)),
+                            ExternalDeclaration::Function(_, name, _) => Err(Error::new(
+                                &name,
+                                ErrorKind::Regular("Cannot define functions in 'block'-statement"),
+                            )),
+                        })
+                    }
+                    _ => self.statement(),
                 }?;
 
                 statements.push(stmt);
@@ -1431,6 +1438,27 @@ pub mod tests {
             ------Literal: 7\n\
             ---Literal: 2\n\
             -Literal: 1";
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn label_statement() {
+        let actual = setup_stmt(
+            r#"
+int main(){
+    typedef int s;
+    s:
+        return 0;
+}"#,
+        );
+
+        let expected = "FuncDef: 'main'
+-Typedef-Declaration:
+--Decl: 's'
+-Label: 's'
+--Return:
+---Literal: 0";
 
         assert_eq!(actual, expected);
     }

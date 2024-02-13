@@ -1,29 +1,29 @@
-error: Conflicting types for 'x': 'int ()' vs 'int'
+error: conflicting types for 'x': 'int ()' vs 'int'
 |  --> in tests/fixtures/global_redef_err.c:5:15
 |
 5 int x, x = 3, x();
 |               ^
-error: Conflicting types for 'x': 'long' vs 'int'
+error: conflicting types for 'x': 'long' vs 'int'
 |  --> in tests/fixtures/global_redef_err.c:6:6
 |
 6 long x;
 |      ^
-error: Redefinition of symbol 'foo'
+error: redefinition of symbol 'foo'
 |  --> in tests/fixtures/global_redef_err.c:12:5
 |
 12 int foo() { return 2; }
 |      ^
-error: Redefinition of 'some' as different symbol. Already exists as 'variable'
+error: redefinition of 'some' as different symbol. Already exists as 'variable'
 |  --> in tests/fixtures/global_redef_err.c:22:16
 |
 22   typedef char some;
 |                 ^
-error: Conflicting types for 'bar': 'long' vs 'char'
+error: conflicting types for 'bar': 'long' vs 'char'
 |  --> in tests/fixtures/global_redef_err.c:26:16
 |
 26   typedef long bar;
 |                 ^
-error: Redefinition of symbol 'a'
+error: redefinition of symbol 'a'
 |  --> in tests/fixtures/global_redef_err.c:29:7
 |
 29   int a;

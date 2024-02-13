@@ -1,14 +1,14 @@
-error: Found '#endif' without matching '#if'
+error: found '#endif' without matching '#if'
 |  --> in tests/fixtures/include_guards_err.c:7:2
 |
 7 #endif
 |  ^
-error: Unterminated '#ifdef'
+error: unterminated '#ifdef'
 |  --> in tests/fixtures/include_guards_err.c:16:2
 |
 16 #ifdef uwe
 |   ^
-error: Unterminated '#ifndef'
+error: unterminated '#ifndef'
 |  --> in tests/fixtures/include_guards_err.c:9:2
 |
 9 #ifndef sme

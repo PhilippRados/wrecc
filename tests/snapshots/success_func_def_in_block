@@ -1,4 +1,4 @@
-error: Cannot define functions in 'block'-statement
+error: cannot define functions in 'block'-statement
 |  --> in tests/fixtures/func_def_in_block.c:5:9
 |
 5     int some() {

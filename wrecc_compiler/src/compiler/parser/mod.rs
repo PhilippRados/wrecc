@@ -175,7 +175,7 @@ impl Parser {
                 if !allow_storage_classes {
                     return Err(Error::new(
                         &token,
-                        ErrorKind::Regular("Storage classes not allowed in this specifier"),
+                        ErrorKind::Regular("storage classes not allowed in this specifier"),
                     ));
                 }
                 is_typedef = true;
@@ -226,7 +226,7 @@ impl Parser {
                     consume!(
                         self,
                         TokenKind::RightParen,
-                        "Expected closing ')' after declarator"
+                        "expected closing ')' after declarator"
                     )?;
                     return Ok((declarator.name, Some(declarator.modifiers)));
                 }
@@ -238,7 +238,7 @@ impl Parser {
             DeclaratorKind::NoAbstract => Some(consume!(
                 self,
                 TokenKind::Ident(_),
-                "Expected identifier following type-specifier"
+                "expected identifier following type-specifier"
             )?),
             DeclaratorKind::MaybeAbstract => match_next!(self, TokenKind::Ident(_)),
             DeclaratorKind::Abstract => None,
@@ -272,7 +272,7 @@ impl Parser {
         consume!(
             self,
             TokenKind::RightBracket,
-            "Expect closing ']' after array initialization"
+            "expected closing ']' after array initialization"
         )?;
         Ok(DeclModifier::Array(token, size))
     }
@@ -308,7 +308,7 @@ impl Parser {
         consume!(
             self,
             TokenKind::RightParen,
-            "Expect ')' after function parameters"
+            "expected ')' after function parameters"
         )?;
 
         Ok(DeclModifier::Function { token, params, variadic })
@@ -343,7 +343,7 @@ impl Parser {
         if is_typedef {
             return Err(Error::new(
                 &name,
-                ErrorKind::Regular("Typedef not allowed in function-definition"),
+                ErrorKind::Regular("typedef not allowed in function-definition"),
             ));
         }
 
@@ -378,7 +378,7 @@ impl Parser {
 
             declarators.push((declarator, init));
         }
-        consume!(self, TokenKind::Semicolon, "Expect ';' after declaration")?;
+        consume!(self, TokenKind::Semicolon, "expected ';' after declaration")?;
 
         Ok(ExternalDeclaration::Declaration(Declaration {
             specifiers,
@@ -437,10 +437,10 @@ impl Parser {
             let result = || -> Result<(), Error> {
                 let designator = self.parse_designator()?;
                 if designator.is_some() {
-                    consume!(self, TokenKind::Equal, "Expect '=' after array designator")?;
+                    consume!(self, TokenKind::Equal, "expected '=' after array designator")?;
                 }
 
-                let token = self.tokens.peek("Expected expression")?.clone();
+                let token = self.tokens.peek("expected expression")?.clone();
                 let init = self.initializers(&token, designator)?;
 
                 init_list.push(Box::new(init));
@@ -449,7 +449,7 @@ impl Parser {
                     consume!(
                         self,
                         TokenKind::Comma,
-                        "Expect ',' seperating expressions in initializer-list"
+                        "expected ',' seperating expressions in initializer-list"
                     )?;
                 }
 
@@ -465,7 +465,7 @@ impl Parser {
             consume!(
                 self,
                 TokenKind::RightBrace,
-                "Expected closing '}' after initializer-list"
+                "expected closing '}' after initializer-list"
             )?;
 
             Ok(Init {
@@ -491,7 +491,7 @@ impl Parser {
                 } else {
                     return Err(Error::new(
                         &token,
-                        ErrorKind::Regular("Expect identifier as member designator"),
+                        ErrorKind::Regular("expected identifier as member designator"),
                     ));
                 }
             } else {
@@ -500,7 +500,7 @@ impl Parser {
                 consume!(
                     self,
                     TokenKind::RightBracket,
-                    "Expect closing ']' after array designator"
+                    "expected closing ']' after array designator"
                 )?;
 
                 result.push_back(Designator {
@@ -532,7 +532,11 @@ impl Parser {
                 break;
             }
             let result = || -> Result<(), Error> {
-                let ident = consume!(self, TokenKind::Ident(_), "Expect identifier in enum definition")?;
+                let ident = consume!(
+                    self,
+                    TokenKind::Ident(_),
+                    "expected identifier in enum definition"
+                )?;
                 let init = if match_next!(self, TokenKind::Equal).is_some() {
                     Some(self.ternary_conditional()?)
                 } else {
@@ -544,7 +548,7 @@ impl Parser {
                     consume!(
                         self,
                         TokenKind::Comma,
-                        "Expect ',' seperating expressions in enum-specifier"
+                        "expected ',' seperating expressions in enum-specifier"
                     )?;
                 }
                 Ok(())
@@ -558,7 +562,7 @@ impl Parser {
         if let Err(e) = consume!(
             self,
             TokenKind::RightBrace,
-            "Expected closing '}' after enum definition"
+            "expected closing '}' after enum definition"
         ) {
             errors.push(e);
         }
@@ -587,7 +591,7 @@ impl Parser {
 
                 loop {
                     // allows `int;` but not `int *;`
-                    if let TokenKind::Semicolon = self.tokens.peek("Expected member-declarator")?.kind {
+                    if let TokenKind::Semicolon = self.tokens.peek("expected member-declarator")?.kind {
                         break;
                     }
 
@@ -604,9 +608,11 @@ impl Parser {
                 members.push((specifiers, declarators));
 
                 // dont return Error directly because then then can't sync properly
-                if let Err(e) =
-                    consume!(self, TokenKind::Semicolon, "Expect ';' after member declaration")
-                {
+                if let Err(e) = consume!(
+                    self,
+                    TokenKind::Semicolon,
+                    "expected ';' after member declaration"
+                ) {
                     errors.push(e);
                 }
                 Ok(())
@@ -622,7 +628,7 @@ impl Parser {
         if let Err(e) = consume!(
             self,
             TokenKind::RightBrace,
-            "Expected closing '}' after struct declaration"
+            "expected closing '}' after struct declaration"
         ) {
             errors.push(e);
         }
@@ -701,8 +707,8 @@ impl Parser {
                 _ => unreachable!(),
             };
         }
-        if let TokenKind::Ident(..) = self.tokens.peek("Expected expression")?.kind {
-            if let TokenKind::Colon = self.tokens.double_peek("Expected expression")?.kind {
+        if let TokenKind::Ident(..) = self.tokens.peek("expected expression")?.kind {
+            if let TokenKind::Colon = self.tokens.double_peek("expected expression")?.kind {
                 let ident = self.tokens.next().expect("value is peeked");
                 self.tokens.next();
 
@@ -712,8 +718,8 @@ impl Parser {
         self.expression_statement()
     }
     fn goto_statement(&mut self) -> Result<Stmt, Error> {
-        let ident = consume!(self, TokenKind::Ident(_), "Expect identifier following 'goto'")?;
-        consume!(self, TokenKind::Semicolon, "Expect ';' after goto-statement")?;
+        let ident = consume!(self, TokenKind::Ident(_), "expected identifier following 'goto'")?;
+        consume!(self, TokenKind::Semicolon, "expected ';' after goto-statement")?;
 
         Ok(Stmt::Goto(ident))
     }
@@ -723,10 +729,10 @@ impl Parser {
         Ok(Stmt::Label(token, Box::new(body)))
     }
     fn switch_statement(&mut self, token: Token) -> Result<Stmt, Error> {
-        consume!(self, TokenKind::LeftParen, "Expect '(' after switch keyword")?;
+        consume!(self, TokenKind::LeftParen, "expected '(' after switch-keyword")?;
         let cond = self.expression()?;
 
-        consume!(self, TokenKind::RightParen, "Expect ')' after switch condition")?;
+        consume!(self, TokenKind::RightParen, "expected ')' after switch-condition")?;
 
         let body = self.statement()?;
 
@@ -735,14 +741,14 @@ impl Parser {
     fn case_statement(&mut self, token: Token) -> Result<Stmt, Error> {
         let value = self.assignment()?;
 
-        consume!(self, TokenKind::Colon, "Expect ':' following case-statement")?;
+        consume!(self, TokenKind::Colon, "expected ':' following case-statement")?;
 
         let body = self.statement()?;
 
         Ok(Stmt::Case(token, value, Box::new(body)))
     }
     fn default_statement(&mut self, token: Token) -> Result<Stmt, Error> {
-        consume!(self, TokenKind::Colon, "Expect ':' following default-statement")?;
+        consume!(self, TokenKind::Colon, "expected ':' following default-statement")?;
 
         let body = self.statement()?;
 
@@ -751,26 +757,38 @@ impl Parser {
     fn do_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
         let body = self.statement()?;
 
-        consume!(self, TokenKind::While, "Expect 'while' after do/while loop-body")?;
-        consume!(self, TokenKind::LeftParen, "Expect '(' after while keyword")?;
+        consume!(
+            self,
+            TokenKind::While,
+            "expected 'while' after do/while loop-body"
+        )?;
+        consume!(self, TokenKind::LeftParen, "expected '(' after while keyword")?;
 
         let cond = self.expression()?;
 
         consume!(
             self,
             TokenKind::RightParen,
-            "Expected closing ')' after do/while-condition"
+            "expected closing ')' after do/while-condition"
         )?;
-        consume!(self, TokenKind::Semicolon, "Expect ';' after do/while statement")?;
+        consume!(
+            self,
+            TokenKind::Semicolon,
+            "expected ';' after do/while-statement"
+        )?;
 
         Ok(Stmt::Do(keyword, Box::new(body), cond))
     }
     fn break_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
-        consume!(self, TokenKind::Semicolon, "Expect ';' after break statement")?;
+        consume!(self, TokenKind::Semicolon, "expected ';' after break-statement")?;
         Ok(Stmt::Break(keyword))
     }
     fn continue_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
-        consume!(self, TokenKind::Semicolon, "Expect ';' after continue statement")?;
+        consume!(
+            self,
+            TokenKind::Semicolon,
+            "expected ';' after continue-statement"
+        )?;
         Ok(Stmt::Continue(keyword))
     }
     fn return_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
@@ -779,21 +797,21 @@ impl Parser {
             true => None,
         };
 
-        consume!(self, TokenKind::Semicolon, "Expect ';' after return statement")?;
+        consume!(self, TokenKind::Semicolon, "expected ';' after return statement")?;
         Ok(Stmt::Return(keyword, value))
     }
     fn for_statement(&mut self) -> Result<Stmt, Error> {
-        let left_paren = consume!(self, TokenKind::LeftParen, "Expect '(' after for-statement")?;
+        let left_paren = consume!(self, TokenKind::LeftParen, "expected '(' after for-statement")?;
 
         self.typedefs.enter();
 
-        let init = match self.is_specifier(self.tokens.peek("Expected type-specifier")?) {
+        let init = match self.is_specifier(self.tokens.peek("expected type-specifier")?) {
             true => self.external_declaration().and_then(|decl| match decl {
                 ExternalDeclaration::Declaration(decl) => {
                     if decl.is_typedef {
                         return Err(Error::new(
                             &left_paren,
-                            ErrorKind::Regular("Typedef not allowed in for-statement"),
+                            ErrorKind::Regular("typedef not allowed in for-statement"),
                         ));
                     }
 
@@ -802,7 +820,7 @@ impl Parser {
                 ExternalDeclaration::Function(_, name, _) => {
                     return Err(Error::new(
                         &name,
-                        ErrorKind::Regular("Cannot define functions in 'for'-statement"),
+                        ErrorKind::Regular("cannot define functions in for-statement"),
                     ));
                 }
             }),
@@ -810,7 +828,7 @@ impl Parser {
                 Ok(Some(Box::new(self.expression_statement()?)))
             }
             false => {
-                consume!(self, TokenKind::Semicolon, "Expect ';' in 'for'-statement")?;
+                consume!(self, TokenKind::Semicolon, "expected ';' in for-statement")?;
                 Ok(None)
             }
         }?;
@@ -819,13 +837,13 @@ impl Parser {
             false => Some(self.expression()?),
             true => None,
         };
-        consume!(self, TokenKind::Semicolon, "Expect ';' after for condition")?;
+        consume!(self, TokenKind::Semicolon, "expected ';' after for-condition")?;
 
         let inc = match check!(self, TokenKind::RightParen) {
             false => Some(self.expression()?),
             true => None,
         };
-        consume!(self, TokenKind::RightParen, "Expect ')' after for increment")?;
+        consume!(self, TokenKind::RightParen, "expected ')' after for-increment")?;
 
         let body = Box::new(self.statement()?);
 
@@ -834,12 +852,12 @@ impl Parser {
         Ok(Stmt::For(left_paren, init, cond, inc, body))
     }
     fn while_statement(&mut self) -> Result<Stmt, Error> {
-        let left_paren = consume!(self, TokenKind::LeftParen, "Expect '(' after while-statement")?;
+        let left_paren = consume!(self, TokenKind::LeftParen, "expected '(' after while-statement")?;
         let cond = self.expression()?;
         consume!(
             self,
             TokenKind::RightParen,
-            "Expected closing ')' after while-condition"
+            "expected closing ')' after while-condition"
         )?;
 
         let body = self.statement()?;
@@ -868,7 +886,7 @@ impl Parser {
                             ExternalDeclaration::Declaration(decl) => Ok(Stmt::Declaration(decl)),
                             ExternalDeclaration::Function(_, name, _) => Err(Error::new(
                                 &name,
-                                ErrorKind::Regular("Cannot define functions in 'block'-statement"),
+                                ErrorKind::Regular("cannot define functions in 'block'-statement"),
                             )),
                         })
                     }
@@ -882,7 +900,7 @@ impl Parser {
             self.maybe_sync(result, &mut errors, TokenKind::Semicolon);
         }
 
-        if let Err(e) = consume!(self, TokenKind::RightBrace, "Expected closing '}' after block") {
+        if let Err(e) = consume!(self, TokenKind::RightBrace, "expected closing '}' after block") {
             errors.push(e);
         }
 
@@ -896,16 +914,16 @@ impl Parser {
     }
     fn expression_statement(&mut self) -> Result<Stmt, Error> {
         let expr = self.expression()?;
-        consume!(self, TokenKind::Semicolon, "Expect ';' after expression")?;
+        consume!(self, TokenKind::Semicolon, "expected ';' after expression")?;
         Ok(Stmt::Expr(expr))
     }
     fn if_statement(&mut self, keyword: Token) -> Result<Stmt, Error> {
-        consume!(self, TokenKind::LeftParen, "Expect '(' after 'if'")?;
+        consume!(self, TokenKind::LeftParen, "expected '(' after 'if'")?;
         let condition = self.expression()?;
         consume!(
             self,
             TokenKind::RightParen,
-            "Expect closing ')' after if condition"
+            "expected closing ')' after if condition"
         )?;
 
         let then_branch = self.statement()?;
@@ -973,7 +991,7 @@ impl Parser {
             consume!(
                 self,
                 TokenKind::Colon,
-                "Expect ':' to seperate ternary expression"
+                "expected ':' to seperate ternary expression"
             )?;
             let false_expr = self.expression()?;
 
@@ -1135,7 +1153,7 @@ impl Parser {
         | TokenKind::PlusPlus
         | TokenKind::MinusMinus
         | TokenKind::LeftParen
-        | TokenKind::Sizeof) = self.tokens.peek("Expected expression")?.kind.clone()
+        | TokenKind::Sizeof) = self.tokens.peek("expected expression")?.kind.clone()
         {
             return Ok(match kind {
                 // ++a or --a is equivalent to a += 1 or a -= 1
@@ -1152,7 +1170,7 @@ impl Parser {
                 // typecast
                 // have to check whether expression or type inside of parentheses
                 TokenKind::LeftParen => {
-                    if self.is_type(self.tokens.double_peek("Expected expression")?) {
+                    if self.is_type(self.tokens.double_peek("expected expression")?) {
                         let token = self.tokens.next().unwrap();
                         let decl_type = self.type_name()?;
 
@@ -1164,14 +1182,14 @@ impl Parser {
                 TokenKind::Sizeof => {
                     // sizeof expr doesnt need parentheses but sizeof type does
                     self.tokens.next().unwrap();
-                    if let TokenKind::LeftParen = self.tokens.peek("Expected expression")?.kind {
+                    if let TokenKind::LeftParen = self.tokens.peek("expected expression")?.kind {
                         if self
-                            .is_type(self.tokens.double_peek("Expected expression or type-specifier")?)
+                            .is_type(self.tokens.double_peek("expected expression or type-specifier")?)
                         {
                             self.tokens.next().unwrap();
                             let decl_type = self.type_name()?;
 
-                            consume!(self, TokenKind::RightParen, "Expect closing ')' after sizeof")?;
+                            consume!(self, TokenKind::RightParen, "expected closing ')' after sizeof")?;
                             return Ok(ExprKind::SizeofType { decl_type });
                         }
                     }
@@ -1193,7 +1211,11 @@ impl Parser {
         self.postfix()
     }
     fn typecast(&mut self, token: Token, decl_type: DeclType) -> Result<ExprKind, Error> {
-        consume!(self, TokenKind::RightParen, "Expect closing ')' after type-cast")?;
+        consume!(
+            self,
+            TokenKind::RightParen,
+            "expected closing ')' after type-cast"
+        )?;
         let expr = self.unary()?;
 
         Ok(ExprKind::Cast { token, decl_type, expr: Box::new(expr) })
@@ -1217,7 +1239,7 @@ impl Parser {
                     consume!(
                         self,
                         TokenKind::RightBracket,
-                        "Expect closing ']' after array-index"
+                        "expected closing ']' after array-index"
                     )?;
                     expr = index_sugar(token, expr, index);
                 }
@@ -1238,7 +1260,7 @@ impl Parser {
                     } else {
                         return Err(Error::new(
                             &token,
-                            ErrorKind::Regular("A member access must be followed by an identifer"),
+                            ErrorKind::Regular("member access must be followed by an identifer"),
                         ));
                     }
                 }
@@ -1260,7 +1282,7 @@ impl Parser {
                 }
             }
         }
-        consume!(self, TokenKind::RightParen, "Expect ')' after function call")?;
+        consume!(self, TokenKind::RightParen, "expected ')' after function call")?;
         Ok(ExprKind::Call {
             left_paren,
             caller: Box::new(caller),
@@ -1287,19 +1309,19 @@ impl Parser {
 
         if match_next!(self, TokenKind::LeftParen).is_some() {
             let expr = self.expression()?;
-            consume!(self, TokenKind::RightParen, "missing closing ')'")?;
+            consume!(self, TokenKind::RightParen, "expected closing ')'")?;
 
             return Ok(ExprKind::Grouping { expr: Box::new(expr.clone()) });
         }
 
-        let token = self.tokens.peek("Expected expression")?;
+        let token = self.tokens.peek("expected expression")?;
         Err(Error::new(
             token,
             ErrorKind::ExpectedExpression(token.kind.clone()),
         ))
     }
     fn type_specifier(&mut self) -> Result<SpecifierKind, Error> {
-        let token = self.tokens.peek("Expected type-specifier")?;
+        let token = self.tokens.peek("expected type-specifier")?;
         match token.kind {
             TokenKind::Struct | TokenKind::Union => {
                 let token = self.tokens.next().unwrap();

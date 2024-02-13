@@ -1,4 +1,4 @@
-error: Conflicting types for 'some': 'int (int)' vs 'int (char)'
+error: conflicting types for 'some': 'int (int)' vs 'int (char)'
 |  --> in tests/fixtures/mismatched_func_declarations.c:2:5
 |
 2 int some(int i);

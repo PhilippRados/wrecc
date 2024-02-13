@@ -1,24 +1,24 @@
-error: Can't assign to type 'int' with type 'long *'
+error: cannot assign to type 'int' with type 'long *'
 |  --> in tests/fixtures/init_errors.c:6:8
 |
 6 } b = {a, "he", .age = 3};
 |        ^
-error: Initializer overflow. Excess elements in 'int [3]'
+error: initializer overflow, excess elements in 'int [3]'
 |  --> in tests/fixtures/init_errors.c:10:24
 |
 10   int b[3] = {[2] = 2, 3, 4};
 |                         ^
-error: Initializer overflow. Excess elements in 'struct Foo'
+error: initializer overflow, excess elements in 'struct Foo'
 |  --> in tests/fixtures/init_errors.c:20:28
 |
 20   } e = {1, {2, 'h', '2'}, {1, 2}, 3};
 |                             ^
-error: Initializer overflow. Excess elements in 'union Else'
+error: initializer overflow, excess elements in 'union Else'
 |  --> in tests/fixtures/init_errors.c:29:19
 |
 29   } l = {1, 2, 3, 5};
 |                    ^
-error: Initializer overflow. Excess elements in 'int [1]'
+error: initializer overflow, excess elements in 'int [1]'
 |  --> in tests/fixtures/init_errors.c:36:34
 |
 36   int p[2][2][1] = {[0][1] = {1, 2}};

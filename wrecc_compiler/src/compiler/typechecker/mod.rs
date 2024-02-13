@@ -138,7 +138,7 @@ impl TypeChecker {
                     if init.is_some() {
                         return Err(Error::new(
                             &name,
-                            ErrorKind::Regular("Only variables can be initialized"),
+                            ErrorKind::Regular("only variables can be initialized"),
                         ));
                     }
                     // function declarations don't need any codegen
@@ -177,7 +177,7 @@ impl TypeChecker {
                 }
                 (_, Some(_)) => Err(Error::new(
                     &name,
-                    ErrorKind::Regular("Only variables can be initialized"),
+                    ErrorKind::Regular("only variables can be initialized"),
                 )),
                 _ => Ok(None),
             };
@@ -233,7 +233,7 @@ impl TypeChecker {
             }
             _ => Err(Error::new(
                 &token,
-                ErrorKind::Regular("Invalid combination of type-specifiers"),
+                ErrorKind::Regular("invalid combination of type-specifiers"),
             )),
         }
     }
@@ -638,12 +638,12 @@ impl TypeChecker {
                 }
                 [single_init] => Err(Error::new(
                     &single_init.token,
-                    ErrorKind::Regular("Too many braces around scalar initializer"),
+                    ErrorKind::Regular("too many braces around scalar initializer"),
                 )),
                 [_, second_init, ..] => Err(Error::new(&second_init.token, ErrorKind::ScalarOverflow)),
                 [] => Err(Error::new(
                     &token,
-                    ErrorKind::Regular("Scalar initializer cannot be empty"),
+                    ErrorKind::Regular("scalar initializer cannot be empty"),
                 )),
             },
         }
@@ -660,7 +660,7 @@ impl TypeChecker {
                 if literal < 0 {
                     return Err(Error::new(
                         &designator.token,
-                        ErrorKind::Regular("Array designator must be positive number"),
+                        ErrorKind::Regular("array designator must be positive number"),
                     ));
                 }
 
@@ -676,7 +676,7 @@ impl TypeChecker {
             (hir::decl::DesignatorKind::Member(_), Type::Array { .. }) => Err(Error::new(
                 &designator.token,
                 ErrorKind::Regular(
-                    "Can only use member designator on type 'struct' and 'union' not 'array'",
+                    "can only use member designator on type 'struct' and 'union' not 'array'",
                 ),
             )),
 
@@ -737,7 +737,7 @@ impl TypeChecker {
                         {
                             return Err(Error::new(
                                 &second_init.token,
-                                ErrorKind::Regular("Excess elements in char array initializer"),
+                                ErrorKind::Regular("excess elements in char array initializer"),
                             ));
                         }
                     }
@@ -753,7 +753,7 @@ impl TypeChecker {
         if amount < s.len() {
             return Err(Error::new(
                 &token,
-                ErrorKind::TooLong("Initializer-string", amount, s.len()),
+                ErrorKind::TooLong("initializer-string", amount, s.len()),
             ));
         }
         let mut diff = amount - s.len();
@@ -935,7 +935,7 @@ impl TypeChecker {
         if !cond.type_decl.is_integer() {
             return Err(Error::new(
                 &token,
-                ErrorKind::NotInteger("Switch conditional", cond.type_decl),
+                ErrorKind::NotInteger("switch conditional", cond.type_decl),
             ));
         }
         func.scope.push(ScopeKind::Switch(Vec::new()));
@@ -956,7 +956,7 @@ impl TypeChecker {
         mut value: hir::expr::ExprKind,
         body: hir::stmt::Stmt,
     ) -> Result<mir::stmt::Stmt, Error> {
-        let value = value.get_literal_constant(self, &token, "Case value")?;
+        let value = value.get_literal_constant(self, &token, "case value")?;
 
         match find_scope!(&mut func.scope, ScopeKind::Switch(..)) {
             Some(ScopeKind::Switch(labels)) => {
@@ -1012,7 +1012,7 @@ impl TypeChecker {
         if !cond.type_decl.is_scalar() {
             return Err(Error::new(
                 &token,
-                ErrorKind::NotScalar("Conditional", cond.type_decl),
+                ErrorKind::NotScalar("conditional", cond.type_decl),
             ));
         }
 
@@ -1038,7 +1038,7 @@ impl TypeChecker {
             if !cond.type_decl.is_scalar() {
                 return Err(Error::new(
                     &left_paren,
-                    ErrorKind::NotScalar("Conditional", cond.type_decl),
+                    ErrorKind::NotScalar("conditional", cond.type_decl),
                 ));
             }
             Some(cond)
@@ -1100,7 +1100,7 @@ impl TypeChecker {
         if !cond.type_decl.is_scalar() {
             return Err(Error::new(
                 &left_paren,
-                ErrorKind::NotScalar("Conditional", cond.type_decl),
+                ErrorKind::NotScalar("conditional", cond.type_decl),
             ));
         }
 
@@ -1125,7 +1125,7 @@ impl TypeChecker {
         if !cond.type_decl.is_scalar() {
             return Err(Error::new(
                 &keyword,
-                ErrorKind::NotScalar("Conditional", cond.type_decl),
+                ErrorKind::NotScalar("conditional", cond.type_decl),
             ));
         }
 
@@ -1376,7 +1376,7 @@ impl TypeChecker {
         if !cond.type_decl.is_scalar() {
             return Err(Error::new(
                 &token,
-                ErrorKind::NotScalar("Conditional", cond.type_decl),
+                ErrorKind::NotScalar("conditional", cond.type_decl),
             ));
         }
         let true_expr = self.visit_expr(func, true_expr)?;
@@ -1945,7 +1945,7 @@ impl TypeChecker {
         } else {
             Err(Error::new(
                 &token,
-                ErrorKind::Regular("Can't call '&' on r-value"),
+                ErrorKind::Regular("address-of operator '&' requires lvalue as operand"),
             ))
         }
     }

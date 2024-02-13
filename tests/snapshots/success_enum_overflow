@@ -1,14 +1,14 @@
-error: Enum constant overflow. Value has to be in range -2147483648 and 2147483647
+error: enum constant overflow, value has to be in range of type 'int'
 |  --> in tests/fixtures/enum_overflow.c:4:14
 |
 4 enum Other { A = 2147483647, B, C }; // overflow
 |              ^
-error: Undeclared symbol 'B'
+error: undeclared symbol 'B'
 |  --> in tests/fixtures/enum_overflow.c:8:17
 |
 8   printf("%d\n",B);
 |                 ^
-error: Undeclared symbol 'C'
+error: undeclared symbol 'C'
 |  --> in tests/fixtures/enum_overflow.c:9:17
 |
 9   printf("%d\n",C);

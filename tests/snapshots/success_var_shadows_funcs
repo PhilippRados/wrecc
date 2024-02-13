@@ -1,4 +1,4 @@
-error: Called object type: 'long' is not function or function pointer
+error: called object type: 'long' is not function or function pointer
 |  --> in tests/fixtures/var_shadows_funcs.c:4:7
 |
 4   main();

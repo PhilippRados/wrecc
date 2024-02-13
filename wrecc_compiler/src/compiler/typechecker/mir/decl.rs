@@ -87,7 +87,7 @@ impl Function {
         let name = name_token.unwrap_string();
 
         if self.labels.contains_key(&name) {
-            return Err(Error::new(name_token, ErrorKind::Redefinition("Label", name)));
+            return Err(Error::new(name_token, ErrorKind::Redefinition("label", name)));
         }
         let len = self.labels.len();
         self.labels.insert(name, len);

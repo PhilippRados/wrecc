@@ -1,14 +1,14 @@
-error: Undeclared symbol 'b'
+error: undeclared symbol 'b'
 |  --> in tests/fixtures/pp_multiline_err.c:1:12
 |
 1 int foo = &b;
 |            ^
-error: Undeclared symbol 'a'
+error: undeclared symbol 'a'
 |  --> in tests/fixtures/pp_multiline_err.c:8:12
 |
 8 int bar = &a;
 |            ^
-error: Undeclared symbol 'text'
+error: undeclared symbol 'text'
 |  --> in tests/fixtures/pp_multiline_err.c:19:14
 |
 19 int main() { text(); }

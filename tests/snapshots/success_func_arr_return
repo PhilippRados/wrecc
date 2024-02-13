@@ -1,9 +1,9 @@
-error: Functions cannot return type 'int [2]'
+error: functions cannot return type 'int [2]'
 |  --> in tests/fixtures/func_arr_return.c:3:9
 |
 3 arr some() {
 |         ^
-error: Functions cannot return type 'int [2]'
+error: functions cannot return type 'int [2]'
 |  --> in tests/fixtures/func_arr_return.c:10:8
 |
 10 int baz()[2];

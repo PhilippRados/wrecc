@@ -103,132 +103,132 @@ pub enum ErrorKind {
 impl ErrorKind {
     fn message(&self) -> String {
         match self {
-            ErrorKind::UnexpectedChar(c) => format!("Unexpected character: {:?}", c),
+            ErrorKind::UnexpectedChar(c) => format!("unexpected character: {:?}", c),
             ErrorKind::Eof(s) => format!("{}, found end of file", s),
             ErrorKind::CharLiteralQuotes => {
-                "Character literal must contain single character enclosed by single quotes ('')"
+                "character literal must contain single character enclosed by single quotes ('')"
                     .to_string()
             }
             ErrorKind::InvalidNumber(kind) => {
                 format!(
-                    "Can't parse number literal. {}",
+                    "cannot parse number literal: {}",
                     match kind {
-                        IntErrorKind::InvalidDigit => "Invalid digit found in string",
-                        IntErrorKind::PosOverflow => "Number is too large to fit in 64bits",
+                        IntErrorKind::InvalidDigit => "invalid digit found in string",
+                        IntErrorKind::PosOverflow => "number is too large to fit in 64bits",
                         _ => "",
                     }
                 )
             }
             ErrorKind::CharLiteralAscii(c) => {
-                format!("Character literal must be valid ascii value. '{}' is not", c)
+                format!("character literal must be valid ascii value. '{}' is not", c)
             }
-            ErrorKind::InvalidEscape(c) => format!("Can't escape character '{}'", c),
-            ErrorKind::UnterminatedString => "Unterminated string".to_string(),
+            ErrorKind::InvalidEscape(c) => format!("cannot escape character '{}'", c),
+            ErrorKind::UnterminatedString => "unterminated string".to_string(),
 
             ErrorKind::NotIntegerConstant(s) => {
                 format!("{} has to be an integer constant expression", s)
             }
-            ErrorKind::NegativeArraySize => "Array size has to be greater than zero".to_string(),
-            ErrorKind::IsEmpty(t) => format!("Can't have empty {}", t),
+            ErrorKind::NegativeArraySize => "array size has to be greater than zero".to_string(),
+            ErrorKind::IsEmpty(t) => format!("cannot have empty {}", t),
             ErrorKind::EnumOverflow => {
-                "Enum constant overflow. Value has to be in range -2147483648 and 2147483647".to_string()
+                "enum constant overflow, value has to be in range of type 'int'".to_string()
             }
             ErrorKind::IncompleteType(t) => format!("'{}' contains incomplete type", t),
             ErrorKind::IncompleteReturnType(name, t) => {
-                format!("Function '{}' has incomplete return type '{}'", name, t)
+                format!("function '{}' has incomplete return type '{}'", name, t)
             }
-            ErrorKind::NotType(token) => format!("Expected type-declaration, found {}", token),
-            ErrorKind::UndeclaredType(s) => format!("Undeclared type '{}'", s),
+            ErrorKind::NotType(token) => format!("expected type-declaration, found {}", token),
+            ErrorKind::UndeclaredType(s) => format!("undeclared type '{}'", s),
             ErrorKind::InvalidVariadic => {
-                "Expected at least one named parameter before variadic arguments".to_string()
+                "expected at least one named parameter before variadic arguments".to_string()
             }
             ErrorKind::IncompleteMemberAccess(type_decl) => {
                 format!(
-                    "Can't access members of type that contains incomplete type '{}'",
+                    "cannot access members of type that contains incomplete type '{}'",
                     type_decl
                 )
             }
             ErrorKind::IncompleteFuncArg(func_name, type_decl) => {
                 format!(
-                    "Function '{}' contains incomplete type '{}' as parameter",
+                    "function '{}' contains incomplete type '{}' as parameter",
                     func_name, type_decl
                 )
             }
             ErrorKind::VoidFuncArg => {
-                "Function argument 'void' must be first and only unnamed argument if specified"
+                "function argument 'void' must be first and only unnamed argument if specified"
                     .to_string()
             }
             ErrorKind::TypeAlreadyExists(name, token) => {
-                format!("Type '{}' already exists but not as {}", name, token)
+                format!("type '{}' already exists but not as {}", name, token)
             }
-            ErrorKind::EnumForwardDecl => "Can't forward declare enums".to_string(),
+            ErrorKind::EnumForwardDecl => "cannot forward declare enums".to_string(),
             ErrorKind::EmptyAggregate(token) => {
-                format!("Can't declare unnamed {} without members", token)
+                format!("cannot declare unnamed {} without members", token)
             }
-            ErrorKind::Redefinition(kind, name) => format!("Redefinition of {} '{}'", kind, name),
+            ErrorKind::Redefinition(kind, name) => format!("redefinition of {} '{}'", kind, name),
             ErrorKind::RedefOtherSymbol(name, kind) => format!(
-                "Redefinition of '{}' as different symbol. Already exists as '{}'",
+                "redefinition of '{}' as different symbol. Already exists as '{}'",
                 name, kind
             ),
             ErrorKind::RedefTypeMismatch(name, new, old) => {
-                format!("Conflicting types for '{}': '{}' vs '{}'", name, new, old)
+                format!("conflicting types for '{}': '{}' vs '{}'", name, new, old)
             }
             ErrorKind::NonExistantMember(member, type_decl) => {
-                format!("No member '{}' in '{}'", member, type_decl)
+                format!("no member '{}' in '{}'", member, type_decl)
             }
             ErrorKind::InvalidArrayDesignator(type_decl) => format!(
-                "Can only use array designator on type 'array' not '{}'",
+                "can only use array designator on type 'array' not '{}'",
                 type_decl
             ),
             ErrorKind::DesignatorOverflow(expected, actual) => {
                 format!(
-                    "Array designator index '{}' exceeds type-size: '{}'",
+                    "array designator index '{}' exceeds type-size: '{}'",
                     actual, expected
                 )
             }
             ErrorKind::InitializerOverflow(type_decl) => {
-                format!("Initializer overflow. Excess elements in '{}'", type_decl)
+                format!("initializer overflow, excess elements in '{}'", type_decl)
             }
-            ErrorKind::ScalarOverflow => "Excess elements in scalar initializer".to_string(),
-            ErrorKind::InvalidArray(type_decl) => format!("Invalid array-type: '{}'", type_decl),
+            ErrorKind::ScalarOverflow => "excess elements in scalar initializer".to_string(),
+            ErrorKind::InvalidArray(type_decl) => format!("invalid array-type: '{}'", type_decl),
             ErrorKind::InvalidCaller(type_decl) => format!(
-                "Called object type: '{}' is not function or function pointer",
+                "called object type: '{}' is not function or function pointer",
                 type_decl
             ),
             ErrorKind::FunctionMember(member_name, member_type) => {
                 format!(
-                    "Field '{}' has illegal function-type: '{}'",
+                    "field '{}' has illegal function-type: '{}'",
                     member_name, member_type
                 )
             }
 
             ErrorKind::NonAggregateDesignator(type_decl) => {
                 format!(
-                    "Can only use designator when initializing aggregate types, not '{}'",
+                    "can only use designator when initializing aggregate types, not '{}'",
                     type_decl
                 )
             }
             ErrorKind::TooLong(s, expected, actual) => {
-                format!("{} is too long. Expected: {}, Actual: {}", s, expected, actual)
+                format!("{} is too long, expected: {}, Actual: {}", s, expected, actual)
             }
             ErrorKind::NonAggregateInitializer(expected, actual) => format!(
-                "Can't initialize non-aggregate type '{}' with '{}'",
+                "cannot initialize non-aggregate type '{}' with '{}'",
                 expected, actual
             ),
-            ErrorKind::ExpectedExpression(token) => format!("Expected expression found: {}", token),
-            ErrorKind::DuplicateMember(name) => format!("Duplicate member '{}'", name),
+            ErrorKind::ExpectedExpression(token) => format!("expected expression, found: {}", token),
+            ErrorKind::DuplicateMember(name) => format!("duplicate member '{}'", name),
 
-            ErrorKind::DivideByZero => "Can't divide by zero".to_string(),
+            ErrorKind::DivideByZero => "cannot divide by zero".to_string(),
             ErrorKind::InvalidConstCast(old_type, new_type) => {
-                format!("Invalid constant-cast from '{}' to '{}'", old_type, new_type,)
+                format!("invalid constant-cast from '{}' to '{}'", old_type, new_type,)
             }
-            ErrorKind::NegativeShift => "Shift amount has to positive".to_string(),
+            ErrorKind::NegativeShift => "shift amount has to positive".to_string(),
             ErrorKind::IntegerOverflow(type_decl) => {
-                format!("Integer overflow with type: '{}'", type_decl)
+                format!("integer overflow with type: '{}'", type_decl)
             }
 
             ErrorKind::UndeclaredLabel(label) => {
-                format!("Undeclared label '{}'", label)
+                format!("undeclared label '{}'", label)
             }
             ErrorKind::NotInteger(s, type_decl) => {
                 format!("{} must be integer type, found '{}'", s, type_decl,)
@@ -236,104 +236,104 @@ impl ErrorKind {
             ErrorKind::NotScalar(s, type_decl) => {
                 format!("{} must be scalar type, found '{}'", s, type_decl,)
             }
-            ErrorKind::DuplicateCase(n) => format!("Duplicate 'case'-statement with value {}", n),
+            ErrorKind::DuplicateCase(n) => format!("duplicate 'case'-statement with value {}", n),
             ErrorKind::NotIn(inner, outer) => {
                 format!("'{}'-statements have to be inside a '{}'-statement", inner, outer)
             }
             ErrorKind::MultipleDefaults => {
-                "Can't have multiple 'default'-statements inside a 'switch'-statement".to_string()
+                "cannot have multiple 'default'-statements inside a 'switch'-statement".to_string()
             }
             ErrorKind::IllegalAssign(left, right) => {
-                format!("Can't assign to type '{}' with type '{}'", left, right)
+                format!("cannot assign to type '{}' with type '{}'", left, right)
             }
             ErrorKind::NotConstantInit(s) => {
                 format!("{} can only be initialized to compile-time constants", s)
             }
             ErrorKind::InvalidExplicitCast(old_type, new_type) => {
                 format!(
-                    "Invalid cast from '{}' to '{}'. '{}' is not a scalar type",
+                    "invalid cast from '{}' to '{}', '{}' is not a scalar type",
                     old_type,
                     new_type,
                     if !old_type.is_scalar() { old_type } else { new_type }
                 )
             }
             ErrorKind::NoReturnAllPaths(name) => {
-                format!("Non-void function '{}' doesn't return in all code paths", name)
+                format!("non-void function '{}' doesn't return in all code paths", name)
             }
             ErrorKind::InvalidMainReturn(type_decl) => {
-                format!("Expected 'main' return type 'int', found: '{}'", type_decl)
+                format!("expected 'main' return type 'int', found: '{}'", type_decl)
             }
             ErrorKind::TypeMismatch(left, right) => {
-                format!("Mismatched operand types. '{}' and '{}'", left, right)
+                format!("mismatched operand types: '{}' and '{}'", left, right)
             }
             ErrorKind::InvalidSymbol(name, symbol) => {
-                format!("Symbol '{}' already exists, but not as {}", name, symbol)
+                format!("symbol '{}' already exists, but not as {}", name, symbol)
             }
             ErrorKind::InvalidMemberAccess(type_decl) => {
-                format!("Can only access members of structs/unions, not '{}'", type_decl)
+                format!("can only access members of structs/unions, not '{}'", type_decl)
             }
             ErrorKind::InvalidIncrementType(type_decl) => {
-                format!("Can't increment value of type '{}'", type_decl)
+                format!("cannot increment value of type '{}'", type_decl)
             }
-            ErrorKind::InvalidRvalueIncrement => "Can't increment Rvalues".to_string(),
+            ErrorKind::InvalidRvalueIncrement => "cannot increment rvalues".to_string(),
             ErrorKind::NotAssignable(type_decl) => {
-                format!("Type '{}' is not assignable", type_decl)
+                format!("type '{}' is not assignable", type_decl)
             }
-            ErrorKind::NotLvalue => "Expect Lvalue left of assignment".to_string(),
+            ErrorKind::NotLvalue => "expected lvalue left of assignment".to_string(),
             ErrorKind::MismatchedArity(type_decl, expected, actual) => {
                 format!(
-                    "Function of type '{}' expected {} argument(s) found {}",
+                    "function of type '{}' expected {} argument(s) found {}",
                     type_decl, expected, actual
                 )
             }
             ErrorKind::MismatchedArgs(index, type_decl, expected, actual) => {
                 format!(
-                            "Mismatched arguments in function of type '{}': expected {} parameter to be of type '{}', found '{}'",
+                            "mismatched arguments in function of type '{}': expected {} parameter to be of type '{}', found '{}'",
                             type_decl,num_to_ord(index + 1),  expected, actual
                         )
             }
             ErrorKind::InvalidLogical(token, left_type, right_type) => {
                 format!(
-                    "Invalid logical expression: '{}' {} '{}'. Both types need to be scalar",
+                    "invalid logical expression: '{}' {} '{}', both types need to be scalar",
                     left_type, token, right_type
                 )
             }
             ErrorKind::InvalidComp(token, left_type, right_type) => {
-                format!("Invalid comparsion: '{}' {} '{}'", left_type, token, right_type)
+                format!("invalid comparsion: '{}' {} '{}'", left_type, token, right_type)
             }
             ErrorKind::InvalidBinary(token, left_type, right_type) => {
                 format!(
-                    "Invalid binary expression: '{}' {} '{}'",
+                    "invalid binary expression: '{}' {} '{}'",
                     left_type, token, right_type
                 )
             }
             ErrorKind::InvalidDerefType(type_decl) => {
                 format!(
-                    "Can't dereference value-type '{}', expected type 'pointer'",
+                    "cannot dereference value-type '{}', expected type 'pointer'",
                     type_decl,
                 )
             }
             ErrorKind::MismatchedFunctionReturn(func_return, body_return) => {
                 format!(
-                    "Mismatched function return type: expected '{}', found: '{}'",
+                    "mismatched function return type: expected '{}', found: '{}'",
                     func_return, body_return
                 )
             }
 
             ErrorKind::UndeclaredSymbol(name) => {
-                format!("Undeclared symbol '{}'", name)
+                format!("undeclared symbol '{}'", name)
             }
             ErrorKind::InvalidUnary(token, right_type, kind) => {
                 format!(
-                    "Invalid unary-expression {} with type '{}'. Must be {}-type",
+                    "invalid unary-expression {} with type '{}', must be {}-type",
                     token, right_type, kind
                 )
             }
             ErrorKind::UnnamedFuncParams => {
-                "Unnamed parameters are not allowed in function definitions".to_string()
+                "unnamed parameters are not allowed in function definitions".to_string()
             }
             ErrorKind::InvalidReturnType(type_decl) => {
-                format!("Functions cannot return type '{}'", type_decl)
+                format!("functions cannot return type '{}'", type_decl)
             }
 
             ErrorKind::InvalidHeader(s) => format!("'{}' is not a valid header file", s),
@@ -341,18 +341,18 @@ impl ErrorKind {
                 format!("'#{}' is not a valid preprocessor directive", s)
             }
             ErrorKind::UnterminatedIf(if_kind) => {
-                format!("Unterminated '#{}'", if_kind)
+                format!("unterminated '#{}'", if_kind)
             }
-            ErrorKind::InvalidMacroName => "Macro name must be valid identifier".to_string(),
-            ErrorKind::DuplicateElse => "Can only have single '#else' in '#if'-directive".to_string(),
+            ErrorKind::InvalidMacroName => "macro name must be valid identifier".to_string(),
+            ErrorKind::DuplicateElse => "can only have single '#else' in '#if'-directive".to_string(),
             ErrorKind::MissingExpression(kind) => {
                 format!("'#{}' directive expects expression", kind)
             }
             ErrorKind::MissingIf(kind) => {
-                format!("Found '#{}' without matching '#if'", kind)
+                format!("found '#{}' without matching '#if'", kind)
             }
-            ErrorKind::ElifAfterElse => "Found '#elif' after '#else'".to_string(),
-            ErrorKind::TrailingTokens(msg) => format!("Found trailing tokens after {}", msg),
+            ErrorKind::ElifAfterElse => "found '#elif' after '#else'".to_string(),
+            ErrorKind::TrailingTokens(msg) => format!("found trailing tokens after {}", msg),
 
             ErrorKind::Regular(s) => s.to_string(),
             ErrorKind::Multiple(_) => {

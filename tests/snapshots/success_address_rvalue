@@ -1,4 +1,4 @@
-error: Can't call '&' on r-value
+error: address-of operator '&' requires lvalue as operand
 |  --> in tests/fixtures/address_rvalue.c:8:7
 |
 8   a = &(b + 3);

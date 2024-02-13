@@ -1,4 +1,4 @@
-error: Redefinition of symbol 'main'
+error: redefinition of symbol 'main'
 |  --> in tests/fixtures/function_redefinition.c:7:5
 |
 7 int main(){}

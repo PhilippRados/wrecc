@@ -1,14 +1,14 @@
-error: Can't assign to type 'void (*)()' with type 'void (*)(int)'
+error: cannot assign to type 'void (*)()' with type 'void (*)(int)'
 |  --> in tests/fixtures/func_ptr_errors.c:12:10
 |
 12   void (*func)(void) = foo;
 |           ^
-error: Only variables can be initialized
+error: only variables can be initialized
 |  --> in tests/fixtures/func_ptr_errors.c:14:7
 |
 14   int(func_ptr)() = 42;
 |        ^
-error: Can't assign to type 'void (*)(int)' with type 'void (*)(long *)'
+error: cannot assign to type 'void (*)(int)' with type 'void (*)(long *)'
 |  --> in tests/fixtures/func_ptr_errors.c:16:12
 |
 16   Callback callback = callbackFunction; // Error: Incompatible argument type

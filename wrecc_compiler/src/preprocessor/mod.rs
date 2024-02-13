@@ -118,7 +118,7 @@ impl<'a> Preprocessor<'a> {
                     } else {
                         Err(Error::new(
                             &PPToken::from(&token, self.filename),
-                            ErrorKind::Regular("Expected closing '\"' after header file"),
+                            ErrorKind::Regular("expected closing '\"' after header file"),
                         ))
                     }
                 }
@@ -136,19 +136,19 @@ impl<'a> Preprocessor<'a> {
                     } else {
                         Err(Error::new(
                             &PPToken::from(&token, self.filename),
-                            ErrorKind::Regular("Expected closing '>' after header file"),
+                            ErrorKind::Regular("expected closing '>' after header file"),
                         ))
                     }
                 }
                 _ => Err(Error::new(
                     &PPToken::from(&token, self.filename),
-                    ErrorKind::Regular("Expected opening '<' or '\"' after include directive"),
+                    ErrorKind::Regular("expected opening '<' or '\"' after include directive"),
                 )),
             }
         } else {
             Err(Error::new(
                 &PPToken::from(&directive, self.filename),
-                ErrorKind::Regular("Expected opening '<' or '\"' after include directive"),
+                ErrorKind::Regular("expected opening '<' or '\"' after include directive"),
             ))
         }
     }
@@ -440,7 +440,7 @@ impl<'a> Preprocessor<'a> {
                                         return Err(Error::new(
                                             &PPToken::from(&open_paren, self.filename),
                                             ErrorKind::Regular(
-                                                "Expect matching closing ')' after 'defined'",
+                                                "expected matching closing ')' after 'defined'",
                                             ),
                                         ));
                                     }
@@ -449,14 +449,14 @@ impl<'a> Preprocessor<'a> {
                             _ => {
                                 return Err(Error::new(
                                     &PPToken::from(&token, self.filename),
-                                    ErrorKind::Regular("Expect identifier after 'defined'-operator"),
+                                    ErrorKind::Regular("expected identifier after 'defined'-operator"),
                                 ))
                             }
                         }
                     } else {
                         return Err(Error::new(
                             &PPToken::from(&token, self.filename),
-                            ErrorKind::Regular("Expect identifier after 'defined'-operator"),
+                            ErrorKind::Regular("expected identifier after 'defined'-operator"),
                         ));
                     }
                 }
@@ -585,7 +585,7 @@ impl<'a> Preprocessor<'a> {
                     } else {
                         Err(Error::new(
                             &PPToken::from(&token, self.filename),
-                            ErrorKind::Regular("Expected preprocessor directive following '#'"),
+                            ErrorKind::Regular("expected preprocessor directive following '#'"),
                         ))
                     };
 
@@ -648,11 +648,11 @@ impl<'a> Preprocessor<'a> {
     fn skip_whitespace(&mut self) -> Result<(), Error> {
         if !skip_whitespace(&mut self.tokens) {
             self.tokens
-                .peek("Expected whitespace", self.filename)
+                .peek("expected whitespace", self.filename)
                 .and_then(|token| {
                     Err(Error::new(
                         &PPToken::from(token, self.filename),
-                        ErrorKind::Regular("Expect whitespace after preprocessing directive"),
+                        ErrorKind::Regular("expected whitespace after preprocessing directive"),
                     ))
                 })
         } else {
@@ -1146,7 +1146,7 @@ else_branch
             actual[..],
             [
                 ErrorKind::TrailingTokens("preprocessor directive"),
-                ErrorKind::Regular("Expected expression"),
+                ErrorKind::Regular("expected expression"),
             ]
         ));
     }

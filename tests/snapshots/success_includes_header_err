@@ -1,4 +1,4 @@
-error: Undeclared symbol 'printf'
+error: undeclared symbol 'printf'
 |  --> in tests/fixtures/includes_header_err.c:15:3
 |
 15   printf("not header #include <file.h>");

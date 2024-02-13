@@ -1,4 +1,4 @@
-error: Expected identifier following type-specifier
+error: expected identifier following type-specifier
 |  --> in tests/fixtures/cant_declare_global_block.c:2:1
 |
 2 {

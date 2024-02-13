@@ -31,7 +31,7 @@ impl ExprKind {
         } else {
             Err(Error::new(
                 pp,
-                ErrorKind::Regular("Invalid preprocessor constant expression"),
+                ErrorKind::Regular("invalid preprocessor constant expression"),
             ))
         }
     }

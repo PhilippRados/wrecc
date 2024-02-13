@@ -1,4 +1,4 @@
-error: missing closing ')'
+error: expected closing ')'
 |  --> in tests/fixtures/missing_closing_parenthesis.c:2:17
 |
 2   int a = (2 + 1;

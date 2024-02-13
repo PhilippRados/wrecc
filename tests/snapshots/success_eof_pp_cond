@@ -1,9 +1,9 @@
-error: missing closing ')'
+error: expected closing ')'
 |  --> in tests/fixtures/eof_pp_cond.c:3:8
 |
 3 #if ((1)
 |        ^
-error: Expected expression
+error: expected expression
 |  --> in tests/fixtures/eof_pp_cond.c:9:5
 |
 9 + 3 (

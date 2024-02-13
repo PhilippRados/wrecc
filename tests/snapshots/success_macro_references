@@ -1,14 +1,14 @@
-error: Undeclared symbol 'foo2'
+error: undeclared symbol 'foo2'
 |  --> in tests/fixtures/macro_references.c:9:3
 |
 9   foo1;
 |   ^
-error: Undeclared symbol 'test'
+error: undeclared symbol 'test'
 |  --> in tests/fixtures/macro_references.c:10:3
 |
 10   siggi;
 |    ^
-error: Undeclared symbol 'test'
+error: undeclared symbol 'test'
 |  --> in tests/fixtures/macro_references.c:10:3
 |
 10   siggi;

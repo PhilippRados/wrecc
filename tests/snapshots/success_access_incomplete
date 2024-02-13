@@ -1,4 +1,4 @@
-error: Can't access members of type that contains incomplete type 'struct d'
+error: cannot access members of type that contains incomplete type 'struct d'
 |  --> in tests/fixtures/access_incomplete.c:7:28
 |
 7   printf("%d\n",*(&*a)[!-e]->outer);

@@ -1,4 +1,4 @@
-error: Unexpected character: '#'
+error: unexpected character: '#'
 |  --> in tests/fixtures/includes_header_err2.c:4:24
 |
 4   int not_first_token; #include <stdio.h>;

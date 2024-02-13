@@ -1,14 +1,14 @@
-error: Expect ';' after declaration
+error: expected ';' after declaration
 |  --> in tests/fixtures/multiline_err.c:8:4
 |
 8  o wie "gehts";
 |    ^
-error: Expect ';' after declaration
+error: expected ';' after declaration
 |  --> in tests/fixtures/multiline_err.c:21:2
 |
 21 2ö;
 |   ^
-error: Expected expression found: ')'
+error: expected expression, found: ')'
 |  --> in tests/fixtures/multiline_err.c:26:17
 |
 26          some + );

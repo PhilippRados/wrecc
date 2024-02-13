@@ -1,4 +1,4 @@
-error: Undeclared symbol 'c'
+error: undeclared symbol 'c'
 |  --> in tests/fixtures/multiline_comment.c:9:23
 |
 9   printf("%d\n",/*c*/ c);

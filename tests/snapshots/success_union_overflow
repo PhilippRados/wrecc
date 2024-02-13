@@ -1,4 +1,4 @@
-error: Initializer overflow. Excess elements in 'union (<unnamed> at tests/fixtures/union_overflow.c:7:3)'
+error: initializer overflow, excess elements in 'union (<unnamed> at tests/fixtures/union_overflow.c:7:3)'
 |  --> in tests/fixtures/union_overflow.c:10:25
 |
 10   } b = {'u', 'w', 'e', 2};

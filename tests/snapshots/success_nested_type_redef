@@ -1,4 +1,4 @@
-error: Redefinition of type 'Other'
+error: redefinition of type 'Other'
 |  --> in tests/fixtures/nested_type_redef.c:11:11
 |
 11     union Other {

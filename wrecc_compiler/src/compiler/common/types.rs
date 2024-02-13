@@ -426,7 +426,7 @@ impl StructInfo {
         match self {
             StructInfo::Named(name, _) => name.to_string(),
             StructInfo::Unnamed(token, _) => format!(
-                "(<anonymous> at {}:{}:{})",
+                "(<unnamed> at {}:{}:{})",
                 token.filename.display(),
                 token.line_index,
                 token.column
@@ -546,7 +546,7 @@ impl Display for Type {
                 Type::Union(s) => "union ".to_string() + &s.name(),
                 Type::Struct(s) => "struct ".to_string() + &s.name(),
                 Type::Enum(Some(name), ..) => "enum ".to_string() + name,
-                Type::Enum(None, ..) => "enum <anonymous>".to_string(),
+                Type::Enum(None, ..) => "enum <unnamed>".to_string(),
                 _ => unreachable!("all modifiers were removed"),
             };
             if !modifiers.is_empty() {

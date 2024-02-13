@@ -1,9 +1,9 @@
-error: Can't assign to type 'struct (<anonymous> at tests/fixtures/cast_comma.c:5:3)' with type 'char'
+error: Can't assign to type 'struct (<unnamed> at tests/fixtures/cast_comma.c:5:3)' with type 'char'
 |  --> in tests/fixtures/cast_comma.c:9:5
 |
 9   a = ((long)1, (char)7);
 |     ^
-error: Can't assign to type 'struct (<anonymous> at tests/fixtures/cast_comma.c:5:3)' with type 'long'
+error: Can't assign to type 'struct (<unnamed> at tests/fixtures/cast_comma.c:5:3)' with type 'long'
 |  --> in tests/fixtures/cast_comma.c:10:5
 |
 10   a = (long)1, (char)7;

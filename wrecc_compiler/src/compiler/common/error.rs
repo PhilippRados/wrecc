@@ -163,7 +163,7 @@ impl ErrorKind {
             }
             ErrorKind::EnumForwardDecl => "Can't forward declare enums".to_string(),
             ErrorKind::EmptyAggregate(token) => {
-                format!("Can't declare anonymous {} without members", token)
+                format!("Can't declare unnamed {} without members", token)
             }
             ErrorKind::Redefinition(kind, name) => format!("Redefinition of {} '{}'", kind, name),
             ErrorKind::RedefOtherSymbol(name, kind) => format!(

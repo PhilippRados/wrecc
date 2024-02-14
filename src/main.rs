@@ -68,23 +68,19 @@ impl From<(Vec<CompilerError>, bool)> for Error {
 // Reads in string from file passed from user
 fn read_input_file(file: &Path) -> Result<String, Error> {
     fs::read_to_string(file)
-        .map_err(|_| Error::Sys(format!("Couldn't find file: '{}'", file.display())))
+        .map_err(|_| Error::Sys(format!("could not find file: '{}'", file.display())))
 }
 
 // Generates x8664 assembly output file
 fn generate_asm_file(options: &CliOptions, output: String) -> Result<OutFile, Error> {
     let output_path = output_path(options, options.compile_only, "s");
 
-    let mut output_file = std::fs::File::create(output_path.get()).map_err(|_| {
-        Error::Sys(format!(
-            "Couldn't create file '{}'",
-            output_path.get().display()
-        ))
-    })?;
+    let mut output_file = std::fs::File::create(output_path.get())
+        .map_err(|_| Error::Sys(format!("could not create file '{}'", output_path.get().display())))?;
 
     if writeln!(output_file, "{}", output).is_err() {
         Err(Error::Sys(format!(
-            "Couldn't write to file '{}'",
+            "could not write to file '{}'",
             output_path.get().display()
         )))
     } else {
@@ -108,7 +104,7 @@ fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, Error> {
         .arg("-o")
         .arg(output_path.get())
         .output()
-        .map_err(|_| Error::Sys("Couldn't invoke assembler 'as'".to_string()))?;
+        .map_err(|_| Error::Sys("could not invoke assembler 'as'".to_string()))?;
 
     if output.status.success() {
         Ok(output_path)
@@ -135,7 +131,7 @@ fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), Error> {
 
     let output = cmd
         .output()
-        .map_err(|_| Error::Sys("Couldn't invoke linker 'ld'".to_string()))?;
+        .map_err(|_| Error::Sys("could not invoke linker 'ld'".to_string()))?;
 
     if output.status.success() {
         Ok(())
@@ -151,9 +147,7 @@ fn run() -> Result<(), Error> {
     let pp_source = preprocess(&options.file_path, source).map_err(|e| (e, options.no_color))?;
 
     if options.preprocess_only {
-        return Ok(pp_source
-            .iter()
-            .for_each(|s| eprint!("{}", s.kind.to_string())));
+        return Ok(pp_source.iter().for_each(|s| eprint!("{}", s.kind.to_string())));
     }
 
     let asm_source = compile(pp_source, options.dump_ast).map_err(|e| (e, options.no_color))?;

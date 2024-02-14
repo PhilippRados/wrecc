@@ -71,10 +71,7 @@ impl CliOptions {
     }
     pub fn parse() -> Result<CliOptions, Error> {
         let mut cli_options = CliOptions::default();
-        let mut args = std::env::args()
-            .collect::<Vec<String>>()
-            .into_iter()
-            .skip(1);
+        let mut args = std::env::args().collect::<Vec<String>>().into_iter().skip(1);
 
         while let Some(arg) = args.next() {
             if arg.starts_with('-') {
@@ -83,10 +80,7 @@ impl CliOptions {
                         if let Some(file) = args.next() {
                             cli_options.output_path = Some(PathBuf::from(file));
                         } else {
-                            return Err(Error::Sys(format!(
-                                "Expects file following '{}' option",
-                                arg
-                            )));
+                            return Err(Error::Sys(format!("expected file following '{}' option", arg)));
                         }
                     }
                     "-E" | "--preprocess-only" => cli_options.preprocess_only = true,
@@ -97,7 +91,7 @@ impl CliOptions {
                     "-h" => sys_info(USAGE),
                     "--help" => sys_info(HELP),
                     "-v" | "--version" => sys_info(VERSION),
-                    _ => return Err(Error::Sys(format!("Illegal option '{}'", arg))),
+                    _ => return Err(Error::Sys(format!("illegal option '{}'", arg))),
                 }
             } else {
                 cli_options.file_path = PathBuf::from(arg);
@@ -105,12 +99,12 @@ impl CliOptions {
         }
 
         if cli_options.file_path.to_string_lossy().is_empty() {
-            Err(Error::Sys("No input files given".to_string()))
+            Err(Error::Sys("no input files given".to_string()))
         } else if let Some(Some("c")) = cli_options.file_path.extension().map(|s| s.to_str()) {
             Ok(cli_options)
         } else {
             Err(Error::Sys(format!(
-                "File '{}' is not a valid C source file",
+                "file '{}' is not a valid C source file",
                 cli_options.file_path.display()
             )))
         }

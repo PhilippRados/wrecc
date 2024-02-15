@@ -1,0 +1,6 @@
+error: #include is nested too deeply, exceeds maximum-depth of 200
+|  --> in tests/fixtures/recursive_include.c:1:10
+|
+1 #include "recursive_include.c"
+|          ^
+1 error generated.

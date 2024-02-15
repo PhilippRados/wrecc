@@ -11,8 +11,9 @@ use std::path::Path;
 // Preprocesses given input file
 pub fn preprocess(filename: &Path, source: String) -> Result<Vec<PPToken>, Vec<Error>> {
     let tokens = PPScanner::new(source).scan_token();
+    let include_depth = 0;
 
-    Preprocessor::new(filename, tokens, None)
+    Preprocessor::new(filename, tokens, None, include_depth)
         .start()
         .map(|(tokens, _)| tokens)
 }

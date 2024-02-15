@@ -70,6 +70,12 @@ pub struct Preprocessor<'a> {
 
     // path to custom system header files
     system_header_path: PathBuf,
+
+    // current number of nest-depth
+    include_depth: usize,
+
+    // maximum number of allowed nested includes
+    max_include_depth: usize,
 }
 
 impl<'a> Preprocessor<'a> {
@@ -77,11 +83,13 @@ impl<'a> Preprocessor<'a> {
         filename: &'a Path,
         tokens: Vec<Token>,
         pre_defines: Option<HashMap<String, Vec<Token>>>,
+        include_depth: usize,
     ) -> Self {
         Preprocessor {
             tokens: DoublePeek::new(tokens),
             filename,
-            ifs: vec![],
+            include_depth,
+            ifs: Vec::new(),
             // WARN: only temporary absolute path. /include will be found via PATH env var.
             // Maybe has to be vector if there are multiple search paths
             system_header_path: PathBuf::from(
@@ -93,12 +101,14 @@ impl<'a> Preprocessor<'a> {
             } else {
                 HashMap::new()
             },
+            max_include_depth: 200,
         }
     }
 
     fn paste_header(&mut self, (file_path, data): (PathBuf, String)) -> Result<Vec<PPToken>, Error> {
         let (data, defines) =
-            preprocess_included(&file_path, data, self.defines.clone()).map_err(Error::new_multiple)?;
+            preprocess_included(&file_path, data, self.defines.clone(), self.include_depth + 1)
+                .map_err(Error::new_multiple)?;
 
         self.defines.extend(defines);
 
@@ -109,6 +119,13 @@ impl<'a> Preprocessor<'a> {
         self.skip_whitespace()?;
 
         if let Some(token) = self.tokens.next() {
+            if self.include_depth > self.max_include_depth {
+                return Err(Error::new(
+                    &PPToken::from(&token, self.filename),
+                    ErrorKind::MaxIncludeDepth(self.max_include_depth),
+                ));
+            }
+
             match token.kind.clone() {
                 TokenKind::String(mut file) => {
                     file.remove(0);
@@ -713,10 +730,11 @@ fn preprocess_included(
     filename: &Path,
     source: String,
     defines: HashMap<String, Vec<Token>>,
+    include_depth: usize,
 ) -> Result<(Vec<PPToken>, HashMap<String, Vec<Token>>), Vec<Error>> {
     let tokens = PPScanner::new(source).scan_token();
 
-    Preprocessor::new(filename, tokens, Some(defines)).start()
+    Preprocessor::new(filename, tokens, Some(defines), include_depth).start()
 }
 
 fn as_kind(tokens: &[Token]) -> Vec<&TokenKind> {
@@ -777,7 +795,7 @@ mod tests {
     fn setup(input: &str) -> Preprocessor {
         let tokens = PPScanner::new(input.to_string()).scan_token();
 
-        Preprocessor::new(Path::new(""), tokens, None)
+        Preprocessor::new(Path::new(""), tokens, None, 0)
     }
 
     fn setup_complete(input: &str) -> String {
@@ -803,7 +821,7 @@ mod tests {
             .into_iter()
             .map(|(k, v)| (k.to_string(), scan(v)))
             .collect();
-        let pp = Preprocessor::new(Path::new(""), Vec::new(), Some(defined.clone()));
+        let pp = Preprocessor::new(Path::new(""), Vec::new(), Some(defined.clone()), 0);
 
         let mut result = HashMap::new();
         for (name, replace_list) in defined {

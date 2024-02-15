@@ -95,6 +95,7 @@ pub enum ErrorKind {
     MissingExpression(String),
     ElifAfterElse,
     TrailingTokens(&'static str),
+    MaxIncludeDepth(usize),
 
     Regular(&'static str), // generic error message when message only used once
     Multiple(Vec<Error>),
@@ -353,6 +354,9 @@ impl ErrorKind {
             }
             ErrorKind::ElifAfterElse => "found '#elif' after '#else'".to_string(),
             ErrorKind::TrailingTokens(msg) => format!("found trailing tokens after {}", msg),
+            ErrorKind::MaxIncludeDepth(max) => {
+                format!("#include is nested too deeply, exceeds maximum-depth of {}", max)
+            }
 
             ErrorKind::Regular(s) => s.to_string(),
             ErrorKind::Multiple(_) => {

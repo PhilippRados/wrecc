@@ -108,13 +108,12 @@ impl Lir {
     }
 }
 
-fn maybe_prefix_underscore(label:&String) -> String {
+pub fn maybe_prefix_underscore(label: &String) -> String {
     if cfg!(target_os = "macos") {
-        format!("_{}",label)
+        format!("_{}", label)
     } else {
         label.to_string()
     }
-
 }
 
 impl Display for Lir {
@@ -138,7 +137,8 @@ impl Display for Lir {
                 Lir::FuncSetup(name, stack_size) => {
                     let mut result = format!(
                         "\n\t.text\n\t.globl {}\n{}:\n\tpushq   %rbp\n\tmovq    %rsp, %rbp\n",
-                        maybe_prefix_underscore(name), maybe_prefix_underscore(name)
+                        maybe_prefix_underscore(name),
+                        maybe_prefix_underscore(name)
                     );
                     // have to keep stack 16B aligned
                     if *stack_size > 0 {

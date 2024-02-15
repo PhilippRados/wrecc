@@ -2,6 +2,8 @@ use crate::compiler::common::token::TokenKind;
 use crate::compiler::common::types::*;
 use crate::compiler::typechecker::mir::expr::ValueKind;
 
+use super::lir::maybe_prefix_underscore;
+
 pub static ARG_REGS: &[[&str; 3]; 6] = &[
     ["%rdi", "%edi", "%dil"],
     ["%rsi", "%esi", "%sil"],
@@ -107,7 +109,7 @@ impl LabelRegister {
     fn base_name(&self) -> String {
         match self {
             LabelRegister::String(index) => format!("LS{index}"),
-            LabelRegister::Var(name, _) => format!("{name}"),
+            LabelRegister::Var(name, _) => format!("{}", maybe_prefix_underscore(name)),
         }
     }
 }

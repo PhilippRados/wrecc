@@ -108,6 +108,15 @@ impl Lir {
     }
 }
 
+fn maybe_prefix_underscore(label:&String) -> String {
+    if cfg!(target_os = "macos") {
+        format!("_{}",label)
+    } else {
+        label.to_string()
+    }
+
+}
+
 impl Display for Lir {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -115,9 +124,9 @@ impl Display for Lir {
             "{}",
             match self {
                 Lir::GlobalDeclaration(name, is_pointer) => format!(
-                    "\n\t.data\n{}_{}:",
+                    "\n\t.data\n{}{}:",
                     if *is_pointer { "\t.align 4\n" } else { "" },
-                    name
+                    maybe_prefix_underscore(name)
                 ),
                 Lir::GlobalInit(type_decl, reg) =>
                     format!("\t.{} {}", type_decl.complete_suffix(), reg.name()),
@@ -128,8 +137,8 @@ impl Display for Lir {
                 Lir::JmpCond(cond, label_index) => format!("\tj{}     L{}", cond, label_index),
                 Lir::FuncSetup(name, stack_size) => {
                     let mut result = format!(
-                        "\n\t.text\n\t.globl _{}\n_{}:\n\tpushq   %rbp\n\tmovq    %rsp, %rbp\n",
-                        name, name
+                        "\n\t.text\n\t.globl {}\n{}:\n\tpushq   %rbp\n\tmovq    %rsp, %rbp\n",
+                        maybe_prefix_underscore(name), maybe_prefix_underscore(name)
                     );
                     // have to keep stack 16B aligned
                     if *stack_size > 0 {

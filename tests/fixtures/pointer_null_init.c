@@ -11,7 +11,7 @@ int main() {
   int *b = (long)1 - 1;
 
   if (b == 1 - 1) {
-    printf("%p", some());
+    printf("%d", some() == NULL);
   } else {
     printf("else");
   }

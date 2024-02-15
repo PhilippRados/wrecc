@@ -115,14 +115,63 @@ fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, Error> {
         )))
     }
 }
+fn find_libpath() -> Result<PathBuf,Error> {
+    if Path::new("/usr/lib/x86_64-linux-gnu/crti.o").exists(){
+        return Ok(PathBuf::from("/usr/lib/x86_64-linux-gnu/"));
+    }
+    if Path::new("/usr/lib64/crti.o").exists(){
+        return Ok(PathBuf::from("/usr/lib64"));
+    }
+    Err(Error::Sys(String::from("library path not found")))
+}
 
 fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), Error> {
     let mut cmd = Command::new("ld");
-    // WARN: first check where SDK is installed and if not emit error-message
-    cmd.arg("-dynamic")
-        .arg("-lSystem")
-        .arg("-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib")
-        .arg(filename.get());
+    match std::env::consts::OS {
+        "macos" => {
+            // WARN: first check where SDK is installed and if not emit error-message
+            cmd.arg("-dynamic")
+                .arg("-lSystem")
+                .arg("-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib")
+                .arg(filename.get());
+        },
+        "linux" => {
+            let libpath = find_libpath()?;
+            // FIXME: this should be done dynamically
+            let gcc_libpath = Path::new("/usr/lib/gcc/x86_64-linux-gnu/9");
+            cmd.arg("-m")
+                .arg("elf_x86_64")
+                .arg("-dynamic-linker")
+                .arg("/lib64/ld-linux-x86-64.so.2")
+
+                .arg(format!("{}/crt1.o",libpath.display()))
+                .arg(format!("{}/crti.o",libpath.display()))
+                .arg(format!("{}/crtbegin.o",gcc_libpath.display()))
+
+                .arg(format!("-L{}",gcc_libpath.display()))
+                .arg("-L/usr/lib/x86_64-linux-gnu")
+                .arg("-L/usr/lib64")
+                .arg("-L/lib64")
+                .arg("-L/usr/lib/x86_64-linux-gnu")
+                .arg("-L/usr/lib/x86_64-pc-linux-gnu")
+                .arg("-L/usr/lib/x86_64-redhat-linux")
+                .arg("-L/usr/lib")
+                .arg("-L/lib")
+
+
+                .arg(filename.get())
+
+                .arg("-lc")
+                .arg("-lgcc")
+                .arg("--as-needed")
+                .arg("-lgcc_s")
+
+                .arg(format!("{}/crtend.o",gcc_libpath.display()))
+                .arg(format!("{}/crtn.o",libpath.display()));
+        },
+        _ => return Err(Error::Sys(String::from("only supports linx and macos")))
+    }
+
 
     if let Some(output_name) = output_path {
         cmd.arg("-o");

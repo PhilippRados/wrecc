@@ -107,7 +107,7 @@ impl LabelRegister {
     fn base_name(&self) -> String {
         match self {
             LabelRegister::String(index) => format!("LS{index}"),
-            LabelRegister::Var(name, _) => format!("_{name}"),
+            LabelRegister::Var(name, _) => format!("{name}"),
         }
     }
 }

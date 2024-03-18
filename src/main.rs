@@ -189,10 +189,16 @@ fn run(options: &CliOptions) -> Result<(), Error> {
     Ok(())
 }
 
-fn main() -> Result<(), ()> {
+// seperate main to clean up all destructors
+fn real_main() -> Result<(), ()> {
     let options = CliOptions::parse().map_err(|errs| errs.print(false))?;
 
-    run(&options).map_err(|errs| errs.print(options.no_color))?;
+    run(&options).map_err(|errs| errs.print(options.no_color))
+}
 
-    Ok(())
+fn main() {
+    match real_main() {
+        Ok(_) => (),
+        Err(_) => std::process::exit(1),
+    }
 }

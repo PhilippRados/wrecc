@@ -1,6 +1,8 @@
 mod cli_options;
+mod temp_file;
 
 use cli_options::*;
+use temp_file::*;
 use wrecc_compiler::compiler::common::error::Error as CompilerError;
 use wrecc_compiler::*;
 
@@ -9,33 +11,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-struct TempFile(PathBuf);
-impl TempFile {
-    fn new(extension: &'static str) -> Self {
-        let temp_dir = std::env::temp_dir();
-        let filename = PathBuf::from("wrecc_temp_file").with_extension(extension);
-
-        TempFile(temp_dir.join(filename))
-    }
-}
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
-
-enum OutFile {
-    Temp(TempFile),
-    Regular(PathBuf),
-}
-impl OutFile {
-    fn get(&self) -> &Path {
-        match self {
-            OutFile::Temp(f) => &f.0,
-            OutFile::Regular(f) => f,
-        }
-    }
-}
 pub enum Error {
     Comp(Vec<CompilerError>, bool),
     Sys(String),

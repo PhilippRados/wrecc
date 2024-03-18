@@ -11,22 +11,23 @@ const VERSION: &str = concat!(
 );
 
 const USAGE: &str = "\
-usage: wrecc [-o | --output <file>] [-I | --include-dir <dir>] 
-        [-E | --preprocess-only] [-S | --compile-only] [-c | --no-link] [--dump-ast]
-        [--no-color] [-h | --help] [-v | --version] <file>";
+usage: wrecc [-o | --output <file>] [-I | --include-dir <dir>]
+             [-D | --define <name>=<value>] [-E | --preprocess-only] [-S | --compile-only] 
+             [-c | --no-link] [--dump-ast] [--no-color] [-h | --help] [-v | --version] <file>";
 
 const HELP: &str = "usage: wrecc [options] <file>
 options:
-    -o | --output <file>     Specifies the output-file to write to
-    -I | --include-dir <dir> Add single <dir> to the directories to be searched for using #include <...> or #include \"...\" directives
-    -E | --preprocess-only   Stops evaluation after preprocessing printing the preprocessed source
-    -S | --compile-only      Stops evaluation after compiling resulting in a .s file
-    -c | --no-link           Stops evaluation after assembling resulting in a .o file
-         --dump-ast          Displays the AST produced by the parser while also compiling program as usual
-         --no-color          Errors are printed without color
-    -h                       Prints usage information
-    --help                   Prints elaborate help information
-    -v | --version           Prints version information
+    -o | --output <file>                Specifies the output-file to write to
+    -I | --include-dir <dir>            Add single <dir> to the directories to be searched for using #include
+    -D | --define <macro-name>=<value>  Defines a new object-like macro
+    -E | --preprocess-only              Stops evaluation after preprocessing printing the preprocessed source
+    -S | --compile-only                 Stops evaluation after compiling resulting in a .s file
+    -c | --no-link                      Stops evaluation after assembling resulting in a .o file
+         --dump-ast                     Displays the AST produced by the parser while also compiling program as usual
+         --no-color                     Errors are printed without color
+    -h                                  Prints usage information
+    --help                              Prints elaborate help information
+    -v | --version                      Prints version information
 
 file:
     The C source file to be read";

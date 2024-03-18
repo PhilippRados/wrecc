@@ -27,7 +27,7 @@ pub fn preprocess(
         dummy_defines.push_str(&format!("#define {} {}\n", macro_name, value));
     }
     let (_, defines) = Preprocessor::new(
-        filename,
+        &PathBuf::from("command-line-argument"),
         PPScanner::new(dummy_defines).scan_token(),
         HashMap::new(),
         user_include_dirs.clone(),

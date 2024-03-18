@@ -11,21 +11,22 @@ const VERSION: &str = concat!(
 );
 
 const USAGE: &str = "\
-usage: wrecc [-o | --output <file>] [-E | --preprocess-only]
-        [-S | --compile-only] [-c | --no-link] [--dump-ast]
+usage: wrecc [-o | --output <file>] [-I | --include-dir <dir>] 
+        [-E | --preprocess-only] [-S | --compile-only] [-c | --no-link] [--dump-ast]
         [--no-color] [-h | --help] [-v | --version] <file>";
 
 const HELP: &str = "usage: wrecc [options] <file>
 options:
-    -o | --output <file>    Specifies the output-file to write to
-    -E | --preprocess-only  Stops evaluation after preprocessing printing the preprocessed source
-    -S | --compile-only     Stops evaluation after compiling resulting in a .s file
-    -c | --no-link          Stops evaluation after assembling resulting in a .o file
-         --dump-ast         Displays the AST produced by the parser while also compiling program as usual
-         --no-color         Errors are printed without color
-    -h                      Prints usage information
-    --help                  Prints elaborate help information
-    -v | --version          Prints version information
+    -o | --output <file>     Specifies the output-file to write to
+    -I | --include-dir <dir> Add single <dir> to the directories to be searched for using #include <...> or #include \"...\" directives
+    -E | --preprocess-only   Stops evaluation after preprocessing printing the preprocessed source
+    -S | --compile-only      Stops evaluation after compiling resulting in a .s file
+    -c | --no-link           Stops evaluation after assembling resulting in a .o file
+         --dump-ast          Displays the AST produced by the parser while also compiling program as usual
+         --no-color          Errors are printed without color
+    -h                       Prints usage information
+    --help                   Prints elaborate help information
+    -v | --version           Prints version information
 
 file:
     The C source file to be read";
@@ -56,11 +57,15 @@ pub struct CliOptions {
 
     // errors are printed without color
     pub no_color: bool,
+
+    // directories specified by user to be searched after #include "..." and before #include <...>
+    pub user_include_dirs: Vec<PathBuf>,
 }
 impl CliOptions {
-    fn default() -> CliOptions {
+    fn new() -> CliOptions {
         CliOptions {
             file_path: PathBuf::new(),
+            user_include_dirs: Vec::new(),
             output_path: None,
             preprocess_only: false,
             compile_only: false,
@@ -70,7 +75,7 @@ impl CliOptions {
         }
     }
     pub fn parse() -> Result<CliOptions, Error> {
-        let mut cli_options = CliOptions::default();
+        let mut cli_options = CliOptions::new();
         let mut args = std::env::args().collect::<Vec<String>>().into_iter().skip(1);
 
         while let Some(arg) = args.next() {
@@ -81,6 +86,13 @@ impl CliOptions {
                             cli_options.output_path = Some(PathBuf::from(file));
                         } else {
                             return Err(Error::Sys(format!("expected file following '{}' option", arg)));
+                        }
+                    }
+                    "-I" | "--include-dir" => {
+                        if let Some(dir) = args.next() {
+                            cli_options.user_include_dirs.push(PathBuf::from(dir))
+                        } else {
+                            return Err(Error::Sys(format!("expected dir following '{}' option", arg)));
                         }
                     }
                     "-E" | "--preprocess-only" => cli_options.preprocess_only = true,

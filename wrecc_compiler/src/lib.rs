@@ -7,13 +7,18 @@ use compiler::{
 use preprocessor::{scanner::Scanner as PPScanner, *};
 
 use std::path::Path;
+use std::path::PathBuf;
 
 // Preprocesses given input file
-pub fn preprocess(filename: &Path, source: String) -> Result<Vec<PPToken>, Vec<Error>> {
+pub fn preprocess(
+    filename: &Path,
+    user_include_dirs: &Vec<PathBuf>,
+    source: String,
+) -> Result<Vec<PPToken>, Vec<Error>> {
     let tokens = PPScanner::new(source).scan_token();
     let include_depth = 0;
 
-    Preprocessor::new(filename, tokens, None, include_depth)
+    Preprocessor::new(filename, tokens, None, user_include_dirs.clone(), include_depth)
         .start()
         .map(|(tokens, _)| tokens)
 }

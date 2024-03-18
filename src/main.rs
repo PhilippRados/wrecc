@@ -115,11 +115,11 @@ fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, Error> {
         )))
     }
 }
-fn find_libpath() -> Result<PathBuf,Error> {
-    if Path::new("/usr/lib/x86_64-linux-gnu/crti.o").exists(){
+fn find_libpath() -> Result<PathBuf, Error> {
+    if Path::new("/usr/lib/x86_64-linux-gnu/crti.o").exists() {
         return Ok(PathBuf::from("/usr/lib/x86_64-linux-gnu/"));
     }
-    if Path::new("/usr/lib64/crti.o").exists(){
+    if Path::new("/usr/lib64/crti.o").exists() {
         return Ok(PathBuf::from("/usr/lib64"));
     }
     Err(Error::Sys(String::from("library path not found")))
@@ -134,7 +134,7 @@ fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), Error> {
                 .arg("-lSystem")
                 .arg("-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib")
                 .arg(filename.get());
-        },
+        }
         "linux" => {
             let libpath = find_libpath()?;
             // FIXME: this should be done dynamically
@@ -143,12 +143,10 @@ fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), Error> {
                 .arg("elf_x86_64")
                 .arg("-dynamic-linker")
                 .arg("/lib64/ld-linux-x86-64.so.2")
-
-                .arg(format!("{}/crt1.o",libpath.display()))
-                .arg(format!("{}/crti.o",libpath.display()))
-                .arg(format!("{}/crtbegin.o",gcc_libpath.display()))
-
-                .arg(format!("-L{}",gcc_libpath.display()))
+                .arg(format!("{}/crt1.o", libpath.display()))
+                .arg(format!("{}/crti.o", libpath.display()))
+                .arg(format!("{}/crtbegin.o", gcc_libpath.display()))
+                .arg(format!("-L{}", gcc_libpath.display()))
                 .arg("-L/usr/lib/x86_64-linux-gnu")
                 .arg("-L/usr/lib64")
                 .arg("-L/lib64")
@@ -157,21 +155,16 @@ fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), Error> {
                 .arg("-L/usr/lib/x86_64-redhat-linux")
                 .arg("-L/usr/lib")
                 .arg("-L/lib")
-
-
                 .arg(filename.get())
-
                 .arg("-lc")
                 .arg("-lgcc")
                 .arg("--as-needed")
                 .arg("-lgcc_s")
-
-                .arg(format!("{}/crtend.o",gcc_libpath.display()))
-                .arg(format!("{}/crtn.o",libpath.display()));
-        },
-        _ => return Err(Error::Sys(String::from("only supports linx and macos")))
+                .arg(format!("{}/crtend.o", gcc_libpath.display()))
+                .arg(format!("{}/crtn.o", libpath.display()));
+        }
+        _ => return Err(Error::Sys(String::from("only supports linx and macos"))),
     }
-
 
     if let Some(output_name) = output_path {
         cmd.arg("-o");
@@ -193,7 +186,8 @@ fn run() -> Result<(), Error> {
     let options = CliOptions::parse()?;
 
     let source = read_input_file(&options.file_path)?;
-    let pp_source = preprocess(&options.file_path, source).map_err(|e| (e, options.no_color))?;
+    let pp_source = preprocess(&options.file_path, &options.user_include_dirs, source)
+        .map_err(|e| (e, options.no_color))?;
 
     if options.preprocess_only {
         return Ok(pp_source.iter().for_each(|s| eprint!("{}", s.kind.to_string())));

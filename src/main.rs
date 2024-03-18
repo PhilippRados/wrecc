@@ -12,13 +12,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub enum Error {
-    Comp(Vec<CompilerError>, bool),
+    Comp(Vec<CompilerError>),
     Sys(String),
 }
 impl Error {
-    fn print(self) {
+    fn print(self, no_color: bool) {
         match self {
-            Error::Comp(errors, no_color) => {
+            Error::Comp(errors) => {
                 for e in &errors {
                     e.print_error(no_color);
                 }
@@ -34,9 +34,9 @@ impl Error {
         }
     }
 }
-impl From<(Vec<CompilerError>, bool)> for Error {
-    fn from((errors, no_color): (Vec<CompilerError>, bool)) -> Self {
-        Error::Comp(errors, no_color)
+impl From<Vec<CompilerError>> for Error {
+    fn from(errors: Vec<CompilerError>) -> Self {
+        Error::Comp(errors)
     }
 }
 
@@ -157,31 +157,28 @@ fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), Error> {
     }
 }
 
-fn run() -> Result<(), Error> {
-    let options = CliOptions::parse()?;
-
+fn run(options: &CliOptions) -> Result<(), Error> {
     let source = read_input_file(&options.file_path)?;
     let pp_source = preprocess(
         &options.file_path,
         &options.user_include_dirs,
         &options.defines,
         source,
-    )
-    .map_err(|e| (e, options.no_color))?;
+    )?;
 
     if options.preprocess_only {
         return Ok(pp_source.iter().for_each(|s| eprint!("{}", s.kind.to_string())));
     }
 
-    let asm_source = compile(pp_source, options.dump_ast).map_err(|e| (e, options.no_color))?;
+    let asm_source = compile(pp_source, options.dump_ast)?;
 
-    let asm_file = generate_asm_file(&options, asm_source)?;
+    let asm_file = generate_asm_file(options, asm_source)?;
 
     if options.compile_only {
         return Ok(());
     }
 
-    let object_file = assemble(&options, asm_file)?;
+    let object_file = assemble(options, asm_file)?;
 
     if options.no_link {
         return Ok(());
@@ -192,12 +189,10 @@ fn run() -> Result<(), Error> {
     Ok(())
 }
 
-fn main() {
-    match run() {
-        Ok(()) => (),
-        Err(errors) => {
-            errors.print();
-            std::process::exit(1);
-        }
-    }
+fn main() -> Result<(), ()> {
+    let options = CliOptions::parse().map_err(|errs| errs.print(false))?;
+
+    run(&options).map_err(|errs| errs.print(options.no_color))?;
+
+    Ok(())
 }

@@ -186,8 +186,13 @@ fn run() -> Result<(), Error> {
     let options = CliOptions::parse()?;
 
     let source = read_input_file(&options.file_path)?;
-    let pp_source = preprocess(&options.file_path, &options.user_include_dirs, source)
-        .map_err(|e| (e, options.no_color))?;
+    let pp_source = preprocess(
+        &options.file_path,
+        &options.user_include_dirs,
+        &options.defines,
+        source,
+    )
+    .map_err(|e| (e, options.no_color))?;
 
     if options.preprocess_only {
         return Ok(pp_source.iter().for_each(|s| eprint!("{}", s.kind.to_string())));

@@ -57,6 +57,7 @@ impl Location for PPToken {
 }
 
 pub struct Preprocessor<'a> {
+    // preprocessor tokens as tokenized by preprocessor-scanner
     tokens: DoublePeek<Token>,
 
     // current file being preprocessed
@@ -87,8 +88,7 @@ impl<'a> Preprocessor<'a> {
     pub fn new(
         filename: &'a Path,
         tokens: Vec<Token>,
-        // TODO: dont make this optional since can pass -D as option
-        pre_defines: Option<HashMap<String, Vec<Token>>>,
+        defines: HashMap<String, Vec<Token>>,
         user_include_dirs: Vec<PathBuf>,
         include_depth: usize,
     ) -> Self {
@@ -107,12 +107,8 @@ impl<'a> Preprocessor<'a> {
             include_depth,
             user_include_dirs,
             header_search_paths,
+            defines,
             ifs: Vec::new(),
-            defines: if let Some(defines) = pre_defines {
-                defines
-            } else {
-                HashMap::new()
-            },
             max_include_depth: 200,
         }
     }
@@ -756,7 +752,7 @@ fn preprocess_included(
 ) -> Result<(Vec<PPToken>, HashMap<String, Vec<Token>>), Vec<Error>> {
     let tokens = PPScanner::new(source).scan_token();
 
-    Preprocessor::new(filename, tokens, Some(defines), user_include_dirs, include_depth).start()
+    Preprocessor::new(filename, tokens, defines, user_include_dirs, include_depth).start()
 }
 
 fn as_kind(tokens: &[Token]) -> Vec<&TokenKind> {
@@ -817,7 +813,7 @@ mod tests {
     fn setup(input: &str) -> Preprocessor {
         let tokens = PPScanner::new(input.to_string()).scan_token();
 
-        Preprocessor::new(Path::new(""), tokens, None, Vec::new(), 0)
+        Preprocessor::new(Path::new(""), tokens, HashMap::new(), Vec::new(), 0)
     }
 
     fn setup_complete(input: &str) -> String {
@@ -843,7 +839,7 @@ mod tests {
             .into_iter()
             .map(|(k, v)| (k.to_string(), scan(v)))
             .collect();
-        let pp = Preprocessor::new(Path::new(""), Vec::new(), Some(defined.clone()), Vec::new(), 0);
+        let pp = Preprocessor::new(Path::new(""), Vec::new(), defined.clone(), Vec::new(), 0);
 
         let mut result = HashMap::new();
         for (name, replace_list) in defined {

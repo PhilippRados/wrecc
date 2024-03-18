@@ -297,7 +297,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     fn setup_generic(input: &str) -> Vec<Token> {
-        let pp_tokens = preprocess(Path::new(""), &Vec::new(), input.to_string()).unwrap();
+        let pp_tokens = preprocess(Path::new(""), &Vec::new(), &Vec::new(), input.to_string()).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         if let Ok(tokens) = scanner.scan_token() {
             tokens
@@ -306,7 +306,7 @@ mod tests {
         }
     }
     fn setup_generic_err(input: &str) -> Vec<Error> {
-        let pp_tokens = preprocess(Path::new(""), &Vec::new(), input.to_string()).unwrap();
+        let pp_tokens = preprocess(Path::new(""), &Vec::new(), &Vec::new(), input.to_string()).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         if let Err(errs) = scanner.scan_token() {
             errs
@@ -527,7 +527,7 @@ mod tests {
     fn handle_newline_string() {
         let input: String = vec!['"', 'h', 'a', '\\', 'n', 'l', '"'].into_iter().collect();
 
-        let pp_tokens = preprocess(Path::new(""), &Vec::new(), input).unwrap();
+        let pp_tokens = preprocess(Path::new(""), &Vec::new(), &Vec::new(), input).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         let actual: Vec<TokenKind> = scanner
             .scan_token()
@@ -545,7 +545,7 @@ mod tests {
     fn handle_multiline_string() {
         let input: String = vec!['"', 'h', 'a', '\\', '\n', 'l', '"'].into_iter().collect();
 
-        let pp_tokens = preprocess(Path::new(""), &Vec::new(), input).unwrap();
+        let pp_tokens = preprocess(Path::new(""), &Vec::new(), &Vec::new(), input).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         let actual: Vec<TokenKind> = scanner
             .scan_token()

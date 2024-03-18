@@ -1405,7 +1405,7 @@ pub mod tests {
     }
 
     pub fn setup(input: &str) -> Parser {
-        let pp_tokens = preprocess(Path::new(""), &Vec::new(), input.to_string()).unwrap();
+        let pp_tokens = preprocess(Path::new(""), &Vec::new(), &Vec::new(), input.to_string()).unwrap();
         let mut scanner = Scanner::new(pp_tokens);
         let tokens = scanner.scan_token().unwrap();
 

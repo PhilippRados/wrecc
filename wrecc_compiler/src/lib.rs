@@ -6,6 +6,7 @@ use compiler::{
 };
 use preprocessor::{scanner::Scanner as PPScanner, *};
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -13,14 +14,36 @@ use std::path::PathBuf;
 pub fn preprocess(
     filename: &Path,
     user_include_dirs: &Vec<PathBuf>,
+    defines: &Vec<(String, String)>,
     source: String,
 ) -> Result<Vec<PPToken>, Vec<Error>> {
     let tokens = PPScanner::new(source).scan_token();
     let include_depth = 0;
 
-    Preprocessor::new(filename, tokens, None, user_include_dirs.clone(), include_depth)
-        .start()
-        .map(|(tokens, _)| tokens)
+    // INFO: convert all cli-passed defines to #defines as if they were in regular source file
+    // to properly error check them
+    let mut dummy_defines = String::new();
+    for (macro_name, value) in defines {
+        dummy_defines.push_str(&format!("#define {} {}\n", macro_name, value));
+    }
+    let (_, defines) = Preprocessor::new(
+        filename,
+        PPScanner::new(dummy_defines).scan_token(),
+        HashMap::new(),
+        user_include_dirs.clone(),
+        include_depth,
+    )
+    .start()?;
+
+    Preprocessor::new(
+        filename,
+        tokens,
+        defines,
+        user_include_dirs.clone(),
+        include_depth,
+    )
+    .start()
+    .map(|(tokens, _)| tokens)
 }
 
 pub fn compile(source: Vec<PPToken>, dump_ast: bool) -> Result<String, Vec<Error>> {

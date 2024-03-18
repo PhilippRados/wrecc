@@ -60,12 +60,17 @@ pub struct CliOptions {
 
     // directories specified by user to be searched after #include "..." and before #include <...>
     pub user_include_dirs: Vec<PathBuf>,
+
+    // all definitions passed as cli-arguments
+    // INFO: duplicate definitions are caught in preprocessor
+    pub defines: Vec<(String, String)>,
 }
 impl CliOptions {
     fn new() -> CliOptions {
         CliOptions {
             file_path: PathBuf::new(),
             user_include_dirs: Vec::new(),
+            defines: Vec::new(),
             output_path: None,
             preprocess_only: false,
             compile_only: false,
@@ -94,6 +99,23 @@ impl CliOptions {
                         } else {
                             return Err(Error::Sys(format!("expected dir following '{}' option", arg)));
                         }
+                    }
+                    "-D" | "--define" => {
+                        let Some(arg) = args.next()  else {
+                            return Err(Error::Sys(format!(
+                                "expected macro-definition following '{}' option",
+                                arg
+                            )));
+                        };
+
+                        let (macro_name, value) = arg
+                            .split_once('=')
+                            // if no '=' found then `-D foo`, same as `-D foo=1`
+                            .unwrap_or((&arg, "1"));
+
+                        cli_options
+                            .defines
+                            .push((macro_name.to_string(), value.to_string()));
                     }
                     "-E" | "--preprocess-only" => cli_options.preprocess_only = true,
                     "-S" | "--compile-only" => cli_options.compile_only = true,

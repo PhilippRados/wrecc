@@ -131,6 +131,9 @@ impl<'a> Preprocessor<'a> {
     fn include(&mut self, directive: Token) -> Result<Vec<PPToken>, Error> {
         self.skip_whitespace()?;
 
+        self.include_filename(directive)
+    }
+    fn include_filename(&mut self, directive: Token) -> Result<Vec<PPToken>, Error> {
         if let Some(token) = self.tokens.next() {
             if self.include_depth > self.max_include_depth {
                 return Err(Error::new(
@@ -171,10 +174,26 @@ impl<'a> Preprocessor<'a> {
                         ))
                     }
                 }
-                _ => Err(Error::new(
-                    &PPToken::from(&token, self.filename),
-                    ErrorKind::Regular("expected opening '<' or '\"' after include directive"),
-                )),
+                kind => {
+                    // may be `#include MACRO` which has to be replaced first
+                    if let Some(identifier) = kind.as_ident() {
+                        if let Some(replacement) = self.defines.get(&identifier) {
+                            for replacement_token in replacement.iter().rev() {
+                                // change location of replacement-tokens to the token being replaced
+                                let replacement_token = Token {
+                                    kind: replacement_token.kind.clone(),
+                                    ..token.clone()
+                                };
+                                self.tokens.inner.push_front(replacement_token);
+                            }
+                            return self.include_filename(directive);
+                        }
+                    }
+                    Err(Error::new(
+                        &PPToken::from(&token, self.filename),
+                        ErrorKind::Regular("expected opening '<' or '\"' after include directive"),
+                    ))
+                }
             }
         } else {
             Err(Error::new(
@@ -183,6 +202,7 @@ impl<'a> Preprocessor<'a> {
             ))
         }
     }
+
     // first searches current directory (if search_local is set), otherwise searches system path
     // and returns the data it contains together with the filepath where it was found
     fn include_data(
@@ -802,7 +822,6 @@ fn is_first_line_token(prev_tokens: &[PPToken]) -> bool {
 }
 
 #[cfg(test)]
-#[allow(unused_variables)]
 mod tests {
     use super::*;
 

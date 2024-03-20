@@ -69,12 +69,9 @@ pub struct Preprocessor<'a> {
     // list of #if directives with last one being the most deeply nested
     ifs: Vec<IfDirective>,
 
-    // list of search paths additionally defined by the user
-    user_include_dirs: Vec<PathBuf>,
-
     // paths to search for system header files.
-    // INFO: currently only supports custom header files since not all features of standard header
-    // files are supported
+    // INFO: currently only supports custom header files since not all features of
+    // standard header files are supported
     header_search_paths: Vec<PathBuf>,
 
     // current number of nest-depth
@@ -89,46 +86,13 @@ impl<'a> Preprocessor<'a> {
         filename: &'a Path,
         tokens: Vec<Token>,
         defines: HashMap<String, Vec<Token>>,
-        user_include_dirs: Vec<PathBuf>,
+        header_search_paths: Vec<PathBuf>,
         include_depth: usize,
     ) -> Self {
-        let mut system_header_paths = Vec::new();
-
-        // INFO: these env-vars are only checked once at compile-time
-
-        // if installed then add include path set during installation
-        if let Some(include_dir_path) = option_env!("WRECC_INCLUDE_DIR") {
-            system_header_paths.push(PathBuf::from(include_dir_path));
-        }
-
-        // if building from source (or for development) then look in ROOT_CRATE_DIR/include
-        if let Some(cargo_manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
-            let cargo_manifest_dir = PathBuf::from(cargo_manifest_dir);
-            let root_crate_path = cargo_manifest_dir.parent().expect("library-crate inside root-crate");
-            system_header_paths.push(root_crate_path.join("include"));
-        }
-
-        let mut header_search_paths = Vec::new();
-        header_search_paths.extend(user_include_dirs.clone());
-        header_search_paths.extend(system_header_paths);
-
-        // TODO: should return Error::Sys instead
-        // if header_search_paths.is_empty() {
-        //     return Err(Error {
-        //         kind:ErrorKind::Regular("Cannot find system-headers. Either pass with -I or set the WRECC_INCLUDE_DIR env-var")
-        //         line_index: -1,
-        //         line_string: String::from(""),
-        //         filename: PathBuf::new(),
-        //         column: -1,
-        //     })
-        // }
-        
-
         Preprocessor {
             tokens: DoublePeek::new(tokens),
             filename,
             include_depth,
-            user_include_dirs,
             header_search_paths,
             defines,
             ifs: Vec::new(),
@@ -141,7 +105,7 @@ impl<'a> Preprocessor<'a> {
             &file_path,
             data,
             self.defines.clone(),
-            self.user_include_dirs.clone(),
+            self.header_search_paths.clone(),
             self.include_depth + 1,
         )
         .map_err(Error::new_multiple)?;
@@ -790,12 +754,12 @@ fn preprocess_included(
     filename: &Path,
     source: String,
     defines: HashMap<String, Vec<Token>>,
-    user_include_dirs: Vec<PathBuf>,
+    header_search_paths: Vec<PathBuf>,
     include_depth: usize,
 ) -> Result<(Vec<PPToken>, HashMap<String, Vec<Token>>), Vec<Error>> {
     let tokens = PPScanner::new(source).scan_token();
 
-    Preprocessor::new(filename, tokens, defines, user_include_dirs, include_depth).start()
+    Preprocessor::new(filename, tokens, defines, header_search_paths, include_depth).start()
 }
 
 fn as_kind(tokens: &[Token]) -> Vec<&TokenKind> {

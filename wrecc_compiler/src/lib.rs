@@ -20,6 +20,41 @@ pub fn preprocess(
     let tokens = PPScanner::new(source).scan_token();
     let include_depth = 0;
 
+    let mut system_header_paths = Vec::new();
+
+    // INFO: these env-vars are only checked once at compile-time
+
+    // if installed then add include path set during installation
+    if let Some(include_dir_path) = option_env!("WRECC_INCLUDE_DIR") {
+        system_header_paths.push(PathBuf::from(include_dir_path));
+    }
+
+    // if building from source (or for development) then look in ROOT_CRATE_DIR/include
+    if let Some(cargo_manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
+        let cargo_manifest_dir = PathBuf::from(cargo_manifest_dir);
+        let root_crate_path = cargo_manifest_dir
+            .parent()
+            .expect("library-crate inside root-crate");
+        system_header_paths.push(root_crate_path.join("include"));
+    }
+
+    let mut header_search_paths = Vec::new();
+    header_search_paths.extend(user_include_dirs.clone());
+    header_search_paths.extend(system_header_paths);
+
+    // TODO: should return Error::Sys instead
+    if header_search_paths.is_empty() {
+        return Err(vec![Error {
+            kind: ErrorKind::Regular(
+                "Cannot find system-headers. Either pass with -I or set the WRECC_INCLUDE_DIR env-var",
+            ),
+            line_index: -1,
+            line_string: String::from(""),
+            filename: PathBuf::new(),
+            column: -1,
+        }]);
+    }
+
     // INFO: convert all cli-passed defines to #defines as if they were in regular source file
     // to properly error check them
     let mut dummy_defines = String::new();
@@ -30,20 +65,14 @@ pub fn preprocess(
         &PathBuf::from("command-line-argument"),
         PPScanner::new(dummy_defines).scan_token(),
         HashMap::new(),
-        user_include_dirs.clone(),
+        header_search_paths.clone(),
         include_depth,
     )
     .start()?;
 
-    Preprocessor::new(
-        filename,
-        tokens,
-        defines,
-        user_include_dirs.clone(),
-        include_depth,
-    )
-    .start()
-    .map(|(tokens, _)| tokens)
+    Preprocessor::new(filename, tokens, defines, header_search_paths, include_depth)
+        .start()
+        .map(|(tokens, _)| tokens)
 }
 
 pub fn compile(source: Vec<PPToken>, dump_ast: bool) -> Result<String, Vec<Error>> {

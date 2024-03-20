@@ -92,14 +92,37 @@ impl<'a> Preprocessor<'a> {
         user_include_dirs: Vec<PathBuf>,
         include_depth: usize,
     ) -> Self {
-        // INFO: searches for system (custom) header files wherever the install-script ran
-        let lib_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let root_crate_path = lib_path.parent().expect("library inside root-crate");
-        let system_header_path = root_crate_path.join("include");
+        let mut system_header_paths = Vec::new();
+
+        // INFO: these env-vars are only checked once at compile-time
+
+        // if installed then add include path set during installation
+        if let Some(include_dir_path) = option_env!("WRECC_INCLUDE_DIR") {
+            system_header_paths.push(PathBuf::from(include_dir_path));
+        }
+
+        // if building from source (or for development) then look in ROOT_CRATE_DIR/include
+        if let Some(cargo_manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
+            let cargo_manifest_dir = PathBuf::from(cargo_manifest_dir);
+            let root_crate_path = cargo_manifest_dir.parent().expect("library-crate inside root-crate");
+            system_header_paths.push(root_crate_path.join("include"));
+        }
 
         let mut header_search_paths = Vec::new();
         header_search_paths.extend(user_include_dirs.clone());
-        header_search_paths.push(system_header_path);
+        header_search_paths.extend(system_header_paths);
+
+        // TODO: should return Error::Sys instead
+        // if header_search_paths.is_empty() {
+        //     return Err(Error {
+        //         kind:ErrorKind::Regular("Cannot find system-headers. Either pass with -I or set the WRECC_INCLUDE_DIR env-var")
+        //         line_index: -1,
+        //         line_string: String::from(""),
+        //         filename: PathBuf::new(),
+        //         column: -1,
+        //     })
+        // }
+        
 
         Preprocessor {
             tokens: DoublePeek::new(tokens),

@@ -1,10 +1,10 @@
 void printf(char* s,int d);
 
 int main() {
-  int i;
-  int j;
+  int i = 1;
+  int j = 1;
 
-  //// Simple for loop
+  // Simple for loop
   for (int i = 1; i <= 10; i++) {
     if (i == 5) {
       break; // Exit the loop when i is equal to 5

@@ -2,6 +2,45 @@ use crate::compiler::common::{token::*, types::*};
 use std::num::IntErrorKind;
 use std::path::PathBuf;
 
+#[derive(Debug)]
+pub enum WreccError {
+    // Error produced by compiler (parsing/typechecking etc)
+    Comp(Vec<Error>),
+    // Error when doing system operations (linking/assembling etc)
+    Sys(String),
+    // Error in passing cli-arguments (passing invalid argument)
+    Cli(Vec<String>),
+}
+impl WreccError {
+    pub fn print(self, no_color: bool) {
+        match self {
+            WreccError::Comp(errors) => {
+                for e in &errors {
+                    e.print_error(no_color);
+                }
+                eprintln!(
+                    "{} error{} generated.",
+                    errors.len(),
+                    if errors.len() > 1 { "s" } else { "" }
+                );
+            }
+            WreccError::Cli(errors) => {
+                for e in &errors {
+                    eprintln!("wrecc: <command-line>: {}", e);
+                }
+            }
+            WreccError::Sys(error) => {
+                eprintln!("wrecc: {}", error);
+            }
+        }
+    }
+}
+impl From<Vec<Error>> for WreccError {
+    fn from(compiler_errors: Vec<Error>) -> WreccError {
+        WreccError::Comp(compiler_errors)
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum ErrorKind {
     // scan errors
@@ -102,7 +141,7 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
-    fn message(&self) -> String {
+    pub fn message(&self) -> String {
         match self {
             ErrorKind::UnexpectedChar(c) => format!("unexpected character: {:?}", c),
             ErrorKind::Eof(s) => format!("{}, found end of file", s),

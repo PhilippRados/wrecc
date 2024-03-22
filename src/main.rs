@@ -3,7 +3,7 @@ mod temp_file;
 
 use cli_options::*;
 use temp_file::*;
-use wrecc_compiler::compiler::common::error::Error as CompilerError;
+use wrecc_compiler::compiler::common::error::WreccError;
 use wrecc_compiler::*;
 
 use std::fs;
@@ -11,50 +11,22 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub enum Error {
-    Comp(Vec<CompilerError>),
-    Sys(String),
-}
-impl Error {
-    fn print(self, no_color: bool) {
-        match self {
-            Error::Comp(errors) => {
-                for e in &errors {
-                    e.print_error(no_color);
-                }
-                eprintln!(
-                    "{} error{} generated.",
-                    errors.len(),
-                    if errors.len() > 1 { "s" } else { "" }
-                );
-            }
-            Error::Sys(e) => {
-                eprintln!("wrecc: {}", e);
-            }
-        }
-    }
-}
-impl From<Vec<CompilerError>> for Error {
-    fn from(errors: Vec<CompilerError>) -> Self {
-        Error::Comp(errors)
-    }
-}
-
 // Reads in string from file passed from user
-fn read_input_file(file: &Path) -> Result<String, Error> {
+fn read_input_file(file: &Path) -> Result<String, WreccError> {
     fs::read_to_string(file)
-        .map_err(|_| Error::Sys(format!("could not find file: '{}'", file.display())))
+        .map_err(|_| WreccError::Sys(format!("could not find file: '{}'", file.display())))
 }
 
 // Generates x8664 assembly output file
-fn generate_asm_file(options: &CliOptions, output: String) -> Result<OutFile, Error> {
+fn generate_asm_file(options: &CliOptions, output: String) -> Result<OutFile, WreccError> {
     let output_path = output_path(options, options.compile_only, "s");
 
-    let mut output_file = std::fs::File::create(output_path.get())
-        .map_err(|_| Error::Sys(format!("could not create file '{}'", output_path.get().display())))?;
+    let mut output_file = std::fs::File::create(output_path.get()).map_err(|_| {
+        WreccError::Sys(format!("could not create file '{}'", output_path.get().display()))
+    })?;
 
     if writeln!(output_file, "{}", output).is_err() {
-        Err(Error::Sys(format!(
+        Err(WreccError::Sys(format!(
             "could not write to file '{}'",
             output_path.get().display()
         )))
@@ -71,7 +43,7 @@ fn output_path(options: &CliOptions, is_last_phase: bool, extension: &'static st
     }
 }
 
-fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, Error> {
+fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, WreccError> {
     let output_path = output_path(options, options.no_link, "o");
 
     let output = Command::new("as")
@@ -79,28 +51,28 @@ fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, Error> {
         .arg("-o")
         .arg(output_path.get())
         .output()
-        .map_err(|_| Error::Sys("could not invoke assembler 'as'".to_string()))?;
+        .map_err(|_| WreccError::Sys("could not invoke assembler 'as'".to_string()))?;
 
     if output.status.success() {
         Ok(output_path)
     } else {
-        Err(Error::Sys(format!(
+        Err(WreccError::Sys(format!(
             "as: {}",
             String::from_utf8(output.stderr).unwrap()
         )))
     }
 }
-fn find_libpath() -> Result<PathBuf, Error> {
+fn find_libpath() -> Result<PathBuf, WreccError> {
     if Path::new("/usr/lib/x86_64-linux-gnu/crti.o").exists() {
         return Ok(PathBuf::from("/usr/lib/x86_64-linux-gnu/"));
     }
     if Path::new("/usr/lib64/crti.o").exists() {
         return Ok(PathBuf::from("/usr/lib64"));
     }
-    Err(Error::Sys(String::from("library path not found")))
+    Err(WreccError::Sys(String::from("library path not found")))
 }
 
-fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), Error> {
+fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), WreccError> {
     let mut cmd = Command::new("ld");
     match std::env::consts::OS {
         "macos" => {
@@ -138,7 +110,7 @@ fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), Error> {
                 .arg(format!("{}/crtend.o", gcc_libpath.display()))
                 .arg(format!("{}/crtn.o", libpath.display()));
         }
-        _ => return Err(Error::Sys(String::from("only supports linx and macos"))),
+        _ => return Err(WreccError::Sys(String::from("only supports linx and macos"))),
     }
 
     if let Some(output_name) = output_path {
@@ -148,16 +120,16 @@ fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), Error> {
 
     let output = cmd
         .output()
-        .map_err(|_| Error::Sys("could not invoke linker 'ld'".to_string()))?;
+        .map_err(|_| WreccError::Sys("could not invoke linker 'ld'".to_string()))?;
 
     if output.status.success() {
         Ok(())
     } else {
-        Err(Error::Sys(String::from_utf8(output.stderr).unwrap()))
+        Err(WreccError::Sys(String::from_utf8(output.stderr).unwrap()))
     }
 }
 
-fn run(options: &CliOptions) -> Result<(), Error> {
+fn run(options: &CliOptions) -> Result<(), WreccError> {
     let source = read_input_file(&options.file_path)?;
     let pp_source = preprocess(
         &options.file_path,

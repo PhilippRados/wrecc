@@ -1,4 +1,4 @@
-use crate::Error;
+use crate::WreccError;
 use std::path::PathBuf;
 
 // TODO: add license information
@@ -80,7 +80,7 @@ impl CliOptions {
             no_color: false,
         }
     }
-    pub fn parse() -> Result<CliOptions, Error> {
+    pub fn parse() -> Result<CliOptions, WreccError> {
         let mut cli_options = CliOptions::new();
         let mut args = std::env::args().collect::<Vec<String>>().into_iter().skip(1);
 
@@ -91,22 +91,28 @@ impl CliOptions {
                         if let Some(file) = args.next() {
                             cli_options.output_path = Some(PathBuf::from(file));
                         } else {
-                            return Err(Error::Sys(format!("expected file following '{}' option", arg)));
+                            return Err(WreccError::Cli(vec![format!(
+                                "expected file following '{}' option",
+                                arg
+                            )]));
                         }
                     }
                     "-I" | "--include-dir" => {
                         if let Some(dir) = args.next() {
                             cli_options.user_include_dirs.push(PathBuf::from(dir))
                         } else {
-                            return Err(Error::Sys(format!("expected dir following '{}' option", arg)));
+                            return Err(WreccError::Cli(vec![format!(
+                                "expected dir following '{}' option",
+                                arg
+                            )]));
                         }
                     }
                     "-D" | "--define" => {
                         let Some(arg) = args.next()  else {
-                            return Err(Error::Sys(format!(
+                            return Err(WreccError::Cli(vec![format!(
                                 "expected macro-definition following '{}' option",
                                 arg
-                            )));
+                            )]));
                         };
 
                         let (macro_name, value) = arg
@@ -126,7 +132,7 @@ impl CliOptions {
                     "-h" => sys_info(USAGE),
                     "--help" => sys_info(HELP),
                     "-v" | "--version" => sys_info(VERSION),
-                    _ => return Err(Error::Sys(format!("illegal option '{}'", arg))),
+                    _ => return Err(WreccError::Cli(vec![format!("illegal option '{}'", arg)])),
                 }
             } else {
                 cli_options.file_path = PathBuf::from(arg);
@@ -134,14 +140,14 @@ impl CliOptions {
         }
 
         if cli_options.file_path.to_string_lossy().is_empty() {
-            Err(Error::Sys("no input files given".to_string()))
+            Err(WreccError::Cli(vec!["no input files given".to_string()]))
         } else if let Some(Some("c")) = cli_options.file_path.extension().map(|s| s.to_str()) {
             Ok(cli_options)
         } else {
-            Err(Error::Sys(format!(
+            Err(WreccError::Cli(vec![format!(
                 "file '{}' is not a valid C source file",
                 cli_options.file_path.display()
-            )))
+            )]))
         }
     }
 }

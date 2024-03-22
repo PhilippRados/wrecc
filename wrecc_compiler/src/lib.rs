@@ -30,7 +30,7 @@ pub fn preprocess(
     user_include_dirs: &Vec<PathBuf>,
     defines: &Vec<(String, String)>,
     source: String,
-) -> Result<Vec<PPToken>, Vec<Error>> {
+) -> Result<Vec<PPToken>, WreccError> {
     let tokens = PPScanner::new(source).scan_token();
     let include_depth = 0;
 
@@ -61,9 +61,10 @@ pub fn preprocess(
         &standard_headers,
         include_depth,
     )
-    .start()?;
+    .start()
+    .map_err(|errors| WreccError::Cli(errors.iter().map(|e| e.kind.message()).collect()))?;
 
-    Preprocessor::new(
+    Ok(Preprocessor::new(
         filename,
         tokens,
         defines,
@@ -72,10 +73,10 @@ pub fn preprocess(
         include_depth,
     )
     .start()
-    .map(|(tokens, _)| tokens)
+    .map(|(tokens, _)| tokens)?)
 }
 
-pub fn compile(source: Vec<PPToken>, dump_ast: bool) -> Result<String, Vec<Error>> {
+pub fn compile(source: Vec<PPToken>, dump_ast: bool) -> Result<String, WreccError> {
     // scan input
     let tokens = Scanner::new(source).scan_token()?;
 

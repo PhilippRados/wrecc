@@ -69,10 +69,13 @@ pub struct Preprocessor<'a> {
     // list of #if directives with last one being the most deeply nested
     ifs: Vec<IfDirective>,
 
-    // paths to search for system header files.
+    // paths to search for system header files as defined by user with `-I` argument
+    user_include_dirs: &'a Vec<PathBuf>,
+
+    // standard headers which are embedded in the binary using include_str!
     // INFO: currently only supports custom header files since not all features of
     // standard header files are supported
-    header_search_paths: Vec<PathBuf>,
+    standard_headers: &'a HashMap<PathBuf, &'static str>,
 
     // current number of nest-depth
     include_depth: usize,
@@ -86,14 +89,16 @@ impl<'a> Preprocessor<'a> {
         filename: &'a Path,
         tokens: Vec<Token>,
         defines: HashMap<String, Vec<Token>>,
-        header_search_paths: Vec<PathBuf>,
+        user_include_dirs: &'a Vec<PathBuf>,
+        standard_headers: &'a HashMap<PathBuf, &'static str>,
         include_depth: usize,
     ) -> Self {
         Preprocessor {
             tokens: DoublePeek::new(tokens),
             filename,
             include_depth,
-            header_search_paths,
+            user_include_dirs,
+            standard_headers,
             defines,
             ifs: Vec::new(),
             max_include_depth: 200,
@@ -105,7 +110,8 @@ impl<'a> Preprocessor<'a> {
             &file_path,
             data,
             self.defines.clone(),
-            self.header_search_paths.clone(),
+            &self.user_include_dirs,
+            &self.standard_headers,
             self.include_depth + 1,
         )
         .map_err(Error::new_multiple)?;
@@ -208,11 +214,15 @@ impl<'a> Preprocessor<'a> {
             }
         }
 
-        for sys_path in &self.header_search_paths {
+        for sys_path in self.user_include_dirs {
             let abs_system_path = sys_path.join(&file_path);
             if let Ok(data) = fs::read_to_string(abs_system_path) {
                 return Ok((file_path, data));
             }
+        }
+
+        if let Some(data) = self.standard_headers.get(&file_path) {
+            return Ok((file_path, data.to_string()));
         }
 
         Err(Error::new(
@@ -754,12 +764,21 @@ fn preprocess_included(
     filename: &Path,
     source: String,
     defines: HashMap<String, Vec<Token>>,
-    header_search_paths: Vec<PathBuf>,
+    user_include_dirs: &Vec<PathBuf>,
+    standard_headers: &HashMap<PathBuf, &'static str>,
     include_depth: usize,
 ) -> Result<(Vec<PPToken>, HashMap<String, Vec<Token>>), Vec<Error>> {
     let tokens = PPScanner::new(source).scan_token();
 
-    Preprocessor::new(filename, tokens, defines, header_search_paths, include_depth).start()
+    Preprocessor::new(
+        filename,
+        tokens,
+        defines,
+        user_include_dirs,
+        standard_headers,
+        include_depth,
+    )
+    .start()
 }
 
 fn as_kind(tokens: &[Token]) -> Vec<&TokenKind> {
@@ -816,14 +835,24 @@ mod tests {
         PPScanner::new(input.to_string()).scan_token()
     }
 
-    fn setup(input: &str) -> Preprocessor {
-        let tokens = PPScanner::new(input.to_string()).scan_token();
+    macro_rules! setup {
+        ($input:expr) => {{
+            let tokens = PPScanner::new($input.to_string()).scan_token();
 
-        Preprocessor::new(Path::new(""), tokens, HashMap::new(), Vec::new(), 0)
+            Preprocessor::new(
+                Path::new(""),
+                tokens,
+                HashMap::new(),
+                &Vec::new(),
+                &HashMap::new(),
+                0,
+            )
+        }};
     }
+    // fn setup(input: &str) -> Preprocessor {}
 
     fn setup_complete(input: &str) -> String {
-        setup(input)
+        setup!(input)
             .start()
             .unwrap()
             .0
@@ -833,40 +862,44 @@ mod tests {
     }
 
     fn setup_complete_err(input: &str) -> Vec<ErrorKind> {
-        if let Err(e) = setup(input).start() {
+        if let Err(e) = setup!(input).start() {
             e.into_iter().map(|e| e.kind).collect()
         } else {
             unreachable!()
         }
     }
 
-    fn setup_macro_replacement(defined: HashMap<&str, &str>) -> HashMap<String, String> {
-        let defined: HashMap<String, Vec<Token>> = defined
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), scan(v)))
-            .collect();
-        let pp = Preprocessor::new(Path::new(""), Vec::new(), defined.clone(), Vec::new(), 0);
-
-        let mut result = HashMap::new();
-        for (name, replace_list) in defined {
-            result.insert(
-                name.to_string(),
-                pp.replace_macros(
-                    Token {
-                        kind: TokenKind::Ident(name),
-                        column: 1,
-                        line: 1,
-                        line_string: "".to_string(),
-                    },
-                    replace_list,
-                )
+    macro_rules! setup_macro_replacement {
+        ($defined:expr) => {{
+            let defined: HashMap<String, Vec<Token>> = $defined
                 .into_iter()
-                .map(|t| t.kind.to_string())
-                .collect(),
-            );
-        }
+                .map(|(k, v)| (k.to_string(), scan(v)))
+                .collect();
+            let v = Vec::new();
+            let h = HashMap::new();
+            let pp = Preprocessor::new(Path::new(""), Vec::new(), defined.clone(), &v, &h, 0);
 
-        result
+            let mut result = HashMap::new();
+            for (name, replace_list) in defined {
+                result.insert(
+                    name.to_string(),
+                    pp.replace_macros(
+                        Token {
+                            kind: TokenKind::Ident(name),
+                            column: 1,
+                            line: 1,
+                            line_string: "".to_string(),
+                        },
+                        replace_list,
+                    )
+                    .into_iter()
+                    .map(|t| t.kind.to_string())
+                    .collect(),
+                );
+            }
+
+            result
+        }};
     }
 
     #[test]
@@ -887,7 +920,7 @@ mod tests {
     #[test]
     fn macro_replacements() {
         let actual =
-            setup_macro_replacement(HashMap::from([("num", "3"), ("foo", "num"), ("bar", "foo")]));
+            setup_macro_replacement!(HashMap::from([("num", "3"), ("foo", "num"), ("bar", "foo")]));
         let expected = HashMap::from([
             (String::from("num"), String::from("3")),
             (String::from("foo"), String::from("3")),
@@ -899,7 +932,7 @@ mod tests {
 
     #[test]
     fn macro_list_replacements() {
-        let actual = setup_macro_replacement(HashMap::from([
+        let actual = setup_macro_replacement!(HashMap::from([
             ("foo", "one two three"),
             ("some", "four foo six"),
             ("bar", "foo seven some"),
@@ -918,7 +951,7 @@ mod tests {
 
     #[test]
     fn cyclic_macros() {
-        let actual = setup_macro_replacement(HashMap::from([("foo", "bar"), ("bar", "foo")]));
+        let actual = setup_macro_replacement!(HashMap::from([("foo", "bar"), ("bar", "foo")]));
         let expected = HashMap::from([
             (String::from("foo"), String::from("foo")),
             (String::from("bar"), String::from("bar")),
@@ -929,7 +962,7 @@ mod tests {
 
     #[test]
     fn cyclic_macros2() {
-        let actual = setup_macro_replacement(HashMap::from([("foo1", "bar"), ("bar", "foo2")]));
+        let actual = setup_macro_replacement!(HashMap::from([("foo1", "bar"), ("bar", "foo2")]));
         let expected = HashMap::from([
             (String::from("foo1"), String::from("foo2")),
             (String::from("bar"), String::from("foo2")),

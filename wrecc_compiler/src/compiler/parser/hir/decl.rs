@@ -134,10 +134,15 @@ impl PrintIndent for InitKind {
             InitKind::Scalar(expr) => format!("Scalar:\n{}", indent_fmt(expr, indent_level + 1)),
             InitKind::Aggr(list) => format!(
                 "Aggregate:\n{}",
-                list.iter()
-                    .map(|init| indent_fmt(&init.kind, indent_level + 1))
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                if list.is_empty() {
+                    // int a[10] = {};
+                    indent_fmt(&ExprKind::Nop, indent_level + 1)
+                } else {
+                    list.iter()
+                        .map(|init| indent_fmt(&init.kind, indent_level + 1))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
             ),
         }
     }

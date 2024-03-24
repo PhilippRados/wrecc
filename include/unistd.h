@@ -1,3 +1,7 @@
+/*
+ * Wrecc implementation of posix C header-file as defined by:
+ */
+
 #ifndef _UNISTD_H_
 #define _UNISTD_H_
 

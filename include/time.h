@@ -1,3 +1,9 @@
+/*
+ * Wrecc implementation of standard C header-file as defined by:
+ * C89 standard (7.12)
+ * https://en.cppreference.com/w/c/header
+ */
+
 #ifndef _TIME_H_
 #define _TIME_H_
 
@@ -24,7 +30,6 @@ struct tm {
 char *asctime(struct tm *);
 clock_t clock(void);
 char *ctime(time_t *);
-double difftime(time_t, time_t);
 struct tm *getdate(char *);
 struct tm *gmtime(time_t *);
 struct tm *localtime(time_t *);

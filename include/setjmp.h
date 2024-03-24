@@ -1,3 +1,9 @@
+/*
+ * Wrecc implementation of standard C header-file as defined by:
+ * C89 standard (7.6)
+ * https://en.cppreference.com/w/c/header
+ */
+
 #ifndef _SETJMP_H_
 #define _SETJMP_H_
 

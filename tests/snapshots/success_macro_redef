@@ -1,6 +1,6 @@
 error: redefinition of macro 'NULL'
-|  --> in included file stddef.h:4:9
+|  --> in included file stddef.h:13:9
 |
-4 #define NULL ((void *)0)
-|         ^
+13 #define NULL ((void *)0)
+|          ^
 1 error generated.

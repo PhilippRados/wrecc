@@ -1,3 +1,7 @@
+/*
+ * Wrecc implementation of posix C header-file as defined by:
+ */
+
 #ifndef _FCNTL_H_
 #define _FCNTL_H_
 

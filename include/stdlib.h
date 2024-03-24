@@ -1,3 +1,9 @@
+/*
+ * Wrecc implementation of standard C header-file as defined by:
+ * C89 standard (7.10)
+ * https://en.cppreference.com/w/c/header
+ */
+
 #ifndef _STDLIB_H_
 #define _STDLIB_H_
 
@@ -20,6 +26,7 @@ typedef struct {
 
 void abort(void);
 void exit(int);
+int atexit(void (*func)(void));
 
 int system(char *);
 
@@ -35,7 +42,14 @@ void free(void *);
 void *realloc(void *, size_t);
 
 int rand(void);
+void srand(int);
+
 int abs(int);
 long labs(long);
+div_t div(int, int);
+ldiv_t ldiv(long, long);
+
+void *bsearch(void *, void *, size_t, size_t, int (*compar)(void *, void *));
+void qsort(void *, size_t, size_t, int (*compar)(void *, void *));
 
 #endif

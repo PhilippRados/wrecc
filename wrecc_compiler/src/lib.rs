@@ -46,6 +46,8 @@ pub fn preprocess(
         include_header!("time.h"),
         include_header!("unistd.h"),
         include_header!("setjmp.h"),
+        include_header!("signal.h"),
+        include_header!("locale.h"),
     ]);
 
     // INFO: convert all cli-passed defines to #defines as if they were in regular source file

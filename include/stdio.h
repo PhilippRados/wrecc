@@ -1,3 +1,9 @@
+/*
+ * Wrecc implementation of standard C header-file as defined by:
+ * C89 standard (7.9)
+ * https://en.cppreference.com/w/c/header
+ */
+
 #ifndef _STDIO_H_
 #define _STDIO_H_
 

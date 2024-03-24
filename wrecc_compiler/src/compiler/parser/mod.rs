@@ -1631,6 +1631,45 @@ FuncDef: 'main'
     }
 
     #[test]
+    fn empty_stmts() {
+        let actual = setup_stmt(
+            "
+long a[10] = {};
+int;
+int main() {}
+int some() {
+  long b[10] = {};
+  int a;
+
+  {}
+  return a;
+}",
+        );
+
+        let expected = "Declaration:
+-Init: 'a'
+--Aggregate:
+---Empty
+Declaration:
+-Empty
+FuncDef: 'main'
+-Empty
+FuncDef: 'some'
+-Declaration:
+--Init: 'b'
+---Aggregate:
+----Empty
+-Declaration:
+--Decl: 'a'
+-Block:
+--Empty
+-Return:
+--Ident: 'a'";
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn matches_works_on_enums_with_values() {
         let tokens = vec![
             token_default!(TokenKind::Number(2)),

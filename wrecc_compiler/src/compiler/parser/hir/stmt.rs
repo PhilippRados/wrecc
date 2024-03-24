@@ -28,6 +28,22 @@ pub enum Stmt {
     Label(Token, Box<Stmt>),
 }
 
+// provides printable default for empty iterator produced string
+pub trait OrEmpty {
+    fn or_empty(self, indent_level: usize) -> String;
+}
+
+impl OrEmpty for String {
+    fn or_empty(self, indent_level: usize) -> String {
+        if self.is_empty() {
+            let indent = "-".repeat(indent_level);
+            format!("{}Empty", indent)
+        } else {
+            self
+        }
+    }
+}
+
 impl PrintIndent for Stmt {
     fn print_indent(&self, indent_level: usize) -> String {
         match self {
@@ -38,7 +54,8 @@ impl PrintIndent for Stmt {
                     .iter()
                     .map(|s| indent_fmt(s, indent_level + 1))
                     .collect::<Vec<String>>()
-                    .join("\n");
+                    .join("\n")
+                    .or_empty(indent_level + 1);
 
                 format!("Block:\n{}", body)
             }

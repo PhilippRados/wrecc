@@ -113,7 +113,8 @@ impl PrintIndent for ExternalDeclaration {
                     .iter()
                     .map(|s| indent_fmt(s, indent_level + 1))
                     .collect::<Vec<String>>()
-                    .join("\n");
+                    .join("\n")
+                    .or_empty(indent_level + 1);
 
                 format!("FuncDef: '{}'\n{}", name.unwrap_string(), body)
             }
@@ -134,15 +135,11 @@ impl PrintIndent for InitKind {
             InitKind::Scalar(expr) => format!("Scalar:\n{}", indent_fmt(expr, indent_level + 1)),
             InitKind::Aggr(list) => format!(
                 "Aggregate:\n{}",
-                if list.is_empty() {
-                    // int a[10] = {};
-                    indent_fmt(&ExprKind::Nop, indent_level + 1)
-                } else {
-                    list.iter()
-                        .map(|init| indent_fmt(&init.kind, indent_level + 1))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                }
+                list.iter()
+                    .map(|init| indent_fmt(&init.kind, indent_level + 1))
+                    .collect::<Vec<String>>()
+                    .join("\n")
+                    .or_empty(indent_level + 1)
             ),
         }
     }
@@ -169,14 +166,11 @@ impl PrintIndent for Declaration {
                 }
             })
             .collect::<Vec<_>>()
-            .join("\n");
+            .join("\n")
+            .or_empty(indent_level);
 
         let typedef = if self.is_typedef { "Typedef-" } else { "" };
-        if decls.is_empty() {
-            format!("{}Declaration:\n{}Empty", typedef, indent)
-        } else {
-            format!("{}Declaration:\n{}", typedef, decls)
-        }
+        format!("{}Declaration:\n{}", typedef, decls)
     }
 }
 

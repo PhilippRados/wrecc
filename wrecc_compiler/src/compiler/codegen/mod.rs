@@ -833,6 +833,7 @@ impl Compiler {
     }
     fn cg_scale_up(&mut self, func: &mut Function, expr: Expr, by_amount: usize) -> Register {
         let value_reg = self.execute_expr(func, expr);
+        let value_reg = self.convert_to_rval(value_reg);
 
         self.cg_mult(
             Register::Literal(by_amount as i64, Type::Primitive(Primitive::Int)),
@@ -1359,7 +1360,8 @@ impl Compiler {
         left
     }
     fn cg_binary(&mut self, left_reg: Register, token: &TokenKind, right_reg: Register) -> Register {
-        let (left_reg, right_reg) = (self.convert_to_rval(left_reg), self.convert_to_rval(right_reg));
+        let left_reg = self.convert_to_rval(left_reg);
+        let right_reg = self.convert_to_rval(right_reg);
 
         match token {
             TokenKind::Plus => self.cg_add(left_reg, right_reg),

@@ -145,24 +145,24 @@ impl Scanner {
                 }
                 ' ' | '\t' => {
                     let (whitespace, loc) =
-                        self.consume_until(&c.to_string(), |ch| ch != ' ' && ch != '\t', false);
+                        self.consume_until(&c.to_string(), |ch, _| ch != ' ' && ch != '\t', false);
 
                     self.add_token(&mut result, TokenKind::Whitespace(whitespace), Some(loc));
                 }
                 '"' => {
-                    let (s, loc) = self.consume_until("\"", |ch| ch == '"', true);
+                    let (s, loc) = self.consume_until("\"", |ch, escaped| ch == '"' && !escaped, true);
 
                     self.add_token(&mut result, TokenKind::String(s), Some(loc));
                 }
                 '\'' => {
-                    let (s, loc) = self.consume_until("'", |ch| ch == '\'', true);
+                    let (s, loc) = self.consume_until("'", |ch, escaped| ch == '\'' && !escaped, true);
 
                     self.add_token(&mut result, TokenKind::CharLit(s), Some(loc));
                 }
                 '/' if matches!(self.source.peek(), Some('/')) => {
                     self.source.next();
                     let (_, (newlines, col)) =
-                        self.consume_until("//", |ch| ch == '\n' && ch == '\0', false);
+                        self.consume_until("//", |ch, _| ch == '\n' && ch == '\0', false);
 
                     self.line += newlines;
                     self.column = col;
@@ -177,7 +177,7 @@ impl Scanner {
                 _ if c.is_alphabetic() || c == '_' => {
                     let (ident, loc) = self.consume_until(
                         &c.to_string(),
-                        |c| !c.is_alphabetic() && c != '_' && !c.is_ascii_digit(),
+                        |c, _| !c.is_alphabetic() && c != '_' && !c.is_ascii_digit(),
                         false,
                     );
                     let ident = if let Some(directive) = self.directives.get(ident.as_str()) {
@@ -190,7 +190,7 @@ impl Scanner {
                 }
                 _ if c.is_ascii_digit() => {
                     let (number, loc) =
-                        self.consume_until(&c.to_string(), |c| !c.is_ascii_digit(), false);
+                        self.consume_until(&c.to_string(), |c, _| !c.is_ascii_digit(), false);
 
                     self.add_token(&mut result, TokenKind::Number(number), Some(loc));
                 }
@@ -209,15 +209,18 @@ impl Scanner {
         &mut self,
         start: &str,
         mut predicate: F,
-        is_string: bool,
+        consume_last: bool,
     ) -> (String, (i32, i32))
     where
-        F: FnMut(char) -> bool,
+        F: FnMut(char, bool) -> bool,
     {
         let mut result = String::from(start);
-        let (mut newlines, mut column) = (0, self.column + start.len() as i32);
+        let mut newlines = 0;
+        let mut column = self.column + start.len() as i32;
 
         while let Some(peeked) = self.source.peek() {
+            // if last chars are an uneven amount of backslashes then is escaped
+            let is_escaped = (result.chars().rev().take_while(|c| *c == '\\').count() % 2) != 0;
             match peeked {
                 '\\' if matches!(self.source.double_peek(), Some('\n')) => {
                     self.source.next();
@@ -226,8 +229,8 @@ impl Scanner {
                     newlines += 1;
                 }
                 '\n' => break,
-                _ if predicate(*peeked) => {
-                    if is_string {
+                _ if predicate(*peeked, is_escaped) => {
+                    if consume_last {
                         column += 1;
                         result.push(self.source.next().unwrap());
                     }
@@ -349,6 +352,28 @@ mod tests {
 
         assert_eq!(actual, expected);
     }
+    #[test]
+    fn escaped_char() {
+        let actual = setup_tokenkind("char c = '\'';");
+        let expected = vec![
+            TokenKind::Ident("char".to_string()),
+            TokenKind::Ident("c".to_string()),
+            TokenKind::Other('='),
+            TokenKind::CharLit("\\'".to_string()),
+        ];
+    }
+
+    #[test]
+    fn escaped_string() {
+        let actual = setup_tokenkind("char *c = \"s   \\\"  else\";");
+        let expected = vec![
+            TokenKind::Ident("char".to_string()),
+            TokenKind::Ident("c".to_string()),
+            TokenKind::Other('='),
+            TokenKind::String("s   \"  else".to_string()),
+        ];
+    }
+
     #[test]
     fn macro_name() {
         let actual = setup_tokenkind("#define NULL((void *)0)");

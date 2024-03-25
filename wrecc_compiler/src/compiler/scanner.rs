@@ -3,6 +3,7 @@ use crate::preprocessor::scanner::TokenKind as PPKind;
 use crate::PPToken;
 use std::collections::HashMap;
 use std::iter::Peekable;
+use std::str::Chars;
 
 // Converts preprocessor tokens into compiler tokens
 pub struct Scanner<'a> {
@@ -172,18 +173,11 @@ impl<'a> Scanner<'a> {
                         }
                     }
                 }
-                PPKind::String(ref s) => {
-                    let mut s = s.clone();
-                    let first = s.remove(0);
-                    assert_eq!(first, '"');
-
-                    if let Some('"') = s.pop() {
-                        tokens.push(pp_token, TokenKind::String(s))
-                    } else {
-                        errors.push(Error::new(&pp_token.clone(), ErrorKind::UnterminatedString))
-                    }
-                }
-                PPKind::CharLit(ref c) => match self.char_lit(&pp_token, c.clone()) {
+                PPKind::String(ref s) => match self.string_lit(&pp_token, s.clone()) {
+                    Ok(s) => tokens.push(pp_token, TokenKind::String(s)),
+                    Err(e) => errors.push(e),
+                },
+                PPKind::CharLit(ref s) => match self.char_lit(&pp_token, s) {
                     Ok(char) => tokens.push(pp_token, TokenKind::CharLit(char as i8)),
                     Err(e) => errors.push(e),
                 },
@@ -236,16 +230,51 @@ impl<'a> Scanner<'a> {
         self.source.next();
         true
     }
-    fn char_lit(&mut self, pp_token: &PPToken, char: String) -> Result<char, Error> {
-        let mut char_iter = char.chars();
+    fn string_lit(&mut self, pp_token: &PPToken, mut string: String) -> Result<String, Error> {
+        let first = string.remove(0);
+        assert_eq!(first, '"');
+
+        if let Some('"') = string.pop() {
+            let mut chars = string.chars();
+            let mut string = Vec::new();
+
+            while let Some(c) = chars.next() {
+                let c = self.parse_char(&pp_token, c, &mut chars)?;
+                string.push(c);
+            }
+
+            Ok(string.into_iter().collect())
+        } else {
+            Err(Error::new(&pp_token.clone(), ErrorKind::UnterminatedString))
+        }
+    }
+    fn char_lit(&mut self, pp_token: &PPToken, char_string: &str) -> Result<char, Error> {
+        let mut char_iter = char_string.chars();
 
         let first = char_iter.next();
         assert_eq!(first, Some('\''));
 
-        let mut c = char_iter
+        let c = char_iter
             .next()
             .ok_or(Error::new(pp_token, ErrorKind::Eof("character literal")))?;
 
+        let c = self.parse_char(pp_token, c, &mut char_iter)?;
+
+        if !matches!(char_iter.next(), Some('\'')) {
+            return Err(Error::new(pp_token, ErrorKind::CharLiteralQuotes));
+        }
+        if !c.is_ascii() {
+            return Err(Error::new(pp_token, ErrorKind::CharLiteralAscii(c)));
+        };
+
+        Ok(c)
+    }
+    fn parse_char(
+        &mut self,
+        pp_token: &PPToken,
+        mut c: char,
+        char_iter: &mut Chars,
+    ) -> Result<char, Error> {
         if c == '\\' {
             let char_to_escape = char_iter
                 .next()
@@ -254,12 +283,6 @@ impl<'a> Scanner<'a> {
                 .escape_char(char_to_escape)
                 .ok_or(Error::new(pp_token, ErrorKind::InvalidEscape(char_to_escape)))?;
         }
-        if !matches!(char_iter.next(), Some('\'')) {
-            return Err(Error::new(pp_token, ErrorKind::CharLiteralQuotes));
-        }
-        if !c.is_ascii() {
-            return Err(Error::new(pp_token, ErrorKind::CharLiteralAscii(c)));
-        };
 
         Ok(c)
     }
@@ -271,7 +294,7 @@ impl<'a> Scanner<'a> {
             't' => Some('\t'),
             '\\' => Some('\\'),
             '\'' => Some('\''),
-            '\"' => Some('\"'),
+            '"' => Some('\"'),
             _ => None,
         }
     }
@@ -524,19 +547,26 @@ mod tests {
     }
 
     #[test]
+    fn escaped_char() {
+        // c = '\'';
+        let input: String = vec!['c', '=', '\'', '\\', '\'', '\'', ';'].into_iter().collect();
+        let actual = setup(&input);
+        let expected = vec![
+            TokenKind::Ident("c".to_string()),
+            TokenKind::Equal,
+            TokenKind::CharLit(39),
+            TokenKind::Semicolon,
+        ];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn handle_newline_string() {
         let input: String = vec!['"', 'h', 'a', '\\', 'n', 'l', '"'].into_iter().collect();
+        let actual = setup(&input);
 
-        let pp_tokens = preprocess(Path::new(""), &Vec::new(), &Vec::new(), input).unwrap();
-        let mut scanner = Scanner::new(pp_tokens);
-        let actual: Vec<TokenKind> = scanner
-            .scan_token()
-            .unwrap()
-            .into_iter()
-            .map(|e| e.kind)
-            .collect();
-
-        let expected = vec![TokenKind::String("ha\\nl".to_string())];
+        let expected = vec![TokenKind::String("ha\nl".to_string())];
 
         assert_eq!(actual, expected);
     }
@@ -544,15 +574,8 @@ mod tests {
     #[test]
     fn handle_multiline_string() {
         let input: String = vec!['"', 'h', 'a', '\\', '\n', 'l', '"'].into_iter().collect();
+        let actual = setup(&input);
 
-        let pp_tokens = preprocess(Path::new(""), &Vec::new(), &Vec::new(), input).unwrap();
-        let mut scanner = Scanner::new(pp_tokens);
-        let actual: Vec<TokenKind> = scanner
-            .scan_token()
-            .unwrap()
-            .into_iter()
-            .map(|e| e.kind)
-            .collect();
         let expected = vec![TokenKind::String("hal".to_string())];
 
         assert_eq!(actual, expected);

@@ -130,7 +130,12 @@ impl Display for Lir {
                 Lir::GlobalInit(type_decl, reg) =>
                     format!("\t.{} {}", type_decl.complete_suffix(), reg.name()),
                 Lir::StringDeclaration(label_index, s) =>
-                    format!("LS{}:\n\t.string \"{}\"", label_index, s),
+                // INFO: use {:?} so escapes aren't applied:
+                // "hel\nlo"
+                // is .string "hel\nlo"
+                // not .string "hel
+                // lo"
+                    format!("LS{}:\n\t.string {:?}", label_index, s),
                 Lir::LabelDefinition(label_index) => format!("L{}:", label_index),
                 Lir::Jmp(label_index) => format!("\tjmp     L{}", label_index),
                 Lir::JmpCond(cond, label_index) => format!("\tj{}     L{}", cond, label_index),

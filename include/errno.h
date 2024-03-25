@@ -1,6 +1,6 @@
 /*
  * Wrecc implementation of standard C header-file as defined by:
- * C89 standard (7.1.4)
+ * C99 standard (7.5)
  * https://en.cppreference.com/w/c/header
  */
 
@@ -13,6 +13,8 @@ int *__error(void);
 // standard constants
 #define EDOM 33
 #define ERANGE 34
+
+// INFO: EILSEQ is platform dependant
 
 // base posix constants
 #define EPERM 1    /* Operation not permitted */

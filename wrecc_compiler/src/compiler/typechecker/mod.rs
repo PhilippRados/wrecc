@@ -193,6 +193,7 @@ impl TypeChecker {
     }
     fn parse_specifiers(&mut self, specifiers: Vec<hir::decl::DeclSpecifier>) -> Result<Type, Error> {
         if specifiers.is_empty() {
+            // WARN: since C99 this should at least issue a warning
             return Ok(Type::Primitive(Primitive::Int));
         }
 

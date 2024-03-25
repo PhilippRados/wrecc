@@ -1,6 +1,6 @@
 /*
  * Wrecc implementation of standard C header-file as defined by:
- * C89 standard (7.9)
+ * C99 standard (7.19)
  * https://en.cppreference.com/w/c/header
  */
 
@@ -69,6 +69,7 @@ int scanf(char *, ...);
 void setbuf(FILE *, char *);
 int setvbuf(FILE *, char *, int, size_t);
 int sprintf(char *, char *, ...);
+int snprintf(char *, size_t, char *, ...);
 int sscanf(char *, char *, ...);
 FILE *tmpfile(void);
 

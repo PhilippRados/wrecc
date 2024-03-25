@@ -1,6 +1,6 @@
 /*
  * Wrecc implementation of standard C header-file as defined by:
- * C89 standard (7.12)
+ * C99 standard (7.23)
  * https://en.cppreference.com/w/c/header
  */
 

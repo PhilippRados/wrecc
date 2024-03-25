@@ -1,6 +1,6 @@
 /*
  * Wrecc implementation of standard C header-file as defined by:
- * C89 standard (7.3)
+ * C99 standard (7.4)
  * https://en.cppreference.com/w/c/header
  */
 
@@ -16,14 +16,11 @@ int isdigit(int);
 int isxdigit(int);
 int isgraph(int);
 int isspace(int);
+int isblank(int);
 int isprint(int);
 int ispunct(int);
 
 int tolower(int);
 int toupper(int);
-
-//
-int isascii(int);
-int toascii(int);
 
 #endif

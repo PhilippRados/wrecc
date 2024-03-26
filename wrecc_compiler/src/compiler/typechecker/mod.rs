@@ -1310,11 +1310,15 @@ impl TypeChecker {
             ));
         }
 
-        Ok(match expr.type_decl.size().cmp(&new_type.size()) {
+        Ok(Self::always_cast(expr, new_type))
+    }
+    // ensures that equal sized expressions still have new type
+    fn always_cast(expr: mir::expr::Expr, new_type: Type) -> mir::expr::Expr {
+        match expr.type_decl.size().cmp(&new_type.size()) {
             Ordering::Less => expr.cast_to(new_type, CastDirection::Up),
             Ordering::Greater => expr.cast_to(new_type, CastDirection::Down),
             Ordering::Equal => expr.cast_to(new_type, CastDirection::Equal),
-        })
+        }
     }
     fn maybe_cast(new_type: Type, expr: mir::expr::Expr) -> mir::expr::Expr {
         match expr.type_decl.size().cmp(&new_type.size()) {
@@ -1838,20 +1842,19 @@ impl TypeChecker {
 
                 // if pointer - pointer, scale result before operation to match left-pointers type
                 (Type::Pointer(inner), Type::Pointer(_), _) => (left, right, Some(inner.size())),
-                // if integer type and pointer always cast to pointer
-                (_, right_type @ Type::Pointer(_), _) => {
-                    (left.cast_to(right_type, CastDirection::Up), right, None)
+
+                // if integer type and pointer then result is always pointer the pointer type
+                (.., right_type @ Type::Pointer(_), _) => {
+                    (Self::always_cast(left, right_type), right, None)
                 }
-                (left_type @ Type::Pointer(_), ..) => {
-                    (left, right.cast_to(left_type, CastDirection::Up), None)
-                }
+                (left_type @ Type::Pointer(_), ..) => (left, Self::always_cast(right, left_type), None),
 
                 // otherwise cast to bigger type if unequal types
                 (left_type, right_type, _) if left_type.size() > right_type.size() => {
-                    (left, right.cast_to(left_type, CastDirection::Up), None)
+                    (left, Self::always_cast(right, left_type), None)
                 }
                 (left_type, right_type, _) if left_type.size() < right_type.size() => {
-                    (left.cast_to(right_type, CastDirection::Up), right, None)
+                    (Self::always_cast(left, right_type), right, None)
                 }
                 _ => (left, right, None),
             };

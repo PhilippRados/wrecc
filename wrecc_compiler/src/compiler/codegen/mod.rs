@@ -155,20 +155,23 @@ impl Compiler {
                 CaseKind::Default => default_label = Some(label),
             }
         }
+        let end_label = create_label(&mut self.label_index);
+
+        self.jump_labels.push((end_label, 0));
+        self.switch_labels.append(&mut jump_labels.into());
+
         // default label has to be jumped to at the end (even if there are cases following it) if no other cases match
         if let Some(label) = default_label {
             self.write_out(Lir::Jmp(label));
+        } else {
+            self.write_out(Lir::Jmp(end_label));
         }
+
         self.free(cond_reg);
-
-        let break_label = create_label(&mut self.label_index);
-
-        self.jump_labels.push((break_label, 0));
-        self.switch_labels.append(&mut jump_labels.into());
 
         self.visit_stmt(func, body);
 
-        self.write_out(Lir::LabelDefinition(break_label));
+        self.write_out(Lir::LabelDefinition(end_label));
 
         self.jump_labels.pop();
     }

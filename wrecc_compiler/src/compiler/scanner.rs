@@ -173,10 +173,29 @@ impl<'a> Scanner<'a> {
                         }
                     }
                 }
-                PPKind::String(ref s) => match self.string_lit(&pp_token, s.clone()) {
-                    Ok(s) => tokens.push(pp_token, TokenKind::String(s)),
-                    Err(e) => errors.push(e),
-                },
+                PPKind::String(ref s) => {
+                    let mut string = String::new();
+
+                    match self.string_lit(&pp_token, s.clone()) {
+                        Ok(s) => string.push_str(&s),
+                        Err(e) => errors.push(e),
+                    }
+
+                    // concatenate springs which are only seperated by whitespace or newline
+                    while let Some(PPKind::String(_) | PPKind::Whitespace(_) | PPKind::Newline) =
+                        self.source.peek().map(|t| &t.kind)
+                    {
+                        match self.source.next().map(|t| t.kind) {
+                            Some(PPKind::String(s)) => match self.string_lit(&pp_token, s.clone()) {
+                                Ok(s) => string.push_str(&s),
+                                Err(e) => errors.push(e),
+                            },
+                            Some(PPKind::Newline | PPKind::Whitespace(_)) => (),
+                            _ => unreachable!("just peeked"),
+                        }
+                    }
+                    tokens.push(pp_token, TokenKind::String(string))
+                }
                 PPKind::CharLit(ref s) => match self.char_lit(&pp_token, s) {
                     Ok(char) => tokens.push(pp_token, TokenKind::CharLit(char as i8)),
                     Err(e) => errors.push(e),
@@ -577,6 +596,19 @@ mod tests {
         let actual = setup(&input);
 
         let expected = vec![TokenKind::String("hal".to_string())];
+
+        assert_eq!(actual, expected);
+    }
+    #[test]
+    fn whitespace_seperated_string() {
+        let actual = setup(
+            "
+     \"one\"       \" two\"
+\"three\"
+",
+        );
+
+        let expected = vec![TokenKind::String("one twothree".to_string())];
 
         assert_eq!(actual, expected);
     }

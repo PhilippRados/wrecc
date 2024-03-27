@@ -190,7 +190,7 @@ impl<T> NameSpace<T> {
 
 #[derive(Debug)]
 pub struct Environment {
-    pub symbols: NameSpace<Symbols>,
+    symbols: NameSpace<Symbols>,
     tags: NameSpace<Tags>,
 }
 impl Environment {

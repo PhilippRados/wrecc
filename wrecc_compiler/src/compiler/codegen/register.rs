@@ -86,20 +86,30 @@ impl Register {
 }
 #[derive(Debug, PartialEq, Clone)]
 pub enum LabelRegister {
+    // LS0:
+    //    .string "foo"
+    // label-index
     String(usize),
-    Var(String, Type),
+
+    //    .data
+    // _varname:
+    //    .zero 4
+    // identifier name
+    // its type with which it was declared
+    // wether its address has to be retrieved from GlobalAddressTable during runtime
+    Var(String, Type, bool),
 }
 impl LabelRegister {
     pub fn get_type(&self) -> Type {
         match self {
             LabelRegister::String(_) => Type::Pointer(Box::new(Type::Primitive(Primitive::Char))),
-            LabelRegister::Var(_, type_decl) => type_decl.clone(),
+            LabelRegister::Var(_, type_decl, _) => type_decl.clone(),
         }
     }
     fn set_type(&mut self, new_type: Type) {
         match self {
             LabelRegister::String(_) => (),
-            LabelRegister::Var(_, type_decl) => *type_decl = new_type,
+            LabelRegister::Var(_, type_decl, _) => *type_decl = new_type,
         }
     }
     fn name(&self) -> String {
@@ -109,7 +119,7 @@ impl LabelRegister {
     fn base_name(&self) -> String {
         match self {
             LabelRegister::String(index) => format!("LS{index}"),
-            LabelRegister::Var(name, _) => format!("{}", maybe_prefix_underscore(name)),
+            LabelRegister::Var(name, ..) => format!("{}", maybe_prefix_underscore(name)),
         }
     }
 }

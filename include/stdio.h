@@ -12,9 +12,19 @@
 typedef char *FILE;
 typedef long fpos_t;
 
-#define stdin *FILE
-#define stdout *FILE
-#define stderr *FILE
+// INFO: these are platform dependant, so can't ship them
+// macos:
+// extern FILE *__stdinp;
+// extern FILE *__stdoutp;
+// extern FILE *__stderrp;
+// linux:
+// extern FILE *stdin;
+// extern FILE *stdout;
+// extern FILE *stderr;
+
+// #define stdin __stdinp
+// #define stdout __stdoutp
+// #define stderr __stderrp
 
 #define _IOFBF 0
 #define _IOLBF 1

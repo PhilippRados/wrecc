@@ -375,7 +375,9 @@ impl Compiler {
                 Type::Primitive(Primitive::Void),
                 StaticRegister::Literal(type_decl.size() as i64, Type::Primitive(Primitive::Int)),
             ));
-            let reg = Register::Label(LabelRegister::Var(name, type_decl));
+            // INFO: since variable is declared in current translation unit
+            // it doesn't need runtime-addressing
+            let reg = Register::Label(LabelRegister::Var(name, type_decl, false));
 
             var_symbol.borrow_mut().unwrap_var_mut().set_reg(reg);
         }
@@ -384,7 +386,11 @@ impl Compiler {
         var_symbol
             .borrow_mut()
             .unwrap_var_mut()
-            .set_reg(Register::Label(LabelRegister::Var(name, type_decl.clone())));
+            .set_reg(Register::Label(LabelRegister::Var(
+                name,
+                type_decl.clone(),
+                false,
+            )));
 
         match init {
             Init::Scalar(expr) => {

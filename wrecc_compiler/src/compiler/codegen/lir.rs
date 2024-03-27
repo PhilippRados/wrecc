@@ -237,12 +237,27 @@ impl Display for Lir {
                     left.name(),
                     right.name()
                 ),
-                Lir::Load(from, to) => format!(
-                    "\tlea{}    {}, {}",
-                    to.get_type().suffix(),
-                    from.name(),
-                    to.name()
-                ),
+                Lir::Load(from, to) => {
+                    // if address has to be computed at runtime then add
+                    // Global-Offset-Table attribute to it's name
+                    if let Register::Label(LabelRegister::Var(name, ty, true)) = from {
+                        let runtime_name = format!("{}@GOTPCREL", name);
+                        let label = Register::Label(LabelRegister::Var(runtime_name, ty.clone(), true));
+                        format!(
+                            "\tmov{}    {}, {}",
+                            to.get_type().suffix(),
+                            label.name(),
+                            to.name()
+                        )
+                    } else {
+                        format!(
+                            "\tlea{}    {}, {}",
+                            to.get_type().suffix(),
+                            from.name(),
+                            to.name()
+                        )
+                    }
+                }
                 Lir::Set(operator) => format!("\t{}   %al", operator),
                 Lir::Xor(left, right) => format!(
                     "\txor{}   {}, {}",

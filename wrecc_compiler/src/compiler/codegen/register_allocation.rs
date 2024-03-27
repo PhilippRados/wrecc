@@ -698,6 +698,7 @@ mod tests {
             Lir::Call(Register::Label(LabelRegister::Var(
                 "foo".to_string(),
                 setup_type!("void (int, int)"),
+                false,
             ))),
             Lir::RestoreRegs,
         ];
@@ -742,6 +743,7 @@ mod tests {
             Lir::Call(Register::Label(LabelRegister::Var(
                 "foo".to_string(),
                 setup_type!("void (int, int)"),
+                false,
             ))),
         ];
 

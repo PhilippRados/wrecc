@@ -108,14 +108,12 @@ impl TypeChecker {
             let symbol = if is_typedef {
                 Symbols::TypeDef(parsed_type.clone())
             } else {
+                let kind = if init.is_some() {
+                    InitType::Definition
+                } else {
+                    InitType::Declaration
+                };
                 Symbols::Variable(SymbolInfo {
-                    kind: if init.is_some() {
-                        InitType::Definition
-                    } else {
-                        InitType::Declaration
-                    },
-                    token: name.clone(),
-                    type_decl: parsed_type.clone(),
                     // since global variable declarations can be used before initialization already
                     // insert its register.
                     // also have to insert function-labels otherwise their registers are never filled,
@@ -124,10 +122,16 @@ impl TypeChecker {
                         Some(Register::Label(LabelRegister::Var(
                             name.unwrap_string(),
                             parsed_type.clone(),
+                            // variable address is computed at runtime if defined in other
+                            // translation unit
+                            parsed_type.is_func() && kind == InitType::Declaration,
                         )))
                     } else {
                         None
                     },
+                    kind,
+                    token: name.clone(),
+                    type_decl: parsed_type.clone(),
                 })
             };
 
@@ -825,6 +829,7 @@ impl TypeChecker {
                 reg: Some(Register::Label(LabelRegister::Var(
                     name_string.clone(),
                     type_decl,
+                    false,
                 ))),
                 token: name.clone(),
             }),

@@ -159,7 +159,7 @@ impl ExprKind {
             if let Some((literal, amount)) =
                 maybe_scale_index(&left_type, &right_type, &mut left_n, &mut right_n)
             {
-                *literal *= amount as i64;
+                *literal = literal.overflowing_mul(amount as i64).0;
             }
 
             Ok(Some(match token.kind {
@@ -251,11 +251,12 @@ impl ExprKind {
         right_type: Type,
         (value, overflow): (i64, bool),
     ) -> Result<ExprKind, Error> {
-        let result_type = if left_type.size() > right_type.size() {
-            left_type
-        } else {
-            right_type
+        let result_type = match (left_type, right_type) {
+            (ty @ Type::Pointer(_), _) | (_, ty @ Type::Pointer(_)) => ty,
+            (left, right) if left.size() > right.size() => left,
+            (_, right) => right,
         };
+
         let result_type = if result_type.size() < Primitive::Int.size() {
             Type::Primitive(Primitive::Int)
         } else {
@@ -649,6 +650,8 @@ mod tests {
         assert_fold_type("4294967296 + 1", "4294967297", "long");
         assert_fold_type("2147483648 - 10", "(long)2147483638", "long");
         assert_fold_type("'1' * 2147483648", "105226698752", "long");
+        assert_fold_type("(int*)1 + 2147483648", "(int*)8589934593", "int*");
+        assert_fold_type("2147483648 + (int*)1", "(int*)8589934593", "int*");
 
         assert_fold_type("'a'", "'a'", "char");
         assert_fold_type("-'a'", "-'a'", "int");
@@ -658,6 +661,8 @@ mod tests {
 
         assert_fold_type("-2147483649", "-2147483649", "long");
         assert_fold_type("(int)-2147483648", "(int)-2147483648", "int");
+
+        assert_fold_type("(char **)1 + (9223372036854775805 * 1)", "(char**)-23", "char**");
     }
 
     #[test]

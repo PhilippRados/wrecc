@@ -251,7 +251,7 @@ impl TypeChecker {
             parsed_type = match m {
                 hir::decl::DeclModifier::Pointer => parsed_type.pointer_to(),
                 hir::decl::DeclModifier::Array(token, mut expr) => {
-                    let size = expr.get_literal_constant(self, &token, "Array size specifier")?;
+                    let size = expr.get_literal_constant(self, &token, "array size specifier")?;
 
                     if parsed_type.is_func() {
                         return Err(Error::new(&token, ErrorKind::InvalidArray(parsed_type)));
@@ -424,7 +424,7 @@ impl TypeChecker {
 
         for (name, init) in constants {
             if let Some(mut init_expr) = init {
-                index = init_expr.get_literal_constant(self, &name, "Enum Constant")? as i32;
+                index = init_expr.get_literal_constant(self, &name, "enum Constant")? as i32;
             }
 
             // insert enum constant into symbol table
@@ -524,7 +524,7 @@ impl TypeChecker {
         let expr = Self::maybe_cast(type_decl.clone(), expr);
 
         if self.env.is_global() && !expr.is_constant() {
-            return Err(Error::new(token, ErrorKind::NotConstantInit("Global variables")));
+            return Err(Error::new(token, ErrorKind::NotConstantInit("global variables")));
         }
 
         Ok(mir::decl::Init::Scalar(expr))
@@ -661,7 +661,7 @@ impl TypeChecker {
     ) -> Result<(i64, i64, Type), Error> {
         match (designator.kind, type_decl) {
             (hir::decl::DesignatorKind::Array(mut expr), Type::Array { amount, of }) => {
-                let literal = expr.get_literal_constant(self, &designator.token, "Array designator")?;
+                let literal = expr.get_literal_constant(self, &designator.token, "array designator")?;
                 if literal < 0 {
                     return Err(Error::new(
                         &designator.token,

@@ -605,7 +605,7 @@ impl Compiler {
             }
             ExprKind::ScaleUp { by, expr } => {
                 if let StaticRegister::Literal(n, type_decl) = self.execute_global_expr(*expr) {
-                    let n = n * by as i64;
+                    let n = n.overflowing_mul(by as i64).0;
                     let scaled_type = integer_type(n);
 
                     let type_decl = if type_decl.size() < scaled_type.size() {

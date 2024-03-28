@@ -1,0 +1,16 @@
+error: array-size exceeds maximum size of 9223372036854775807
+|  --> in tests/fixtures/array_too_big.c:3:6
+|
+3 int a[9223372036854775805];
+|      ^
+error: array size has to be greater than zero
+|  --> in tests/fixtures/array_too_big.c:5:6
+|
+5 int b[(int)2147483649];
+|      ^
+error: array-size exceeds maximum size of 9223372036854775807
+|  --> in tests/fixtures/array_too_big.c:7:20
+|
+7 int main() { long a[8223352035854775400]; }
+|                    ^
+3 errors generated.

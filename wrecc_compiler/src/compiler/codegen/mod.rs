@@ -373,7 +373,7 @@ impl Compiler {
         } else {
             self.write_out(Lir::GlobalInit(
                 Type::Primitive(Primitive::Void),
-                StaticRegister::Literal(type_decl.size() as i64, Type::Primitive(Primitive::Int)),
+                StaticRegister::Literal(type_decl.size() as i64, Type::Primitive(Primitive::Long)),
             ));
             // INFO: since variable is declared in current translation unit
             // it doesn't need runtime-addressing
@@ -411,7 +411,7 @@ impl Compiler {
                     if diff != 0 {
                         self.write_out(Lir::GlobalInit(
                             Type::Primitive(Primitive::Void),
-                            StaticRegister::Literal(diff, Type::Primitive(Primitive::Int)),
+                            StaticRegister::Literal(diff, Type::Primitive(Primitive::Long)),
                         ));
                         size -= diff;
                     }
@@ -426,7 +426,7 @@ impl Compiler {
                 if size > 0 {
                     self.write_out(Lir::GlobalInit(
                         Type::Primitive(Primitive::Void),
-                        StaticRegister::Literal(size, Type::Primitive(Primitive::Int)),
+                        StaticRegister::Literal(size, Type::Primitive(Primitive::Long)),
                     ));
                 }
             }
@@ -507,7 +507,7 @@ impl Compiler {
             eax_reg.clone(),
         ));
         self.write_out(Lir::Mov(
-            Register::Literal(amount as i64, Type::Primitive(Primitive::Int)),
+            Register::Literal(amount as i64, Type::Primitive(Primitive::Long)),
             ecx_reg.clone(),
         ));
         self.write_out(Lir::Load(var_reg, rdi_reg.clone()));
@@ -642,7 +642,7 @@ impl Compiler {
                                 StaticRegister::LabelOffset(label_reg, offset as i64, TokenKind::Plus)
                             }
                             StaticRegister::LabelOffset(reg, existant_offset, _) => {
-                                let offset = existant_offset + offset as i64;
+                                let offset = existant_offset.overflowing_add(offset as i64).0;
                                 if offset < 0 {
                                     StaticRegister::LabelOffset(reg, offset.abs(), TokenKind::Minus)
                                 } else {
@@ -672,7 +672,7 @@ impl Compiler {
 
                     (StaticRegister::LabelOffset(reg, offset, _), StaticRegister::Literal(n, _))
                     | (StaticRegister::Literal(n, _), StaticRegister::LabelOffset(reg, offset, _)) => {
-                        let offset = n + offset;
+                        let offset = n.overflowing_add(offset as i64).0;
                         if offset < 0 {
                             StaticRegister::LabelOffset(reg, offset.abs(), TokenKind::Minus)
                         } else {

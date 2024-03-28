@@ -213,6 +213,7 @@ impl Type {
     pub fn max(&self) -> i64 {
         match self {
             Type::Primitive(t) => t.max(),
+            Type::Enum(..) => i32::MAX as i64,
             Type::Pointer(_) => i64::MAX,
             _ => unreachable!(),
         }
@@ -220,8 +221,18 @@ impl Type {
     pub fn min(&self) -> i64 {
         match self {
             Type::Primitive(t) => t.min(),
+            Type::Enum(..) => i32::MIN as i64,
             Type::Pointer(_) => i64::MIN,
             _ => unreachable!(),
+        }
+    }
+
+    pub fn maybe_wrap(&self, n: i64) -> Option<i64> {
+        match self {
+            Type::Primitive(Primitive::Char) => Some(n as i8 as i64),
+            Type::Primitive(Primitive::Int) | Type::Enum(..) => Some(n as i32 as i64),
+            Type::Pointer(_) | Type::Primitive(Primitive::Long) => Some(n),
+            _ => None,
         }
     }
 

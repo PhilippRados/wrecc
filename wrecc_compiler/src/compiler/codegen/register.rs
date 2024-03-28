@@ -37,7 +37,7 @@ impl Register {
             Register::Void => unimplemented!(),
             Register::Stack(reg) => reg.name(),
             Register::Label(reg) => reg.name(),
-            Register::Literal(n, _) => format!("${n}"),
+            Register::Literal(n, type_decl) => format!("${}", literal_name(n, type_decl)),
             Register::Temp(reg) => reg.name(),
             Register::Return(t) => t.return_reg(),
             Register::Arg(reg) => reg.name(),
@@ -49,7 +49,7 @@ impl Register {
             Register::Void | Register::Return(..) => unimplemented!(),
             Register::Stack(reg) => reg.name(),
             Register::Label(reg) => reg.base_name(),
-            Register::Literal(n, ..) => format!("{n}"),
+            Register::Literal(n, type_decl) => literal_name(n, type_decl),
             Register::Temp(reg) => reg.base_name(),
             Register::Arg(reg) => reg.base_name(),
         }
@@ -124,6 +124,13 @@ impl LabelRegister {
     }
 }
 
+fn literal_name(n: &i64, type_decl: &Type) -> String {
+    format!(
+        "{}",
+        type_decl.maybe_wrap(*n).expect("num literal has scalar type")
+    )
+}
+
 // operands that are allowed in data/bss sections
 #[derive(Debug)]
 pub enum StaticRegister {
@@ -158,7 +165,7 @@ impl StaticRegister {
                 },
                 offset
             ),
-            StaticRegister::Literal(n, _) => format!("{n}"),
+            StaticRegister::Literal(n, type_decl) => literal_name(n, type_decl),
         }
     }
 }

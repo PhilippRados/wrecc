@@ -418,12 +418,10 @@ impl ExprKind {
         new_type: Type,
         right_fold: i64,
     ) -> Result<(i64, Type), Error> {
-        let result = match (&old_type, &new_type) {
-            (old, new) if !old.is_scalar() || !new.is_scalar() => None,
-            (_, Type::Primitive(Primitive::Char)) => Some(right_fold as i8 as i64),
-            (_, Type::Primitive(Primitive::Int) | Type::Enum(..)) => Some(right_fold as i32 as i64),
-            (_, Type::Primitive(Primitive::Long) | Type::Pointer(_)) => Some(right_fold),
-            _ => None,
+        let result = if old_type.is_scalar() && new_type.is_scalar() {
+            new_type.maybe_wrap(right_fold)
+        } else {
+            None
         };
 
         if let Some(result) = result {
@@ -554,6 +552,8 @@ mod tests {
 
         assert_fold_type("(long)-5 >> 42", "(long)-1", "long");
         assert_fold_type("(long)-5 << 42", "-21990232555520", "long");
+
+        assert_fold("(enum A {B})4 << 2", "(enum A {B})16");
     }
     #[test]
     fn shift_fold_error() {
@@ -572,6 +572,7 @@ mod tests {
 
         assert_fold_error!("-16 << -2", ErrorKind::NegativeShift);
         assert_fold_error!("-5 >> -1", ErrorKind::NegativeShift);
+        assert_fold_error!("2 << (int)9223372036854775806", ErrorKind::NegativeShift);
 
         assert_fold_error!(
             "2147483647 << 2",

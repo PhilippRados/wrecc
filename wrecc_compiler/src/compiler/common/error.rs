@@ -119,6 +119,7 @@ pub enum ErrorKind {
     InvalidArray(Type),
     InvalidCaller(Type),
     FunctionMember(String, Type),
+    ArraySizeOverflow,
 
     // environment errors
     UndeclaredSymbol(String),
@@ -230,6 +231,9 @@ impl ErrorKind {
                 format!("initializer overflow, excess elements in '{}'", type_decl)
             }
             ErrorKind::ScalarOverflow => "excess elements in scalar initializer".to_string(),
+            ErrorKind::ArraySizeOverflow => {
+                "array-size exceeds maximum size of 9223372036854775807".to_string()
+            }
             ErrorKind::InvalidArray(type_decl) => format!("invalid array-type: '{}'", type_decl),
             ErrorKind::InvalidCaller(type_decl) => format!(
                 "called object type: '{}' is not function or function pointer",

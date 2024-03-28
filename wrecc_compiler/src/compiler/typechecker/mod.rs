@@ -251,14 +251,17 @@ impl TypeChecker {
             parsed_type = match m {
                 hir::decl::DeclModifier::Pointer => parsed_type.pointer_to(),
                 hir::decl::DeclModifier::Array(token, mut expr) => {
-                    let size = expr.get_literal_constant(self, &token, "array size specifier")?;
+                    let amount = expr.get_literal_constant(self, &token, "array size specifier")?;
 
                     if parsed_type.is_func() {
                         return Err(Error::new(&token, ErrorKind::InvalidArray(parsed_type)));
                     }
 
-                    if size > 0 {
-                        parsed_type.array_of(size as usize)
+                    if amount > 0 {
+                        if i64::overflowing_mul(parsed_type.size() as i64, amount).1 {
+                            return Err(Error::new(&token, ErrorKind::ArraySizeOverflow));
+                        }
+                        parsed_type.array_of(amount as usize)
                     } else {
                         return Err(Error::new(&token, ErrorKind::NegativeArraySize));
                     }
@@ -2565,6 +2568,17 @@ int a;";
             actual,
             Err(Error { kind: ErrorKind::ScalarOverflow, .. })
         ));
+    }
+    #[test]
+    fn array_size_overflow() {
+        let actual_overflow = setup_init_list("int arr[2305843009213693952];");
+        assert!(matches!(
+            actual_overflow,
+            Err(Error { kind: ErrorKind::ArraySizeOverflow, .. })
+        ));
+
+        let actual_no_overflow = setup_init_list("int arr[2305843009213693951] = {};");
+        assert!(actual_no_overflow.is_ok());
     }
     #[test]
     fn partial_nested_arr_override() {

@@ -78,6 +78,8 @@ fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
         "macos" => {
             cmd.arg("-dynamic")
                 .arg("-lSystem")
+                .arg("-L/usr/lib")
+                .arg("-L/usr/local/lib")
                 .arg("-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib")
                 .arg("-L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/")
                 .arg(filename.get());

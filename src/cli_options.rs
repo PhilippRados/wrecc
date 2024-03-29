@@ -11,17 +11,17 @@ const VERSION: &str = concat!(
 );
 
 const USAGE: &str = "\
-usage: wrecc [-o | --output <file>] [-I | --include-dir <dir>] [-D | --define <name>=<value>]
-             [-L <dir>] [-l <name>] [-E | --preprocess-only] [-S | --compile-only] 
-             [-c | --no-link] [--dump-ast] [--no-color] [-h | --help] [-v | --version] <file>";
+usage: wrecc [-o <file>] [-I <dir>] [-D <name>=<value>]
+             [-L <dir>] [-l <name>] [-E] [-S] [-c] [--dump-ast]
+             [--no-color] [-h | --help] [-v] <file>";
 
 const HELP: &str = "usage: wrecc [options] <file>
 options:
     -o | --output <file>                Specifies the output-file to write to
     -I | --include-dir <dir>            Adds <dir> to the directories to be searched for using #include
     -D | --define <macro-name>=<value>  Defines a new object-like macro
-    -L <dir>                            Adds <dir> to the directories to be searched during linking (passed as -L<dir> to linker)
-    -l <name>                           Looks for shared libraries with <name> (passed as -l<name> to linker)
+    -L | --library-path <dir>           Adds <dir> to the directories to tthe library search paths (passed as -L<dir> to linker)
+    -l | --library <name>               Looks for shared libraries with <name> in library search paths (passed as -l<name> to linker)
     -E | --preprocess-only              Stops evaluation after preprocessing printing the preprocessed source
     -S | --compile-only                 Stops evaluation after compiling resulting in a .s file
     -c | --no-link                      Stops evaluation after assembling resulting in a .o file
@@ -134,7 +134,7 @@ impl CliOptions {
                             .defines
                             .push((macro_name.to_string(), value.to_string()));
                     }
-                    "-L" => {
+                    "-L" | "--library-path" => {
                         if let Some(path) = args.next() {
                             cli_options.lib_paths.push(PathBuf::from(path));
                         } else {
@@ -144,7 +144,7 @@ impl CliOptions {
                             )]));
                         }
                     }
-                    "-l" => {
+                    "-l" | "--library" => {
                         if let Some(lib_name) = args.next() {
                             cli_options.shared_libs.push(lib_name);
                         } else {

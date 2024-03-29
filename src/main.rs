@@ -76,10 +76,10 @@ fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
     let mut cmd = Command::new("ld");
     match std::env::consts::OS {
         "macos" => {
-            // WARN: first check where SDK is installed and if not emit error-message
             cmd.arg("-dynamic")
                 .arg("-lSystem")
                 .arg("-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib")
+                .arg("-L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/")
                 .arg(filename.get());
         }
         "linux" => {
@@ -110,7 +110,7 @@ fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
                 .arg(format!("{}/crtend.o", gcc_libpath.display()))
                 .arg(format!("{}/crtn.o", libpath.display()));
         }
-        _ => return Err(WreccError::Sys(String::from("only supports linx and macos"))),
+        _ => return Err(WreccError::Sys(String::from("only supports linux and macos"))),
     }
 
     for path in options.lib_paths {

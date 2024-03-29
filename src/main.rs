@@ -62,15 +62,6 @@ fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, WreccErr
         )))
     }
 }
-fn find_libpath() -> Result<PathBuf, WreccError> {
-    if Path::new("/usr/lib/x86_64-linux-gnu/crti.o").exists() {
-        return Ok(PathBuf::from("/usr/lib/x86_64-linux-gnu/"));
-    }
-    if Path::new("/usr/lib64/crti.o").exists() {
-        return Ok(PathBuf::from("/usr/lib64"));
-    }
-    Err(WreccError::Sys(String::from("library path not found")))
-}
 
 fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
     let mut cmd = Command::new("ld");
@@ -83,40 +74,39 @@ fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
                 .arg("-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib")
                 .arg("-L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/")
                 .arg(filename.get());
+
+                for path in options.lib_paths {
+                    cmd.arg(format!("-L{}", path.display()));
+                }
         }
         "linux" => {
-            let libpath = find_libpath()?;
-            // FIXME: this should be done dynamically
-            let gcc_libpath = Path::new("/usr/lib/gcc/x86_64-linux-gnu/9");
+            let mut lib_paths = [
+                "/usr/lib/x86_64-linux-gnu",
+                "/usr/lib64",
+                "/lib64",
+                "/usr/lib/x86_64-pc-linux-gnu",
+                "/usr/lib/x86_64-redhat-linux",
+                "/usr/lib",
+                "/lib",
+            ].into_iter().map(PathBuf::from).chain(options.lib_paths.into_iter());
+
+            let lib_path = lib_paths.find(|path| path.join("crti.o").exists()).ok_or_else(||WreccError::Sys(String::from("library path not found")))?;
             cmd.arg("-m")
                 .arg("elf_x86_64")
                 .arg("-dynamic-linker")
                 .arg("/lib64/ld-linux-x86-64.so.2")
-                .arg(format!("{}/crt1.o", libpath.display()))
-                .arg(format!("{}/crti.o", libpath.display()))
-                .arg(format!("{}/crtbegin.o", gcc_libpath.display()))
-                .arg(format!("-L{}", gcc_libpath.display()))
-                .arg("-L/usr/lib/x86_64-linux-gnu")
-                .arg("-L/usr/lib64")
-                .arg("-L/lib64")
-                .arg("-L/usr/lib/x86_64-linux-gnu")
-                .arg("-L/usr/lib/x86_64-pc-linux-gnu")
-                .arg("-L/usr/lib/x86_64-redhat-linux")
-                .arg("-L/usr/lib")
-                .arg("-L/lib")
-                .arg(filename.get())
+                .arg(format!("{}/crt1.o", lib_path.display()))
+                .arg(format!("{}/crti.o", lib_path.display()));
+
+            for path in lib_paths {
+                cmd.arg(format!("-L{}", path.display()));
+            }
+
+            cmd.arg(filename.get())
                 .arg("-lc")
-                .arg("-lgcc")
-                .arg("--as-needed")
-                .arg("-lgcc_s")
-                .arg(format!("{}/crtend.o", gcc_libpath.display()))
-                .arg(format!("{}/crtn.o", libpath.display()));
+                .arg(format!("{}/crtn.o", lib_path.display()));
         }
         _ => return Err(WreccError::Sys(String::from("only supports linux and macos"))),
-    }
-
-    for path in options.lib_paths {
-        cmd.arg(format!("-L{}", path.display()));
     }
 
     for name in options.shared_libs {

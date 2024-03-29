@@ -13,23 +13,23 @@ const VERSION: &str = concat!(
 const USAGE: &str = "\
 usage: wrecc [-o <file>] [-I <dir>] [-D <name>=<value>]
              [-L <dir>] [-l <name>] [-E] [-S] [-c] [--dump-ast]
-             [--no-color] [-h | --help] [-v] <file>";
+             [--no-color] [-h | --help] [-v] <file>";
 
 const HELP: &str = "usage: wrecc [options] <file>
 options:
     -o | --output <file>                Specifies the output-file to write to
     -I | --include-dir <dir>            Adds <dir> to the directories to be searched for using #include
     -D | --define <macro-name>=<value>  Defines a new object-like macro
-    -L | --library-path <dir>           Adds <dir> to the directories to tthe library search paths (passed as -L<dir> to linker)
-    -l | --library <name>               Looks for shared libraries with <name> in library search paths (passed as -l<name> to linker)
-    -E | --preprocess-only              Stops evaluation after preprocessing printing the preprocessed source
-    -S | --compile-only                 Stops evaluation after compiling resulting in a .s file
-    -c | --no-link                      Stops evaluation after assembling resulting in a .o file
+    -L | --library-path <dir>           Adds <dir> to the directories to tthe library search paths (passed as -L<dir> to linker)
+    -l | --library <name>               Looks for shared libraries with <name> in library search paths (passed as -l<name> to linker)
+    -E | --preprocess-only              Stops evaluation after preprocessing printing the preprocessed source
+    -S | --compile-only                 Stops evaluation after compiling resulting in a .s file
+    -c | --no-link                      Stops evaluation after assembling resulting in a .o file
          --dump-ast                     Displays the AST produced by the parser while also compiling program as usual
          --no-color                     Errors are printed without color
     -h                                  Prints usage information
     --help                              Prints elaborate help information
-    -v | --version                      Prints version information
+    -v | --version                      Prints version information
 
 file:
     The C source file to be read";

@@ -72,7 +72,7 @@ fn find_libpath() -> Result<PathBuf, WreccError> {
     Err(WreccError::Sys(String::from("library path not found")))
 }
 
-fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), WreccError> {
+fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
     let mut cmd = Command::new("ld");
     match std::env::consts::OS {
         "macos" => {
@@ -113,7 +113,15 @@ fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), WreccErr
         _ => return Err(WreccError::Sys(String::from("only supports linx and macos"))),
     }
 
-    if let Some(output_name) = output_path {
+    for path in options.lib_paths {
+        cmd.arg(format!("-L{}", path.display()));
+    }
+
+    for name in options.shared_libs {
+        cmd.arg(format!("-l{}", name));
+    }
+
+    if let Some(output_name) = options.output_path {
         cmd.arg("-o");
         cmd.arg(output_name);
     }
@@ -129,7 +137,7 @@ fn link(filename: OutFile, output_path: &Option<PathBuf>) -> Result<(), WreccErr
     }
 }
 
-fn run(options: &CliOptions) -> Result<(), WreccError> {
+fn run(options: CliOptions) -> Result<(), WreccError> {
     let source = read_input_file(&options.file_path)?;
     let pp_source = preprocess(
         &options.file_path,
@@ -144,19 +152,19 @@ fn run(options: &CliOptions) -> Result<(), WreccError> {
 
     let asm_source = compile(pp_source, options.dump_ast)?;
 
-    let asm_file = generate_asm_file(options, asm_source)?;
+    let asm_file = generate_asm_file(&options, asm_source)?;
 
     if options.compile_only {
         return Ok(());
     }
 
-    let object_file = assemble(options, asm_file)?;
+    let object_file = assemble(&options, asm_file)?;
 
     if options.no_link {
         return Ok(());
     }
 
-    link(object_file, &options.output_path)?;
+    link(options, object_file)?;
 
     Ok(())
 }
@@ -164,8 +172,9 @@ fn run(options: &CliOptions) -> Result<(), WreccError> {
 // seperate main to clean up all destructors
 fn real_main() -> Result<(), ()> {
     let options = CliOptions::parse().map_err(|errs| errs.print(false))?;
+    let no_color = options.no_color;
 
-    run(&options).map_err(|errs| errs.print(options.no_color))
+    run(options).map_err(|errs| errs.print(no_color))
 }
 
 fn main() {

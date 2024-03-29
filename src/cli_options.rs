@@ -11,15 +11,17 @@ const VERSION: &str = concat!(
 );
 
 const USAGE: &str = "\
-usage: wrecc [-o | --output <file>] [-I | --include-dir <dir>]
-             [-D | --define <name>=<value>] [-E | --preprocess-only] [-S | --compile-only] 
+usage: wrecc [-o | --output <file>] [-I | --include-dir <dir>] [-D | --define <name>=<value>]
+             [-L <dir>] [-l <name>] [-E | --preprocess-only] [-S | --compile-only] 
              [-c | --no-link] [--dump-ast] [--no-color] [-h | --help] [-v | --version] <file>";
 
 const HELP: &str = "usage: wrecc [options] <file>
 options:
     -o | --output <file>                Specifies the output-file to write to
-    -I | --include-dir <dir>            Add single <dir> to the directories to be searched for using #include
+    -I | --include-dir <dir>            Adds <dir> to the directories to be searched for using #include
     -D | --define <macro-name>=<value>  Defines a new object-like macro
+    -L <dir>                            Adds <dir> to the directories to be searched during linking (passed as -L<dir> to linker)
+    -l <name>                           Looks for shared libraries with <name> (passed as -l<name> to linker)
     -E | --preprocess-only              Stops evaluation after preprocessing printing the preprocessed source
     -S | --compile-only                 Stops evaluation after compiling resulting in a .s file
     -c | --no-link                      Stops evaluation after assembling resulting in a .o file
@@ -65,6 +67,12 @@ pub struct CliOptions {
     // all definitions passed as cli-arguments
     // INFO: duplicate definitions are caught in preprocessor
     pub defines: Vec<(String, String)>,
+
+    // adds a path to the directories to be searched during linking (passed as -L<dir> to linker)
+    pub lib_paths: Vec<PathBuf>,
+
+    // adds name to the shared libraries going to be linked (passed as -l<name> to linker)
+    pub shared_libs: Vec<String>,
 }
 impl CliOptions {
     fn new() -> CliOptions {
@@ -72,6 +80,8 @@ impl CliOptions {
             file_path: PathBuf::new(),
             user_include_dirs: Vec::new(),
             defines: Vec::new(),
+            lib_paths: Vec::new(),
+            shared_libs: Vec::new(),
             output_path: None,
             preprocess_only: false,
             compile_only: false,
@@ -108,7 +118,7 @@ impl CliOptions {
                         }
                     }
                     "-D" | "--define" => {
-                        let Some(arg) = args.next()  else {
+                        let Some(arg) = args.next() else {
                             return Err(WreccError::Cli(vec![format!(
                                 "expected macro-definition following '{}' option",
                                 arg
@@ -123,6 +133,26 @@ impl CliOptions {
                         cli_options
                             .defines
                             .push((macro_name.to_string(), value.to_string()));
+                    }
+                    "-L" => {
+                        if let Some(path) = args.next() {
+                            cli_options.lib_paths.push(PathBuf::from(path));
+                        } else {
+                            return Err(WreccError::Cli(vec![format!(
+                                "expected directory path following '{}' option",
+                                arg
+                            )]));
+                        }
+                    }
+                    "-l" => {
+                        if let Some(lib_name) = args.next() {
+                            cli_options.shared_libs.push(lib_name);
+                        } else {
+                            return Err(WreccError::Cli(vec![format!(
+                                "expected library name following '{}' option",
+                                arg
+                            )]));
+                        }
                     }
                     "-E" | "--preprocess-only" => cli_options.preprocess_only = true,
                     "-S" | "--compile-only" => cli_options.compile_only = true,

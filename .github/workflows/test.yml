@@ -1,0 +1,29 @@
+name: Run tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Rust
+        uses: actions/setup-rust@v1
+
+      - name: unit tests
+        run: cargo test --all
+
+      - name: snapshot tests
+        run: |
+         chmod +x ./tests/snapshot_test.sh
+         ./tests/snapshot_test.sh
+        shell: bash

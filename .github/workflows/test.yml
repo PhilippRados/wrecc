@@ -1,8 +1,6 @@
-name: Run tests
+name: Test
 
-on:
-  push:
-  pull_request:
+on: [push, pull_request]
 
 jobs:
   test:
@@ -16,11 +14,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Set up Rust
-        uses: actions/setup-rust@v1
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
 
-      - name: unit tests
-        run: cargo test --all
+      - name: cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --all
 
       - name: snapshot tests
         run: |

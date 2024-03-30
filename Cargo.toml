@@ -2,8 +2,13 @@
 name = "wrecc"
 version = "0.1.0"
 edition = "2021"
+authors = ["Philipp Rados"]
+license = "MIT"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+keywords = ["compiler", "c", "x86_64","codegen"]
+repository = "https://github.com/PhilippRados/wrecc"
+description = "A x86_64 C99 compiler written from scratch"
+readme = "README.md"
 
 [dependencies]
 wrecc_compiler = { path = "./wrecc_compiler/" }

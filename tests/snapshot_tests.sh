@@ -50,3 +50,6 @@ done
 
 # Prints out test-results
 printf "\nTests passed: $PASSED\nTests failed: $FAILED\n"
+if [ $FAILED -gt 0 ]; then
+  exit 1
+fi

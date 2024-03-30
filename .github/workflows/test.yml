@@ -29,6 +29,6 @@ jobs:
 
       - name: snapshot tests
         run: |
-         chmod +x ./tests/snapshot_test.sh
-         ./tests/snapshot_test.sh
+         chmod +x ./tests/snapshot_tests.sh
+         ./tests/snapshot_tests.sh
         shell: bash

@@ -522,15 +522,14 @@ mod struct_ref {
 
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fn suffix_exists(modifiers: &Vec<&Type>, i: usize) -> bool {
+        fn suffix_exists(modifiers: &[&Type], i: usize) -> bool {
             modifiers
                 .iter()
                 .skip(i)
-                .find(|m| matches!(m, Type::Array { .. } | Type::Function { .. }))
-                .is_some()
+                .any(|m| matches!(m, Type::Array { .. } | Type::Function { .. }))
         }
-        fn closing_precedence(modifiers: &Vec<&Type>, i: usize) -> &'static str {
-            if matches!(modifiers.get(i + 1), Some(Type::Pointer(_))) && suffix_exists(&modifiers, i + 1)
+        fn closing_precedence(modifiers: &[&Type], i: usize) -> &'static str {
+            if matches!(modifiers.get(i + 1), Some(Type::Pointer(_))) && suffix_exists(modifiers, i + 1)
             {
                 ")"
             } else {
@@ -541,17 +540,15 @@ impl Display for Type {
         fn print_type(type_decl: &Type) -> String {
             let mut current = type_decl;
             let mut modifiers = Vec::new();
-            loop {
-                match current {
-                    Type::Pointer(new)
-                    | Type::Array { of: new, .. }
-                    | Type::Function(FuncType { return_type: new, .. }) => {
-                        modifiers.push(current);
-                        current = new;
-                    }
-                    _ => break,
-                }
+
+            while let Type::Pointer(new)
+            | Type::Array { of: new, .. }
+            | Type::Function(FuncType { return_type: new, .. }) = current
+            {
+                modifiers.push(current);
+                current = new;
             }
+
             let mut result = match current {
                 Type::Primitive(t) => t.fmt().to_string(),
                 Type::Union(s) => "union ".to_string() + &s.name(),

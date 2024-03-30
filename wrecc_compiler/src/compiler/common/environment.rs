@@ -167,11 +167,7 @@ impl<T> NameSpace<T> {
 
     // checks if element is in current scope
     pub fn get_current(&self, expected: &str) -> Option<Rc<RefCell<T>>> {
-        self.elems
-            .last()
-            .unwrap()
-            .get(expected)
-            .map(|elem| Rc::clone(&elem))
+        self.elems.last().unwrap().get(expected).map(Rc::clone)
     }
     pub fn declare(&mut self, name: String, elem: T) -> Rc<RefCell<T>> {
         let kind = Rc::new(RefCell::new(elem));
@@ -181,7 +177,7 @@ impl<T> NameSpace<T> {
     pub fn get(&self, name: String) -> Option<Rc<RefCell<T>>> {
         for scope in self.elems.iter().rev() {
             if let Some(elem) = scope.get(&name) {
-                return Some(Rc::clone(&elem));
+                return Some(Rc::clone(elem));
             }
         }
         None
@@ -231,10 +227,7 @@ impl Environment {
     ) -> Result<Rc<RefCell<Symbols>>, Error> {
         let global_scope = self.symbols.elems.get_mut(0).expect("always have a global scope");
 
-        if let Some(existing_symbol) = global_scope
-            .get(&var_name.unwrap_string())
-            .map(|elem| Rc::clone(&elem))
-        {
+        if let Some(existing_symbol) = global_scope.get(&var_name.unwrap_string()).map(Rc::clone) {
             return self.check_redef(var_name, symbol, existing_symbol);
         }
 

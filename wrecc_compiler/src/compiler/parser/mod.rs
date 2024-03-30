@@ -817,12 +817,10 @@ impl Parser {
 
                     Ok(Some(Box::new(Stmt::Declaration(decl))))
                 }
-                ExternalDeclaration::Function(_, name, _) => {
-                    return Err(Error::new(
-                        &name,
-                        ErrorKind::Regular("cannot define functions in for-statement"),
-                    ));
-                }
+                ExternalDeclaration::Function(_, name, _) => Err(Error::new(
+                    &name,
+                    ErrorKind::Regular("cannot define functions in for-statement"),
+                )),
             }),
             false if !check!(self, TokenKind::Semicolon) => {
                 Ok(Some(Box::new(self.expression_statement()?)))

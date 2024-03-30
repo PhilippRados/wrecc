@@ -75,9 +75,9 @@ fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
                 .arg("-L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/")
                 .arg(filename.get());
 
-                for path in options.lib_paths {
-                    cmd.arg(format!("-L{}", path.display()));
-                }
+            for path in options.lib_paths {
+                cmd.arg(format!("-L{}", path.display()));
+            }
         }
         "linux" => {
             let mut lib_paths = [
@@ -88,9 +88,15 @@ fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
                 "/usr/lib/x86_64-redhat-linux",
                 "/usr/lib",
                 "/lib",
-            ].into_iter().map(PathBuf::from).chain(options.lib_paths.into_iter());
+            ]
+            .into_iter()
+            .map(PathBuf::from)
+            .chain(options.lib_paths);
 
-            let lib_path = lib_paths.find(|path| path.join("crti.o").exists()).ok_or_else(||WreccError::Sys(String::from("library path not found")))?;
+            let lib_path = lib_paths
+                .find(|path| path.join("crti.o").exists())
+                .ok_or_else(|| WreccError::Sys(String::from("library path not found")))?;
+
             cmd.arg("-m")
                 .arg("elf_x86_64")
                 .arg("-dynamic-linker")
@@ -98,6 +104,7 @@ fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
                 .arg(format!("{}/crt1.o", lib_path.display()))
                 .arg(format!("{}/crti.o", lib_path.display()));
 
+            // not sure if libc is always in lib_path so I just pass all lib_paths for now
             for path in lib_paths {
                 cmd.arg(format!("-L{}", path.display()));
             }

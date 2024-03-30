@@ -56,6 +56,8 @@ impl Location for PPToken {
     }
 }
 
+type Defines = HashMap<String, Vec<Token>>;
+
 pub struct Preprocessor<'a> {
     // preprocessor tokens as tokenized by preprocessor-scanner
     tokens: DoublePeek<Token>,
@@ -64,7 +66,7 @@ pub struct Preprocessor<'a> {
     filename: &'a Path,
 
     // #define's mapping identifier to list of tokens until newline
-    defines: HashMap<String, Vec<Token>>,
+    defines: Defines,
 
     // list of #if directives with last one being the most deeply nested
     ifs: Vec<IfDirective>,
@@ -88,7 +90,7 @@ impl<'a> Preprocessor<'a> {
     pub fn new(
         filename: &'a Path,
         tokens: Vec<Token>,
-        defines: HashMap<String, Vec<Token>>,
+        defines: Defines,
         user_include_dirs: &'a Vec<PathBuf>,
         standard_headers: &'a HashMap<PathBuf, &'static str>,
         include_depth: usize,
@@ -110,8 +112,8 @@ impl<'a> Preprocessor<'a> {
             &file_path,
             data,
             self.defines.clone(),
-            &self.user_include_dirs,
-            &self.standard_headers,
+            self.user_include_dirs,
+            self.standard_headers,
             self.include_depth + 1,
         )
         .map_err(Error::new_multiple)?;
@@ -603,7 +605,7 @@ impl<'a> Preprocessor<'a> {
         Err(self.ifs.pop().unwrap().location)
     }
 
-    pub fn start(mut self) -> Result<(Vec<PPToken>, HashMap<String, Vec<Token>>), Vec<Error>> {
+    pub fn start(mut self) -> Result<(Vec<PPToken>, Defines), Vec<Error>> {
         let mut result = PPResult::new(self.filename);
         let mut errors = Vec::new();
 
@@ -615,7 +617,10 @@ impl<'a> Preprocessor<'a> {
                     let outcome = if let Some(directive) = self.tokens.next() {
                         match directive.kind {
                             TokenKind::Include => match self.include(directive) {
-                                Ok(s) => Ok(s.into_iter().for_each(|t| result.inner.push(t))),
+                                Ok(s) => {
+                                    s.into_iter().for_each(|t| result.inner.push(t));
+                                    Ok(())
+                                }
                                 Err(e) => Err(e),
                             },
                             TokenKind::Define => self.define(directive),
@@ -763,11 +768,11 @@ impl PPResult {
 fn preprocess_included(
     filename: &Path,
     source: String,
-    defines: HashMap<String, Vec<Token>>,
+    defines: Defines,
     user_include_dirs: &Vec<PathBuf>,
     standard_headers: &HashMap<PathBuf, &'static str>,
     include_depth: usize,
-) -> Result<(Vec<PPToken>, HashMap<String, Vec<Token>>), Vec<Error>> {
+) -> Result<(Vec<PPToken>, Defines), Vec<Error>> {
     let tokens = PPScanner::new(source).scan_token();
 
     Preprocessor::new(
@@ -871,7 +876,7 @@ mod tests {
 
     macro_rules! setup_macro_replacement {
         ($defined:expr) => {{
-            let defined: HashMap<String, Vec<Token>> = $defined
+            let defined: Defines = $defined
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), scan(v)))
                 .collect();

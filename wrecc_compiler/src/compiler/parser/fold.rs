@@ -363,9 +363,9 @@ impl ExprKind {
             (left.as_ref(), right.as_ref())
         {
             if !crate::compiler::typechecker::is_valid_comp(
-                &left_type,
+                left_type,
                 left.as_ref(),
-                &right_type,
+                right_type,
                 right.as_ref(),
             ) {
                 return Err(Error::new(

@@ -13,13 +13,15 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+pub type ConstLabels = HashMap<String, usize>;
+
 pub struct TypeChecker {
-    // TODO: shouldn't be public
+    // TODO: shouldn't have to be public
     // symbol table
     pub env: Environment,
 
     // label with its associated label index
-    const_labels: HashMap<String, usize>,
+    const_labels: ConstLabels,
 
     // label index counter
     const_label_count: usize,
@@ -37,7 +39,7 @@ impl TypeChecker {
     pub fn check(
         mut self,
         external_decls: Vec<hir::decl::ExternalDeclaration>,
-    ) -> Result<(Vec<mir::decl::ExternalDeclaration>, HashMap<String, usize>), Vec<Error>> {
+    ) -> Result<(Vec<mir::decl::ExternalDeclaration>, ConstLabels), Vec<Error>> {
         match self.check_declarations(external_decls) {
             Ok(mir) => Ok((mir, self.const_labels)),
             Err(e) => Err(e.flatten_multiple()),
@@ -206,7 +208,7 @@ impl TypeChecker {
         let mut specifier_kind_list: Vec<hir::decl::SpecifierKind> =
             specifiers.into_iter().map(|spec| spec.kind).collect();
 
-        specifier_kind_list.sort_by(|s1, s2| s2.order().cmp(&s1.order()));
+        specifier_kind_list.sort_by_key(|s2| std::cmp::Reverse(s2.order()));
 
         match specifier_kind_list.as_slice() {
             [hir::decl::SpecifierKind::Struct(name, members)]
@@ -371,7 +373,7 @@ impl TypeChecker {
 
         Ok(parsed_members)
     }
-    fn check_duplicate_members(vec: &Vec<(Type, Token)>) -> Result<(), Error> {
+    fn check_duplicate_members(vec: &[(Type, Token)]) -> Result<(), Error> {
         use std::collections::HashSet;
         let mut set = HashSet::new();
         for token in vec.iter().map(|(_, name)| name) {
@@ -632,7 +634,7 @@ impl TypeChecker {
                     objects.update_current();
                 }
 
-                new_list.sort_by(|(.., offset1), (.., offset2)| offset1.cmp(&offset2));
+                new_list.sort_by(|(.., offset1), (.., offset2)| offset1.cmp(offset2));
                 Ok(mir::decl::Init::Aggr(
                     new_list
                         .into_iter()

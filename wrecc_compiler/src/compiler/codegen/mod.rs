@@ -5,7 +5,7 @@ pub mod register_allocation;
 use crate::compiler::codegen::{lir::*, register::*, register_allocation::*};
 use crate::compiler::common::{token::*, types::*};
 use crate::compiler::typechecker::mir::{decl::*, expr::*, stmt::*};
-use crate::compiler::typechecker::{align_by, create_label};
+use crate::compiler::typechecker::{align_by, create_label, ConstLabels};
 
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
@@ -38,7 +38,7 @@ pub struct Compiler {
     label_index: usize,
 
     // map containing Strings and their corresponding label-index
-    const_labels: HashMap<String, usize>,
+    const_labels: ConstLabels,
 
     // loop labels saved so that break and continue jump to them
     jump_labels: Vec<(usize, usize)>,
@@ -48,7 +48,7 @@ pub struct Compiler {
     switch_labels: VecDeque<usize>,
 }
 impl Compiler {
-    pub fn new(const_labels: HashMap<String, usize>) -> Self {
+    pub fn new(const_labels: ConstLabels) -> Self {
         Compiler {
             const_labels,
             output: Vec::with_capacity(100),
@@ -672,7 +672,7 @@ impl Compiler {
 
                     (StaticRegister::LabelOffset(reg, offset, _), StaticRegister::Literal(n, _))
                     | (StaticRegister::Literal(n, _), StaticRegister::LabelOffset(reg, offset, _)) => {
-                        let offset = n.overflowing_add(offset as i64).0;
+                        let offset = n.overflowing_add(offset).0;
                         if offset < 0 {
                             StaticRegister::LabelOffset(reg, offset.abs(), TokenKind::Minus)
                         } else {

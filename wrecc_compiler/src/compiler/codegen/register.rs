@@ -119,7 +119,7 @@ impl LabelRegister {
     fn base_name(&self) -> String {
         match self {
             LabelRegister::String(index) => format!("LS{index}"),
-            LabelRegister::Var(name, ..) => format!("{}", maybe_prefix_underscore(name)),
+            LabelRegister::Var(name, ..) => maybe_prefix_underscore(name).to_string(),
         }
     }
 }

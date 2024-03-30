@@ -258,7 +258,7 @@ impl<'a> Scanner<'a> {
             let mut string = Vec::new();
 
             while let Some(c) = chars.next() {
-                let c = self.parse_char(&pp_token, c, &mut chars)?;
+                let c = self.parse_char(pp_token, c, &mut chars)?;
                 string.push(c);
             }
 

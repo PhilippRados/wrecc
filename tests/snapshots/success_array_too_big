@@ -1,7 +1,7 @@
 error: array-size exceeds maximum size of 9223372036854775807
 |  --> in tests/fixtures/array_too_big.c:3:6
 |
-3 int a[9223372036854775805];
+3 int a[8223372036854775805];
 |      ^
 error: array size has to be greater than zero
 |  --> in tests/fixtures/array_too_big.c:5:6

@@ -1,6 +1,12 @@
+//! Scans input into [preprocessor-tokens](TokenKind) with corresponding locations in the input file.<br>
+//! Comments will be skipped and multiline-strings collapsed into single line, while still
+//! maintaining correct location.<br>
+//! Doesn't emit any errors.
+
 use crate::compiler::parser::double_peek::DoublePeek;
 use std::collections::HashMap;
 
+/// All preprocessor-tokens
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenKind {
     Hash,
@@ -23,6 +29,7 @@ pub enum TokenKind {
     Other(char),
 }
 
+/// [Preprocessor-token](TokenKind) and its location
 #[derive(Clone, Debug, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
@@ -100,6 +107,7 @@ impl ToString for TokenKind {
     }
 }
 
+/// Iterates through input string while maintaining correct location
 pub struct Scanner {
     source: DoublePeek<char>,
     directives: HashMap<&'static str, TokenKind>,

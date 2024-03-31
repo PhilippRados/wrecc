@@ -1,3 +1,8 @@
+//! Recursive descent parser building [parse-tree](hir) as described in [C99 grammar](https://cs.wmich.edu/~gupta/teaching/cs4850/sumII06/The%20syntax%20of%20C%20in%20Backus-Naur%20form.htm)
+//! and checking syntax errors.<br>
+//! Does not stop after first error but synchronizes parser back into valid state to emit multiple
+//! errors at once
+
 pub mod double_peek;
 pub mod fold;
 pub mod hir;

@@ -1,3 +1,6 @@
+//! Custom iterator to peek more then one element to avoid backtracking.
+//! Also stores last token in iterator to have a location when throwing EOF-errors.
+
 use crate::compiler::common::{error::*, token::Token};
 use std::collections::VecDeque;
 

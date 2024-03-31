@@ -1,7 +1,12 @@
+//! Gets [LIR](crate::compiler::codegen::lir::Lir) with virtual registers as input and fills them in with physical registers
+//! using [linear scan](https://en.wikipedia.org/wiki/Register_allocation#Linear_scan),
+//! spilling registers to the stack when no more scratch-registers are free
+
 use crate::compiler::codegen::{lir::*, register::*};
 use crate::compiler::common::types::*;
 use std::collections::HashMap;
 
+/// A virtual registers live-range and if the register might be needed for a special operation
 #[derive(Debug, Clone)]
 pub struct IntervalEntry {
     start: usize,
@@ -22,9 +27,8 @@ impl IntervalEntry {
     }
 }
 
-// gets IR with virtual registers as input and fills them in with physical registers
-// using linear scan; spilling when no more registers are free
 pub struct RegisterAllocation {
+    // live ranges per register
     live_intervals: HashMap<usize, IntervalEntry>,
 
     // physical registers

@@ -1,3 +1,7 @@
+//! Converts [AST](crate::compiler::typechecker::mir) into linear [LIR](lir).<br>
+//! Also builds live-intervals for every virtual-register to be filled in by real scratch-registers
+//! during [Register Allocation](register_allocation)
+
 pub mod lir;
 pub mod register;
 pub mod register_allocation;
@@ -31,13 +35,12 @@ pub struct Compiler {
     interval_counter: usize,
 
     // intervals for register allocation that keep track of lifetime of virtual-registers
-    // (key:register-id, values: (end of lifetime, reg-type, physical register))
     live_intervals: HashMap<usize, IntervalEntry>,
 
     // index of current label
     label_index: usize,
 
-    // map containing Strings and their corresponding label-index
+    // map containing strings and their corresponding label-index
     const_labels: ConstLabels,
 
     // loop labels saved so that break and continue jump to them

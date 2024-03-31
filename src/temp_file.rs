@@ -1,6 +1,10 @@
+//! Handles generating and deleting files which are needed for creating a binary file
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Specifies a file to be generated in the temp-dir of the OS.
+/// This file is deleted once it goes out of scope at the end of the program.
 pub struct TempFile(PathBuf);
 impl TempFile {
     pub fn new(extension: &'static str) -> Self {

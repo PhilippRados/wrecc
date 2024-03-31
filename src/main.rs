@@ -1,3 +1,12 @@
+//! Wrecc is made up of two crates: this binary-crate (wrecc)
+//! and the compiler implementation library-crate [wrecc_compiler](wrecc_compiler).
+//! This crate uses all the methods exposed by the lib-crate to build the resulting
+//! binary from the generated assembly. It assembles and links the assembly by manually
+//! invoking the `as` and `ld` commands.
+//! This crate also includes the modules [cli_options](crate::cli_options) which parses the
+//! cli-args and [temp_file](crate::temp_file) which generates the temp-files passed to the invoked
+//! commands.
+
 mod cli_options;
 mod temp_file;
 
@@ -11,13 +20,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// Reads in string from file passed from user
+/// Reads in string from file passed from user
 fn read_input_file(file: &Path) -> Result<String, WreccError> {
     fs::read_to_string(file)
         .map_err(|_| WreccError::Sys(format!("could not find file: '{}'", file.display())))
 }
 
-// Generates x8664 assembly output file
+/// Generates x86_64 assembly output file
 fn generate_asm_file(options: &CliOptions, output: String) -> Result<OutFile, WreccError> {
     let output_path = output_path(options, options.compile_only, "s");
 
@@ -35,6 +44,7 @@ fn generate_asm_file(options: &CliOptions, output: String) -> Result<OutFile, Wr
     }
 }
 
+/// Selects [OutFile] based on cli-args passed and which stage of execution is currently executed
 fn output_path(options: &CliOptions, is_last_phase: bool, extension: &'static str) -> OutFile {
     match (&options.output_path, is_last_phase) {
         (Some(file), true) => OutFile::Regular(file.clone()),
@@ -43,6 +53,7 @@ fn output_path(options: &CliOptions, is_last_phase: bool, extension: &'static st
     }
 }
 
+/// Invokes assembler `as` and stores its output in a file
 fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, WreccError> {
     let output_path = output_path(options, options.no_link, "o");
 
@@ -63,6 +74,12 @@ fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, WreccErr
     }
 }
 
+/// Invokes linker `ld` and stores its output in the specified filename.
+/// Linker is invoked with some default library-search paths for mac and linux to link with
+/// libc.<br>
+/// Options `-l` and `-L` are also passed to the linker.<br>
+/// If the default search path doesn't include libc on your system you can pass it using `-L`
+/// and linking libc should work.
 fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
     let mut cmd = Command::new("ld");
     match std::env::consts::OS {
@@ -136,6 +153,7 @@ fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
     }
 }
 
+/// Actually runs the [preprocessor] and the [compiler] to create the binary.
 fn run(options: CliOptions) -> Result<(), WreccError> {
     let source = read_input_file(&options.file_path)?;
     let pp_source = preprocess(
@@ -168,7 +186,7 @@ fn run(options: CliOptions) -> Result<(), WreccError> {
     Ok(())
 }
 
-// seperate main to clean up all destructors
+/// Seperate main to clean up all destructors
 fn real_main() -> Result<(), ()> {
     let options = CliOptions::parse().map_err(|errs| errs.print(false))?;
     let no_color = options.no_color;
@@ -176,6 +194,7 @@ fn real_main() -> Result<(), ()> {
     run(options).map_err(|errs| errs.print(no_color))
 }
 
+/// Main entrypoint only calls [real_main] and returns correct exit-code according to result
 fn main() {
     match real_main() {
         Ok(_) => (),

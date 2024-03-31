@@ -1,3 +1,5 @@
+//! Handles parsing cli-arguments without library.
+
 use crate::WreccError;
 use std::path::PathBuf;
 
@@ -39,39 +41,40 @@ fn sys_info(msg: &str) -> ! {
     std::process::exit(0);
 }
 
+/// Struct holding all possible cli-args to be passed when running `wrecc`
 pub struct CliOptions {
-    // required argument specifying file to compile
+    /// Required argument specifying file to compile
     pub file_path: PathBuf,
 
-    // optional argument specifying output-file to write to
+    /// Optional argument specifying output-file to write to
     pub output_path: Option<PathBuf>,
 
-    // stops evaluation after preprocessing printing the preprocessed source
+    /// Stops evaluation after preprocessing printing the preprocessed source
     pub preprocess_only: bool,
 
-    // stops evaluation after compiling resulting in a .s file
+    /// Stops evaluation after compiling resulting in a .s file
     pub compile_only: bool,
 
-    // stops evaluation after assembling resulting in an .o file
+    /// Stops evaluation after assembling resulting in an .o file
     pub no_link: bool,
 
-    // displays AST while also compiling program as usual
+    /// Displays AST while also compiling program as usual
     pub dump_ast: bool,
 
-    // errors are printed without color
+    /// Errors are printed without color
     pub no_color: bool,
 
-    // directories specified by user to be searched after #include "..." and before #include <...>
+    /// Directories specified by user to be searched after `#include "..."` and before `#include <...>`
     pub user_include_dirs: Vec<PathBuf>,
 
-    // all definitions passed as cli-arguments
-    // INFO: duplicate definitions are caught in preprocessor
+    /// All definitions passed as cli-arguments
+    /// INFO: duplicate definitions are caught in preprocessor
     pub defines: Vec<(String, String)>,
 
-    // adds a path to the directories to be searched during linking (passed as -L<dir> to linker)
+    /// Adds a path to the directories to be searched during linking (passed as `-L<dir>` to linker)
     pub lib_paths: Vec<PathBuf>,
 
-    // adds name to the shared libraries going to be linked (passed as -l<name> to linker)
+    /// Adds name to the shared libraries going to be linked (passed as `-l<name>` to linker)
     pub shared_libs: Vec<String>,
 }
 impl CliOptions {
@@ -90,6 +93,12 @@ impl CliOptions {
             no_color: false,
         }
     }
+    /// Parses all passed cli-args and builds [CliOptions] with them.<br>
+    /// INFO: every argument needs to be seperated by whitespace meaning that options requiring a
+    /// following argument like in `wrecc -L` have to be seperated by a whitespace:<br>
+    /// `wrecc -Iinclude` => error invalid argument `-Iinclude`<br>
+    /// `wrecc -I include` => valid<br>
+    /// I am planning to allow this in the future though.
     pub fn parse() -> Result<CliOptions, WreccError> {
         let mut cli_options = CliOptions::new();
         let mut args = std::env::args().collect::<Vec<String>>().into_iter().skip(1);

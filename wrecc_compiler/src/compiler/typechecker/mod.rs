@@ -1,3 +1,5 @@
+//! Converts [HIR-parsetree](hir) to type-annotated [MIR-ast](mir) and checks for semantic errors
+
 pub mod mir;
 
 use crate::compiler::codegen::align;
@@ -27,7 +29,6 @@ pub struct TypeChecker {
     const_label_count: usize,
 }
 
-// Converts hir-parsetree to type-annotated mir-ast. Also does typechecking and semantic analysis
 impl TypeChecker {
     pub fn new() -> Self {
         TypeChecker {
@@ -1979,6 +1980,9 @@ impl TypeChecker {
     }
 }
 
+// Helper object to store elements when initializing aggregate objects like:
+// `int array[10] = {1,2,[6] = 8}`
+// and keeping track of nested initializations
 #[derive(Clone)]
 struct CurrentObjects(Vec<(i64, i64, Type)>);
 impl CurrentObjects {

@@ -1,9 +1,12 @@
+//! Operands used in codegen
+
 use crate::compiler::common::token::TokenKind;
 use crate::compiler::common::types::*;
 use crate::compiler::typechecker::mir::expr::ValueKind;
 
 use super::lir::maybe_prefix_underscore;
 
+/// Registers used for passing arguments to functions
 pub static ARG_REGS: &[[&str; 3]; 6] = &[
     ["%rdi", "%edi", "%dil"],
     ["%rsi", "%esi", "%sil"],
@@ -13,22 +16,23 @@ pub static ARG_REGS: &[[&str; 3]; 6] = &[
     ["%r9", "%r9d", "%r9b"],
 ];
 
+/// All possible operands to an instruction in [LIR](crate::compiler::codegen::lir)
 #[derive(Debug, Clone)]
 pub enum Register {
-    // Virtual register that can be infinite in amount; get transformed into pysical registers
-    // in register-allocation pass
+    /// Virtual register that can be infinite in amount; get transformed into pysical registers
+    /// in register-allocation pass
     Temp(TempRegister),
-    // Variables that live on the local function-stack
+    /// Variables that live on the local function-stack
     Stack(StackRegister),
-    // Labels can be Strings and global variables
+    /// Labels can be Strings and global variables
     Label(LabelRegister),
-    // Registers used in function calls for arguments, and in special operations
+    /// Registers used in function calls for arguments, and in special operations
     Arg(ArgRegister),
-    // Register used for return values
+    /// Register used for return values
     Return(Type),
-    // Numerical constants
+    /// Numerical constants
     Literal(i64, Type),
-    // Indicator register for functions returning void
+    /// Indicator register for functions returning void
     Void,
 }
 impl Register {
@@ -131,7 +135,7 @@ fn literal_name(n: &i64, type_decl: &Type) -> String {
     )
 }
 
-// operands that are allowed in data/bss sections
+/// Operands that are allowed in data/bss sections
 #[derive(Debug)]
 pub enum StaticRegister {
     Label(LabelRegister),
@@ -219,13 +223,15 @@ pub enum TempKind {
     Pushed(usize),
 }
 
+/// Virtual registers filled in by register allocation
 #[derive(Debug, Clone)]
 pub struct TempRegister {
     pub type_decl: Type,
     pub reg: Option<TempKind>,
     pub value_kind: ValueKind,
     pub start_idx: usize,
-    // key into interval hashmap
+
+    /// Key into interval hashmap
     pub id: usize,
 }
 impl TempRegister {

@@ -13,22 +13,23 @@ pub type VarSymbol = Rc<RefCell<Symbols>>;
 pub type FuncSymbol = Rc<RefCell<Symbols>>;
 
 pub trait TypeInfo {
-    // returns size in bytes of type
+    /// Returns size in bytes of type
     fn size(&self) -> usize;
 
-    // returns the correct suffix for a register of type
+    /// Returns the correct suffix for a register of type
     fn reg_suffix(&self) -> String;
 
-    // returns the instruction-suffixes
+    /// Returns the instruction-suffixes
     fn suffix(&self) -> String;
 
-    // returns the instruction-suffixes spelled out
+    /// Returns the instruction-suffixes spelled out
     fn complete_suffix(&self) -> String;
 
-    // returns the return register name of type
+    /// Returns the return register name of type
     fn return_reg(&self) -> String;
 }
 
+/// All C-types in currently implemented in `wrecc`
 #[derive(Clone, PartialEq, Debug)]
 pub enum Type {
     Primitive(Primitive),
@@ -251,7 +252,7 @@ impl Type {
         }
         None
     }
-    // returns the amount of scalar elements in a type
+    /// Returns the amount of scalar elements in a type
     pub fn element_amount(&self) -> usize {
         match self {
             Type::Array { amount, of } => amount * of.element_amount(),
@@ -277,7 +278,7 @@ impl Type {
         }
     }
 
-    // returns the type of the field at index
+    /// Returns the type of the field at index
     pub fn at(&self, index: usize) -> Option<Type> {
         match self {
             Type::Array { of, amount } => {
@@ -334,7 +335,7 @@ pub enum Primitive {
 }
 
 impl TypeInfo for Primitive {
-    // returns type-size in bytes
+    /// Returns type-size in bytes
     fn size(&self) -> usize {
         match self {
             Primitive::Void => 0,

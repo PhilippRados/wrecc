@@ -1,14 +1,17 @@
+//! The errors emitted throughout all of wrecc
+
 use crate::compiler::common::{token::*, types::*};
 use std::num::IntErrorKind;
 use std::path::PathBuf;
 
+/// The high-level error type, which is used by both lib.rs and main.rs
 #[derive(Debug)]
 pub enum WreccError {
-    // Error produced by compiler (parsing/typechecking etc)
+    /// Error produced by compiler (parsing/typechecking etc)
     Comp(Vec<Error>),
-    // Error when doing system operations (linking/assembling etc)
+    /// Error when doing system operations (linking/assembling etc)
     Sys(String),
-    // Error in passing cli-arguments (passing invalid argument)
+    /// Error in passing cli-arguments (passing invalid argument)
     Cli(Vec<String>),
 }
 impl WreccError {
@@ -41,6 +44,7 @@ impl From<Vec<Error>> for WreccError {
     }
 }
 
+/// All error-types in [wrecc_compiler](crate)
 #[derive(Debug, PartialEq, Clone)]
 pub enum ErrorKind {
     // scan errors
@@ -142,6 +146,7 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
+    /// The error message being emitted by and error
     pub fn message(&self) -> String {
         match self {
             ErrorKind::UnexpectedChar(c) => format!("unexpected character: {:?}", c),
@@ -418,6 +423,7 @@ fn num_to_ord(n: usize) -> String {
     }
 }
 
+/// Main error used throughout [wrecc_compiler](crate)
 #[derive(Debug, PartialEq, Clone)]
 pub struct Error {
     pub line_index: i32,
@@ -437,7 +443,7 @@ impl Error {
         }
     }
 
-    // Recursive helper-function chaining all found errors into single vector
+    /// Recursive helper-function chaining all found errors into single vector
     pub fn flatten_multiple(self) -> Vec<Error> {
         match self.kind {
             ErrorKind::Multiple(errors) => {
@@ -460,7 +466,7 @@ impl Error {
             kind: ErrorKind::Multiple(errors),
         }
     }
-    // HACK: should never be used because in theory there is always an eof-token
+    /// HACK: should never be used because in theory there is always an eof-token
     pub fn eof(expected: &'static str) -> Self {
         Error {
             line_index: -1,
@@ -470,6 +476,8 @@ impl Error {
             kind: ErrorKind::Eof(expected),
         }
     }
+    /// Prints the error to `stderr` using all of its location information.<br>
+    /// If `no_color` is specified then only prints without any highlighting and color codes.
     pub fn print_error(&self, no_color: bool) {
         let included = if let Some(Some("h")) = self.filename.extension().map(|s| s.to_str()) {
             "included file "
@@ -514,6 +522,7 @@ impl Error {
         }
     }
 }
+/// Trait which can be implemented by different error-tokens which are all locatable
 pub trait Location {
     fn line_index(&self) -> i32;
     fn column(&self) -> i32;

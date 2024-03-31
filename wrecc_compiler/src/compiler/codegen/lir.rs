@@ -1,9 +1,10 @@
+//! Low-level Intermediate representation as an x86-64 assembly instruction abstraction to simplify register allocation
+
 use crate::compiler::codegen::register::*;
 use crate::compiler::common::types::*;
 use std::fmt::Display;
 
-// Low-level Intermediate representation as an assembly instruction abstraction to simplify register allocation.
-// Needs owned values so that later register transformations like type-casts don't change previous references
+/// INFO: Needs owned register-values so that later register transformations like type-casts don't change previous references
 #[derive(Debug)]
 pub enum Lir {
     // name, if needs alignment
@@ -108,6 +109,7 @@ impl Lir {
     }
 }
 
+/// macos x86-64 requires an underscore preceding labels
 pub fn maybe_prefix_underscore(label: &String) -> String {
     if cfg!(target_os = "macos") {
         format!("_{}", label)

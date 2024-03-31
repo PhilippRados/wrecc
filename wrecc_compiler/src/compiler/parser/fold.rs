@@ -1,3 +1,5 @@
+//! Implements constant folding to collapse operations involving only literals into single literal
+
 use crate::compiler::codegen::register::*;
 use crate::compiler::common::{environment::*, error::*, token::*, types::*};
 use crate::compiler::parser::hir::decl::DeclType;

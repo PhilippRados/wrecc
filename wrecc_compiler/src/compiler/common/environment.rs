@@ -1,3 +1,5 @@
+//! The symbol-table used to store information about variables and types
+
 use crate::compiler::codegen::register::*;
 use crate::compiler::common::{error::*, token::*, types::*};
 use std::cell::RefCell;
@@ -10,19 +12,20 @@ pub enum InitType {
     Definition,
 }
 
+/// The information stored for a variable in the symbol-table
 #[derive(Clone, Debug)]
 pub struct SymbolInfo {
-    // type of identifier given in declaration
+    /// Type of identifier given in declaration
     pub type_decl: Type,
 
-    // wether the variable is a declaration or initialization
+    /// Wether the variable is a declaration or initialization
     pub kind: InitType,
 
-    // optional because info isn't known at moment of insertion
-    // can be label-register or stack-register
+    /// Can be label-register or stack-register
+    /// optional because info isn't known at moment of insertion
     pub reg: Option<Register>,
 
-    // used in codegen to ensure only single declaration of same symbol
+    /// Used in codegen to ensure only single declaration of same symbol
     pub token: Token,
 }
 
@@ -39,9 +42,9 @@ impl SymbolInfo {
 }
 #[derive(Clone, Debug)]
 pub enum Symbols {
-    // includes functions, enum-constants and variables
+    /// Includes functions, enum-constants and variables
     Variable(SymbolInfo),
-    // in `typedef int a` a is stored
+    /// In `typedef int a` a is stored
     TypeDef(Type),
 }
 impl Symbols {
@@ -108,7 +111,7 @@ impl std::fmt::Display for Symbols {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tags {
-    // struct/union
+    /// Contains struct/union types
     Aggregate(StructRef),
     Enum(Vec<(Token, i32)>),
 }
@@ -150,6 +153,7 @@ impl Tags {
 
 type Scope<T> = HashMap<String, Rc<RefCell<T>>>;
 
+/// A list of scopes which are popped when you exit the scope
 #[derive(Clone, Debug)]
 pub struct NameSpace<T> {
     elems: Vec<Scope<T>>,
@@ -184,6 +188,8 @@ impl<T> NameSpace<T> {
     }
 }
 
+/// The environment is made up of two seperate namespaces, one for storing symbols and another for
+/// storing tags when the user declares a type
 #[derive(Debug)]
 pub struct Environment {
     symbols: NameSpace<Symbols>,

@@ -1,3 +1,4 @@
+//! Scans input file file into preprocessor-tokens and handles all preprocessing-directives
 pub mod scanner;
 
 use crate::compiler::common::error::*;
@@ -21,7 +22,7 @@ impl IfDirective {
         IfDirective { location, has_else: false }
     }
 }
-// same as preprocessor::scanner::Token but with added filename since scanner doesn't that information
+/// Adds filename info to [scanner-token](scanner::Token), since scanner doesn't have that information
 #[derive(Clone)]
 pub struct PPToken {
     pub kind: TokenKind,
@@ -58,31 +59,32 @@ impl Location for PPToken {
 
 type Defines = HashMap<String, Vec<Token>>;
 
+/// Handles all preprocessing-directives and converts them into regular tokens
 pub struct Preprocessor<'a> {
-    // preprocessor tokens as tokenized by preprocessor-scanner
+    /// Preprocessor tokens as tokenized by preprocessor-scanner
     tokens: DoublePeek<Token>,
 
-    // current file being preprocessed
+    /// Current file being preprocessed
     filename: &'a Path,
 
-    // #define's mapping identifier to list of tokens until newline
+    /// `#define`'s mapping identifier to list of tokens until newline
     defines: Defines,
 
-    // list of #if directives with last one being the most deeply nested
+    /// List of `#if` directives with last one being the most deeply nested
     ifs: Vec<IfDirective>,
 
-    // paths to search for system header files as defined by user with `-I` argument
+    /// Paths to search for system header files as defined by user with `-I` argument
     user_include_dirs: &'a Vec<PathBuf>,
 
-    // standard headers which are embedded in the binary using include_str!
+    /// Standard headers which are embedded in the binary using `include_str!`
     // INFO: currently only supports custom header files since not all features of
     // standard header files are supported
     standard_headers: &'a HashMap<PathBuf, &'static str>,
 
-    // current number of nest-depth
+    /// Current number of nest-depth, to stop recursion stack-overflow during `#include`
     include_depth: usize,
 
-    // maximum number of allowed nested includes
+    /// Maximum number of allowed nested includes
     max_include_depth: usize,
 }
 
@@ -605,6 +607,8 @@ impl<'a> Preprocessor<'a> {
         Err(self.ifs.pop().unwrap().location)
     }
 
+    /// Iterates through preprocessor-tokens and replaces all preprocessing-directives.<br>
+    /// Can emit errors when encountering invalid preprocessor syntax/semantics.
     pub fn start(mut self) -> Result<(Vec<PPToken>, Defines), Vec<Error>> {
         let mut result = PPResult::new(self.filename);
         let mut errors = Vec::new();

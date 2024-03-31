@@ -1,3 +1,5 @@
+//! Converts [preprocessor-tokens](PPToken) into [compiler-tokens](Token)
+
 use crate::compiler::common::{error::*, token::*};
 use crate::preprocessor::scanner::TokenKind as PPKind;
 use crate::PPToken;
@@ -5,11 +7,11 @@ use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;
 
-// Converts preprocessor tokens into compiler tokens
 pub struct Scanner<'a> {
-    // source used for iterating
+    // Source used for iterating
     source: Peekable<std::vec::IntoIter<PPToken>>,
 
+    // Reserved keywords which cannot be an identifier
     keywords: HashMap<&'a str, TokenKind>,
 }
 impl<'a> Scanner<'a> {

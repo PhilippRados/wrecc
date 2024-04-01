@@ -511,8 +511,8 @@ mod tests {
         let actual = reg_alloc.generate(input);
 
         assert_eq!(actual.len(), expected.len());
-        for (actual, expected) in actual.iter().zip(expected) {
-            let actual_ir = mem::discriminant(actual) == mem::discriminant(&expected);
+        for (actual, expected) in actual.into_iter().zip(expected) {
+            let actual_ir = mem::discriminant(&actual) == mem::discriminant(&expected);
             assert!(actual_ir);
 
             // TODO: also compare ids
@@ -532,8 +532,8 @@ mod tests {
                     _ => false,
                 },
                 "Mismatched ir-instruction:\nactual: {}\nexpected: {}",
-                actual,
-                expected
+                actual.as_string(),
+                expected.as_string()
             )
         }
     }

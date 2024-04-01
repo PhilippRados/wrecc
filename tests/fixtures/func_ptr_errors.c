@@ -10,6 +10,9 @@ void callbackFunction(long *value) {
 
 int main() {
   void (*func)(void) = foo;
+  void (**func2)(void) = &func;
+
+  func2();
 
   int(func_ptr)() = 42;
 

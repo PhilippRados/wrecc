@@ -1666,8 +1666,8 @@ impl TypeChecker {
                         pointer_to_func = Some(func_type)
                     }
                 }
-                if let Some(pointer_to_func) = pointer_to_func {
-                    pointer_to_func
+                if let Some(func_type) = pointer_to_func {
+                    func_type
                 } else {
                     return Err(Error::new(
                         &left_paren,
@@ -1686,6 +1686,13 @@ impl TypeChecker {
             ));
         }
         let args = self.args_and_params_match(&left_paren, &caller.type_decl, func_type.params, args)?;
+
+        let caller = if caller.type_decl.is_ptr() {
+            self.check_deref(Token { kind: TokenKind::Star, ..left_paren }, caller)
+                .expect("already checked if caller is ptr")
+        } else {
+            caller
+        };
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Call { caller: Box::new(caller), args },

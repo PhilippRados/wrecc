@@ -26,7 +26,7 @@ fn read_input_file(file: &Path) -> Result<String, WreccError> {
         .map_err(|_| WreccError::Sys(format!("could not find file: '{}'", file.display())))
 }
 
-/// Generates x86_64 assembly output file
+/// Writes the produced x86-64 assembly into a file
 fn generate_asm_file(options: &CliOptions, output: String) -> Result<OutFile, WreccError> {
     let output_path = output_path(options, options.compile_only, "s");
 

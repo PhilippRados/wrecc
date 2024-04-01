@@ -22,7 +22,7 @@ options:
     -o | --output <file>                Specifies the output-file to write to
     -I | --include-dir <dir>            Adds <dir> to the directories to be searched for using #include
     -D | --define <macro-name>=<value>  Defines a new object-like macro
-    -L | --library-path <dir>           Adds <dir> to the directories to tthe library search paths (passed as -L<dir> to linker)
+    -L | --library-path <dir>           Adds <dir> to the directories to the library search paths (passed as -L<dir> to linker)
     -l | --library <name>               Looks for shared libraries with <name> in library search paths (passed as -l<name> to linker)
     -E | --preprocess-only              Stops evaluation after preprocessing printing the preprocessed source
     -S | --compile-only                 Stops evaluation after compiling resulting in a .s file

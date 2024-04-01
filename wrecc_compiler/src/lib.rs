@@ -104,7 +104,7 @@ pub fn compile(source: Vec<PPToken>, dump_ast: bool) -> Result<String, WreccErro
 
     let output = asm
         .into_iter()
-        .map(|instr| instr.to_string())
+        .map(|instr| instr.as_string())
         .collect::<Vec<String>>()
         .join("\n");
 

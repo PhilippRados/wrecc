@@ -4,6 +4,11 @@
   </p>
 </div>
 
+[![Test](https://github.com/PhilippRados/wrecc/actions/workflows/test.yml/badge.svg)](https://github.com/PhilippRados/wrecc/actions/workflows/test.yml)
+![](https://img.shields.io/github/license/PhilippRados/wrecc)
+![](https://img.shields.io/badge/made_for-UNIX-lightgrey)
+![](https://img.shields.io/badge/Architecture-x86--64-blue)
+
 Wrecc is a x86-64 C99 compiler written from scratch. The name is a play on the word `wreck` which describes a rusting ship on the sea floor. 
 
 ### Table of contents

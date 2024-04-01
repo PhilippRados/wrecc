@@ -20,8 +20,9 @@ The compiler emits [x86-64](https://en.wikipedia.org/wiki/X86-64) assembly in [A
   + [Preprocessor](#preprocessor)
   + [Compiler](#compiler)
     + [Supported keywords](#keywords)
-    + [Ast pretty-printer](#ast)
-    + [Error messages](#errors)
+    + [Unimplemented features](#unimplemented)
+  + [Error messages](#errors)
+  + [Ast pretty-printer](#ast)
 * [Testing](#testing)
   + [Unit-tests](#unit)
   + [Snapshot-tests](#snap)
@@ -53,21 +54,55 @@ The preprocessor implements all [C99 preprocessor directives](https://en.cpprefe
 #### Supported Keywords <a name="keywords"></a>
 <img width="487" alt="keywords" src="https://github.com/PhilippRados/wrecc/assets/60818062/b738b6e0-9ca3-4a8d-9a5a-e1a6da0c31ed">
 
-Weird but working C code
-```C
-#include <stdio.h>
+#### Other than that it even supports:
+<details>
+  <summary>Aggregate initialization with designated initializers</summary>
+  
+  ```C
+  struct {
+    union {
+      int foo;
+      long baz;
+    } nested;
+    int array[16];
+  } bar = { .nested.foo = 3, .array[6] = 1};
+  ```
 
-typedef struct {
-  int (*print_func)(char*,...);
-  char str[2 * 3];  
-} PrintableString;
+</details>
+<details>
+  <summary>Function pointers</summary>
 
-PrintableString s = {.print_func = printf, .str[3] = 's'};
+  ```C
+  #include <stdio.h>
+  
+  typedef int (*BinaryOperation)(int, int);
+  typedef struct {
+    BinaryOperation add;
+    BinaryOperation subtract;
+  } Calculator;
+  
+  int add(int a, int b) { return a + b; }
+  int subtract(int a, int b) { return a - b; }
+  
+  int main() {
+    Calculator calc = {add, subtract};
+  
+    printf("Result of addition: %d\n", calc.add(10, 5));
+    printf("Result of subtraction: %d\n", calc.subtract(10, 5));
+  }
 
-int main() {
+  ```
 
-}
-```
+</details>
+<details>
+  <summary>Constant folding</summary>
+  
+  ```C
+  char **string_offset = (char **)&"hello" + (int)(3 * 1);
+  int array[(long)3 * 2 - 1];
+  ```
+
+</details>
 
 #### Unimplemented Features <a name="unimplemented"></a>
 Aside from the missing keywords these are the main missing features:
@@ -77,7 +112,7 @@ Aside from the missing keywords these are the main missing features:
 
 Here is a list of all the stuff still missing: [todo](https://placid-eris-c19.notion.site/check-all-errors-from-c-testsuite-6f3fa2a3c24a4711b5e89f45354db540)
 
-#### Error messages <a name="errors"></a>
+### Error messages <a name="errors"></a>
 Wrecc also has nice looking messages. Error reporting doesn't stop after the first error. Using the `--no-color` option you can switch off color-highlighting in errors. Currently there are only errors and no warnings.
 <table>
   <tr>
@@ -103,7 +138,7 @@ Wrecc also has nice looking messages. Error reporting doesn't stop after the fir
 </tr>
 </table>
 
-#### Ast pretty-printer <a name="ast"></a>
+### Ast pretty-printer <a name="ast"></a>
 When compiling using the `--dump-ast` option it prints the parse-tree
 <table>
   <tr>
@@ -163,7 +198,7 @@ When compiling using the `--dump-ast` option it prints the parse-tree
 </tr>
 </table>
 
-##### Inspect all options by running `wrecc --help`
+#### Inspect all options by running `wrecc --help`
 
 ## Testing
 #### Unit tests <a name="unit"></a>
@@ -187,7 +222,7 @@ cargo afl fuzz -i inputs -o outputs target/debug/fuzz_target
 Reasons for `wrecc` not working properly on your machine:
 - Unsupported architecture/OS
 - Cannot find libc in standard library search paths (can be fixed by passing custom search path using `-L <path>` option)
-- 
+- If it's not mentioned in the [unimplemented features](#unimplemented) section then please raise an issue
 
 ## Contribution
 If you want to help me with this compiler I would really welcome it. The easiest place to start is probably by implementing one of the missing keywords/types mentioned in the [unimplemented features](#unimplemented) section. Make sure all tests still pass and implement your own if it's something new that is not already being tested.<br>

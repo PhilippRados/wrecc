@@ -10,6 +10,7 @@
 ![](https://img.shields.io/badge/Architecture-x86--64-blue)
 
 Wrecc is a x86-64 C99 compiler written from scratch. The name is a play on the word `wreck` which describes a rusting ship on the sea floor. 
+The compiler emits [x86-64](https://en.wikipedia.org/wiki/X86-64) assembly in [AT&T syntax](https://staffwww.fullcoll.edu/aclifton/courses/cs241/syntax.html), it adheres to the [System V ABI](https://wiki.osdev.org/System_V_ABI) which I could only test for Ubuntu and Macos.
 
 ### Table of contents
 * [Installation](#installation)
@@ -26,12 +27,11 @@ Wrecc is a x86-64 C99 compiler written from scratch. The name is a play on the w
   + [Snapshot-tests](#snap)
   + [Fuzzer](#fuzzer)
 * [Contribution](#contribution)
-* [Agenda](#agenda)
+* [Project goals](#goals)
 * [Ressources](#ressources)
 
 
 ## Installation
-The compiler emits [x86-64](https://en.wikipedia.org/wiki/X86-64) assembly in [AT&T syntax](https://staffwww.fullcoll.edu/aclifton/courses/cs241/syntax.html), it adheres to the [System V ABI](https://wiki.osdev.org/System_V_ABI) which I could only test for Ubuntu and Macos.
 ### Pre-built binaries <a name="binaries"></a>
 If you don't have the rust toolchain installed on your system you can install the latest binary from the releases directly:
 ```
@@ -44,11 +44,11 @@ cargo install wrecc
 ```
 
 ## Features
-Since not all keywords are currently implemented wrecc uses [custom headers](https://github.com/PhilippRados/wrecc/tree/master/include) which are built directly into the binary
+Since not all keywords are currently implemented wrecc uses [custom standard-headers](https://github.com/PhilippRados/wrecc/tree/master/include) which are built directly into the binary
 ### Preprocessor
 The preprocessor implements all [C99 preprocessor directives](https://en.cppreference.com/w/c/keyword), except `#line`, `#error` and `#pragma`. Most prominently it currently also misses function-like macros which are on the agenda though.
 
-#### Compiler
+### Compiler
 #### Supported Keywords <a name="keywords"></a>
 <img width="487" alt="keywords" src="https://github.com/PhilippRados/wrecc/assets/60818062/b738b6e0-9ca3-4a8d-9a5a-e1a6da0c31ed">
 
@@ -89,7 +89,7 @@ Wrecc also has nice looking messages. Error reporting also doesn't stop after th
 cargo t --all
 ```
 ### Snapshot testing <a name="snap"></a>
-This runs all [fixtures]() and compares them to the expected [snapshot]()
+This runs all [fixtures](https://github.com/PhilippRados/wrecc/tree/master/tests/fixtures) and compares them to the expected [snapshot](https://github.com/PhilippRados/wrecc/tree/master/tests/snapshots)
 ```
 bash tests/snapshot_tests.sh
 ```
@@ -104,11 +104,11 @@ cargo afl fuzz -i inputs -o outputs target/debug/fuzz_target
 ### Contribution
 If you want to help me with this compiler I would really welcome it. The easiest place to start is probably by implementing one of the missing keywords/types mentioned in the [unimplemented features](#unimplemented) section. Make sure all tests still pass and implement your own if it's something new that is not already being tested.
 
-### Agenda
-Overall goals include:
+### Project goals <a name="goals"></a>
 - Not relying on custom headers
 - Passing all C99 tests in [c-testsuite](https://github.com/c-testsuite/c-testsuite)
 - Compiling multiple files at once
+- Compiling real-world C projects like [Git](https://github.com/git/git/tree/master)
 
 ### Ressources
 The following ressources helped me in building this compiler:

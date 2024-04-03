@@ -11,7 +11,7 @@ description = "A x86_64 C99 compiler written from scratch"
 readme = "README.md"
 
 [dependencies]
-wrecc_compiler = { path = "./wrecc_compiler/" }
+wrecc_compiler = { path = "./wrecc_compiler/", version = "0.1.0" }
 
 [[bin]]
 name = "wrecc"
@@ -25,3 +25,23 @@ members = [
 exclude = [
   "fuzzer"
 ]
+
+# Config for 'cargo dist'
+[workspace.metadata.dist]
+# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.12.0"
+# CI backends to support
+ci = ["github"]
+# The installers to generate for each app
+installers = ["shell"]
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl"]
+# Publish jobs to run in CI
+pr-run-mode = "plan"
+# Whether to install an updater program
+install-updater = false
+
+# The profile that 'cargo dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

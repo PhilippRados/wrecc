@@ -12,50 +12,16 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 
-// helper function to embed headers into binary
-macro_rules! include_header {
-    ($filename:expr) => {
-        (
-            PathBuf::from($filename),
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../include/",
-                $filename
-            )),
-        )
-    };
-}
-
 /// Preprocesses given input file by converting String into preprocessor-tokens.<br>
-/// Also initializes the standard headers which are built into the binary which can be found in
-/// [/include](https://github.com/PhilippRados/wrecc/tree/master/include).
 pub fn preprocess(
     filename: &Path,
     user_include_dirs: &Vec<PathBuf>,
     defines: &Vec<(String, String)>,
+    standard_headers: HashMap<PathBuf, &'static str>,
     source: String,
 ) -> Result<Vec<PPToken>, WreccError> {
     let tokens = PPScanner::new(source).scan_token();
     let include_depth = 0;
-
-    let standard_headers: HashMap<PathBuf, &'static str> = HashMap::from([
-        include_header!("ctype.h"),
-        include_header!("errno.h"),
-        include_header!("fcntl.h"),
-        include_header!("limits.h"),
-        include_header!("stddef.h"),
-        include_header!("stdio.h"),
-        include_header!("stdlib.h"),
-        include_header!("string.h"),
-        include_header!("time.h"),
-        include_header!("unistd.h"),
-        include_header!("setjmp.h"),
-        include_header!("signal.h"),
-        include_header!("locale.h"),
-        include_header!("iso646.h"),
-        include_header!("stdint.h"),
-        include_header!("inttypes.h"),
-    ]);
 
     // INFO: convert all cli-passed defines to #defines as if they were in regular source file
     // to properly error check them

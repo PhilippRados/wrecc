@@ -15,10 +15,43 @@ use temp_file::*;
 use wrecc_compiler::compiler::common::error::WreccError;
 use wrecc_compiler::*;
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// Helper macro to embed headers into binary
+macro_rules! include_header {
+    ($filename:expr) => {
+        (
+            PathBuf::from($filename),
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/include/", $filename)),
+        )
+    };
+}
+
+/// Includes all headers found in [include](https://github.com/PhilippRados/wrecc/tree/master/include)
+fn init_standard_headers() -> HashMap<PathBuf, &'static str> {
+    HashMap::from([
+        include_header!("ctype.h"),
+        include_header!("errno.h"),
+        include_header!("fcntl.h"),
+        include_header!("limits.h"),
+        include_header!("stddef.h"),
+        include_header!("stdio.h"),
+        include_header!("stdlib.h"),
+        include_header!("string.h"),
+        include_header!("time.h"),
+        include_header!("unistd.h"),
+        include_header!("setjmp.h"),
+        include_header!("signal.h"),
+        include_header!("locale.h"),
+        include_header!("iso646.h"),
+        include_header!("stdint.h"),
+        include_header!("inttypes.h"),
+    ])
+}
 
 /// Reads in string from file passed from user
 fn read_input_file(file: &Path) -> Result<String, WreccError> {
@@ -156,10 +189,13 @@ fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
 /// Actually runs the [preprocessor] and the [compiler] to create the binary.
 fn run(options: CliOptions) -> Result<(), WreccError> {
     let source = read_input_file(&options.file_path)?;
+
+    let standard_headers = init_standard_headers();
     let pp_source = preprocess(
         &options.file_path,
         &options.user_include_dirs,
         &options.defines,
+        standard_headers,
         source,
     )?;
 

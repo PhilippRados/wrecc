@@ -137,7 +137,7 @@ Wrecc also has nice looking messages. Error reporting doesn't stop after the fir
   ```
   </td>
   <td>
-    <img width="535" alt="error" src="https://github.com/PhilippRados/wrecc/assets/60818062/a8da825a-67a1-498e-80d1-4609f229fa8d">
+    <img width="535" alt="error" src="https://github.com/PhilippRados/wrecc/assets/60818062/0b0e0c9f-3600-460c-9da5-1705ef0f83d9">
   </td>
 </tr>
 </table>

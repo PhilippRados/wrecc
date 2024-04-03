@@ -207,7 +207,7 @@ When compiling using the `--dump-ast` option it prints the parse-tree
 ## Testing
 #### Unit tests <a name="unit"></a>
 ```
-cargo t --all
+cargo test --workspace
 ```
 #### Snapshot testing <a name="snap"></a>
 This runs all [fixtures](https://github.com/PhilippRados/wrecc/tree/master/tests/fixtures) and compares them to the expected [snapshot](https://github.com/PhilippRados/wrecc/tree/master/tests/snapshots)

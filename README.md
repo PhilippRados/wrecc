@@ -35,12 +35,16 @@ The compiler emits [x86-64](https://en.wikipedia.org/wiki/X86-64) assembly in [A
 
 ## Installation
 ### Pre-built binaries <a name="binaries"></a>
-If you don't have the rust toolchain installed on your system you can install the latest binary from the releases directly:
+If you don't have the rust toolchain installed on your system you can install the latest binary (MacOs, Linux) from the releases directly:
 ```
-curl ...
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/PhilippRados/wrecc/releases/download/v0.1.0/wrecc-installer.sh | sh
 ```
 ### Cargo
-Otherwise you can just use:
+Using `cargo binstall`
+```
+cargo binstall wrecc
+```
+or building from source
 ```
 cargo install wrecc
 ```

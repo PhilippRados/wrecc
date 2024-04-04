@@ -230,7 +230,7 @@ Reasons for `wrecc` not working properly on your machine:
 
 ## Contribution
 If you want to help me with this compiler I would really welcome it. The easiest place to start is probably by implementing one of the missing keywords/types mentioned in the [unimplemented features](#unimplemented) section. Make sure all tests still pass and implement your own if it's something new that is not already being tested.<br>
-Have a look at the [documentation](https://docs.rs/wrecc/latest/wrecc/) to get a high level overview of the compiler pipeline.
+Have a look at the [documentation](https://docs.rs/wrecc_compiler/latest/wrecc_compiler/) to get a high level overview of the compiler pipeline.
 
 ## Project goals <a name="goals"></a>
 - Not relying on custom headers

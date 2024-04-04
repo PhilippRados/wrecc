@@ -9,7 +9,7 @@
 ![](https://img.shields.io/badge/made_for-UNIX-lightgrey)
 ![](https://img.shields.io/badge/Architecture-x86--64-blue)
 
-Wrecc is a small,lean x86-64 C99 compiler written from scratch. The name is a play on the word `wreck` which describes a rusting ship on the sea floor. 
+`wrecc` is a small,lean x86-64 C99 compiler written from scratch. The name is a play on the word _wreck_ which describes a rusting ship on the sea floor. 
 The compiler emits [x86-64](https://en.wikipedia.org/wiki/X86-64) assembly in [AT&T syntax](https://staffwww.fullcoll.edu/aclifton/courses/cs241/syntax.html), it adheres to the [System V ABI](https://wiki.osdev.org/System_V_ABI) which I could only test for Ubuntu and Macos. There are no dependencies you only need your assembler and linker which the compiler then invokes to create the final binary.
 
 ### Table of contents

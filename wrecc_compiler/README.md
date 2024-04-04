@@ -1,0 +1,1 @@
+This is the library crate containing all functionality used by the [wrecc]( https://github.com/PhilippRados/wrecc) binary-crate for transforming a unpreprocessed C-source string into a x86-64 assembly string

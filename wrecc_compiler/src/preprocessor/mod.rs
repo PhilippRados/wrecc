@@ -1,4 +1,4 @@
-//! Scans input file file into preprocessor-tokens and handles all preprocessing-directives
+//! Scans input file into preprocessor-tokens and handles all preprocessing-directives
 pub mod scanner;
 
 use crate::compiler::common::error::*;

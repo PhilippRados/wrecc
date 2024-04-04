@@ -30,7 +30,7 @@ The compiler emits [x86-64](https://en.wikipedia.org/wiki/X86-64) assembly in [A
 * [Troubleshooting](#troubleshooting) 
 * [Contribution](#contribution)
 * [Project goals](#goals)
-* [Ressources](#ressources)
+* [Resources](#resources)
 
 
 ## Installation
@@ -238,8 +238,8 @@ Have a look at the [documentation](https://docs.rs/wrecc_compiler/latest/wrecc_c
 - Compiling multiple files at once
 - Compiling real-world C projects like [Git](https://github.com/git/git/tree/master)
 
-## Ressources
-The following ressources helped me in building this compiler:
+## Resources
+The following resources helped me in building this compiler:
 - [Crafting Interpreters](https://craftinginterpreters.com/)
 - Engineering a Compiler (Book)
 - [acwj](https://github.com/DoctorWkt/acwj)

@@ -5,6 +5,8 @@ edition = "2021"
 authors = ["Philipp Rados"]
 license = "MIT"
 
+description = "Library used by wrecc to compile C99 to x86-64"
+repository = "https://github.com/PhilippRados/wrecc"
 readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

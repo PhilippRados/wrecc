@@ -117,6 +117,9 @@ pub struct Scanner {
 }
 impl Scanner {
     pub fn new(source: String) -> Scanner {
+        // replace windows style carriage return
+        let source = source.replace("\r\n", "\n");
+
         Scanner {
             column: 1,
             line: 1,

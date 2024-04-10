@@ -110,11 +110,12 @@ The preprocessor implements all [C99 preprocessor directives](https://en.cpprefe
 
 #### Unimplemented Features <a name="unimplemented"></a>
 Aside from the missing keywords these are the main missing features:
-- [ ] Arrays with unspecified size
+- [x] Arrays with unspecified size
+- [ ] Compiling multiple files at once
 - [ ] Raw structs/unions as function argument-/return-types
 - [ ] Floating point types<br>
 
-Here is a list of all the stuff still missing: [todo](https://placid-eris-c19.notion.site/check-all-errors-from-c-testsuite-6f3fa2a3c24a4711b5e89f45354db540)
+Here is a list of all the stuff still missing: [todo](https://placid-eris-c19.notion.site/check-all-errors-from-c-testsuite-6f3fa2a3c24a4711b5e89f45354db540?pvs=4)
 
 ### Error messages <a name="errors"></a>
 Wrecc also has nice looking messages. Error reporting doesn't stop after the first error. Using the `--no-color` option you can switch off color-highlighting in errors. Currently there are only errors and no warnings.
@@ -235,7 +236,6 @@ Have a look at the [documentation](https://docs.rs/wrecc_compiler/latest/wrecc_c
 ## Project goals <a name="goals"></a>
 - Not relying on custom headers
 - Passing all C99 tests in [c-testsuite](https://github.com/c-testsuite/c-testsuite)
-- Compiling multiple files at once
 - Compiling real-world C projects like [Git](https://github.com/git/git/tree/master)
 
 ## Resources

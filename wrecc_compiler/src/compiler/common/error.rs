@@ -64,6 +64,8 @@ pub enum ErrorKind {
     IncompleteType(Type),
     IncompleteReturnType(String, Type),
     IncompleteFuncArg(String, Type),
+    IncompleteAssign(Type),
+    IncompleteTentative(Type),
     VoidFuncArg,
     IncompleteMemberAccess(Type),
     TypeAlreadyExists(String, TokenKind),
@@ -184,6 +186,12 @@ impl ErrorKind {
             ErrorKind::IncompleteType(t) => format!("'{}' contains incomplete type", t),
             ErrorKind::IncompleteReturnType(name, t) => {
                 format!("function '{}' has incomplete return type '{}'", name, t)
+            }
+            ErrorKind::IncompleteAssign(t) => {
+                format!("cannot assign to incomplete type '{}'", t)
+            }
+            ErrorKind::IncompleteTentative(t) => {
+                format!("tentative definition of type '{}' is never completed", t)
             }
             ErrorKind::NotType(token) => format!("expected type-declaration, found {}", token),
             ErrorKind::UndeclaredType(s) => format!("undeclared type '{}'", s),

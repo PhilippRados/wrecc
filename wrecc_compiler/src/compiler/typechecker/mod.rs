@@ -62,6 +62,10 @@ impl TypeChecker {
             }
         }
 
+        if let Err(mut incomplete_declarations) = self.env.check_remaining_tentatives() {
+            errors.append(&mut incomplete_declarations);
+        }
+
         if errors.is_empty() {
             Ok(mir_decls)
         } else {
@@ -107,7 +111,7 @@ impl TypeChecker {
         (declarator, init): (hir::decl::Declarator, Option<hir::decl::Init>),
         func: &mut Option<&mut mir::decl::Function>,
     ) -> Result<Option<mir::decl::Declarator>, Error> {
-        let mut parsed_type = self.parse_modifiers(specifier_type, declarator.modifiers)?;
+        let parsed_type = self.parse_modifiers(specifier_type, declarator.modifiers)?;
 
         if let Some(name) = declarator.name {
             let symbol = if is_typedef {
@@ -127,60 +131,50 @@ impl TypeChecker {
 
             let entry = self.env.declare_symbol(&name, symbol)?;
 
-            return match (is_typedef, init) {
-                (false, init) if parsed_type.is_func() => {
-                    if init.is_some() {
-                        return Err(Error::new(
-                            &name,
-                            ErrorKind::Regular("only variables can be initialized"),
-                        ));
-                    }
-                    Ok(Some(mir::decl::Declarator {
-                        name,
-                        entry: Rc::clone(&entry),
-                        init: None,
-                    }))
-                }
-                (false, Some(init)) => {
-                    if !parsed_type.is_unbounded_array() && !parsed_type.is_complete() {
-                        return Err(Error::new(&name, ErrorKind::IncompleteType(parsed_type.clone())));
-                    }
-                    let init = self.init_check(func, &mut parsed_type, init)?;
-
-                    if let Some(func) = func {
-                        func.increment_stack_size(&parsed_type);
-                    }
-
-                    // update symbol type if was unbounded array
-                    entry.borrow_mut().unwrap_var_mut().type_decl = parsed_type;
-
-                    Ok(Some(mir::decl::Declarator {
-                        name,
-                        entry: Rc::clone(&entry),
-                        init: Some(init),
-                    }))
-                }
-                (false, None) => {
-                    let tentative_decl = self.env.is_global() && parsed_type.is_aggregate();
-                    if !parsed_type.is_complete() && !tentative_decl {
-                        return Err(Error::new(&name, ErrorKind::IncompleteType(parsed_type)));
-                    }
-                    if let Some(func) = func {
-                        func.increment_stack_size(&parsed_type);
-                    }
-
-                    Ok(Some(mir::decl::Declarator {
-                        name,
-                        entry: Rc::clone(&entry),
-                        init: None,
-                    }))
-                }
-                (_, Some(_)) => Err(Error::new(
+            if (is_typedef || parsed_type.is_func()) && init.is_some() {
+                return Err(Error::new(
                     &name,
                     ErrorKind::Regular("only variables can be initialized"),
-                )),
-                _ => Ok(None),
+                ));
+            }
+            if is_typedef {
+                return Ok(None);
+            }
+
+            // safe because typedef returns early
+            let mut symbol_type = entry.borrow().unwrap_var().type_decl.clone();
+
+            let init = if let Some(init) = init {
+                if !symbol_type.is_unbounded_array() && !symbol_type.is_complete() {
+                    return Err(Error::new(&name, ErrorKind::IncompleteType(symbol_type.clone())));
+                }
+                let init = self.init_check(func, &mut symbol_type, init)?;
+
+                // update symbol type if was unbounded array
+                if let ty @ Type::Array(_, ArraySize::Unknown) =
+                    &mut entry.borrow_mut().unwrap_var_mut().type_decl
+                {
+                    *ty = symbol_type.clone();
+                }
+
+                Some(init)
+            } else {
+                let tentative_decl = self.env.is_global() && symbol_type.is_aggregate();
+                if !symbol_type.is_complete() && !tentative_decl {
+                    return Err(Error::new(&name, ErrorKind::IncompleteType(symbol_type)));
+                }
+                None
             };
+
+            if let Some(func) = func {
+                func.increment_stack_size(&symbol_type);
+            }
+
+            Ok(Some(mir::decl::Declarator {
+                name,
+                init,
+                entry: Rc::clone(&entry),
+            }))
         } else {
             Ok(None)
         }
@@ -1657,6 +1651,10 @@ impl TypeChecker {
 
         if left.value_kind != ValueKind::Lvalue {
             return Err(Error::new(&token, ErrorKind::NotLvalue));
+        }
+
+        if !left.type_decl.is_complete() {
+            return Err(Error::new(&token, ErrorKind::IncompleteAssign(left.type_decl)));
         }
 
         let right = right.decay();

@@ -2,6 +2,7 @@
 
 use crate::compiler::codegen::register::*;
 use crate::compiler::common::{error::*, token::*, types::*};
+use crate::compiler::parser::hir::expr::ExprKind;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -72,16 +73,20 @@ impl Symbols {
                 Symbols::Variable(SymbolInfo { type_decl: ty1, .. }),
                 Symbols::Variable(SymbolInfo { type_decl: ty2, .. }),
             )
-            | (Symbols::TypeDef(ty1), Symbols::TypeDef(ty2)) => {
-                if ty1 != ty2 {
-                    Err(Error::new(
-                        name,
-                        ErrorKind::RedefTypeMismatch(name.unwrap_string(), ty1.clone(), ty2.clone()),
-                    ))
-                } else {
+            | (Symbols::TypeDef(ty1), Symbols::TypeDef(ty2)) => match (ty1, ty2) {
+                (Type::Array(..), Type::Array(..))
+                    if matches!(self, Symbols::Variable(..))
+                        // placeholder expression
+                        && ty1.type_compatible(ty2, &ExprKind::Nop) =>
+                {
                     Ok(())
                 }
-            }
+                _ if ty1 != ty2 => Err(Error::new(
+                    name,
+                    ErrorKind::RedefTypeMismatch(name.unwrap_string(), ty1.clone(), ty2.clone()),
+                )),
+                _ => Ok(()),
+            },
             _ => Err(Error::new(
                 name,
                 ErrorKind::RedefOtherSymbol(name.unwrap_string(), other.to_string()),
@@ -246,12 +251,12 @@ impl Environment {
     fn check_redef(
         &self,
         var_name: &Token,
-        symbol: Symbols,
+        mut current_symbol: Symbols,
         existing_symbol: Rc<RefCell<Symbols>>,
     ) -> Result<Rc<RefCell<Symbols>>, Error> {
-        symbol.cmp(var_name, &existing_symbol.borrow())?;
+        current_symbol.cmp(var_name, &existing_symbol.borrow())?;
 
-        if let Symbols::Variable(symbol_info) = &symbol {
+        if let Symbols::Variable(symbol_info) = &current_symbol {
             // functions and typedefs can be redeclared even inside functions
             if !self.is_global() && !symbol_info.type_decl.is_func() {
                 return Err(Error::new(
@@ -263,14 +268,27 @@ impl Environment {
 
         let existing_kind = existing_symbol.borrow().get_kind().clone();
 
-        match (symbol.get_kind(), existing_kind) {
-            (InitType::Declaration, InitType::Declaration)
-            | (InitType::Declaration, InitType::Definition) => Ok(existing_symbol),
+        match (current_symbol.get_kind(), existing_kind) {
+            (InitType::Definition, InitType::Declaration)
+            | (InitType::Declaration, InitType::Declaration) => {
+                // make sure that current symbol has known array-size if existing array-size
+                // was known
+                match (&mut current_symbol, &*existing_symbol.borrow()) {
+                    (
+                        Symbols::Variable(SymbolInfo { type_decl: current, .. }),
+                        Symbols::Variable(SymbolInfo { type_decl: existing_ty, .. }),
+                    ) if current.is_unbounded_array() => {
+                        *current = existing_ty.clone();
+                    }
+                    _ => (),
+                }
 
-            (InitType::Definition, InitType::Declaration) => {
-                *existing_symbol.borrow_mut() = symbol;
+                *existing_symbol.borrow_mut() = current_symbol;
                 Ok(existing_symbol)
             }
+
+            (InitType::Declaration, InitType::Definition) => Ok(existing_symbol),
+
             (InitType::Definition, InitType::Definition) => Err(Error::new(
                 var_name,
                 ErrorKind::Redefinition("symbol", var_name.unwrap_string()),
@@ -312,6 +330,29 @@ impl Environment {
         self.tags
             .get(var_name.unwrap_string())
             .ok_or_else(|| Error::new(var_name, ErrorKind::UndeclaredType(var_name.unwrap_string())))
+    }
+
+    pub fn check_remaining_tentatives(&self) -> Result<(), Vec<Error>> {
+        let globals = self.symbols.elems.get(0).expect("global scope never popped");
+        let mut errors = Vec::new();
+
+        for symbol in globals.values() {
+            if let Symbols::Variable(info) = &*symbol.borrow() {
+                // tentative array definitions are fine (according to gcc and clang)
+                if !info.type_decl.is_unbounded_array() && !info.type_decl.is_complete() {
+                    errors.push(Error::new(
+                        &info.token,
+                        ErrorKind::IncompleteTentative(info.type_decl.clone()),
+                    ));
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 

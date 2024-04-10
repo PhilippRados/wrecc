@@ -56,8 +56,9 @@ impl TypeInfo for Type {
             Type::Pointer(_) => Type::Primitive(Primitive::Long).size(),
             Type::Enum(..) => Type::Primitive(Primitive::Int).size(),
             Type::Array(element_type, ArraySize::Known(amount)) => amount * element_type.size(),
-            Type::Array(_, ArraySize::Unknown) => unreachable!("cannot get size from unbounded array"),
-            Type::Function { .. } => 1,
+            // INFO: tentative array assumed to have one element
+            Type::Array(element_type, ArraySize::Unknown) => element_type.size(),
+            Type::Function(_) => 1,
         }
     }
     fn reg_suffix(&self) -> String {

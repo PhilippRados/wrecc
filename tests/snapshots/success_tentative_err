@@ -1,0 +1,36 @@
+error: 'struct Bar' contains incomplete type
+|  --> in tests/fixtures/tentative_err.c:8:12
+|
+8 struct Bar kso = gh;
+|            ^
+error: conflicting types for 'b': 'int [20]' vs 'int [3]'
+|  --> in tests/fixtures/tentative_err.c:12:5
+|
+12 int b[20];
+|      ^
+error: conflicting types for 'ty': 'int [2]' vs 'int []'
+|  --> in tests/fixtures/tentative_err.c:15:13
+|
+15 typedef int ty[2];
+|              ^
+error: cannot access members of type that contains incomplete type 'struct Bar'
+|  --> in tests/fixtures/tentative_err.c:19:5
+|
+19   gh.age = 12;
+|      ^
+error: cannot assign to incomplete type 'struct Bar'
+|  --> in tests/fixtures/tentative_err.c:22:6
+|
+22   gh = gb;
+|       ^
+error: 'int []' contains incomplete type
+|  --> in tests/fixtures/tentative_err.c:23:3
+|
+23   sizeof(a);
+|    ^
+error: tentative definition of type 'struct Uwe' is never completed
+|  --> in tests/fixtures/tentative_err.c:4:12
+|
+4 struct Uwe k;
+|            ^
+7 errors generated.

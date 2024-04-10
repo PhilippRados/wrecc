@@ -50,10 +50,7 @@ impl ExprKind {
                     ..
                 })) = typechecker.env.get_symbol(name).map(|s| s.borrow().clone())
                 {
-                    Some(ExprKind::new_literal(
-                        n,
-                        type_decl.get_primitive().unwrap().clone(),
-                    ))
+                    Some(ExprKind::Literal(n, type_decl))
                 } else {
                     None
                 }
@@ -94,8 +91,8 @@ impl ExprKind {
                     _ => None,
                 }
             }
-            ExprKind::SizeofType { decl_type, .. } => {
-                let size = typechecker.parse_type(decl_type.clone())?.size();
+            ExprKind::SizeofType { token, decl_type } => {
+                let size = typechecker.parse_type(&token, decl_type.clone())?.size();
                 Some(ExprKind::new_literal(size as i64, Primitive::Int))
             }
 
@@ -407,7 +404,7 @@ impl ExprKind {
         expr.integer_const_fold(typechecker)?;
 
         if let ExprKind::Literal(right, old_type) = expr.as_ref() {
-            let new_type = typechecker.parse_type(decl_type.clone())?;
+            let new_type = typechecker.parse_type(&token, decl_type.clone())?;
 
             let (n, new_type) = Self::valid_cast(token, old_type.clone(), new_type, *right)?;
             Ok(Some(ExprKind::Literal(n, new_type)))

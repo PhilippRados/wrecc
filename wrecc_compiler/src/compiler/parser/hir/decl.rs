@@ -63,7 +63,7 @@ impl SpecifierKind {
 #[derive(Clone, Debug, PartialEq)]
 pub enum DeclModifier {
     Pointer,
-    Array(Token, ExprKind),
+    Array(Token, Option<ExprKind>),
     Function {
         params: Vec<(Vec<DeclSpecifier>, Declarator)>,
         variadic: bool,

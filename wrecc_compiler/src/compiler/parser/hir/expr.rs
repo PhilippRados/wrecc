@@ -67,9 +67,11 @@ pub enum ExprKind {
         right: Box<ExprKind>,
     },
     SizeofType {
+        token: Token,
         decl_type: DeclType,
     },
     SizeofExpr {
+        token: Token,
         expr: Box<ExprKind>,
     },
     String(Token),
@@ -146,9 +148,9 @@ impl PrintIndent for ExprKind {
                     args
                 )
             }
-            ExprKind::Cast { decl_type, expr, .. } => {
+            ExprKind::Cast { decl_type, expr, token } => {
                 let type_string = TypeChecker::new()
-                    .parse_type(decl_type.clone())
+                    .parse_type(&token, decl_type.clone())
                     .map(|ty| ty.to_string())
                     .unwrap_or("invalid type".to_string());
                 format!(
@@ -191,9 +193,9 @@ impl PrintIndent for ExprKind {
             ExprKind::SizeofExpr { expr, .. } => {
                 format!("SizeofExpr:\n{}", indent_fmt(expr.as_ref(), indent_level + 1))
             }
-            ExprKind::SizeofType { decl_type } => {
+            ExprKind::SizeofType { token, decl_type } => {
                 let type_string = TypeChecker::new()
-                    .parse_type(decl_type.clone())
+                    .parse_type(&token, decl_type.clone())
                     .map(|ty| ty.to_string())
                     .unwrap_or("invalid type".to_string());
 

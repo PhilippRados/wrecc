@@ -7,7 +7,7 @@ use std::path::PathBuf;
 /// The high-level error type, which is used by both lib.rs and main.rs
 #[derive(Debug)]
 pub enum WreccError {
-    /// Error produced by compiler (parsing/typechecking etc)
+    /// Error produced by [compiler](crate::compiler) (parsing/typechecking etc)
     Comp(Vec<Error>),
     /// Error when doing system operations (linking/assembling etc)
     Sys(String),
@@ -124,6 +124,8 @@ pub enum ErrorKind {
     InvalidCaller(Type),
     FunctionMember(String, Type),
     ArraySizeOverflow,
+    EmptyInit,
+    InvalidAggrInit(Type),
 
     // environment errors
     UndeclaredSymbol(String),
@@ -238,6 +240,10 @@ impl ErrorKind {
             ErrorKind::ScalarOverflow => "excess elements in scalar initializer".to_string(),
             ErrorKind::ArraySizeOverflow => {
                 "array-size exceeds maximum size of 9223372036854775807".to_string()
+            }
+            ErrorKind::EmptyInit => "cannot have empty aggregate-initializer".to_string(),
+            ErrorKind::InvalidAggrInit(type_decl) => {
+                format!("cannot initialize '{}' with scalar", type_decl)
             }
             ErrorKind::InvalidArray(type_decl) => format!("invalid array-type: '{}'", type_decl),
             ErrorKind::InvalidCaller(type_decl) => format!(

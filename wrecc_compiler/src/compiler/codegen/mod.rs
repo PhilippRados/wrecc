@@ -350,14 +350,34 @@ impl Compiler {
     fn global_declaration(&mut self, declarators: Vec<Declarator>) {
         for declarator in declarators {
             let var_symbol = declarator.entry.borrow().unwrap_var().clone();
+            let type_decl = var_symbol.type_decl;
 
-            if declarator.name == var_symbol.token {
+            if declarator.name == var_symbol.token && !type_decl.is_func() {
                 self.declare_global_var(
                     declarator.name.unwrap_string(),
-                    var_symbol.type_decl,
+                    type_decl,
                     declarator.entry,
                     declarator.init,
                 )
+            }
+            // if variable is declared but its initialization is after the first use then
+            // still needs a register to access:
+            // ```
+            // int a;
+            // int main() {printf("%d",a);} // prints 3
+            // int a = 3;
+            // ```
+            else if var_symbol.reg.is_none() {
+                let is_runtime_address = type_decl.is_func() && declarator.init.is_none();
+                declarator
+                    .entry
+                    .borrow_mut()
+                    .unwrap_var_mut()
+                    .set_reg(Register::Label(LabelRegister::Var(
+                        declarator.name.unwrap_string(),
+                        type_decl,
+                        is_runtime_address,
+                    )))
             }
         }
     }
@@ -440,8 +460,20 @@ impl Compiler {
         for declarator in declarators {
             let var_symbol = declarator.entry.borrow().unwrap_var().clone();
 
-            if declarator.name == var_symbol.token {
+            if declarator.name == var_symbol.token && !var_symbol.type_decl.is_func() {
                 self.declare_var(func, declarator.entry, declarator.init)
+            }
+            // only function-declarations can be redeclared inside of a function body
+            else if var_symbol.type_decl.is_func() {
+                declarator
+                    .entry
+                    .borrow_mut()
+                    .unwrap_var_mut()
+                    .set_reg(Register::Label(LabelRegister::Var(
+                        declarator.name.unwrap_string(),
+                        var_symbol.type_decl,
+                        false,
+                    )))
             }
         }
     }
@@ -1431,7 +1463,7 @@ impl Compiler {
 
 pub fn align(offset: usize, type_decl: &Type) -> usize {
     let size = match type_decl {
-        Type::Array { of, .. } => of.size(),
+        Type::Array(of, _) => of.size(),
         _ => type_decl.size(),
     };
     align_by(offset, size)

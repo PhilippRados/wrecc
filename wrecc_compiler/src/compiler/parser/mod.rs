@@ -272,12 +272,16 @@ impl Parser {
     }
 
     fn parse_arr(&mut self, token: Token) -> Result<DeclModifier, Error> {
-        let size = self.assignment()?;
+        let size = if let TokenKind::RightBracket = self.tokens.peek("array-declaration")?.kind {
+            None
+        } else {
+            Some(self.assignment()?)
+        };
 
         consume!(
             self,
             TokenKind::RightBracket,
-            "expected closing ']' after array initialization"
+            "expected closing ']' after array declaration"
         )?;
         Ok(DeclModifier::Array(token, size))
     }
@@ -1184,21 +1188,21 @@ impl Parser {
                 }
                 TokenKind::Sizeof => {
                     // sizeof expr doesnt need parentheses but sizeof type does
-                    self.tokens.next().unwrap();
+                    let token = self.tokens.next().unwrap();
                     if let TokenKind::LeftParen = self.tokens.peek("expected expression")?.kind {
                         if self
                             .is_type(self.tokens.double_peek("expected expression or type-specifier")?)
                         {
-                            self.tokens.next().unwrap();
+                            let token = self.tokens.next().unwrap();
                             let decl_type = self.type_name()?;
 
                             consume!(self, TokenKind::RightParen, "expected closing ')' after sizeof")?;
-                            return Ok(ExprKind::SizeofType { decl_type });
+                            return Ok(ExprKind::SizeofType { token, decl_type });
                         }
                     }
 
                     let right = self.unary()?;
-                    ExprKind::SizeofExpr { expr: Box::new(right) }
+                    ExprKind::SizeofExpr { token, expr: Box::new(right) }
                 }
                 _ => {
                     let token = self.tokens.next().unwrap();

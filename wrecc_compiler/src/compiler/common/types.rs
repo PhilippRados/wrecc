@@ -33,12 +33,18 @@ pub trait TypeInfo {
 #[derive(Clone, PartialEq, Debug)]
 pub enum Type {
     Primitive(Primitive),
-    Array { amount: usize, of: Box<Type> },
+    Array(Box<Type>, ArraySize),
     Pointer(Box<Type>),
     Struct(StructInfo),
     Union(StructInfo),
     Enum(Option<String>, Vec<(Token, i32)>),
     Function(FuncType),
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum ArraySize {
+    Known(usize),
+    Unknown,
 }
 
 impl TypeInfo for Type {
@@ -49,7 +55,8 @@ impl TypeInfo for Type {
             Type::Union(_) => self.union_biggest().size(),
             Type::Pointer(_) => Type::Primitive(Primitive::Long).size(),
             Type::Enum(..) => Type::Primitive(Primitive::Int).size(),
-            Type::Array { amount, of: element_type } => amount * element_type.size(),
+            Type::Array(element_type, ArraySize::Known(amount)) => amount * element_type.size(),
+            Type::Array(_, ArraySize::Unknown) => unreachable!("cannot get size from unbounded array"),
             Type::Function { .. } => 1,
         }
     }
@@ -101,9 +108,6 @@ impl Type {
     pub fn pointer_to(self) -> Type {
         Type::Pointer(Box::new(self.clone()))
     }
-    pub fn array_of(self, amount: usize) -> Type {
-        Type::Array { amount, of: Box::new(self) }
-    }
     pub fn function_of(self, params: Vec<Type>, variadic: bool) -> Type {
         Type::Function(FuncType {
             return_type: Box::new(self),
@@ -122,6 +126,9 @@ impl Type {
     }
     pub fn is_func(&self) -> bool {
         matches!(self, Type::Function { .. })
+    }
+    pub fn is_unbounded_array(&self) -> bool {
+        matches!(self, Type::Array(_, ArraySize::Unknown))
     }
     pub fn is_array(&self) -> bool {
         matches!(self, Type::Array { .. })
@@ -150,6 +157,15 @@ impl Type {
                 if matches!(**t, Type::Primitive(Primitive::Void)) =>
             {
                 true
+            }
+            (Type::Array(of1, ArraySize::Known(size1)), Type::Array(of2, ArraySize::Known(size2))) => {
+                size1 == size2 && of1.type_compatible(of2, other_expr)
+            }
+            // unspecified arrays are compatible if they have the same type
+            (Type::Array(of1, ArraySize::Unknown), Type::Array(of2, ArraySize::Unknown))
+            | (Type::Array(of1, ArraySize::Known(_)), Type::Array(of2, ArraySize::Unknown))
+            | (Type::Array(of1, ArraySize::Unknown), Type::Array(of2, ArraySize::Known(_))) => {
+                of1.type_compatible(of2, other_expr)
             }
 
             (Type::Pointer(_), Type::Pointer(_)) => *self == *other,
@@ -187,8 +203,11 @@ impl Type {
             _ => false,
         }
     }
-    pub fn is_aggregate(&self) -> bool {
+    pub fn is_struct(&self) -> bool {
         matches!(self, Type::Struct(_) | Type::Union(_))
+    }
+    pub fn is_aggregate(&self) -> bool {
+        matches!(self, Type::Struct(_) | Type::Union(_) | Type::Array(..))
     }
     fn union_biggest(&self) -> Type {
         match self {
@@ -205,7 +224,8 @@ impl Type {
     pub fn is_complete(&self) -> bool {
         match self {
             Type::Struct(s) | Type::Union(s) => s.is_complete(),
-            Type::Array { of: to, .. } => to.is_complete(),
+            Type::Array(of, ArraySize::Known(_)) => of.is_complete(),
+            Type::Array(_, ArraySize::Unknown) => false,
             _ if self.is_void() => false,
             _ => true,
         }
@@ -244,78 +264,13 @@ impl Type {
             None
         }
     }
-    pub fn is_char_array(&self) -> Option<usize> {
-        if let Type::Array { amount, of } = self {
+    pub fn is_char_array(&self) -> Option<&ArraySize> {
+        if let Type::Array(of, size) = self {
             if let Type::Primitive(Primitive::Char) = **of {
-                return Some(*amount);
+                return Some(size);
             }
         }
         None
-    }
-    /// Returns the amount of scalar elements in a type
-    pub fn element_amount(&self) -> usize {
-        match self {
-            Type::Array { amount, of } => amount * of.element_amount(),
-            Type::Struct(s) => s
-                .members()
-                .iter()
-                .fold(0, |acc, (member_type, _)| acc + member_type.element_amount()),
-            Type::Union(s) => {
-                if let Some((member_type, _)) = s.members().first() {
-                    member_type.element_amount()
-                } else {
-                    0
-                }
-            }
-            _ => 1,
-        }
-    }
-    pub fn len(&self) -> usize {
-        match self {
-            Type::Array { amount, .. } => *amount,
-            Type::Struct(s) => s.members().len(),
-            _ => 1,
-        }
-    }
-
-    /// Returns the type of the field at index
-    pub fn at(&self, index: usize) -> Option<Type> {
-        match self {
-            Type::Array { of, amount } => {
-                if index >= *amount {
-                    None
-                } else {
-                    Some(of.as_ref().clone())
-                }
-            }
-            Type::Struct(s) => s.members().get(index).map(|(ty, _)| ty.clone()),
-            Type::Union(s) => {
-                if index > 0 {
-                    None
-                } else {
-                    s.members().first().map(|(ty, _)| ty.clone())
-                }
-            }
-            _ => Some(self.clone()),
-        }
-    }
-    pub fn offset(&self, index: i64) -> i64 {
-        match self {
-            Type::Struct(s) => s
-                .members()
-                .iter()
-                .take(index as usize)
-                .fold(0, |acc, (m_type, _)| acc + m_type.size() as i64),
-            Type::Array { of, .. } => of.size() as i64 * index,
-            _ => 0,
-        }
-    }
-    pub fn unwrap_primitive(self) -> Primitive {
-        if let Type::Primitive(primitive) = self {
-            primitive
-        } else {
-            unreachable!("unwrap on non-primitive type")
-        }
     }
 }
 
@@ -543,7 +498,7 @@ impl Display for Type {
             let mut modifiers = Vec::new();
 
             while let Type::Pointer(new)
-            | Type::Array { of: new, .. }
+            | Type::Array(new, _)
             | Type::Function(FuncType { return_type: new, .. }) = current
             {
                 modifiers.push(current);
@@ -566,9 +521,14 @@ impl Display for Type {
 
             for (i, modifier) in modifiers.iter().enumerate() {
                 match modifier {
-                    Type::Array { amount, .. } => {
-                        suffixes.push(format!("[{}]{}", amount, closing_precedence(&modifiers, i)))
-                    }
+                    Type::Array(_, size) => suffixes.push(format!(
+                        "[{}]{}",
+                        match size {
+                            ArraySize::Known(size) => size.to_string(),
+                            ArraySize::Unknown => String::new(),
+                        },
+                        closing_precedence(&modifiers, i)
+                    )),
                     Type::Pointer(_) => {
                         let precedence = matches!(
                             modifiers.get(i + 1),
@@ -620,7 +580,12 @@ pub mod tests {
     macro_rules! setup_type {
         ($input:expr) => {
             if let Ok(ty) = crate::compiler::parser::tests::setup($input).type_name() {
-                if let Ok(actual_ty) = crate::compiler::typechecker::TypeChecker::new().parse_type(ty) {
+                if let Ok(actual_ty) = crate::compiler::typechecker::TypeChecker::new().parse_type(
+                    &crate::compiler::common::token::Token::default(
+                        crate::compiler::common::token::TokenKind::Semicolon,
+                    ),
+                    ty,
+                ) {
                     actual_ty
                 } else {
                     unreachable!("not type declaration")
@@ -632,7 +597,8 @@ pub mod tests {
         // if type depends on an already existing environment, supply said environment
         ($input:expr,$typechecker:expr) => {
             if let Ok(ty) = crate::compiler::parser::tests::setup($input).type_name() {
-                if let Ok(actual_ty) = $typechecker.parse_type(ty) {
+                if let Ok(actual_ty) = $typechecker.parse_type(&Token::default(TokenKind::Semicolon), ty)
+                {
                     actual_ty
                 } else {
                     unreachable!("not type declaration")
@@ -645,14 +611,6 @@ pub mod tests {
     fn assert_type_print(input: &str, expected: &str) {
         let type_string = setup_type!(input);
         assert_eq!(type_string.to_string(), expected);
-    }
-
-    #[test]
-    fn multidimensional_array_size() {
-        let input = setup_type!("int[2][2]");
-        let actual = input.element_amount();
-
-        assert_eq!(actual, 4);
     }
 
     #[test]

@@ -47,7 +47,7 @@ impl Expr {
     // int f() => int (*f)()
     pub fn decay(self) -> Expr {
         match self.type_decl.clone() {
-            Type::Array { of, .. } => Expr {
+            Type::Array(of, _) => Expr {
                 value_kind: self.value_kind.clone(),
                 type_decl: of.pointer_to(),
 

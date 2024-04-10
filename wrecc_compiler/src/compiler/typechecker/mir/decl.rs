@@ -17,43 +17,47 @@ pub struct Declarator {
 }
 
 pub enum Init {
+    /// A single element initializer
     Scalar(Expr),
+
+    /// Flat list of expressions in aggregate initializer and their offset from the 0th element
     Aggr(Vec<(Expr, usize)>),
 }
 
 pub struct Function {
     pub name: String,
+
     pub return_type: Type,
 
-    // parameters and their references in the symbol table
+    /// Parameters and their references in the symbol table
     pub params: Vec<VarSymbol>,
 
-    // if function contains var-args
+    /// If function contains var-args
     pub variadic: bool,
 
-    // how much stack space a function needs to allocate info given in typechecker
+    /// How much stack space a function needs to allocate info given in typechecker
     pub stack_size: usize,
 
-    // all the goto-labels that are unique to that function
+    /// All the goto-labels that are unique to that function
     pub labels: HashMap<String, usize>,
 
-    // index of epilogue label in function
+    /// Index of epilogue label in function
     pub epilogue_index: usize,
 
-    // offset from base-pointer where variable stays
+    /// Offset from base-pointer where variable stays
     pub current_bp_offset: usize,
 
-    // switch information, about cases and defaults
+    /// Switch information, about cases and defaults
     pub switches: VecDeque<Vec<CaseKind>>,
 
     // TODO: should be done via control-flow-graph
-    // checks if all paths return from a function
+    /// Checks if all paths return from a function
     pub returns_all_paths: bool,
 
-    // all goto-statements in that function, used to generate error for unkown goto-label
+    /// All goto-statements in that function, used to generate error for unkown goto-label
     pub gotos: Vec<Token>,
 
-    // keeps track of current scope-kind to check that certain statements (eg. continue or case) are
+    /// Keeps track of current scope-kind to check that certain statements (eg. continue or case) are
     // only within certain other scopes (loops and switches, respectively)
     pub scope: Vec<ScopeKind>,
 }

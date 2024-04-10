@@ -1,5 +1,6 @@
 //! Converts [HIR-parsetree](hir) to type-annotated [MIR-ast](mir) and checks for semantic errors
 
+pub mod init;
 pub mod mir;
 
 use crate::compiler::codegen::align;
@@ -7,6 +8,7 @@ use crate::compiler::codegen::register::*;
 use crate::compiler::common::{environment::*, error::*, token::*, types::*};
 use crate::compiler::parser::hir;
 
+use self::init::*;
 use self::mir::decl::{CaseKind, ScopeKind};
 use self::mir::expr::{CastDirection, ValueKind};
 use crate::find_scope;
@@ -105,34 +107,19 @@ impl TypeChecker {
         (declarator, init): (hir::decl::Declarator, Option<hir::decl::Init>),
         func: &mut Option<&mut mir::decl::Function>,
     ) -> Result<Option<mir::decl::Declarator>, Error> {
-        let parsed_type = self.parse_modifiers(specifier_type, declarator.modifiers)?;
+        let mut parsed_type = self.parse_modifiers(specifier_type, declarator.modifiers)?;
 
         if let Some(name) = declarator.name {
             let symbol = if is_typedef {
                 Symbols::TypeDef(parsed_type.clone())
             } else {
-                let kind = if init.is_some() {
-                    InitType::Definition
-                } else {
-                    InitType::Declaration
-                };
                 Symbols::Variable(SymbolInfo {
-                    // since global variable declarations can be used before initialization already
-                    // insert its register.
-                    // also have to insert function-labels otherwise their registers are never filled,
-                    // since they are ignored in codegen.
-                    reg: if self.env.is_global() || parsed_type.is_func() {
-                        Some(Register::Label(LabelRegister::Var(
-                            name.unwrap_string(),
-                            parsed_type.clone(),
-                            // variable address is computed at runtime if defined in other
-                            // translation unit
-                            parsed_type.is_func() && kind == InitType::Declaration,
-                        )))
+                    kind: if init.is_some() {
+                        InitType::Definition
                     } else {
-                        None
+                        InitType::Declaration
                     },
-                    kind,
+                    reg: None,
                     token: name.clone(),
                     type_decl: parsed_type.clone(),
                 })
@@ -140,26 +127,32 @@ impl TypeChecker {
 
             let entry = self.env.declare_symbol(&name, symbol)?;
 
-            return match (&*entry.borrow(), init) {
-                (Symbols::Variable(_), init) if parsed_type.is_func() => {
+            return match (is_typedef, init) {
+                (false, init) if parsed_type.is_func() => {
                     if init.is_some() {
                         return Err(Error::new(
                             &name,
                             ErrorKind::Regular("only variables can be initialized"),
                         ));
                     }
-                    // function declarations don't need any codegen
-                    Ok(None)
+                    Ok(Some(mir::decl::Declarator {
+                        name,
+                        entry: Rc::clone(&entry),
+                        init: None,
+                    }))
                 }
-                (Symbols::Variable(_), Some(init)) => {
-                    if !parsed_type.is_complete() {
-                        return Err(Error::new(&name, ErrorKind::IncompleteType(parsed_type)));
+                (false, Some(init)) => {
+                    if !parsed_type.is_unbounded_array() && !parsed_type.is_complete() {
+                        return Err(Error::new(&name, ErrorKind::IncompleteType(parsed_type.clone())));
                     }
-                    let init = self.init_check(func, &parsed_type, init)?;
+                    let init = self.init_check(func, &mut parsed_type, init)?;
 
                     if let Some(func) = func {
                         func.increment_stack_size(&parsed_type);
                     }
+
+                    // update symbol type if was unbounded array
+                    entry.borrow_mut().unwrap_var_mut().type_decl = parsed_type;
 
                     Ok(Some(mir::decl::Declarator {
                         name,
@@ -167,7 +160,7 @@ impl TypeChecker {
                         init: Some(init),
                     }))
                 }
-                (Symbols::Variable(_), None) => {
+                (false, None) => {
                     let tentative_decl = self.env.is_global() && parsed_type.is_aggregate();
                     if !parsed_type.is_complete() && !tentative_decl {
                         return Err(Error::new(&name, ErrorKind::IncompleteType(parsed_type)));
@@ -192,9 +185,13 @@ impl TypeChecker {
             Ok(None)
         }
     }
-    pub fn parse_type(&mut self, decl_type: hir::decl::DeclType) -> Result<Type, Error> {
+    pub fn parse_type(&mut self, token: &Token, decl_type: hir::decl::DeclType) -> Result<Type, Error> {
         let specifier_type = self.parse_specifiers(decl_type.specifiers)?;
         let parsed_type = self.parse_modifiers(specifier_type, decl_type.modifiers)?;
+
+        if !parsed_type.is_void() && !parsed_type.is_complete() {
+            return Err(Error::new(token, ErrorKind::IncompleteType(parsed_type)));
+        }
 
         Ok(parsed_type)
     }
@@ -253,20 +250,24 @@ impl TypeChecker {
         for m in modifiers {
             parsed_type = match m {
                 hir::decl::DeclModifier::Pointer => parsed_type.pointer_to(),
-                hir::decl::DeclModifier::Array(token, mut expr) => {
-                    let amount = expr.get_literal_constant(self, &token, "array size specifier")?;
-
-                    if parsed_type.is_func() {
+                hir::decl::DeclModifier::Array(token, size) => {
+                    if parsed_type.is_func() || parsed_type.is_unbounded_array() {
                         return Err(Error::new(&token, ErrorKind::InvalidArray(parsed_type)));
                     }
 
-                    if amount > 0 {
-                        if i64::overflowing_mul(parsed_type.size() as i64, amount).1 {
-                            return Err(Error::new(&token, ErrorKind::ArraySizeOverflow));
+                    if let Some(mut expr) = size {
+                        let amount = expr.get_literal_constant(self, &token, "array size specifier")?;
+
+                        if amount > 0 {
+                            if i64::overflowing_mul(parsed_type.size() as i64, amount).1 {
+                                return Err(Error::new(&token, ErrorKind::ArraySizeOverflow));
+                            }
+                            Type::Array(Box::new(parsed_type), ArraySize::Known(amount as usize))
+                        } else {
+                            return Err(Error::new(&token, ErrorKind::NegativeArraySize));
                         }
-                        parsed_type.array_of(amount as usize)
                     } else {
-                        return Err(Error::new(&token, ErrorKind::NegativeArraySize));
+                        Type::Array(Box::new(parsed_type), ArraySize::Unknown)
                     }
                 }
                 hir::decl::DeclModifier::Function { token, params, variadic } => {
@@ -467,7 +468,7 @@ impl TypeChecker {
             let mut parsed_type = self.parse_modifiers(specifier_type, declarator.modifiers)?;
 
             parsed_type = match parsed_type {
-                Type::Array { of, .. } => of.pointer_to(),
+                Type::Array(of, _) => of.pointer_to(),
                 Type::Function { .. } => parsed_type.pointer_to(),
                 ty => ty,
             };
@@ -504,11 +505,11 @@ impl TypeChecker {
     fn init_check(
         &mut self,
         func: &mut Option<&mut mir::decl::Function>,
-        type_decl: &Type,
+        type_decl: &mut Type,
         mut init: hir::decl::Init,
     ) -> Result<mir::decl::Init, Error> {
-        if let Some((amount, s)) = Self::is_string_init(type_decl, &init)? {
-            init.kind = Self::char_array(init.token.clone(), s, amount)?;
+        if let Some((string, size)) = Self::is_string_init(type_decl, &init)? {
+            init.kind = Self::char_array(init.token.clone(), string, size)?;
         }
 
         match init.kind {
@@ -523,6 +524,10 @@ impl TypeChecker {
         token: &Token,
         expr: hir::expr::ExprKind,
     ) -> Result<mir::decl::Init, Error> {
+        if type_decl.is_array() {
+            return Err(Error::new(token, ErrorKind::InvalidAggrInit(type_decl.clone())));
+        }
+
         let expr = self.visit_expr(func, expr)?;
 
         let expr = expr.decay();
@@ -538,7 +543,7 @@ impl TypeChecker {
     fn init_aggregate(
         &mut self,
         func: &mut Option<&mut mir::decl::Function>,
-        type_decl: &Type,
+        type_decl: &mut Type,
         token: Token,
         mut list: Vec<Box<hir::decl::Init>>,
     ) -> Result<mir::decl::Init, Error> {
@@ -546,6 +551,12 @@ impl TypeChecker {
             Type::Array { .. } | Type::Struct(_) | Type::Union(_) => {
                 let mut new_list = Vec::new();
                 let mut objects = CurrentObjects::new(type_decl.clone());
+                let mut max_index: usize = 0;
+
+                // INFO: int array[3] = {} is a gnu-extension
+                if list.is_empty() {
+                    return Err(Error::new(&token, ErrorKind::EmptyInit));
+                }
 
                 while !list.is_empty() {
                     let first = list.first_mut().unwrap();
@@ -607,6 +618,7 @@ impl TypeChecker {
                     }
 
                     let init = self.init_check(func, sub_type, *list.remove(0))?;
+                    let sub_type_size = sub_type.size() as i64;
                     let init_offset = objects.offset();
 
                     // remove overriding elements
@@ -614,7 +626,7 @@ impl TypeChecker {
                     {
                         offset..offset + size as i64
                     } else {
-                        init_offset..init_offset + sub_type.size() as i64
+                        init_offset..init_offset + sub_type_size
                     };
                     new_list.retain(|(.., offset)| !init_interval.contains(offset));
 
@@ -632,7 +644,18 @@ impl TypeChecker {
 
                     // pop off sub-type
                     objects.0.pop();
+
+                    max_index = std::cmp::max(
+                        max_index,
+                        objects.0.first().map(|(i, ..)| *i as usize).unwrap_or(0),
+                    );
+
                     objects.update_current();
+                }
+
+                // set size of unbounded array to biggest designator index
+                if let Type::Array(_, size @ ArraySize::Unknown) = type_decl {
+                    *size = ArraySize::Known(max_index + 1);
                 }
 
                 new_list.sort_by(|(.., offset1), (.., offset2)| offset1.cmp(offset2));
@@ -666,7 +689,7 @@ impl TypeChecker {
         designator: hir::decl::Designator,
     ) -> Result<(i64, i64, Type), Error> {
         match (designator.kind, type_decl) {
-            (hir::decl::DesignatorKind::Array(mut expr), Type::Array { amount, of }) => {
+            (hir::decl::DesignatorKind::Array(mut expr), Type::Array(of, size)) => {
                 let literal = expr.get_literal_constant(self, &designator.token, "array designator")?;
                 if literal < 0 {
                     return Err(Error::new(
@@ -675,13 +698,12 @@ impl TypeChecker {
                     ));
                 }
 
-                if literal >= *amount as i64 {
-                    Err(Error::new(
+                match size {
+                    ArraySize::Known(amount) if literal >= *amount as i64 => Err(Error::new(
                         &designator.token,
                         ErrorKind::DesignatorOverflow(*amount, literal),
-                    ))
-                } else {
-                    Ok((literal, literal, *of.clone()))
+                    )),
+                    _ => Ok((literal, literal, *of.clone())),
                 }
             }
             (hir::decl::DesignatorKind::Member(_), Type::Array { .. }) => Err(Error::new(
@@ -725,21 +747,21 @@ impl TypeChecker {
     // both valid:
     // - char arr[4] = "foo";
     // - char arr[4] = {"foo"};
-    fn is_string_init(
-        type_decl: &Type,
+    fn is_string_init<'a>(
+        type_decl: &'a Type,
         init: &hir::decl::Init,
-    ) -> Result<Option<(usize, String)>, Error> {
-        if let Some(amount) = type_decl.is_char_array() {
+    ) -> Result<Option<(String, &'a ArraySize)>, Error> {
+        if let Some(size) = type_decl.is_char_array() {
             match &init.kind {
                 hir::decl::InitKind::Scalar(hir::expr::ExprKind::String(s)) => {
-                    return Ok(Some((amount, s.unwrap_string())))
+                    return Ok(Some((s.unwrap_string(), size)))
                 }
                 hir::decl::InitKind::Aggr(list) => match list.as_slice() {
                     [single_init] if single_init.designator.is_none() => {
                         if let hir::decl::InitKind::Scalar(hir::expr::ExprKind::String(s)) =
                             &single_init.kind
                         {
-                            return Ok(Some((amount, s.unwrap_string())));
+                            return Ok(Some((s.unwrap_string(), size)));
                         }
                     }
                     [first_init, second_init] if first_init.designator.is_none() => {
@@ -759,18 +781,23 @@ impl TypeChecker {
         }
         Ok(None)
     }
-    fn char_array(token: Token, mut s: String, amount: usize) -> Result<hir::decl::InitKind, Error> {
-        // char s[] = "abc" identical to char s[] = {'a','b','c','\0'} (6.7.8)
-        if amount < s.len() {
-            return Err(Error::new(
-                &token,
-                ErrorKind::TooLong("initializer-string", amount, s.len()),
-            ));
-        }
-        let mut diff = amount - s.len();
-        while diff > 0 {
-            diff -= 1;
-            s.push('\0'); // append implicit NULL terminator to string
+    // char s[] = "abc" identical to char s[] = {'a','b','c','\0'} (6.7.8)
+    fn char_array(token: Token, mut s: String, size: &ArraySize) -> Result<hir::decl::InitKind, Error> {
+        match size {
+            ArraySize::Known(size) if *size < s.len() => {
+                return Err(Error::new(
+                    &token,
+                    ErrorKind::TooLong("initializer-string", *size, s.len()),
+                ));
+            }
+            // append implicit NULL terminator to string
+            ArraySize::Known(size) if *size > s.len() => {
+                s.push('\0');
+            }
+            ArraySize::Unknown => {
+                s.push('\0');
+            }
+            _ => (),
         }
 
         Ok(hir::decl::InitKind::Aggr(
@@ -802,17 +829,15 @@ impl TypeChecker {
         let Some(hir::decl::DeclModifier::Function { params, variadic,token }) = decl_type.modifiers.pop() else {
             unreachable!("last modifier has to be function to be func-def");
         };
-        let return_type = self.parse_type(decl_type)?;
+        let return_type = self.parse_type(&name, decl_type).map_err(|mut err| {
+            if let ErrorKind::IncompleteType(ty) = err.kind {
+                err.kind = ErrorKind::IncompleteReturnType(name_string.clone(), ty)
+            }
+            err
+        })?;
 
         if return_type.is_func() || return_type.is_array() {
             return Err(Error::new(&token, ErrorKind::InvalidReturnType(return_type)));
-        }
-
-        if !return_type.is_complete() && !return_type.is_void() {
-            return Err(Error::new(
-                &name,
-                ErrorKind::IncompleteReturnType(name_string, return_type),
-            ));
         }
 
         // have to push scope before declaring local variables
@@ -1277,8 +1302,8 @@ impl TypeChecker {
                 self.ternary(func, token, *cond, *true_expr, *false_expr)
             }
             hir::expr::ExprKind::Comma { left, right } => self.comma(func, *left, *right),
-            hir::expr::ExprKind::SizeofType { decl_type } => self.sizeof_type(decl_type),
-            hir::expr::ExprKind::SizeofExpr { expr } => self.sizeof_expr(func, *expr),
+            hir::expr::ExprKind::SizeofType { token, decl_type } => self.sizeof_type(token, decl_type),
+            hir::expr::ExprKind::SizeofExpr { token, expr } => self.sizeof_expr(func, token, *expr),
             hir::expr::ExprKind::Nop => Ok(mir::expr::Expr {
                 kind: mir::expr::ExprKind::Nop,
                 type_decl: Type::Primitive(Primitive::Void),
@@ -1312,7 +1337,7 @@ impl TypeChecker {
         decl_type: hir::decl::DeclType,
     ) -> Result<mir::expr::Expr, Error> {
         let expr = self.visit_expr(func, expr)?.decay();
-        let new_type = self.parse_type(decl_type)?;
+        let new_type = self.parse_type(&token, decl_type)?;
 
         if !new_type.is_void() && (!expr.type_decl.is_scalar() || !new_type.is_scalar()) {
             return Err(Error::new(
@@ -1339,8 +1364,12 @@ impl TypeChecker {
         }
     }
 
-    fn sizeof_type(&mut self, decl_type: hir::decl::DeclType) -> Result<mir::expr::Expr, Error> {
-        let type_decl = self.parse_type(decl_type)?;
+    fn sizeof_type(
+        &mut self,
+        token: Token,
+        decl_type: hir::decl::DeclType,
+    ) -> Result<mir::expr::Expr, Error> {
+        let type_decl = self.parse_type(&token, decl_type)?;
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Literal(type_decl.size() as i64),
@@ -1352,9 +1381,14 @@ impl TypeChecker {
     fn sizeof_expr(
         &mut self,
         func: &mut Option<&mut mir::decl::Function>,
+        token: Token,
         expr: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
         let expr = self.visit_expr(func, expr)?;
+
+        if !expr.type_decl.is_void() && !expr.type_decl.is_complete() {
+            return Err(Error::new(&token, ErrorKind::IncompleteType(expr.type_decl)));
+        }
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Literal(expr.type_decl.size() as i64),
@@ -1528,10 +1562,7 @@ impl TypeChecker {
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::String(data),
-            type_decl: Type::Array {
-                of: Box::new(Type::Primitive(Primitive::Char)),
-                amount: len,
-            },
+            type_decl: Type::Array(Box::new(Type::Primitive(Primitive::Char)), ArraySize::Known(len)),
             value_kind: ValueKind::Lvalue,
         })
     }
@@ -1987,77 +2018,6 @@ impl TypeChecker {
     }
 }
 
-// Helper object to store elements when initializing aggregate objects like:
-// `int array[10] = {1,2,[6] = 8}`
-// and keeping track of nested initializations
-#[derive(Clone)]
-struct CurrentObjects(Vec<(i64, i64, Type)>);
-impl CurrentObjects {
-    fn new(type_decl: Type) -> Self {
-        CurrentObjects(vec![(0, 0, type_decl)])
-    }
-    fn update(&mut self, (i, union_index, new_type): (i64, i64, Type)) {
-        self.0.last_mut().unwrap().0 = i;
-        self.0.last_mut().unwrap().1 = union_index;
-        self.0.push((0, 0, new_type));
-    }
-    fn current(&self) -> &(i64, i64, Type) {
-        self.0.last().unwrap()
-    }
-    fn current_type(&self) -> &Type {
-        if let Some((.., type_decl)) = self.0.last() {
-            type_decl
-        } else {
-            unreachable!("always at least one current objects")
-        }
-    }
-    fn offset(&self) -> i64 {
-        self.0
-            .iter()
-            .fold(0, |acc, (i, _, type_decl)| acc + type_decl.offset(*i))
-    }
-    fn update_current(&mut self) {
-        let mut remove_idx = None;
-        for (obj_index, (i, _, type_decl)) in self.0.iter().enumerate().rev() {
-            if obj_index != 0 && (i + 1 >= type_decl.len() as i64) {
-                remove_idx = Some(obj_index);
-            } else {
-                break;
-            }
-        }
-        // if new current objects also full then remove too
-        if let Some(i) = remove_idx {
-            self.0.truncate(i);
-        }
-
-        // increment the index of the current object
-        self.0.last_mut().unwrap().0 += 1;
-    }
-    // removes all objects except base-type
-    fn clear(&mut self) {
-        self.0.truncate(1);
-    }
-
-    fn find_same_union(
-        &self,
-        new_list: &Vec<(CurrentObjects, mir::expr::Expr, i64)>,
-    ) -> Option<(i64, usize)> {
-        for (objects, ..) in new_list {
-            let mut offset = 0;
-            for (other_obj, current_obj) in objects.0.iter().zip(&self.0) {
-                match (other_obj, current_obj) {
-                    ((_, i1, type_decl @ Type::Union(_)), (_, i2, Type::Union(_))) if i1 != i2 => {
-                        return Some((offset, type_decl.size()))
-                    }
-                    ((i1, ..), (i2, ..)) if *i1 != *i2 => break,
-                    ((i, _, type_decl), ..) => offset += type_decl.offset(*i),
-                }
-            }
-        }
-        None
-    }
-}
-
 pub fn align_by(mut offset: usize, type_size: usize) -> usize {
     let remainder = offset % type_size;
     if remainder != 0 {
@@ -2485,7 +2445,6 @@ int a;";
             (1, "'e'", "char"),
             (2, "'i'", "char"),
             (3, "'\\0'", "char"),
-            (4, "'\\0'", "char"),
         ];
 
         assert_init(actual, expected);
@@ -2590,7 +2549,7 @@ int a;";
             Err(Error { kind: ErrorKind::ArraySizeOverflow, .. })
         ));
 
-        let actual_no_overflow = setup_init_list("int arr[2305843009213693951] = {};");
+        let actual_no_overflow = setup_init_list("int arr[2305843009213693951] = {0};");
         assert!(actual_no_overflow.is_ok());
     }
     #[test]
@@ -2643,5 +2602,51 @@ int a;";
         let expected = vec![(0, "3", "int"), (4, "2", "int")];
 
         assert_init(actual, expected);
+    }
+
+    #[test]
+    fn unsized_array() {
+        let actual = setup_init_list("int a[] = {1,2,3};").unwrap();
+        let expected = vec![(0, "1", "int"), (4, "2", "int"), (8, "3", "int")];
+
+        assert_init(actual, expected);
+    }
+
+    #[test]
+    fn unsized_array_string() {
+        let actual = setup_init_list("char s[] = \"foo\";").unwrap();
+        let expected = vec![
+            (0, "'f'", "char"),
+            (1, "'o'", "char"),
+            (2, "'o'", "char"),
+            (3, "'\0'", "char"),
+        ];
+
+        assert_init(actual, expected);
+    }
+
+    #[test]
+    fn nested_unsized_array() {
+        let actual = setup_init_list("int s[][2] = {{1,2},1,2,{4},6};").unwrap();
+        let expected = vec![
+            (0, "1", "int"),
+            (4, "2", "int"),
+            (8, "1", "int"),
+            (12, "2", "int"),
+            (16, "4", "int"),
+            (24, "6", "int"),
+        ];
+
+        assert_init(actual, expected);
+    }
+
+    #[test]
+    fn nested_unsized_array_overflow() {
+        let actual = setup_init_list("long s[][2] = {{1,2},1,{2,3},4};");
+
+        assert!(matches!(
+            actual,
+            Err(Error { kind: ErrorKind::ScalarOverflow, .. })
+        ));
     }
 }

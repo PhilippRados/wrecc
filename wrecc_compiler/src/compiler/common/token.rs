@@ -1,5 +1,5 @@
 use crate::compiler::common::error::Location;
-use crate::compiler::parser::hir::decl::SpecifierKind;
+use crate::compiler::parser::hir::decl::{SpecifierKind, StorageClassKind};
 use std::fmt::Display;
 use std::path::PathBuf;
 
@@ -70,6 +70,10 @@ pub enum TokenKind {
     Union,
     Enum,
     TypeDef,
+    Extern,
+    Static,
+    Auto,
+    Register,
     Else,
     For,
     If,
@@ -120,9 +124,8 @@ impl TokenKind {
             | TokenKind::StarEqual
             | TokenKind::GreaterGreater
             | TokenKind::LessLess
-            | TokenKind::Do => 2,
-            TokenKind::String(s) => s.len() + 2,
-            TokenKind::Ident(s) => s.len(),
+            | TokenKind::Do
+            | TokenKind::If => 2,
             TokenKind::Int
             | TokenKind::For
             | TokenKind::GreaterGreaterEqual
@@ -132,13 +135,23 @@ impl TokenKind {
             | TokenKind::Else
             | TokenKind::Long
             | TokenKind::Enum
-            | TokenKind::Goto => 4,
+            | TokenKind::Goto
+            | TokenKind::Case
+            | TokenKind::Auto => 4,
             TokenKind::While | TokenKind::Union | TokenKind::Break => 5,
-            TokenKind::If => 2,
-            TokenKind::Return | TokenKind::Struct | TokenKind::Sizeof => 6,
-            TokenKind::TypeDef => 7,
-            TokenKind::Continue => 8,
+            TokenKind::Return
+            | TokenKind::Struct
+            | TokenKind::Sizeof
+            | TokenKind::Extern
+            | TokenKind::Static
+            | TokenKind::Switch => 6,
+            TokenKind::TypeDef | TokenKind::Default => 7,
+            TokenKind::Continue | TokenKind::Register => 8,
+
             TokenKind::Number(n) => n.to_string().len(),
+            TokenKind::String(s) => s.len() + 2,
+            TokenKind::Ident(s) => s.len(),
+
             _ => 1,
         }
     }
@@ -186,6 +199,10 @@ impl Display for TokenKind {
                 TokenKind::Long => "'long'",
                 TokenKind::Struct => "'struct'",
                 TokenKind::TypeDef => "'typedef'",
+                TokenKind::Extern => "'extern'",
+                TokenKind::Static => "'static'",
+                TokenKind::Auto => "'auto'",
+                TokenKind::Register => "'register'",
                 TokenKind::Union => "'union'",
                 TokenKind::Enum => "'enum'",
                 TokenKind::Equal => "'='",
@@ -289,6 +306,16 @@ impl Token {
                 | TokenKind::Long
         )
     }
+    pub fn is_storageclass(&self) -> bool {
+        matches!(
+            self.kind,
+            TokenKind::TypeDef
+                | TokenKind::Extern
+                | TokenKind::Static
+                | TokenKind::Auto
+                | TokenKind::Register
+        )
+    }
 }
 impl PartialEq for Token {
     fn eq(&self, other: &Token) -> bool {
@@ -309,6 +336,19 @@ impl Into<SpecifierKind> for Token {
         }
     }
 }
+impl Into<StorageClassKind> for TokenKind {
+    fn into(self) -> StorageClassKind {
+        match self {
+            TokenKind::TypeDef => StorageClassKind::TypeDef,
+            TokenKind::Extern => StorageClassKind::Extern,
+            TokenKind::Static => StorageClassKind::Static,
+            TokenKind::Auto => StorageClassKind::Auto,
+            TokenKind::Register => StorageClassKind::Register,
+            _ => unreachable!("not a valid storage-class token"),
+        }
+    }
+}
+
 impl Location for Token {
     fn line_index(&self) -> i32 {
         self.line_index

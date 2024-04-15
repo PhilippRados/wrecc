@@ -1,19 +1,15 @@
 pub use struct_ref::StructRef;
 
-use crate::compiler::common::{environment::Symbols, token::*};
+use crate::compiler::common::token::*;
 use crate::compiler::parser::hir::expr::*;
 
-use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::Rc;
 
 static RETURN_REG: &[&str; 3] = &["%al", "%eax", "%rax"];
 
-pub type VarSymbol = Rc<RefCell<Symbols>>;
-pub type FuncSymbol = Rc<RefCell<Symbols>>;
-
 pub trait TypeInfo {
-    /// Returns size in bytes of type
+    /// Returns size of type in bytes
     fn size(&self) -> usize;
 
     /// Returns the correct suffix for a register of type

@@ -130,12 +130,12 @@ impl Parser {
     // <external-declaration> ::= <function-definition>
     //                          | <declaration>
     pub fn external_declaration(&mut self) -> Result<ExternalDeclaration, Error> {
-        let (specifiers, is_typedef) = self.declaration_specifiers(true)?;
+        let (specifiers, storage_classes) = self.declaration_specifiers(true)?;
 
         if match_next!(self, TokenKind::Semicolon).is_some() {
             return Ok(ExternalDeclaration::Declaration(Declaration {
                 specifiers,
-                is_typedef,
+                storage_classes,
                 declarators: Vec::new(),
             }));
         }
@@ -145,10 +145,10 @@ impl Parser {
         if matches!(declarator.modifiers.last(), Some(DeclModifier::Function { .. }))
             && matches!(self.tokens.peek(""), Ok(Token { kind: TokenKind::LeftBrace, .. }))
         {
-            return self.function_definition(specifiers, is_typedef, declarator);
+            return self.function_definition(specifiers, storage_classes, declarator);
         }
 
-        self.declaration(specifiers, is_typedef, declarator)
+        self.declaration(specifiers, storage_classes, declarator)
     }
 
     // <declaration-specifier> ::= <storage-class-specifier>
@@ -158,13 +158,13 @@ impl Parser {
     //                             | register
     //                             | static
     //                             | extern
-    //                             | typedef (only typedef currently supported)
+    //                             | typedef
     fn declaration_specifiers(
         &mut self,
         allow_storage_classes: bool,
-    ) -> Result<(Vec<DeclSpecifier>, bool), Error> {
+    ) -> Result<(Vec<DeclSpecifier>, Vec<StorageClass>), Error> {
         let mut specifiers = Vec::new();
-        let mut is_typedef = false;
+        let mut storage_classes = Vec::new();
 
         while let Ok(token) = self.tokens.peek("") {
             if self.is_type(token) {
@@ -176,20 +176,28 @@ impl Parser {
                     token: token.clone(),
                     kind: self.type_specifier()?,
                 });
-            } else if let Some(token) = match_next!(self, TokenKind::TypeDef) {
+            } else if let Some(token) = match_next!(
+                self,
+                TokenKind::TypeDef
+                    | TokenKind::Extern
+                    | TokenKind::Static
+                    | TokenKind::Auto
+                    | TokenKind::Register
+            ) {
                 if !allow_storage_classes {
                     return Err(Error::new(
                         &token,
                         ErrorKind::Regular("storage classes not allowed in this specifier"),
                     ));
                 }
-                is_typedef = true;
+
+                storage_classes.push(StorageClass { kind: token.kind.clone().into(), token });
             } else {
                 break;
             };
         }
 
-        Ok((specifiers, is_typedef))
+        Ok((specifiers, storage_classes))
     }
 
     // <declarator> ::= <pointers> <direct-declarator> {<type-suffix>}*
@@ -326,11 +334,11 @@ impl Parser {
     // <parameter-declaration> ::= {<declaration-specifier>}+ <declarator>
     //                           | {<declaration-specifier>}+ <abstract-declarator>
     //                           | {<declaration-specifier>}+
-    fn parameter_declaration(&mut self) -> Result<(Vec<DeclSpecifier>, Declarator), Error> {
-        let (specifiers, _) = self.declaration_specifiers(false)?;
+    fn parameter_declaration(&mut self) -> Result<ParamDecl, Error> {
+        let (specifiers, storage_classes) = self.declaration_specifiers(true)?;
         let declarator = self.declarator(DeclaratorKind::MaybeAbstract)?;
 
-        Ok((specifiers, declarator))
+        Ok(ParamDecl { specifiers, storage_classes, declarator })
     }
 
     // <type-name> ::= {<specifier-qualifier>}+ {<abstract-declarator>}?
@@ -344,28 +352,20 @@ impl Parser {
     fn function_definition(
         &mut self,
         specifiers: Vec<DeclSpecifier>,
-        is_typedef: bool,
+        storage_classes: Vec<StorageClass>,
         declarator: Declarator,
     ) -> Result<ExternalDeclaration, Error> {
-        let name = declarator.name.expect("external-decls cannot be abstract");
-
-        if is_typedef {
-            return Err(Error::new(
-                &name,
-                ErrorKind::Regular("typedef not allowed in function-definition"),
-            ));
-        }
-
         self.tokens.next().expect("consume peeked left-brace");
 
         let body = self.block()?;
 
         Ok(ExternalDeclaration::Function(
-            DeclType {
+            FuncDecl {
                 specifiers,
+                storage_classes,
+                name: declarator.name.expect("external-decls cannot be abstract"),
                 modifiers: declarator.modifiers,
             },
-            name,
             body,
         ))
     }
@@ -373,17 +373,17 @@ impl Parser {
     fn declaration(
         &mut self,
         specifiers: Vec<DeclSpecifier>,
-        is_typedef: bool,
+        storage_classes: Vec<StorageClass>,
         declarator: Declarator,
     ) -> Result<ExternalDeclaration, Error> {
         let mut declarators = Vec::new();
-        let init = self.init_declarator(is_typedef, &declarator)?;
+        let init = self.init_declarator(&storage_classes, &declarator)?;
 
         declarators.push((declarator, init));
 
         while match_next!(self, TokenKind::Comma).is_some() {
             let declarator = self.declarator(DeclaratorKind::NoAbstract)?;
-            let init = self.init_declarator(is_typedef, &declarator)?;
+            let init = self.init_declarator(&storage_classes, &declarator)?;
 
             declarators.push((declarator, init));
         }
@@ -392,17 +392,20 @@ impl Parser {
         Ok(ExternalDeclaration::Declaration(Declaration {
             specifiers,
             declarators,
-            is_typedef,
+            storage_classes,
         }))
     }
     fn init_declarator(
         &mut self,
-        is_typedef: bool,
+        storage_classes: &Vec<StorageClass>,
         Declarator { name, .. }: &Declarator,
     ) -> Result<Option<Init>, Error> {
         let name = name.clone().unwrap();
 
-        if is_typedef {
+        if storage_classes
+            .iter()
+            .any(|storage| storage.kind == StorageClassKind::TypeDef)
+        {
             self.typedefs.declare(name.unwrap_string(), ());
         }
 
@@ -816,17 +819,8 @@ impl Parser {
 
         let init = match self.is_specifier(self.tokens.peek("expected type-specifier")?) {
             true => self.external_declaration().and_then(|decl| match decl {
-                ExternalDeclaration::Declaration(decl) => {
-                    if decl.is_typedef {
-                        return Err(Error::new(
-                            &left_paren,
-                            ErrorKind::Regular("typedef not allowed in for-statement"),
-                        ));
-                    }
-
-                    Ok(Some(Box::new(Stmt::Declaration(decl))))
-                }
-                ExternalDeclaration::Function(_, name, _) => Err(Error::new(
+                ExternalDeclaration::Declaration(decl) => Ok(Some(Box::new(Stmt::Declaration(decl)))),
+                ExternalDeclaration::Function(FuncDecl { name, .. }, _) => Err(Error::new(
                     &name,
                     ErrorKind::Regular("cannot define functions in for-statement"),
                 )),
@@ -891,7 +885,7 @@ impl Parser {
                     {
                         self.external_declaration().and_then(|decl| match decl {
                             ExternalDeclaration::Declaration(decl) => Ok(Stmt::Declaration(decl)),
-                            ExternalDeclaration::Function(_, name, _) => Err(Error::new(
+                            ExternalDeclaration::Function(FuncDecl { name, .. }, _) => Err(Error::new(
                                 &name,
                                 ErrorKind::Regular("cannot define functions in 'block'-statement"),
                             )),
@@ -1363,7 +1357,7 @@ impl Parser {
         token.is_type()
     }
     fn is_specifier(&self, token: &Token) -> bool {
-        self.is_type(token) || matches!(token.kind, TokenKind::TypeDef)
+        self.is_type(token) || token.is_storageclass()
     }
 }
 

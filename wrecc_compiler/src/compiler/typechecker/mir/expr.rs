@@ -1,4 +1,4 @@
-use crate::compiler::common::{token::TokenKind, types::*};
+use crate::compiler::common::{environment::SymbolRef, token::TokenKind, types::*};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExprKind {
@@ -6,7 +6,7 @@ pub enum ExprKind {
     Unary { operator: TokenKind, right: Box<Expr> },
     Grouping { expr: Box<Expr> },
     Assign { l_expr: Box<Expr>, r_expr: Box<Expr> },
-    CompoundAssign { expr: Box<Expr>, tmp_symbol: VarSymbol },
+    CompoundAssign { expr: Box<Expr>, tmp_symbol: SymbolRef },
     Logical { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
     Comparison { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
     Call { caller: Box<Expr>, args: Vec<Expr> },
@@ -18,7 +18,7 @@ pub enum ExprKind {
     Comma { left: Box<Expr>, right: Box<Expr> },
     String(String),
     Literal(i64),
-    Ident(VarSymbol),
+    Ident(SymbolRef),
     Nop,
 }
 

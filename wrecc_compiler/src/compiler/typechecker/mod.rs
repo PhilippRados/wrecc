@@ -80,8 +80,8 @@ impl TypeChecker {
             hir::decl::ExternalDeclaration::Declaration(decl) => self
                 .declaration(decl, None)
                 .map(mir::decl::ExternalDeclaration::Declaration),
-            hir::decl::ExternalDeclaration::Function(decl_type, name, body) => {
-                self.function_definition(decl_type, name, body)
+            hir::decl::ExternalDeclaration::Function(func_decl, body) => {
+                self.function_definition(func_decl, body)
             }
         }
     }
@@ -92,12 +92,16 @@ impl TypeChecker {
         mut func: Option<&mut mir::decl::Function>,
     ) -> Result<Vec<mir::decl::Declarator>, Error> {
         let mut declarators = Vec::new();
-        let specifier_type = self.parse_specifiers(decl.specifiers.clone())?;
+        let specifier_type = self.parse_specifiers(decl.specifiers)?;
+        let storage_class = self.parse_storage_classes(&decl.storage_classes)?;
 
         for declarator in decl.declarators {
-            if let Some(d) =
-                self.declarator(specifier_type.clone(), decl.is_typedef, declarator, &mut func)?
-            {
+            if let Some(d) = self.declarator(
+                specifier_type.clone(),
+                storage_class.clone(),
+                declarator,
+                &mut func,
+            )? {
                 declarators.push(d);
             }
         }
@@ -107,42 +111,76 @@ impl TypeChecker {
     fn declarator(
         &mut self,
         specifier_type: Type,
-        is_typedef: bool,
+        storage_class: Option<mir::decl::StorageClass>,
         (declarator, init): (hir::decl::Declarator, Option<hir::decl::Init>),
         func: &mut Option<&mut mir::decl::Function>,
     ) -> Result<Option<mir::decl::Declarator>, Error> {
-        let parsed_type = self.parse_modifiers(specifier_type, declarator.modifiers)?;
+        let type_decl = self.parse_modifiers(specifier_type, declarator.modifiers)?;
 
         if let Some(name) = declarator.name {
-            let symbol = if is_typedef {
-                Symbols::TypeDef(parsed_type.clone())
-            } else {
-                Symbols::Variable(SymbolInfo {
-                    kind: if init.is_some() {
-                        InitType::Definition
-                    } else {
-                        InitType::Declaration
-                    },
-                    reg: None,
-                    token: name.clone(),
-                    type_decl: parsed_type.clone(),
-                })
+            match storage_class {
+                Some(sc @ (mir::decl::StorageClass::Register | mir::decl::StorageClass::Auto))
+                    if self.env.is_global() || type_decl.is_func() =>
+                {
+                    return Err(Error::new(
+                        &name,
+                        ErrorKind::InvalidStorageClass(
+                            sc,
+                            if type_decl.is_func() {
+                                "function"
+                            } else {
+                                "global variable"
+                            },
+                        ),
+                    ));
+                }
+                Some(mir::decl::StorageClass::Extern) if init.is_some() => {
+                    return Err(Error::new(
+                        &name,
+                        ErrorKind::Regular("variable declared with 'extern' cannot have initializer"),
+                    ))
+                }
+                Some(mir::decl::StorageClass::Static)
+                    if !self.env.is_global() && type_decl.is_func() =>
+                {
+                    return Err(Error::new(
+                        &name,
+                        ErrorKind::Regular(
+                            "function declared in block scope cannot have 'static' storage-class",
+                        ),
+                    ))
+                }
+
+                _ => (),
+            }
+
+            let symbol = Symbol {
+                storage_class: storage_class.clone(),
+                kind: if init.is_some() {
+                    InitType::Definition
+                } else {
+                    InitType::Declaration
+                },
+                reg: None,
+                token: name.clone(),
+                type_decl: type_decl.clone(),
             };
 
             let entry = self.env.declare_symbol(&name, symbol)?;
+            let is_typedef = entry.borrow().is_typedef();
 
-            if (is_typedef || parsed_type.is_func()) && init.is_some() {
+            if (is_typedef || type_decl.is_func()) && init.is_some() {
                 return Err(Error::new(
                     &name,
                     ErrorKind::Regular("only variables can be initialized"),
                 ));
             }
+
             if is_typedef {
                 return Ok(None);
             }
 
-            // safe because typedef returns early
-            let mut symbol_type = entry.borrow().unwrap_var().type_decl.clone();
+            let mut symbol_type = entry.borrow().type_decl.clone();
 
             let init = if let Some(init) = init {
                 if !symbol_type.is_unbounded_array() && !symbol_type.is_complete() {
@@ -151,9 +189,7 @@ impl TypeChecker {
                 let init = self.init_check(func, &mut symbol_type, init)?;
 
                 // update symbol type if was unbounded array
-                if let ty @ Type::Array(_, ArraySize::Unknown) =
-                    &mut entry.borrow_mut().unwrap_var_mut().type_decl
-                {
+                if let ty @ Type::Array(_, ArraySize::Unknown) = &mut entry.borrow_mut().type_decl {
                     *ty = symbol_type.clone();
                 }
 
@@ -167,7 +203,7 @@ impl TypeChecker {
             };
 
             if let Some(func) = func {
-                func.increment_stack_size(&symbol_type);
+                func.increment_stack_size(&entry);
             }
 
             Ok(Some(mir::decl::Declarator {
@@ -179,6 +215,7 @@ impl TypeChecker {
             Ok(None)
         }
     }
+
     pub fn parse_type(&mut self, token: &Token, decl_type: hir::decl::DeclType) -> Result<Type, Error> {
         let specifier_type = self.parse_specifiers(decl_type.specifiers)?;
         let parsed_type = self.parse_modifiers(specifier_type, decl_type.modifiers)?;
@@ -200,7 +237,7 @@ impl TypeChecker {
         let mut specifier_kind_list: Vec<hir::decl::SpecifierKind> =
             specifiers.into_iter().map(|spec| spec.kind).collect();
 
-        specifier_kind_list.sort_by_key(|s2| std::cmp::Reverse(s2.order()));
+        specifier_kind_list.sort_by_key(|spec| std::cmp::Reverse(spec.order()));
 
         match specifier_kind_list.as_slice() {
             [hir::decl::SpecifierKind::Struct(name, members)]
@@ -211,8 +248,8 @@ impl TypeChecker {
                 self.enum_specifier(token, name, enum_constants)
             }
             [hir::decl::SpecifierKind::UserType] => self.env.get_symbol(&token).and_then(|symbol| {
-                if let Symbols::TypeDef(type_decl) = symbol.borrow().clone() {
-                    Ok(type_decl)
+                if symbol.borrow().is_typedef() {
+                    Ok(symbol.borrow().type_decl.clone())
                 } else {
                     Err(Error::new(
                         &token,
@@ -236,32 +273,45 @@ impl TypeChecker {
             )),
         }
     }
+    fn parse_storage_classes(
+        &mut self,
+        storage_classes: &Vec<hir::decl::StorageClass>,
+    ) -> Result<Option<mir::decl::StorageClass>, Error> {
+        match storage_classes.as_slice() {
+            [single] => Ok(Some(single.kind.clone().into())),
+            [] => Ok(None),
+            [_, sec, ..] => Err(Error::new(
+                &sec.token,
+                ErrorKind::Regular("cannot have multiple storage-classes"),
+            )),
+        }
+    }
     fn parse_modifiers(
         &mut self,
-        mut parsed_type: Type,
+        mut spec_type: Type,
         modifiers: Vec<hir::decl::DeclModifier>,
     ) -> Result<Type, Error> {
         for m in modifiers {
-            parsed_type = match m {
-                hir::decl::DeclModifier::Pointer => parsed_type.pointer_to(),
+            spec_type = match m {
+                hir::decl::DeclModifier::Pointer => spec_type.pointer_to(),
                 hir::decl::DeclModifier::Array(token, size) => {
-                    if parsed_type.is_func() || parsed_type.is_unbounded_array() {
-                        return Err(Error::new(&token, ErrorKind::InvalidArray(parsed_type)));
+                    if spec_type.is_func() || spec_type.is_unbounded_array() {
+                        return Err(Error::new(&token, ErrorKind::InvalidArray(spec_type)));
                     }
 
                     if let Some(mut expr) = size {
                         let amount = expr.get_literal_constant(self, &token, "array size specifier")?;
 
                         if amount > 0 {
-                            if i64::overflowing_mul(parsed_type.size() as i64, amount).1 {
+                            if i64::overflowing_mul(spec_type.size() as i64, amount).1 {
                                 return Err(Error::new(&token, ErrorKind::ArraySizeOverflow));
                             }
-                            Type::Array(Box::new(parsed_type), ArraySize::Known(amount as usize))
+                            Type::Array(Box::new(spec_type), ArraySize::Known(amount as usize))
                         } else {
                             return Err(Error::new(&token, ErrorKind::NegativeArraySize));
                         }
                     } else {
-                        Type::Array(Box::new(parsed_type), ArraySize::Unknown)
+                        Type::Array(Box::new(spec_type), ArraySize::Unknown)
                     }
                 }
                 hir::decl::DeclModifier::Function { token, params, variadic } => {
@@ -274,16 +324,16 @@ impl TypeChecker {
                         .collect();
                     self.env.exit();
 
-                    if parsed_type.is_func() || parsed_type.is_array() {
-                        return Err(Error::new(&token, ErrorKind::InvalidReturnType(parsed_type)));
+                    if spec_type.is_func() || spec_type.is_array() {
+                        return Err(Error::new(&token, ErrorKind::InvalidReturnType(spec_type)));
                     }
 
-                    parsed_type.function_of(params, variadic)
+                    spec_type.function_of(params, variadic)
                 }
             };
         }
 
-        Ok(parsed_type)
+        Ok(spec_type)
     }
     fn struct_or_union_specifier(
         &mut self,
@@ -431,12 +481,13 @@ impl TypeChecker {
             // insert enum constant into symbol table
             self.env.declare_symbol(
                 &name,
-                Symbols::Variable(SymbolInfo {
+                Symbol {
+                    storage_class: None,
                     token: name.clone(),
                     type_decl: Type::Primitive(Primitive::Int),
                     kind: InitType::Definition,
                     reg: Some(Register::Literal(index as i64, Type::Primitive(Primitive::Int))),
-                }),
+                },
             )?;
 
             parsed_constants.push((name.clone(), index));
@@ -453,13 +504,29 @@ impl TypeChecker {
     fn parse_params(
         &mut self,
         token: &Token,
-        params: Vec<(Vec<hir::decl::DeclSpecifier>, hir::decl::Declarator)>,
-    ) -> Result<Vec<(Type, Option<(Token, VarSymbol)>)>, Error> {
+        params: Vec<hir::decl::ParamDecl>,
+    ) -> Result<Vec<(Type, Option<(Token, SymbolRef)>)>, Error> {
         let mut parsed_params = Vec::new();
 
-        for (specifiers, declarator) in params {
-            let specifier_type = self.parse_specifiers(specifiers.clone())?;
-            let mut parsed_type = self.parse_modifiers(specifier_type, declarator.modifiers)?;
+        for param in params {
+            let specifier_type = self.parse_specifiers(param.specifiers.clone())?;
+            let storage_class = self.parse_storage_classes(&param.storage_classes)?;
+            let mut parsed_type = self.parse_modifiers(specifier_type, param.declarator.modifiers)?;
+
+            let storage_class = match storage_class {
+                Some(sc @ mir::decl::StorageClass::Register) => Some(sc),
+                Some(sc) => {
+                    return Err(Error::new(
+                        if let Some(name) = &param.declarator.name {
+                            name
+                        } else {
+                            token
+                        },
+                        ErrorKind::InvalidStorageClass(sc, "function-parameter"),
+                    ));
+                }
+                None => None,
+            };
 
             parsed_type = match parsed_type {
                 Type::Array(of, _) => of.pointer_to(),
@@ -467,15 +534,16 @@ impl TypeChecker {
                 ty => ty,
             };
 
-            let name = if let Some(name) = declarator.name {
+            let name = if let Some(name) = param.declarator.name {
                 let symbol = self.env.declare_symbol(
                     &name,
-                    Symbols::Variable(SymbolInfo {
+                    Symbol {
+                        storage_class,
                         token: name.clone(),
                         type_decl: parsed_type.clone(),
                         kind: InitType::Declaration,
                         reg: None,
-                    }),
+                    },
                 )?;
 
                 Some((name, symbol))
@@ -813,22 +881,41 @@ impl TypeChecker {
 
     fn function_definition(
         &mut self,
-        mut decl_type: hir::decl::DeclType,
-        name: Token,
+        mut func_decl: hir::decl::FuncDecl,
         body: Vec<hir::stmt::Stmt>,
     ) -> Result<mir::decl::ExternalDeclaration, Error> {
-        let name_string = name.unwrap_string();
+        let name_string = func_decl.name.unwrap_string();
 
         // have to pop of last modifier first so that params can have other scope than return type
-        let Some(hir::decl::DeclModifier::Function { params, variadic,token }) = decl_type.modifiers.pop() else {
+        let Some(hir::decl::DeclModifier::Function { params, variadic, token }) = func_decl.modifiers.pop() else {
             unreachable!("last modifier has to be function to be func-def");
         };
-        let return_type = self.parse_type(&name, decl_type).map_err(|mut err| {
-            if let ErrorKind::IncompleteType(ty) = err.kind {
-                err.kind = ErrorKind::IncompleteReturnType(name_string.clone(), ty)
+
+        let storage_class = self.parse_storage_classes(&func_decl.storage_classes)?;
+        match storage_class {
+            None | Some(mir::decl::StorageClass::Static) | Some(mir::decl::StorageClass::Extern) => (),
+            Some(sc) => {
+                return Err(Error::new(
+                    &func_decl.name,
+                    ErrorKind::InvalidStorageClass(sc, "function"),
+                ));
             }
-            err
-        })?;
+        }
+
+        let return_type = self
+            .parse_type(
+                &func_decl.name,
+                hir::decl::DeclType {
+                    specifiers: func_decl.specifiers,
+                    modifiers: func_decl.modifiers,
+                },
+            )
+            .map_err(|mut err| {
+                if let ErrorKind::IncompleteType(ty) = err.kind {
+                    err.kind = ErrorKind::IncompleteReturnType(name_string.clone(), ty)
+                }
+                err
+            })?;
 
         if return_type.is_func() || return_type.is_array() {
             return Err(Error::new(&token, ErrorKind::InvalidReturnType(return_type)));
@@ -846,33 +933,30 @@ impl TypeChecker {
             params: params.iter().map(|(ty, _)| ty.clone()).collect(),
             variadic,
         });
-        self.env.declare_global(
-            &name,
-            Symbols::Variable(SymbolInfo {
+        let symbol = self.env.declare_global(
+            &func_decl.name,
+            Symbol {
+                storage_class,
                 type_decl: type_decl.clone(),
                 kind: InitType::Definition,
-                reg: Some(Register::Label(LabelRegister::Var(
-                    name_string.clone(),
-                    type_decl,
-                    false,
-                ))),
-                token: name.clone(),
-            }),
+                reg: None,
+                token: func_decl.name.clone(),
+            },
         )?;
 
         for (type_decl, param_name) in params.into_iter() {
             if !type_decl.is_complete() {
                 return Err(Error::new(
-                    &name,
+                    &func_decl.name,
                     ErrorKind::IncompleteFuncArg(name_string, type_decl),
                 ));
             }
             if let Some((_, var_symbol)) = param_name {
-                func.increment_stack_size(&type_decl);
+                func.increment_stack_size(&var_symbol);
 
                 func.params.push(var_symbol);
             } else {
-                return Err(Error::new(&name, ErrorKind::UnnamedFuncParams));
+                return Err(Error::new(&func_decl.name, ErrorKind::UnnamedFuncParams));
             }
         }
 
@@ -883,16 +967,19 @@ impl TypeChecker {
 
         let mir::stmt::Stmt::Block(mut body) = body? else {unreachable!()};
 
-        func.main_return(&name, &mut body)?;
+        func.main_return(&func_decl.name, &mut body)?;
 
         if !func.return_type.is_void() && !func.returns_all_paths {
             func.returns_all_paths = false;
 
-            Err(Error::new(&name, ErrorKind::NoReturnAllPaths(name_string)))
+            Err(Error::new(
+                &func_decl.name,
+                ErrorKind::NoReturnAllPaths(name_string),
+            ))
         } else {
             func.returns_all_paths = false;
 
-            Ok(mir::decl::ExternalDeclaration::Function(func, body))
+            Ok(mir::decl::ExternalDeclaration::Function(func, symbol, body))
         }
     }
     fn visit_stmt(
@@ -1062,7 +1149,26 @@ impl TypeChecker {
     ) -> Result<mir::stmt::Stmt, Error> {
         self.env.enter();
 
-        let init = init.map(|init| self.visit_stmt(func, *init)).transpose()?;
+        let init = match init.map(|stmt| *stmt) {
+            Some(hir::stmt::Stmt::Declaration(decl)) => {
+                let storage_classes = self.parse_storage_classes(&decl.storage_classes)?;
+                match storage_classes {
+                    None
+                    | Some(mir::decl::StorageClass::Auto)
+                    | Some(mir::decl::StorageClass::Register) => {
+                        Some(self.visit_stmt(func, hir::stmt::Stmt::Declaration(decl))?)
+                    }
+                    Some(sc) => {
+                        return Err(Error::new(
+                            &left_paren,
+                            ErrorKind::InvalidStorageClass(sc, "for-statement"),
+                        ))
+                    }
+                }
+            }
+            Some(stmt) => Some(self.visit_stmt(func, stmt)?),
+            None => None,
+        };
 
         let cond = if let Some(cond) = cond {
             let cond = self.visit_expr(&mut Some(func), cond)?;
@@ -1340,6 +1446,7 @@ impl TypeChecker {
             ));
         }
 
+        // FIXME: has to be converted to rvalue too
         Ok(Self::always_cast(expr, new_type))
     }
     // ensures that equal sized expressions still have new type
@@ -1465,17 +1572,19 @@ impl TypeChecker {
     fn ident(&mut self, token: Token) -> Result<mir::expr::Expr, Error> {
         let symbol = self.env.get_symbol(&token)?;
 
-        return match &*symbol.borrow() {
-            Symbols::Variable(info) => Ok(mir::expr::Expr {
-                type_decl: info.get_type(),
-                kind: mir::expr::ExprKind::Ident(Rc::clone(&symbol)),
-                value_kind: ValueKind::Lvalue,
-            }),
-            Symbols::TypeDef(..) => Err(Error::new(
+        if symbol.borrow().is_typedef() {
+            return Err(Error::new(
                 &token,
                 ErrorKind::InvalidSymbol(token.unwrap_string(), "variable"),
-            )),
-        };
+            ));
+        }
+
+        let type_decl = symbol.borrow().type_decl.clone();
+        Ok(mir::expr::Expr {
+            type_decl,
+            kind: mir::expr::ExprKind::Ident(Rc::clone(&symbol)),
+            value_kind: ValueKind::Lvalue,
+        })
     }
     fn member_access(
         &mut self,
@@ -1577,22 +1686,22 @@ impl TypeChecker {
             ..token.clone()
         };
         let tmp_type = type_decl.pointer_to();
-
         let tmp_symbol = self
             .env
             .declare_symbol(
                 &tmp_token,
-                Symbols::Variable(SymbolInfo {
+                Symbol {
+                    storage_class: None,
                     type_decl: tmp_type.clone(),
                     kind: InitType::Declaration,
                     reg: None,
                     token: token.clone(),
-                }),
+                },
             )
             .expect("always valid to declare tmp in new scope");
 
         if let Some(func) = func {
-            func.increment_stack_size(&tmp_type);
+            func.increment_stack_size(&tmp_symbol);
         }
 
         // tmp = &A, *tmp = *tmp op B
@@ -1985,6 +2094,19 @@ impl TypeChecker {
     }
     fn check_address(&self, token: Token, right: mir::expr::Expr) -> Result<mir::expr::Expr, Error> {
         if right.value_kind == ValueKind::Lvalue {
+            // TODO: error if trying to get address of register ident (not too important since
+            // register semantics different in wrecc)
+            // if let mir::expr::ExprKind::Ident(name) = right.kind {
+            //     if let Ok(Symbols::Variable(Symbol {
+            //         storage_class: StorageClass::Register, ..
+            //     })) = self.env.get_symbol(&name).borrow()
+            //     {
+            //         return Err(Error::new(
+            //             &token,
+            //             ErrorKind::Regular("cannot take address of value with 'register' storage-class"),
+            //         ));
+            //     }
+            // }
             Ok(mir::expr::Expr {
                 type_decl: right.type_decl.clone().pointer_to(),
                 value_kind: ValueKind::Rvalue,
@@ -2163,12 +2285,13 @@ mod tests {
         let hir::decl::ExternalDeclaration::Declaration(decls) =
                 setup(input).external_declaration().unwrap() else {unreachable!("only passing type")};
 
-        let hir::decl::Declaration { specifiers, declarators, is_typedef } = decls;
+        let hir::decl::Declaration { specifiers, declarators, storage_classes } = decls;
         let mut typechecker = TypeChecker::new();
 
         let decl = declarators[0].clone();
         let specifier_type = typechecker.parse_specifiers(specifiers).unwrap();
-        let declarator = typechecker.declarator(specifier_type, is_typedef, decl, &mut None)?;
+        let storage_class = typechecker.parse_storage_classes(&storage_classes).unwrap();
+        let declarator = typechecker.declarator(specifier_type, storage_class, decl, &mut None)?;
 
         Ok(declarator.unwrap().init.unwrap())
     }

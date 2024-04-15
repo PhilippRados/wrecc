@@ -6,8 +6,8 @@ use crate::compiler::common::types::*;
 /// INFO: Needs owned register-values so that later register transformations like type-casts don't change previous references
 #[derive(Debug)]
 pub enum Lir {
-    // name, if needs alignment
-    GlobalDeclaration(String, bool),
+    // name, if needs alignment, if static decl
+    GlobalDeclaration(String, bool, bool),
     // type, value
     GlobalInit(Type, StaticRegister),
     // label index, value
@@ -26,7 +26,7 @@ pub enum Lir {
 
     // Function stuff
     // usize to allocate/deallocate stack-space
-    FuncSetup(String, usize),
+    FuncSetup(String, usize, bool),
     FuncTeardown(usize),
     SaveRegs,
     RestoreRegs,
@@ -84,35 +84,21 @@ impl Lir {
             _ => (None, None),
         }
     }
-    // only used in unit-tests
-    #[allow(unused)]
-    pub fn get_regs(&self) -> (Option<&Register>, Option<&Register>) {
-        match self {
-            Lir::Call(reg) | Lir::Push(reg) | Lir::Pop(reg) => (None, Some(reg)),
-            Lir::Mov(left, right)
-            | Lir::Movs(left, right)
-            | Lir::Movz(left, right)
-            | Lir::Cmp(left, right)
-            | Lir::Sub(left, right)
-            | Lir::Add(left, right)
-            | Lir::Imul(left, right)
-            | Lir::Xor(left, right)
-            | Lir::Or(left, right)
-            | Lir::And(left, right)
-            | Lir::Load(left, right)
-            | Lir::Shift(_, left, right) => (Some(left), Some(right)),
-            Lir::Neg(reg) | Lir::Not(reg) | Lir::Idiv(reg) => (None, Some(reg)),
-            Lir::GlobalInit(..) => (None, None),
-            _ => (None, None),
-        }
-    }
     pub fn as_string(self) -> String {
         match self {
-            Lir::GlobalDeclaration(name, is_pointer) => format!(
-                "\n\t.data\n{}{}:",
-                if is_pointer { "\t.align 4\n" } else { "" },
-                maybe_prefix_underscore(&name)
-            ),
+            Lir::GlobalDeclaration(name, is_pointer, is_static) => {
+                let name = maybe_prefix_underscore(&name);
+                format!(
+                    "\n\t.data{}\n{}{}:",
+                    if !is_static {
+                        format!("\n\t.globl {}", name)
+                    } else {
+                        String::new()
+                    },
+                    if is_pointer { "\t.align 4\n" } else { "" },
+                    name
+                )
+            }
             Lir::GlobalInit(type_decl, reg) => {
                 format!("\t.{} {}", type_decl.complete_suffix(), reg.name())
             }
@@ -128,11 +114,16 @@ impl Lir {
             Lir::LabelDefinition(label_index) => format!("L{}:", label_index),
             Lir::Jmp(label_index) => format!("\tjmp     L{}", label_index),
             Lir::JmpCond(cond, label_index) => format!("\tj{}     L{}", cond, label_index),
-            Lir::FuncSetup(name, stack_size) => {
+            Lir::FuncSetup(name, stack_size, is_static) => {
+                let name = maybe_prefix_underscore(&name);
                 let mut result = format!(
-                    "\n\t.text\n\t.globl {}\n{}:\n\tpushq   %rbp\n\tmovq    %rsp, %rbp\n",
-                    maybe_prefix_underscore(&name),
-                    maybe_prefix_underscore(&name)
+                    "\n\t.text\n\t{}\n{}:\n\tpushq   %rbp\n\tmovq    %rsp, %rbp\n",
+                    if !is_static {
+                        format!(".globl {}", name)
+                    } else {
+                        String::new()
+                    },
+                    name
                 );
                 // have to keep stack 16B aligned
                 if stack_size > 0 {
@@ -227,25 +218,12 @@ impl Lir {
                 right.name()
             ),
             Lir::Load(from, to) => {
-                // if address has to be computed at runtime then add
-                // Global-Offset-Table attribute to it's name
-                if let Register::Label(LabelRegister::Var(name, ty, true)) = from {
-                    let runtime_name = format!("{}@GOTPCREL", name);
-                    let label = Register::Label(LabelRegister::Var(runtime_name, ty.clone(), true));
-                    format!(
-                        "\tmov{}    {}, {}",
-                        to.get_type().suffix(),
-                        label.name(),
-                        to.name()
-                    )
-                } else {
-                    format!(
-                        "\tlea{}    {}, {}",
-                        to.get_type().suffix(),
-                        from.name(),
-                        to.name()
-                    )
-                }
+                format!(
+                    "\tlea{}    {}, {}",
+                    to.get_type().suffix(),
+                    from.name(),
+                    to.name()
+                )
             }
             Lir::Set(operator) => format!("\t{}   %al", operator),
             Lir::Xor(left, right) => format!(

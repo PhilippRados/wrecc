@@ -3,6 +3,7 @@
 use crate::compiler::codegen::register::*;
 use crate::compiler::common::{error::*, token::*, types::*};
 use crate::compiler::parser::hir::expr::ExprKind;
+use crate::compiler::typechecker::mir::decl::StorageClass;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -13,11 +14,16 @@ pub enum InitType {
     Definition,
 }
 
+pub type SymbolRef = Rc<RefCell<Symbol>>;
+
 /// The information stored for a variable in the symbol-table
 #[derive(Clone, Debug)]
-pub struct SymbolInfo {
+pub struct Symbol {
     /// Type of identifier given in declaration
     pub type_decl: Type,
+
+    /// Current storage-class of symbol
+    pub storage_class: Option<StorageClass>,
 
     /// Wether the variable is a declaration or initialization
     pub kind: InitType,
@@ -30,87 +36,67 @@ pub struct SymbolInfo {
     pub token: Token,
 }
 
-impl SymbolInfo {
-    pub fn get_type(&self) -> Type {
-        self.type_decl.clone()
-    }
-    pub fn get_reg(&self) -> Register {
-        self.reg.clone().unwrap()
-    }
-    pub fn set_reg(&mut self, reg: Register) {
-        self.reg = Some(reg)
-    }
-}
-#[derive(Clone, Debug)]
-pub enum Symbols {
-    /// Includes functions, enum-constants and variables
-    Variable(SymbolInfo),
-    /// In `typedef int a` a is stored
-    TypeDef(Type),
-}
-impl Symbols {
-    pub fn unwrap_var_mut(&mut self) -> &mut SymbolInfo {
-        match self {
-            Symbols::Variable(s) => s,
-            _ => unreachable!("cant unwrap var on other symbol"),
-        }
-    }
-    pub fn unwrap_var(&self) -> &SymbolInfo {
-        match self {
-            Symbols::Variable(s) => s,
-            _ => unreachable!("cant unwrap var on other symbol"),
-        }
-    }
-    fn get_kind(&self) -> &InitType {
-        match self {
-            Symbols::Variable(v) => &v.kind,
-            Symbols::TypeDef(_) => &InitType::Declaration,
-        }
-    }
-    fn cmp(&self, name: &Token, other: &Symbols) -> Result<(), Error> {
-        match (self, other) {
-            (
-                Symbols::Variable(SymbolInfo { type_decl: ty1, .. }),
-                Symbols::Variable(SymbolInfo { type_decl: ty2, .. }),
-            )
-            | (Symbols::TypeDef(ty1), Symbols::TypeDef(ty2)) => match (ty1, ty2) {
-                (Type::Array(..), Type::Array(..))
-                    if matches!(self, Symbols::Variable(..))
-                        // placeholder expression
-                        && ty1.type_compatible(ty2, &ExprKind::Nop) =>
-                {
-                    Ok(())
-                }
-                _ if ty1 != ty2 => Err(Error::new(
-                    name,
-                    ErrorKind::RedefTypeMismatch(name.unwrap_string(), ty1.clone(), ty2.clone()),
-                )),
-                _ => Ok(()),
-            },
-            _ => Err(Error::new(
-                name,
-                ErrorKind::RedefOtherSymbol(name.unwrap_string(), other.to_string()),
-            )),
-        }
-    }
-}
-
-impl PartialEq for Symbols {
-    fn eq(&self, other: &Symbols) -> bool {
+impl PartialEq for Symbol {
+    fn eq(&self, other: &Symbol) -> bool {
         let placeholder = Token::default(TokenKind::Semicolon);
         self.cmp(&placeholder, other).is_ok()
     }
 }
-impl std::fmt::Display for Symbols {
+impl std::fmt::Display for Symbol {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Symbols::Variable(_) => "variable",
-                Symbols::TypeDef(_) => "typedef",
+        write!(f, "{}", if self.is_typedef() { "typedef" } else { "variable" })
+    }
+}
+
+impl Symbol {
+    pub fn is_typedef(&self) -> bool {
+        matches!(self.storage_class, Some(StorageClass::TypeDef))
+    }
+
+    pub fn is_static(&self) -> bool {
+        matches!(self.storage_class, Some(StorageClass::Static))
+    }
+
+    pub fn is_extern(&self) -> bool {
+        match self.storage_class {
+            Some(StorageClass::Extern) => true,
+            None if self.type_decl.is_func() && self.kind == InitType::Declaration => true,
+            _ => false,
+        }
+    }
+
+    pub fn set_reg(&mut self, reg: Register) {
+        self.reg = Some(reg)
+    }
+
+    pub fn get_reg(&self) -> Register {
+        self.reg.clone().unwrap()
+    }
+
+    /// Compares current-symbols type to the already existing symbol
+    fn cmp(&self, name: &Token, other: &Symbol) -> Result<(), Error> {
+        match (&self.type_decl, &other.type_decl) {
+            _ if (self.is_typedef() && !other.is_typedef())
+                || (!self.is_typedef() && other.is_typedef()) =>
+            {
+                Err(Error::new(
+                    name,
+                    ErrorKind::RedefOtherSymbol(name.unwrap_string(), other.to_string()),
+                ))
             }
-        )
+            (ty1 @ Type::Array(..), ty2 @ Type::Array(..))
+                if !self.is_typedef()
+                    // placeholder expression
+                    && ty1.type_compatible(&ty2, &ExprKind::Nop) =>
+            {
+                Ok(())
+            }
+            (ty1, ty2) if ty1 != ty2 => Err(Error::new(
+                name,
+                ErrorKind::RedefTypeMismatch(name.unwrap_string(), ty1.clone(), ty2.clone()),
+            )),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -197,7 +183,7 @@ impl<T> NameSpace<T> {
 /// storing tags when the user declares a type
 #[derive(Debug)]
 pub struct Environment {
-    symbols: NameSpace<Symbols>,
+    symbols: NameSpace<Symbol>,
     tags: NameSpace<Tags>,
 }
 impl Environment {
@@ -218,11 +204,7 @@ impl Environment {
         self.symbols.exit();
         self.tags.exit();
     }
-    pub fn declare_symbol(
-        &mut self,
-        var_name: &Token,
-        symbol: Symbols,
-    ) -> Result<Rc<RefCell<Symbols>>, Error> {
+    pub fn declare_symbol(&mut self, var_name: &Token, symbol: Symbol) -> Result<SymbolRef, Error> {
         if let Some(existing_symbol) = self.symbols.get_current(&var_name.unwrap_string()) {
             return self.check_redef(var_name, symbol, existing_symbol);
         }
@@ -231,11 +213,7 @@ impl Environment {
     }
     // only used for functions since they have to be inserted before params but need params to be
     // already parsed
-    pub fn declare_global(
-        &mut self,
-        var_name: &Token,
-        symbol: Symbols,
-    ) -> Result<Rc<RefCell<Symbols>>, Error> {
+    pub fn declare_global(&mut self, var_name: &Token, symbol: Symbol) -> Result<SymbolRef, Error> {
         let global_scope = self.symbols.elems.get_mut(0).expect("always have a global scope");
 
         if let Some(existing_symbol) = global_scope.get(&var_name.unwrap_string()).map(Rc::clone) {
@@ -248,39 +226,85 @@ impl Environment {
         Ok(Rc::clone(&func))
     }
 
+    fn check_storage_class_mismatch(
+        &self,
+        var_name: &Token,
+        type_decl: &Type,
+        current: &Option<StorageClass>,
+        existing: &Option<StorageClass>,
+    ) -> Result<(), Error> {
+        let mismatch = if self.is_global() {
+            match (current, existing) {
+                (Some(StorageClass::Static), other) if other != &Some(StorageClass::Static) => {
+                    Err(("static", "non-static"))
+                }
+                (current, Some(StorageClass::Static))
+                    if !matches!(current, &Some(StorageClass::Static | StorageClass::Extern)) =>
+                {
+                    Err(("non-static", "static"))
+                }
+
+                _ => Ok(()),
+            }
+        } else {
+            match (current, existing) {
+                _ if type_decl.is_func() => Ok(()),
+                (current, Some(StorageClass::Extern)) if current != &Some(StorageClass::Extern) => {
+                    Err(("non-extern", "extern"))
+                }
+                (Some(StorageClass::Extern), other) if other != &Some(StorageClass::Extern) => {
+                    Err(("extern", "non-extern"))
+                }
+                (Some(StorageClass::Extern), Some(StorageClass::Extern))
+                | (Some(StorageClass::TypeDef), Some(StorageClass::TypeDef)) => Ok(()),
+                _ => {
+                    return Err(Error::new(
+                        var_name,
+                        ErrorKind::Redefinition("symbol", var_name.unwrap_string()),
+                    ))
+                }
+            }
+        };
+
+        if let Err((current_sc, existing_sc)) = mismatch {
+            Err(Error::new(
+                var_name,
+                ErrorKind::StorageClassMismatch(var_name.unwrap_string(), current_sc, existing_sc),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     fn check_redef(
         &self,
         var_name: &Token,
-        mut current_symbol: Symbols,
-        existing_symbol: Rc<RefCell<Symbols>>,
-    ) -> Result<Rc<RefCell<Symbols>>, Error> {
+        mut current_symbol: Symbol,
+        existing_symbol: SymbolRef,
+    ) -> Result<SymbolRef, Error> {
         current_symbol.cmp(var_name, &existing_symbol.borrow())?;
 
-        if let Symbols::Variable(symbol_info) = &current_symbol {
-            // functions and typedefs can be redeclared even inside functions
-            if !self.is_global() && !symbol_info.type_decl.is_func() {
-                return Err(Error::new(
-                    var_name,
-                    ErrorKind::Redefinition("symbol", var_name.unwrap_string()),
-                ));
-            }
-        }
+        self.check_storage_class_mismatch(
+            var_name,
+            &current_symbol.type_decl,
+            &current_symbol.storage_class,
+            &existing_symbol.borrow().storage_class,
+        )?;
 
-        let existing_kind = existing_symbol.borrow().get_kind().clone();
+        let existing_kind = existing_symbol.borrow().kind.clone();
 
-        match (current_symbol.get_kind(), existing_kind) {
+        match (&current_symbol.kind, existing_kind) {
             (InitType::Definition, InitType::Declaration)
             | (InitType::Declaration, InitType::Declaration) => {
-                // make sure that current symbol has known array-size if existing array-size
+                // make sure that current symbol has known array-size if existing array-size was
                 // was known
-                match (&mut current_symbol, &*existing_symbol.borrow()) {
-                    (
-                        Symbols::Variable(SymbolInfo { type_decl: current, .. }),
-                        Symbols::Variable(SymbolInfo { type_decl: existing_ty, .. }),
-                    ) if current.is_unbounded_array() => {
-                        *current = existing_ty.clone();
-                    }
-                    _ => (),
+                if !current_symbol.is_typedef() && current_symbol.type_decl.is_unbounded_array() {
+                    current_symbol.type_decl = existing_symbol.borrow().type_decl.clone();
+                }
+
+                // can only happen if current symbol is empty or extern and existing is static
+                if matches!(existing_symbol.borrow().storage_class, Some(StorageClass::Static)) {
+                    current_symbol.storage_class = Some(StorageClass::Static);
                 }
 
                 *existing_symbol.borrow_mut() = current_symbol;
@@ -321,7 +345,7 @@ impl Environment {
         }
         Ok(self.tags.declare(name, tag))
     }
-    pub fn get_symbol(&self, var_name: &Token) -> Result<Rc<RefCell<Symbols>>, Error> {
+    pub fn get_symbol(&self, var_name: &Token) -> Result<SymbolRef, Error> {
         self.symbols
             .get(var_name.unwrap_string())
             .ok_or_else(|| Error::new(var_name, ErrorKind::UndeclaredSymbol(var_name.unwrap_string())))
@@ -337,14 +361,14 @@ impl Environment {
         let mut errors = Vec::new();
 
         for symbol in globals.values() {
-            if let Symbols::Variable(info) = &*symbol.borrow() {
-                // tentative array definitions are fine (according to gcc and clang)
-                if !info.type_decl.is_unbounded_array() && !info.type_decl.is_complete() {
-                    errors.push(Error::new(
-                        &info.token,
-                        ErrorKind::IncompleteTentative(info.type_decl.clone()),
-                    ));
-                }
+            if !symbol.borrow().type_decl.is_unbounded_array()
+                && !symbol.borrow().type_decl.is_complete()
+                && !matches!(symbol.borrow().storage_class, Some(StorageClass::Extern))
+            {
+                errors.push(Error::new(
+                    &symbol.borrow().token,
+                    ErrorKind::IncompleteTentative(symbol.borrow().type_decl.clone()),
+                ));
             }
         }
 
@@ -362,19 +386,33 @@ pub mod tests {
     use super::*;
     use crate::setup_type;
 
-    pub fn var_template(name: &str, ty: &str, kind: InitType) -> (Token, Symbols) {
-        let token = Token::default(TokenKind::Ident(name.to_string()));
-        let symbol = Symbols::Variable(SymbolInfo {
-            kind,
-            token: token.clone(),
-            type_decl: setup_type!(ty),
-            reg: None,
-        });
+    macro_rules! symbol {
+        ($name:expr,$ty:expr,$kind:expr) => {{
+            let token = Token::default(TokenKind::Ident($name.to_string()));
+            let symbol = Symbol {
+                kind:$kind,
+                storage_class:None,
+                token: token.clone(),
+                type_decl: setup_type!($ty),
+                reg: None,
+            };
+            (token, symbol)
+        }};
 
-        (token, symbol)
+        ($name:expr,$ty:expr,$kind:expr,$sc:expr) => {{
+            let token = Token::default(TokenKind::Ident($name.to_string()));
+            let symbol = Symbol {
+                kind:$kind,
+                storage_class:Some($sc),
+                token: token.clone(),
+                type_decl: setup_type!($ty),
+                reg: None,
+            };
+            (token, symbol)
+        }};
     }
 
-    fn declare(env: &mut Environment, (token, symbol): (Token, Symbols), global: bool) -> Result<Rc<RefCell<Symbols>>,Error>{
+    fn declare(env: &mut Environment, (token, symbol): (Token, Symbol), global: bool) -> Result<SymbolRef,Error>{
         match global {
             true => env.declare_global(&token, symbol),
             false => env.declare_symbol(&token, symbol),
@@ -394,24 +432,24 @@ pub mod tests {
         let mut env = Environment::new();
 
         env.enter();
-        declare(&mut env, var_template("main","int()", InitType::Definition), true).unwrap();
+        declare(&mut env, symbol!("main","int()", InitType::Definition), true).unwrap();
         assert!(env.symbols.get_current("main").is_none());
 
-        declare(&mut env,var_template("s", "char*", InitType::Declaration),false).unwrap();
+        declare(&mut env,symbol!("s", "char*", InitType::Declaration),false).unwrap();
         assert!(env.symbols.get_current("s").is_some());
 
         env.enter();
-        declare(&mut env,var_template("n", "int", InitType::Declaration),false).unwrap();
+        declare(&mut env,symbol!("n", "int", InitType::Declaration),false).unwrap();
         assert!(env.symbols.get_current("n").is_some());
         assert!(env.symbols.get_current("s").is_none());
         env.exit();
 
         assert!(env.symbols.get_current("s").is_some());
 
-        declare(&mut env,var_template("n", "long", InitType::Declaration),false).unwrap();
+        declare(&mut env,symbol!("n", "long", InitType::Declaration),false).unwrap();
         assert!(matches!(
             env.symbols.get_current("n").map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {type_decl: Type::Primitive(Primitive::Long),..}))
+            Some(Symbol {type_decl: Type::Primitive(Primitive::Long),..})
         ));
         assert!(env.symbols.get_current("s").is_some());
 
@@ -436,10 +474,10 @@ pub mod tests {
         let mut env = Environment::new();
 
         env.enter();
-        declare(&mut env,var_template("a", "int", InitType::Declaration),false).unwrap();
-        declare(&mut env,var_template("b", "int", InitType::Declaration),false).unwrap();
+        declare(&mut env,symbol!("a", "int", InitType::Declaration),false).unwrap();
+        declare(&mut env,symbol!("b", "int", InitType::Declaration),false).unwrap();
 
-        declare(&mut env, var_template("foo","int (int,int)", InitType::Definition), true).unwrap();
+        declare(&mut env, symbol!("foo","int (int,int)", InitType::Definition), true).unwrap();
         assert!(env.symbols.get_current("foo").is_none());
         assert!(env.symbols.get_current("a").is_some());
         assert!(env.symbols.get_current("b").is_some());
@@ -448,7 +486,7 @@ pub mod tests {
         assert!(env.symbols.get_current("foo").is_none());
         assert!(env.symbols.get_current("a").is_none());
         env.enter();
-        declare(&mut env,var_template("some", "long", InitType::Declaration),false).unwrap();
+        declare(&mut env,symbol!("some", "long", InitType::Declaration),false).unwrap();
         assert!(env.symbols.get("some".to_string()).is_some());
         assert!(env.symbols.get("a".to_string()).is_some());
         assert!(env.symbols.get("foo".to_string()).is_some());
@@ -458,7 +496,7 @@ pub mod tests {
         env.exit();
         env.exit();
 
-        declare(&mut env, var_template("main","int ()", InitType::Definition), true).unwrap();
+        declare(&mut env, symbol!("main","int ()", InitType::Definition), true).unwrap();
 
         assert!(env.symbols.get_current("a").is_none());
         assert!(env.symbols.get_current("foo").is_some());
@@ -480,32 +518,32 @@ pub mod tests {
         let mut env = Environment::new();
 
         env.enter();
-        declare(&mut env, var_template("main","int ()", InitType::Definition), true).unwrap();
-        declare(&mut env, var_template("a", "int", InitType::Declaration),false).unwrap();
+        declare(&mut env, symbol!("main","int ()", InitType::Definition), true).unwrap();
+        declare(&mut env, symbol!("a", "int", InitType::Declaration),false).unwrap();
         env.enter();
         assert!(env.symbols.get_current("a").is_none());
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {type_decl:Type::Primitive(Primitive::Int),..}))
+            Some(Symbol {type_decl:Type::Primitive(Primitive::Int),..})
         ));
 
-        declare(&mut env, var_template("a", "long", InitType::Declaration),false).unwrap();
+        declare(&mut env, symbol!("a", "long", InitType::Declaration),false).unwrap();
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {type_decl:Type::Primitive(Primitive::Long),..}))
+            Some(Symbol {type_decl:Type::Primitive(Primitive::Long),..})
         ));
         env.enter();
 
         env.enter();
-        declare(&mut env,var_template("a", "char", InitType::Declaration),false).unwrap();
-        declare(&mut env,var_template("b", "int", InitType::Declaration),false).unwrap();
+        declare(&mut env,symbol!("a", "char", InitType::Declaration),false).unwrap();
+        declare(&mut env,symbol!("b", "int", InitType::Declaration),false).unwrap();
         env.exit();
-        declare(&mut env, var_template("foo","int (char, int)", InitType::Declaration), false).unwrap();
+        declare(&mut env, symbol!("foo","int (char, int)", InitType::Declaration), false).unwrap();
 
         assert!(env.symbols.get_current("a").is_none());
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {type_decl:Type::Primitive(Primitive::Long),..}))
+            Some(Symbol {type_decl:Type::Primitive(Primitive::Long),..})
         ));
         assert!(env.symbols.get("foo".to_string()).is_some());
 
@@ -513,12 +551,12 @@ pub mod tests {
         assert!(env.symbols.get("foo".to_string()).is_none());
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {type_decl:Type::Primitive(Primitive::Long),..}))
+            Some(Symbol {type_decl:Type::Primitive(Primitive::Long),..})
         ));
         env.exit();
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {type_decl:Type::Primitive(Primitive::Int),..}))
+            Some(Symbol {type_decl:Type::Primitive(Primitive::Int),..})
         ));
         env.exit();
 
@@ -530,32 +568,32 @@ pub mod tests {
     fn redeclarations() {
         let mut env = Environment::new();
 
-        declare(&mut env, var_template("foo","int ()",InitType::Declaration), true).unwrap();
-        declare(&mut env, var_template("foo","int ()",InitType::Definition), true).unwrap();
-        declare(&mut env, var_template("foo","int ()",InitType::Declaration), true).unwrap();
+        declare(&mut env, symbol!("foo","int ()",InitType::Declaration), true).unwrap();
+        declare(&mut env, symbol!("foo","int ()",InitType::Definition), true).unwrap();
+        declare(&mut env, symbol!("foo","int ()",InitType::Declaration), true).unwrap();
 
-        assert!(declare(&mut env, var_template("foo","int ()", InitType::Definition), true).is_err());
+        assert!(declare(&mut env, symbol!("foo","int ()", InitType::Definition), true).is_err());
 
         env.enter();
         assert!(matches!(
             env.symbols.get("foo".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbols::Variable(SymbolInfo {kind:InitType::Definition,type_decl:Type::Function(_),..})
+            Some(Symbol {kind:InitType::Definition,type_decl:Type::Function(_),..}
         )));
         assert!(env.symbols.get_current("foo").is_none());
 
-        declare(&mut env, var_template("bar","void ()", InitType::Declaration), false).unwrap();
-        assert!(declare(&mut env, var_template("bar","void ()", InitType::Declaration), false).is_ok());
+        declare(&mut env, symbol!("bar","void ()", InitType::Declaration), false).unwrap();
+        assert!(declare(&mut env, symbol!("bar","void ()", InitType::Declaration), false).is_ok());
 
-        declare(&mut env, var_template("baz", "int", InitType::Declaration), false).unwrap();
-        assert!(declare(&mut env, var_template("baz", "int", InitType::Declaration), false).is_err());
-        assert!(declare(&mut env, var_template("baz", "int", InitType::Definition), false).is_err());
+        declare(&mut env, symbol!("baz", "int", InitType::Declaration), false).unwrap();
+        assert!(declare(&mut env, symbol!("baz", "int", InitType::Declaration), false).is_err());
+        assert!(declare(&mut env, symbol!("baz", "int", InitType::Definition), false).is_err());
 
         env.exit();
 
-        declare(&mut env, var_template("baz", "int", InitType::Declaration), false).unwrap();
-        assert!(declare(&mut env, var_template("baz", "int", InitType::Declaration), false).is_ok());
-        assert!(declare(&mut env, var_template("baz", "int", InitType::Definition), false).is_ok());
-        assert!(declare(&mut env, var_template("baz", "long", InitType::Declaration), false).is_err());
+        declare(&mut env, symbol!("baz", "int", InitType::Declaration), false).unwrap();
+        assert!(declare(&mut env, symbol!("baz", "int", InitType::Declaration), false).is_ok());
+        assert!(declare(&mut env, symbol!("baz", "int", InitType::Definition), false).is_ok());
+        assert!(declare(&mut env, symbol!("baz", "long", InitType::Declaration), false).is_err());
 
     }
 }

@@ -6,14 +6,21 @@ use super::expr::PrintIndent;
 
 pub enum ExternalDeclaration {
     Declaration(Declaration),
-    Function(DeclType, Token, Vec<Stmt>),
+    Function(FuncDecl, Vec<Stmt>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Declaration {
     pub specifiers: Vec<DeclSpecifier>,
+    pub storage_classes: Vec<StorageClass>,
     pub declarators: Vec<(Declarator, Option<Init>)>,
-    pub is_typedef: bool,
+}
+
+pub struct FuncDecl {
+    pub specifiers: Vec<DeclSpecifier>,
+    pub storage_classes: Vec<StorageClass>,
+    pub name: Token,
+    pub modifiers: Vec<DeclModifier>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,6 +33,20 @@ pub struct DeclType {
 pub struct DeclSpecifier {
     pub token: Token,
     pub kind: SpecifierKind,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct StorageClass {
+    pub token: Token,
+    pub kind: StorageClassKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum StorageClassKind {
+    TypeDef,
+    Extern,
+    Static,
+    Auto,
+    Register,
 }
 
 pub type MemberDeclaration = (Vec<DeclSpecifier>, Vec<MemberDeclarator>);
@@ -60,15 +81,19 @@ impl SpecifierKind {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParamDecl {
+    pub specifiers: Vec<DeclSpecifier>,
+    pub storage_classes: Vec<StorageClass>,
+    pub declarator: Declarator,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum DeclModifier {
     Pointer,
     Array(Token, Option<ExprKind>),
-    Function {
-        params: Vec<(Vec<DeclSpecifier>, Declarator)>,
-        variadic: bool,
-        token: Token,
-    },
+    Function { params: Vec<ParamDecl>, variadic: bool, token: Token },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -108,7 +133,7 @@ pub enum DesignatorKind {
 impl PrintIndent for ExternalDeclaration {
     fn print_indent(&self, indent_level: usize) -> String {
         match self {
-            ExternalDeclaration::Function(_, name, body) => {
+            ExternalDeclaration::Function(FuncDecl { name, .. }, body) => {
                 let body = body
                     .iter()
                     .map(|s| indent_fmt(s, indent_level + 1))
@@ -169,7 +194,15 @@ impl PrintIndent for Declaration {
             .join("\n")
             .or_empty(indent_level);
 
-        let typedef = if self.is_typedef { "Typedef-" } else { "" };
+        let typedef = if self
+            .storage_classes
+            .iter()
+            .any(|storage| storage.kind == StorageClassKind::TypeDef)
+        {
+            "Typedef-"
+        } else {
+            ""
+        };
         format!("{}Declaration:\n{}", typedef, decls)
     }
 }

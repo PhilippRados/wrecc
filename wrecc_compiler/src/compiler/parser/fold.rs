@@ -44,11 +44,11 @@ impl ExprKind {
             ExprKind::Ident(name) => {
                 // if variable is known at compile time then foldable
                 // is only enum-constant
-                if let Ok(Symbols::Variable(SymbolInfo {
+                if let Ok(Symbol {
                     reg: Some(Register::Literal(n, _)),
                     type_decl,
                     ..
-                })) = typechecker.env.get_symbol(name).map(|s| s.borrow().clone())
+                }) = typechecker.env.get_symbol(name).map(|s| s.borrow().clone())
                 {
                     Some(ExprKind::Literal(n, type_decl))
                 } else {

@@ -7,7 +7,7 @@ pub mod register;
 pub mod register_allocation;
 
 use crate::compiler::codegen::{lir::*, register::*, register_allocation::*};
-use crate::compiler::common::{token::*, types::*};
+use crate::compiler::common::{environment::SymbolRef, token::*, types::*};
 use crate::compiler::typechecker::mir::{decl::*, expr::*, stmt::*};
 use crate::compiler::typechecker::{align_by, create_label, ConstLabels};
 
@@ -22,6 +22,19 @@ macro_rules! convert_reg {
             _ => $reg
         }
     };
+}
+
+struct StaticLabels(HashMap<String, usize>);
+impl StaticLabels {
+    fn update(&mut self, name: String) -> String {
+        if let Some(index) = self.0.get_mut(&name) {
+            *index += 1;
+            format!("{}.{}", name, index)
+        } else {
+            self.0.insert(name.clone(), 0);
+            format!("{}.0", name)
+        }
+    }
 }
 
 pub struct Compiler {
@@ -46,6 +59,12 @@ pub struct Compiler {
     // loop labels saved so that break and continue jump to them
     jump_labels: Vec<(usize, usize)>,
 
+    // if the same static variable is declared in different scopes they get an index appended:
+    // void foo() {static int a;}
+    // void bar() {static int a;}
+    // will be stored as a.0 and a.1 because they refer to different values
+    static_labels: StaticLabels,
+
     // case/default-labels get defined in each switch and then the
     // respective case/default-statements pop them in order of appearance
     switch_labels: VecDeque<usize>,
@@ -56,6 +75,7 @@ impl Compiler {
             const_labels,
             output: Vec::with_capacity(100),
             live_intervals: HashMap::with_capacity(30),
+            static_labels: StaticLabels(HashMap::new()),
             interval_counter: 0,
             instr_counter: 0,
             label_index: 0,
@@ -95,7 +115,9 @@ impl Compiler {
     fn visit_decl(&mut self, external_decl: ExternalDeclaration) {
         match external_decl {
             ExternalDeclaration::Declaration(decls) => self.global_declaration(decls),
-            ExternalDeclaration::Function(func, stmts) => self.function_definition(func, stmts),
+            ExternalDeclaration::Function(func, func_symbol, stmts) => {
+                self.function_definition(func, func_symbol, stmts)
+            }
         }
     }
     fn visit_stmt(&mut self, func: &mut Function, statement: Stmt) {
@@ -349,16 +371,18 @@ impl Compiler {
     }
     fn global_declaration(&mut self, declarators: Vec<Declarator>) {
         for declarator in declarators {
-            let var_symbol = declarator.entry.borrow().unwrap_var().clone();
-            let type_decl = var_symbol.type_decl;
+            let var_symbol = declarator.entry.borrow().clone();
+            let type_decl = var_symbol.type_decl.clone();
 
-            if declarator.name == var_symbol.token && !type_decl.is_func() {
-                self.declare_global_var(
-                    declarator.name.unwrap_string(),
-                    type_decl,
-                    declarator.entry,
-                    declarator.init,
-                )
+            if declarator.name == var_symbol.token && !var_symbol.is_extern() {
+                let name = declarator.name.unwrap_string();
+                let label_name = if var_symbol.is_static() {
+                    self.static_labels.update(name)
+                } else {
+                    name
+                };
+
+                self.declare_global_var(label_name, type_decl, declarator.entry, declarator.init)
             }
             // if variable is declared but its initialization is after the first use then
             // still needs a register to access:
@@ -368,15 +392,13 @@ impl Compiler {
             // int a = 3;
             // ```
             else if var_symbol.reg.is_none() {
-                let is_runtime_address = type_decl.is_func() && declarator.init.is_none();
                 declarator
                     .entry
                     .borrow_mut()
-                    .unwrap_var_mut()
                     .set_reg(Register::Label(LabelRegister::Var(
                         declarator.name.unwrap_string(),
                         type_decl,
-                        is_runtime_address,
+                        var_symbol.is_extern(),
                     )))
             }
         }
@@ -384,31 +406,35 @@ impl Compiler {
 
     fn declare_global_var(
         &mut self,
-        name: String,
+        label_name: String,
         type_decl: Type,
-        var_symbol: VarSymbol,
+        var_symbol: SymbolRef,
         init: Option<Init>,
     ) {
-        self.write_out(Lir::GlobalDeclaration(name.clone(), type_decl.is_ptr()));
+        self.write_out(Lir::GlobalDeclaration(
+            label_name.clone(),
+            type_decl.is_ptr(),
+            var_symbol.borrow().is_static(),
+        ));
 
         if let Some(init) = init {
-            self.init_global_var(name, type_decl, var_symbol, init);
+            self.init_global_var(label_name, type_decl, var_symbol, init);
         } else {
             self.write_out(Lir::GlobalInit(
                 Type::Primitive(Primitive::Void),
                 StaticRegister::Literal(type_decl.size() as i64, Type::Primitive(Primitive::Long)),
             ));
-            // INFO: since variable is declared in current translation unit
-            // it doesn't need runtime-addressing
-            let reg = Register::Label(LabelRegister::Var(name, type_decl, false));
 
-            var_symbol.borrow_mut().unwrap_var_mut().set_reg(reg);
+            // since external declarations don't emit any code it is fine to assume that this label
+            // doesn't have run-time addressing
+            let reg = Register::Label(LabelRegister::Var(label_name, type_decl, false));
+
+            var_symbol.borrow_mut().set_reg(reg);
         }
     }
-    fn init_global_var(&mut self, name: String, type_decl: Type, var_symbol: VarSymbol, init: Init) {
+    fn init_global_var(&mut self, name: String, type_decl: Type, var_symbol: SymbolRef, init: Init) {
         var_symbol
             .borrow_mut()
-            .unwrap_var_mut()
             .set_reg(Register::Label(LabelRegister::Var(
                 name,
                 type_decl.clone(),
@@ -458,32 +484,57 @@ impl Compiler {
 
     fn declaration(&mut self, func: &mut Function, declarators: Vec<Declarator>) {
         for declarator in declarators {
-            let var_symbol = declarator.entry.borrow().unwrap_var().clone();
+            let var_symbol = declarator.entry.borrow().clone();
 
-            if declarator.name == var_symbol.token && !var_symbol.type_decl.is_func() {
-                self.declare_var(func, declarator.entry, declarator.init)
-            }
-            // only function-declarations can be redeclared inside of a function body
-            else if var_symbol.type_decl.is_func() {
-                declarator
-                    .entry
-                    .borrow_mut()
-                    .unwrap_var_mut()
-                    .set_reg(Register::Label(LabelRegister::Var(
-                        declarator.name.unwrap_string(),
-                        var_symbol.type_decl,
-                        false,
-                    )))
+            match var_symbol.storage_class {
+                Some(StorageClass::Extern | StorageClass::Static) => {
+                    let name = declarator.name.unwrap_string();
+                    let label_name = if var_symbol.is_static() {
+                        self.static_labels.update(name)
+                    } else {
+                        name
+                    };
+
+                    // declarations are declared after function but register has to be known inside
+                    // of function already, so have to set it now
+                    declarator
+                        .entry
+                        .borrow_mut()
+                        .set_reg(Register::Label(LabelRegister::Var(
+                            label_name.clone(),
+                            var_symbol.type_decl.clone(),
+                            var_symbol.is_extern(),
+                        )));
+
+                    func.static_declarations.push((label_name, declarator));
+                }
+                None | Some(StorageClass::Auto | StorageClass::Register)
+                    if declarator.name == var_symbol.token && !var_symbol.type_decl.is_func() =>
+                {
+                    self.declare_var(func, declarator.entry, declarator.init)
+                }
+                // only function-declarations can be redeclared inside of a function body
+                _ if var_symbol.reg.is_none() => {
+                    declarator
+                        .entry
+                        .borrow_mut()
+                        .set_reg(Register::Label(LabelRegister::Var(
+                            declarator.name.unwrap_string(),
+                            var_symbol.type_decl.clone(),
+                            var_symbol.is_extern(),
+                        )))
+                }
+                _ => (),
             }
         }
     }
 
-    fn declare_var(&mut self, func: &mut Function, var_symbol: VarSymbol, init: Option<Init>) {
-        let type_decl = var_symbol.borrow().unwrap_var().type_decl.clone();
+    fn declare_var(&mut self, func: &mut Function, var_symbol: SymbolRef, init: Option<Init>) {
+        let type_decl = var_symbol.borrow().type_decl.clone();
         let size = align(type_decl.size(), &type_decl);
 
         let reg = Register::Stack(StackRegister::new(&mut func.current_bp_offset, type_decl));
-        var_symbol.borrow_mut().unwrap_var_mut().set_reg(reg);
+        var_symbol.borrow_mut().set_reg(reg);
 
         if let Some(init) = init {
             match init {
@@ -500,9 +551,9 @@ impl Compiler {
         }
     }
 
-    fn init_scalar(&mut self, func: &mut Function, var_symbol: VarSymbol, expr: Expr, offset: usize) {
+    fn init_scalar(&mut self, func: &mut Function, var_symbol: SymbolRef, expr: Expr, offset: usize) {
         let value_reg = self.execute_expr(func, expr);
-        let mut var_reg = var_symbol.borrow().unwrap_var().get_reg();
+        let mut var_reg = var_symbol.borrow().get_reg();
 
         var_reg.set_type(value_reg.get_type());
         if let Register::Stack(stack_reg) = &mut var_reg {
@@ -515,12 +566,12 @@ impl Compiler {
         }
     }
 
-    fn clear_mem(&mut self, var_symbol: VarSymbol, amount: usize) {
+    fn clear_mem(&mut self, var_symbol: SymbolRef, amount: usize) {
         // writes 0 to stack until amount == 0
         // eax value that gets written
         // ecx amount
         // rdi at memory pos
-        let var_reg = var_symbol.borrow().unwrap_var().get_reg();
+        let var_reg = var_symbol.borrow().get_reg();
 
         // TODO: can be optimized by writing 8Bytes (instead of 1) per repetition but that requires extra logic when amount and size don't align
         let eax_reg = Register::Return(Type::Primitive(Primitive::Char));
@@ -553,14 +604,24 @@ impl Compiler {
         self.free(rdi_reg);
     }
 
-    fn init_arg(&mut self, func: &mut Function, var_symbol: VarSymbol, arg_reg: Register) {
+    fn init_arg(&mut self, func: &mut Function, var_symbol: SymbolRef, arg_reg: Register) {
         self.declare_var(func, Rc::clone(&var_symbol), None);
 
-        let reg = self.cg_assign(var_symbol.borrow().unwrap_var().get_reg(), arg_reg);
+        let reg = self.cg_assign(var_symbol.borrow().get_reg(), arg_reg);
         self.free(reg);
     }
 
-    fn function_definition(&mut self, mut func: Function, stmts: Vec<Stmt>) {
+    fn function_definition(&mut self, mut func: Function, func_symbol: SymbolRef, stmts: Vec<Stmt>) {
+        func_symbol
+            .borrow_mut()
+            .set_reg(Register::Label(LabelRegister::Var(
+                func.name.clone(),
+                func.return_type.clone(),
+                // since function is defined in this translation unit,
+                // it doesn't have to be accessed using `@GOTPCREL`
+                false,
+            )));
+
         func.epilogue_index = create_label(&mut self.label_index);
 
         // create a label for all goto-labels inside a function
@@ -569,16 +630,34 @@ impl Compiler {
         }
 
         // generate function code
-        self.cg_func_preamble(&mut func);
+        self.cg_func_preamble(&mut func, func_symbol);
         self.cg_stmts(&mut func, stmts);
-        self.cg_func_postamble(func);
+        self.cg_func_postamble(&func);
+
+        // declare all statically linked declarations that are declared inside of function-body
+        for (label_name, declarator) in func.static_declarations {
+            let var_symbol = declarator.entry.borrow().clone();
+
+            if declarator.name == var_symbol.token && !var_symbol.is_extern() {
+                self.declare_global_var(
+                    label_name,
+                    var_symbol.type_decl,
+                    declarator.entry,
+                    declarator.init,
+                )
+            }
+        }
     }
-    fn cg_func_preamble(&mut self, func: &mut Function) {
-        self.write_out(Lir::FuncSetup(func.name.clone(), func.stack_size));
+    fn cg_func_preamble(&mut self, func: &mut Function, func_symbol: SymbolRef) {
+        self.write_out(Lir::FuncSetup(
+            func.name.clone(),
+            func.stack_size,
+            func_symbol.borrow().is_static(),
+        ));
 
         // initialize parameters
         for (i, param_symbol) in func.params.clone().into_iter().enumerate() {
-            let type_decl = param_symbol.borrow().unwrap_var().type_decl.clone();
+            let type_decl = param_symbol.borrow().type_decl.clone();
             if i < ARG_REGS.len() {
                 let arg = Register::Arg(ArgRegister::new(
                     i,
@@ -601,7 +680,7 @@ impl Compiler {
             }
         }
     }
-    fn cg_func_postamble(&mut self, func: Function) {
+    fn cg_func_postamble(&mut self, func: &Function) {
         self.write_out(Lir::LabelDefinition(func.epilogue_index));
 
         self.write_out(Lir::FuncTeardown(func.stack_size))
@@ -720,7 +799,7 @@ impl Compiler {
             ExprKind::Ident(var_symbol) => {
                 // plain ident isn't compile-time-constant (this gets caught in typechecker)
                 // but is needed to evaluate address-constants
-                if let Register::Label(reg) = var_symbol.borrow().unwrap_var().get_reg() {
+                if let Register::Label(reg) = var_symbol.borrow().get_reg() {
                     StaticRegister::Label(reg)
                 } else {
                     unreachable!()
@@ -755,7 +834,7 @@ impl Compiler {
             ExprKind::CompoundAssign { expr, tmp_symbol } => {
                 self.cg_comp_assign(func, *expr, tmp_symbol)
             }
-            ExprKind::Ident(var_symbol) => var_symbol.borrow().unwrap_var().get_reg(),
+            ExprKind::Ident(var_symbol) => self.ident(var_symbol),
             ExprKind::Call { caller, args } => self.cg_call(func, *caller, args, expr.type_decl),
             ExprKind::Cast { expr, direction, new_type } => {
                 self.cg_cast(func, new_type, *expr, direction)
@@ -772,6 +851,19 @@ impl Compiler {
             }
             ExprKind::Comma { left, right } => self.cg_comma(func, *left, *right),
             ExprKind::Nop => Register::Void,
+        }
+    }
+    fn ident(&mut self, var_symbol: SymbolRef) -> Register {
+        let mut reg = var_symbol.borrow().get_reg();
+
+        // since runtime-address stored in GlobalOffsetTable returns pointer to that address it has
+        // to be dereferences first
+        if let Register::Label(LabelRegister::Var(.., true)) = &reg {
+            let original_type = reg.get_type();
+            reg.set_type(original_type.clone().pointer_to());
+            self.cg_deref(reg, original_type)
+        } else {
+            reg
         }
     }
     fn cg_comma(&mut self, func: &mut Function, left: Expr, right: Expr) -> Register {
@@ -854,7 +946,7 @@ impl Compiler {
             unreachable!("{:?}", reg.get_type())
         }
     }
-    fn cg_comp_assign(&mut self, func: &mut Function, expr: Expr, tmp_symbol: VarSymbol) -> Register {
+    fn cg_comp_assign(&mut self, func: &mut Function, expr: Expr, tmp_symbol: SymbolRef) -> Register {
         // only have to declare tmp var, since compound assign is only syntax sugar
         self.declare_var(func, tmp_symbol, None);
         self.execute_expr(func, expr)

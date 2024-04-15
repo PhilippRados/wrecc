@@ -1,6 +1,7 @@
 //! The errors emitted throughout all of wrecc
 
 use crate::compiler::common::{token::*, types::*};
+use crate::compiler::typechecker::mir::decl::StorageClass;
 use std::num::IntErrorKind;
 use std::path::PathBuf;
 
@@ -88,6 +89,7 @@ pub enum ErrorKind {
     DivideByZero,
     NegativeShift,
     InvalidConstCast(Type, Type),
+    IntegerOverflow(Type),
 
     // typechecker errors
     UndeclaredLabel(String),
@@ -117,6 +119,7 @@ pub enum ErrorKind {
     MismatchedFunctionReturn(Type, Type),
     InvalidUnary(TokenKind, Type, &'static str),
     UnnamedFuncParams,
+    InvalidStorageClass(StorageClass, &'static str),
     InvalidReturnType(Type),
     NonAggregateDesignator(Type),
     DesignatorOverflow(usize, i64),
@@ -131,7 +134,7 @@ pub enum ErrorKind {
 
     // environment errors
     UndeclaredSymbol(String),
-    IntegerOverflow(Type),
+    StorageClassMismatch(String, &'static str, &'static str),
 
     // preprocessor errors
     InvalidDirective(String),
@@ -294,10 +297,10 @@ impl ErrorKind {
                 format!("undeclared label '{}'", label)
             }
             ErrorKind::NotInteger(s, type_decl) => {
-                format!("{} must be integer type, found '{}'", s, type_decl,)
+                format!("{} must be integer type, found '{}'", s, type_decl)
             }
             ErrorKind::NotScalar(s, type_decl) => {
-                format!("{} must be scalar type, found '{}'", s, type_decl,)
+                format!("{} must be scalar type, found '{}'", s, type_decl)
             }
             ErrorKind::DuplicateCase(n) => format!("duplicate 'case'-statement with value {}", n),
             ErrorKind::NotIn(inner, outer) => {
@@ -386,6 +389,9 @@ impl ErrorKind {
             ErrorKind::UndeclaredSymbol(name) => {
                 format!("undeclared symbol '{}'", name)
             }
+            ErrorKind::StorageClassMismatch(name, current, existing) => {
+                format!("{} of '{}' follows {} declaration", current, name, existing)
+            }
             ErrorKind::InvalidUnary(token, right_type, kind) => {
                 format!(
                     "invalid unary-expression {} with type '{}', must be {}-type",
@@ -394,6 +400,9 @@ impl ErrorKind {
             }
             ErrorKind::UnnamedFuncParams => {
                 "unnamed parameters are not allowed in function definitions".to_string()
+            }
+            ErrorKind::InvalidStorageClass(sc, s) => {
+                format!("invalid storage-class specifier '{}' in {}", sc.to_string(), s)
             }
             ErrorKind::InvalidReturnType(type_decl) => {
                 format!("functions cannot return type '{}'", type_decl)

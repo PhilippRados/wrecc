@@ -89,7 +89,7 @@ impl RegisterAllocation {
                 Lir::RestoreRegs => {
                     self.restore_regs(&mut result);
                 }
-                Lir::FuncSetup(_, stack_size) => {
+                Lir::FuncSetup(_, stack_size, _) => {
                     self.spill_bp_offset = *stack_size;
 
                     result.push(instr);
@@ -394,7 +394,7 @@ impl RegisterAllocation {
             .iter_mut()
             .rev()
             .filter_map(|instr| {
-                if let Lir::FuncSetup(.., setup_size) = instr {
+                if let Lir::FuncSetup(_, setup_size, _) = instr {
                     Some(setup_size)
                 } else {
                     None
@@ -462,6 +462,28 @@ mod tests {
         }
 
         reg_alloc
+    }
+    impl Lir {
+        fn get_regs(&self) -> (Option<&Register>, Option<&Register>) {
+            match self {
+                Lir::Call(reg) | Lir::Push(reg) | Lir::Pop(reg) => (None, Some(reg)),
+                Lir::Mov(left, right)
+                | Lir::Movs(left, right)
+                | Lir::Movz(left, right)
+                | Lir::Cmp(left, right)
+                | Lir::Sub(left, right)
+                | Lir::Add(left, right)
+                | Lir::Imul(left, right)
+                | Lir::Xor(left, right)
+                | Lir::Or(left, right)
+                | Lir::And(left, right)
+                | Lir::Load(left, right)
+                | Lir::Shift(_, left, right) => (Some(left), Some(right)),
+                Lir::Neg(reg) | Lir::Not(reg) | Lir::Idiv(reg) => (None, Some(reg)),
+                Lir::GlobalInit(..) => (None, None),
+                _ => (None, None),
+            }
+        }
     }
     impl IntervalEntry {
         fn as_reg(&self, id: usize) -> Register {

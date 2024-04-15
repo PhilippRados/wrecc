@@ -1,4 +1,5 @@
-use crate::compiler::common::{error::*, token::Token, types::*};
+use crate::compiler::common::{environment::SymbolRef, error::*, token::Token, types::*};
+use crate::compiler::parser::hir;
 use crate::compiler::typechecker::align;
 use crate::compiler::typechecker::mir::{expr::*, stmt::*};
 
@@ -7,13 +8,45 @@ use std::collections::VecDeque;
 
 pub enum ExternalDeclaration {
     Declaration(Vec<Declarator>),
-    Function(Function, Vec<Stmt>),
+    Function(Function, SymbolRef, Vec<Stmt>),
 }
 
 pub struct Declarator {
     pub name: Token,
-    pub entry: VarSymbol,
+    pub entry: SymbolRef,
     pub init: Option<Init>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum StorageClass {
+    TypeDef,
+    Extern,
+    Static,
+    Auto,
+    Register,
+}
+impl StorageClass {
+    pub fn to_string(&self) -> &'static str {
+        match self {
+            StorageClass::TypeDef => "'typedef'",
+            StorageClass::Extern => "'extern'",
+            StorageClass::Static => "'static'",
+            StorageClass::Auto => "'auto'",
+            StorageClass::Register => "'register'",
+        }
+    }
+}
+use hir::decl::StorageClassKind;
+impl Into<StorageClass> for StorageClassKind {
+    fn into(self) -> StorageClass {
+        match self {
+            StorageClassKind::TypeDef => StorageClass::TypeDef,
+            StorageClassKind::Extern => StorageClass::Extern,
+            StorageClassKind::Static => StorageClass::Static,
+            StorageClassKind::Auto => StorageClass::Auto,
+            StorageClassKind::Register => StorageClass::Register,
+        }
+    }
 }
 
 pub enum Init {
@@ -29,8 +62,11 @@ pub struct Function {
 
     pub return_type: Type,
 
+    /// Declarations inside of a function-body are saved and declared after function-definition
+    pub static_declarations: Vec<(String, Declarator)>,
+
     /// Parameters and their references in the symbol table
-    pub params: Vec<VarSymbol>,
+    pub params: Vec<SymbolRef>,
 
     /// If function contains var-args
     pub variadic: bool,
@@ -54,7 +90,7 @@ pub struct Function {
     /// Checks if all paths return from a function
     pub returns_all_paths: bool,
 
-    /// All goto-statements in that function, used to generate error for unkown goto-label
+    /// All goto-statements in that function, used to generate error for unknown goto-label
     pub gotos: Vec<Token>,
 
     /// Keeps track of current scope-kind to check that certain statements (eg. continue or case) are
@@ -70,6 +106,7 @@ impl Function {
             variadic,
             stack_size: 0,
             labels: HashMap::new(),
+            static_declarations: Vec::new(),
             epilogue_index: 0,
             current_bp_offset: 0,
             switches: VecDeque::new(),
@@ -78,11 +115,10 @@ impl Function {
             scope: Vec::new(),
         }
     }
-    pub fn increment_stack_size(&mut self, type_decl: &Type) {
-        // pure function-type doesnt require any stack-space
-        if !type_decl.is_func() {
-            let mut size = self.stack_size + type_decl.size();
-            size = align(size, type_decl);
+    pub fn increment_stack_size(&mut self, symbol: &SymbolRef) {
+        if !symbol.borrow().is_extern() || !symbol.borrow().is_static() {
+            let mut size = self.stack_size + symbol.borrow().type_decl.size();
+            size = align(size, &symbol.borrow().type_decl);
 
             self.stack_size = size;
         }

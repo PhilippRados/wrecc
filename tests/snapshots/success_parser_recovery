@@ -1,8 +1,8 @@
-error: typedef not allowed in function-definition
-|  --> in tests/fixtures/parser_recovery.c:1:13
+error: expected expression, found: 'else'
+|  --> in tests/fixtures/parser_recovery.c:2:10
 |
-1 typedef int my_func() {
-|             ^
+2   return else;
+|          ^
 error: storage classes not allowed in this specifier
 |  --> in tests/fixtures/parser_recovery.c:7:3
 |

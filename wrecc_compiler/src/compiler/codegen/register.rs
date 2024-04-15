@@ -123,7 +123,13 @@ impl LabelRegister {
     fn base_name(&self) -> String {
         match self {
             LabelRegister::String(index) => format!("LS{index}"),
-            LabelRegister::Var(name, ..) => maybe_prefix_underscore(name).to_string(),
+            LabelRegister::Var(name, _, runtime_address) => {
+                if *runtime_address {
+                    format!("{}@GOTPCREL", maybe_prefix_underscore(name))
+                } else {
+                    maybe_prefix_underscore(name).to_string()
+                }
+            }
         }
     }
 }

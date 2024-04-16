@@ -63,6 +63,8 @@ impl TypeChecker {
         }
 
         if let Err(mut incomplete_declarations) = self.env.check_remaining_tentatives() {
+            // TODO: maybe only emit error if that token didn't already emit an
+            // IncompleteType error before
             errors.append(&mut incomplete_declarations);
         }
 
@@ -196,7 +198,7 @@ impl TypeChecker {
                 Some(init)
             } else {
                 let tentative_decl = self.env.is_global() && symbol_type.is_aggregate();
-                if !symbol_type.is_complete() && !tentative_decl {
+                if !symbol_type.is_complete() && !tentative_decl && !entry.borrow().is_extern() {
                     return Err(Error::new(&name, ErrorKind::IncompleteType(symbol_type)));
                 }
                 None
@@ -948,7 +950,7 @@ impl TypeChecker {
             if !type_decl.is_complete() {
                 return Err(Error::new(
                     &func_decl.name,
-                    ErrorKind::IncompleteFuncArg(name_string, type_decl),
+                    ErrorKind::IncompleteFuncParam(name_string, type_decl),
                 ));
             }
             if let Some((_, var_symbol)) = param_name {
@@ -1790,8 +1792,16 @@ impl TypeChecker {
         let caller = self.visit_expr(func, caller)?;
 
         let mut args: Vec<mir::expr::Expr> = Vec::new();
-        for expr in parsed_args.into_iter() {
+        for (index, expr) in parsed_args.into_iter().enumerate() {
             let arg = self.visit_expr(func, expr)?.decay().maybe_int_promote();
+
+            if !arg.type_decl.is_complete() {
+                return Err(Error::new(
+                    &left_paren,
+                    ErrorKind::IncompleteArgType(index, arg.type_decl),
+                ));
+            }
+
             args.push(arg);
         }
 
@@ -2229,11 +2239,11 @@ mod tests {
         typechecker.check_declarations(env).unwrap();
     }
 
-    fn typecheck(input: &str) -> Result<(), Vec<ErrorKind>> {
+    fn typecheck(input: &str) -> Result<(), Vec<Error>> {
         let external_decls = setup(input).parse().unwrap();
         match TypeChecker::new().check_declarations(external_decls) {
             Ok(_) => Ok(()),
-            Err(e) => Err(e.flatten_multiple().into_iter().map(|e| e.kind).collect()),
+            Err(e) => Err(e.flatten_multiple()),
         }
     }
 
@@ -2803,7 +2813,11 @@ int main(){
         .unwrap_err();
 
         assert!(matches!(
-            actual.as_slice(),
+            actual
+                .into_iter()
+                .map(|e| e.kind)
+                .collect::<Vec<ErrorKind>>()
+                .as_slice(),
             &[
                 ErrorKind::InvalidStorageClass(mir::decl::StorageClass::Auto, "function"),
                 ErrorKind::InvalidStorageClass(mir::decl::StorageClass::Auto, "global variable"),
@@ -2818,16 +2832,68 @@ int main(){
         ));
     }
 
-    //     #[test]
-    //     fn tentative_storage_classes() {
-    //         let actual = typecheck(
-    //             "
-    // extern void a;
-    // void b;
-    // ",
-    //         )
-    //         .unwrap_err();
+    #[test]
+    fn allowed_tentative_storage_classes() {
+        let actual = typecheck(
+            "
+extern void a;
+struct Foo some;
+int array[];
 
-    //         assert!(matches!(actual.as_slice(), &[]));
-    //     }
+int main() {
+    extern void c;
+    extern union Bar u;
+}
+
+struct Foo {
+    int age;
+};
+",
+        );
+
+        assert!(actual.is_ok());
+    }
+    #[test]
+    fn invalid_tentative_storage_classes() {
+        let actual = typecheck(
+            "
+extern void a;
+void a;
+
+struct Bar b;
+
+int func(char*, ...);
+
+int main(){
+    struct Foo some;
+    func(\"print\",some);
+}
+    ",
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            actual.as_slice(),
+            &[
+                Error {
+                    kind: ErrorKind::IncompleteType(Type::Primitive(Primitive::Void)),
+                    line_index: 3,
+                    ..
+                },
+                Error {
+                    kind: ErrorKind::IncompleteType(Type::Struct(_)),
+                    ..
+                },
+                Error {
+                    kind: ErrorKind::IncompleteArgType(1, Type::Struct(_)),
+                    ..
+                },
+                Error {
+                    kind: ErrorKind::IncompleteTentative(Type::Struct(_)),
+                    line_index: 5,
+                    ..
+                }
+            ]
+        ));
+    }
 }

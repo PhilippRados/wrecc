@@ -362,8 +362,11 @@ impl Environment {
         let mut errors = Vec::new();
 
         for symbol in globals.values() {
-            if !symbol.borrow().type_decl.is_unbounded_array()
-                && !symbol.borrow().type_decl.is_complete()
+            let type_decl = &symbol.borrow().type_decl;
+
+            if !type_decl.is_complete()
+                && !type_decl.is_unbounded_array()
+                && !type_decl.is_void()
                 && !matches!(symbol.borrow().storage_class, Some(StorageClass::Extern))
             {
                 errors.push(Error::new(

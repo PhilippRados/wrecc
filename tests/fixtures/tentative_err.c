@@ -15,12 +15,18 @@ typedef int ty[];
 typedef int ty[2];
 typedef int ty[];
 
+void call(char *, ...);
+
 int main() {
   gh.age = 12;
   a[0] = 3;
+  extern void v;
 
   gh = gb;
   sizeof(a);
+
+  call("print", a);
+  call("print", v);
 }
 
 struct Bar {

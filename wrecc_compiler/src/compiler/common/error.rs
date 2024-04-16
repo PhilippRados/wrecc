@@ -64,7 +64,8 @@ pub enum ErrorKind {
     EnumOverflow,
     IncompleteType(Type),
     IncompleteReturnType(String, Type),
-    IncompleteFuncArg(String, Type),
+    IncompleteFuncParam(String, Type),
+    IncompleteArgType(usize, Type),
     IncompleteAssign(Type),
     IncompleteTentative(Type),
     VoidFuncArg,
@@ -207,7 +208,7 @@ impl ErrorKind {
                     type_decl
                 )
             }
-            ErrorKind::IncompleteFuncArg(func_name, type_decl) => {
+            ErrorKind::IncompleteFuncParam(func_name, type_decl) => {
                 format!(
                     "function '{}' contains incomplete type '{}' as parameter",
                     func_name, type_decl
@@ -346,6 +347,13 @@ impl ErrorKind {
                 format!("type '{}' is not assignable", type_decl)
             }
             ErrorKind::NotLvalue => "expected lvalue left of assignment".to_string(),
+            ErrorKind::IncompleteArgType(index, type_decl) => {
+                format!(
+                    "{} argument has incomplete type: '{}'",
+                    num_to_ord(index + 1),
+                    type_decl
+                )
+            }
             ErrorKind::MismatchedArity(type_decl, expected, actual) => {
                 format!(
                     "function of type '{}' expected {} argument(s) found {}",

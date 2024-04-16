@@ -116,7 +116,7 @@ impl Function {
         }
     }
     pub fn increment_stack_size(&mut self, symbol: &SymbolRef) {
-        if !symbol.borrow().is_extern() || !symbol.borrow().is_static() {
+        if !symbol.borrow().is_extern() && !symbol.borrow().is_static() {
             let mut size = self.stack_size + symbol.borrow().type_decl.size();
             size = align(size, &symbol.borrow().type_decl);
 

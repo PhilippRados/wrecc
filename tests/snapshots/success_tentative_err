@@ -14,23 +14,28 @@ error: conflicting types for 'ty': 'int [2]' vs 'int []'
 15 typedef int ty[2];
 |              ^
 error: cannot access members of type that contains incomplete type 'struct Bar'
-|  --> in tests/fixtures/tentative_err.c:19:5
+|  --> in tests/fixtures/tentative_err.c:21:5
 |
-19   gh.age = 12;
+21   gh.age = 12;
 |      ^
 error: cannot assign to incomplete type 'struct Bar'
-|  --> in tests/fixtures/tentative_err.c:22:6
+|  --> in tests/fixtures/tentative_err.c:25:6
 |
-22   gh = gb;
+25   gh = gb;
 |       ^
 error: 'int []' contains incomplete type
-|  --> in tests/fixtures/tentative_err.c:23:3
+|  --> in tests/fixtures/tentative_err.c:26:3
 |
-23   sizeof(a);
+26   sizeof(a);
 |    ^
+error: 2nd argument has incomplete type: 'void'
+|  --> in tests/fixtures/tentative_err.c:29:7
+|
+29   call("print", v);
+|        ^
 error: tentative definition of type 'struct Uwe' is never completed
 |  --> in tests/fixtures/tentative_err.c:4:12
 |
 4 struct Uwe k;
 |            ^
-7 errors generated.
+8 errors generated.

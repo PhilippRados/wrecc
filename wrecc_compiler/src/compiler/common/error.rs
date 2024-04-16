@@ -390,7 +390,10 @@ impl ErrorKind {
                 format!("undeclared symbol '{}'", name)
             }
             ErrorKind::StorageClassMismatch(name, current, existing) => {
-                format!("{} of '{}' follows {} declaration", current, name, existing)
+                format!(
+                    "{} declaration of '{}' follows {} declaration",
+                    current, name, existing
+                )
             }
             ErrorKind::InvalidUnary(token, right_type, kind) => {
                 format!(

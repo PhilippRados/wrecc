@@ -28,11 +28,11 @@ pub enum StorageClass {
 impl StorageClass {
     pub fn to_string(&self) -> &'static str {
         match self {
-            StorageClass::TypeDef => "'typedef'",
-            StorageClass::Extern => "'extern'",
-            StorageClass::Static => "'static'",
-            StorageClass::Auto => "'auto'",
-            StorageClass::Register => "'register'",
+            StorageClass::TypeDef => "typedef",
+            StorageClass::Extern => "extern",
+            StorageClass::Static => "static",
+            StorageClass::Auto => "auto",
+            StorageClass::Register => "register",
         }
     }
 }

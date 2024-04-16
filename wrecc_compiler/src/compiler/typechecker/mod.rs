@@ -2229,6 +2229,14 @@ mod tests {
         typechecker.check_declarations(env).unwrap();
     }
 
+    fn typecheck(input: &str) -> Result<(), Vec<ErrorKind>> {
+        let external_decls = setup(input).parse().unwrap();
+        match TypeChecker::new().check_declarations(external_decls) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.flatten_multiple().into_iter().map(|e| e.kind).collect()),
+        }
+    }
+
     macro_rules! assert_type {
         ($input:expr,$expected_type:expr,$env:expr) => {
             let expr = setup($input).expression().unwrap();
@@ -2770,4 +2778,56 @@ int a;";
             Err(Error { kind: ErrorKind::ScalarOverflow, .. })
         ));
     }
+
+    #[test]
+    fn invalid_storage_classes() {
+        let actual = typecheck(
+            "
+auto int a();
+auto struct B foo;
+register char* foo;
+extern int more = 4;
+
+int main(){
+    extern int some = 4;
+    register int b();
+    static int bar();
+
+    extern int boo();
+    auto int c;
+    int other;
+    register int d;
+}
+",
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            actual.as_slice(),
+            &[
+                ErrorKind::InvalidStorageClass(mir::decl::StorageClass::Auto, "function"),
+                ErrorKind::InvalidStorageClass(mir::decl::StorageClass::Auto, "global variable"),
+                ErrorKind::InvalidStorageClass(mir::decl::StorageClass::Register, "global variable"),
+                ErrorKind::Regular("variable declared with 'extern' cannot have initializer"),
+                ErrorKind::Regular("variable declared with 'extern' cannot have initializer"),
+                ErrorKind::InvalidStorageClass(mir::decl::StorageClass::Register, "function"),
+                ErrorKind::Regular(
+                    "function declared in block scope cannot have 'static' storage-class"
+                ),
+            ]
+        ));
+    }
+
+    //     #[test]
+    //     fn tentative_storage_classes() {
+    //         let actual = typecheck(
+    //             "
+    // extern void a;
+    // void b;
+    // ",
+    //         )
+    //         .unwrap_err();
+
+    //         assert!(matches!(actual.as_slice(), &[]));
+    //     }
 }

@@ -248,6 +248,7 @@ impl Environment {
             }
         } else {
             match (current, existing) {
+                // local function-decl can only be extern
                 _ if type_decl.is_func() => Ok(()),
                 (current, Some(StorageClass::Extern)) if current != &Some(StorageClass::Extern) => {
                     Err(("non-extern", "extern"))
@@ -302,9 +303,9 @@ impl Environment {
                     current_symbol.type_decl = existing_symbol.borrow().type_decl.clone();
                 }
 
-                // can only happen if current symbol is empty or extern and existing is static
-                if matches!(existing_symbol.borrow().storage_class, Some(StorageClass::Static)) {
-                    current_symbol.storage_class = Some(StorageClass::Static);
+                // storage classes with extern are either extern or existing storage-class
+                if matches!(current_symbol.storage_class, Some(StorageClass::Extern)) {
+                    current_symbol.storage_class = existing_symbol.borrow().storage_class.clone();
                 }
 
                 *existing_symbol.borrow_mut() = current_symbol;
@@ -595,5 +596,68 @@ pub mod tests {
         assert!(declare(&mut env, symbol!("baz", "int", InitType::Definition), false).is_ok());
         assert!(declare(&mut env, symbol!("baz", "long", InitType::Declaration), false).is_err());
 
+    }
+
+    #[test]
+    fn global_static_redeclarations(){
+        let mut env = Environment::new();
+
+        declare(&mut env,symbol!("foo","int",InitType::Declaration,StorageClass::Static),true).unwrap();
+        declare(&mut env,symbol!("foo","int",InitType::Definition,StorageClass::Static),true).unwrap();
+        let symbol = declare(&mut env,symbol!("foo","int",InitType::Declaration,StorageClass::Extern),true).unwrap();
+
+        assert!(matches!(symbol.borrow().storage_class,Some(StorageClass::Static)));
+        assert!(matches!(declare(&mut env,symbol!("foo","int",InitType::Definition,StorageClass::Static),true),Err(Error {kind:ErrorKind::Redefinition(..),..})));
+        assert!(matches!(declare(&mut env,symbol!("foo","int",InitType::Declaration),true),Err(Error {kind:ErrorKind::StorageClassMismatch(_,"non-static","static"),..})));
+
+        declare(&mut env,symbol!("bar","int",InitType::Definition),true).unwrap();
+        assert!(matches!(declare(&mut env,symbol!("bar","int",InitType::Declaration,StorageClass::Static),true),Err(Error {kind:ErrorKind::StorageClassMismatch(_,"static","non-static"),..})));
+
+        declare(&mut env,symbol!("baz","int",InitType::Declaration,StorageClass::Extern),true).unwrap();
+        assert!(matches!(declare(&mut env,symbol!("baz","int",InitType::Declaration,StorageClass::Static),true),Err(Error {kind:ErrorKind::StorageClassMismatch(_,"static","non-static"),..})));
+    }
+
+    #[test]
+    fn global_extern_redeclarations() {
+        let mut env = Environment::new();
+
+        declare(&mut env,symbol!("foo","int",InitType::Declaration,StorageClass::Extern),true).unwrap();
+        let symbol = declare(&mut env,symbol!("foo","int",InitType::Declaration,StorageClass::Extern),true).unwrap();
+        assert!(matches!(symbol.borrow().storage_class,Some(StorageClass::Extern)));
+
+        let symbol = declare(&mut env,symbol!("foo","int",InitType::Declaration),true).unwrap();
+        assert!(matches!(symbol.borrow().storage_class,None));
+
+        declare(&mut env,symbol!("bar","int",InitType::Declaration),true).unwrap();
+        let symbol = declare(&mut env,symbol!("bar","int",InitType::Declaration,StorageClass::Extern),true).unwrap();
+        assert!(matches!(symbol.borrow().storage_class,None));
+
+        declare(&mut env,symbol!("baz","int",InitType::Declaration,StorageClass::Extern),true).unwrap();
+        let symbol = declare(&mut env,symbol!("baz","int",InitType::Definition),true).unwrap();
+        assert!(matches!(symbol.borrow().storage_class,None));
+    }
+
+    #[test]
+    fn local_storage_classes() {
+        let mut env = Environment::new();
+
+        env.enter();
+        declare(&mut env,symbol!("baz","int",InitType::Declaration,StorageClass::Extern),false).unwrap();
+        declare(&mut env,symbol!("baz","int",InitType::Declaration,StorageClass::Extern),false).unwrap();
+
+        declare(&mut env,symbol!("foo","int",InitType::Declaration),false).unwrap();
+        assert!(matches!(declare(&mut env,symbol!("foo","int",InitType::Declaration,StorageClass::Extern),false),Err(Error {kind:ErrorKind::StorageClassMismatch(_,"extern","non-extern"),..})));
+
+        declare(&mut env,symbol!("bar","int",InitType::Declaration,StorageClass::Extern),false).unwrap();
+        assert!(matches!(declare(&mut env,symbol!("bar","int",InitType::Declaration),false),Err(Error {kind:ErrorKind::StorageClassMismatch(_,"non-extern","extern"),..})));
+
+        declare(&mut env,symbol!("goo","int ()",InitType::Declaration,StorageClass::Extern),false).unwrap();
+        declare(&mut env,symbol!("goo","int ()",InitType::Declaration),false).unwrap();
+        declare(&mut env,symbol!("goo","int ()",InitType::Declaration,StorageClass::Extern),false).unwrap();
+
+        declare(&mut env,symbol!("gaa","int",InitType::Declaration,StorageClass::Auto),false).unwrap();
+        assert!(matches!(declare(&mut env,symbol!("gaa","int",InitType::Definition,StorageClass::Auto),false),Err(Error {kind:ErrorKind::Redefinition(..),..})));
+        assert!(matches!(declare(&mut env,symbol!("gaa","int",InitType::Declaration),false),Err(Error {kind:ErrorKind::Redefinition(..),..})));
+        env.exit();
     }
 }

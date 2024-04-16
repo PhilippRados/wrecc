@@ -188,7 +188,7 @@ impl TypeChecker {
                 if !symbol_type.is_unbounded_array() && !symbol_type.is_complete() {
                     return Err(Error::new(&name, ErrorKind::IncompleteType(symbol_type.clone())));
                 }
-                let init = self.init_check(func, &mut symbol_type, init)?;
+                let init = self.init_check(func, &mut symbol_type, init, entry.borrow().is_static())?;
 
                 // update symbol type if was unbounded array
                 if let ty @ Type::Array(_, ArraySize::Unknown) = &mut entry.borrow_mut().type_decl {
@@ -571,14 +571,19 @@ impl TypeChecker {
         func: &mut Option<&mut mir::decl::Function>,
         type_decl: &mut Type,
         mut init: hir::decl::Init,
+        is_static: bool,
     ) -> Result<mir::decl::Init, Error> {
         if let Some((string, size)) = Self::is_string_init(type_decl, &init)? {
             init.kind = Self::char_array(init.token.clone(), string, size)?;
         }
 
         match init.kind {
-            hir::decl::InitKind::Scalar(expr) => self.init_scalar(func, type_decl, &init.token, expr),
-            hir::decl::InitKind::Aggr(list) => self.init_aggregate(func, type_decl, init.token, list),
+            hir::decl::InitKind::Scalar(expr) => {
+                self.init_scalar(func, type_decl, &init.token, expr, is_static)
+            }
+            hir::decl::InitKind::Aggr(list) => {
+                self.init_aggregate(func, type_decl, init.token, list, is_static)
+            }
         }
     }
     fn init_scalar(
@@ -587,6 +592,7 @@ impl TypeChecker {
         type_decl: &Type,
         token: &Token,
         expr: hir::expr::ExprKind,
+        is_static: bool,
     ) -> Result<mir::decl::Init, Error> {
         if type_decl.is_array() {
             return Err(Error::new(token, ErrorKind::InvalidAggrInit(type_decl.clone())));
@@ -598,8 +604,16 @@ impl TypeChecker {
         Self::check_type_compatibility(token, type_decl, &expr)?;
         let expr = Self::maybe_cast(type_decl.clone(), expr);
 
-        if self.env.is_global() && !expr.is_constant() {
-            return Err(Error::new(token, ErrorKind::NotConstantInit("global variables")));
+        let should_be_const = self.env.is_global() || is_static;
+        if should_be_const && !expr.is_constant() {
+            return Err(Error::new(
+                token,
+                ErrorKind::NotConstantInit(if is_static {
+                    "static variables"
+                } else {
+                    "global variables"
+                }),
+            ));
         }
 
         Ok(mir::decl::Init::Scalar(expr))
@@ -610,6 +624,7 @@ impl TypeChecker {
         type_decl: &mut Type,
         token: Token,
         mut list: Vec<Box<hir::decl::Init>>,
+        is_static: bool,
     ) -> Result<mir::decl::Init, Error> {
         match type_decl {
             Type::Array { .. } | Type::Struct(_) | Type::Union(_) => {
@@ -681,7 +696,7 @@ impl TypeChecker {
                         }
                     }
 
-                    let init = self.init_check(func, sub_type, *list.remove(0))?;
+                    let init = self.init_check(func, sub_type, *list.remove(0), is_static)?;
                     let sub_type_size = sub_type.size() as i64;
                     let init_offset = objects.offset();
 
@@ -732,7 +747,7 @@ impl TypeChecker {
             }
             _ => match list.as_slice() {
                 [single_init] if matches!(single_init.kind, hir::decl::InitKind::Scalar(_)) => {
-                    self.init_check(func, type_decl, *single_init.clone())
+                    self.init_check(func, type_decl, *single_init.clone(), is_static)
                 }
                 [single_init] => Err(Error::new(
                     &single_init.token,
@@ -2797,11 +2812,13 @@ auto int a();
 auto struct B foo;
 register char* foo;
 extern int more = 4;
+int func();
 
 int main(){
     extern int some = 4;
     register int b();
     static int bar();
+    static int array[] = {func()};
 
     extern int boo();
     auto int c;
@@ -2828,6 +2845,7 @@ int main(){
                 ErrorKind::Regular(
                     "function declared in block scope cannot have 'static' storage-class"
                 ),
+                ErrorKind::NotConstantInit("static variables")
             ]
         ));
     }

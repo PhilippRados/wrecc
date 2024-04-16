@@ -1,0 +1,36 @@
+error: invalid storage-class specifier 'register' in global variable
+|  --> in tests/fixtures/storage_class_err.c:1:14
+|
+1 register int s;
+|              ^
+error: invalid storage-class specifier 'auto' in function-parameter
+|  --> in tests/fixtures/storage_class_err.c:3:15
+|
+3 static int bar(auto int);
+|               ^
+error: function declared in block scope cannot have 'static' storage-class
+|  --> in tests/fixtures/storage_class_err.c:7:14
+|
+7   static int foo();
+|              ^
+error: invalid storage-class specifier 'auto' in function
+|  --> in tests/fixtures/storage_class_err.c:8:12
+|
+8   auto int foor();
+|            ^
+error: invalid storage-class specifier 'typedef' in for-statement
+|  --> in tests/fixtures/storage_class_err.c:11:7
+|
+11   for (typedef int i = 0;;)
+|        ^
+error: invalid storage-class specifier 'static' in for-statement
+|  --> in tests/fixtures/storage_class_err.c:13:7
+|
+13   for (static int i = 0;;)
+|        ^
+error: static variables can only be initialized to compile-time constants
+|  --> in tests/fixtures/storage_class_err.c:16:26
+|
+16   static int array[2] = {baz((int *)1)};
+|                           ^
+7 errors generated.

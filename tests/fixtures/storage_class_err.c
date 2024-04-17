@@ -17,4 +17,8 @@ int main() {
 
   extern char *c;
   extern char *c;
+
+  register int arr[3];
+  int *b = arr + 3;
+  int *d = arr;
 }

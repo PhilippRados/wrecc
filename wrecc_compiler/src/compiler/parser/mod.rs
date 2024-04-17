@@ -1312,7 +1312,7 @@ impl Parser {
             let expr = self.expression()?;
             consume!(self, TokenKind::RightParen, "expected closing ')'")?;
 
-            return Ok(ExprKind::Grouping { expr: Box::new(expr.clone()) });
+            return Ok(expr);
         }
 
         let token = self.tokens.peek("expected expression")?;
@@ -1368,11 +1368,9 @@ fn arrow_sugar(left: ExprKind, member: Token, arrow_token: Token) -> ExprKind {
     ExprKind::MemberAccess {
         token: arrow_token,
         member: member.clone(),
-        expr: Box::new(ExprKind::Grouping {
-            expr: Box::new(ExprKind::Unary {
-                token: Token { kind: TokenKind::Star, ..member },
-                right: Box::new(left),
-            }),
+        expr: Box::new(ExprKind::Unary {
+            token: Token { kind: TokenKind::Star, ..member },
+            right: Box::new(left),
         }),
     }
 }
@@ -1381,12 +1379,10 @@ fn arrow_sugar(left: ExprKind, member: Token, arrow_token: Token) -> ExprKind {
 pub fn index_sugar(token: Token, expr: ExprKind, index: ExprKind) -> ExprKind {
     ExprKind::Unary {
         token: Token { kind: TokenKind::Star, ..token.clone() },
-        right: Box::new(ExprKind::Grouping {
-            expr: Box::new(ExprKind::Binary {
-                left: Box::new(expr),
-                token: Token { kind: TokenKind::Plus, ..token },
-                right: Box::new(index),
-            }),
+        right: Box::new(ExprKind::Binary {
+            left: Box::new(expr),
+            token: Token { kind: TokenKind::Plus, ..token },
+            right: Box::new(index),
         }),
     }
 }
@@ -1459,15 +1455,13 @@ pub mod tests {
     fn nested_groupings() {
         let actual = setup_expr("(3 / (6 - 7) * 2) + 1");
         let expected = "Binary: '+'\n\
-            -Grouping:\n\
-            --Binary: '*'\n\
-            ---Binary: '/'\n\
-            ----Literal: 3\n\
-            ----Grouping:\n\
-            -----Binary: '-'\n\
-            ------Literal: 6\n\
-            ------Literal: 7\n\
-            ---Literal: 2\n\
+            -Binary: '*'\n\
+            --Binary: '/'\n\
+            ---Literal: 3\n\
+            ---Binary: '-'\n\
+            ----Literal: 6\n\
+            ----Literal: 7\n\
+            --Literal: 2\n\
             -Literal: 1";
 
         assert_eq!(actual, expected);

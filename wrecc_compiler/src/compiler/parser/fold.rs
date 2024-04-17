@@ -68,10 +68,6 @@ impl ExprKind {
             ExprKind::Cast { decl_type, token, expr, .. } => {
                 Self::const_cast(typechecker, token.clone(), decl_type, expr)?
             }
-            ExprKind::Grouping { expr } => {
-                expr.integer_const_fold(typechecker)?;
-                Some(expr.as_ref().clone())
-            }
             ExprKind::Ternary { cond, true_expr, false_expr, token } => {
                 cond.integer_const_fold(typechecker)?;
                 true_expr.integer_const_fold(typechecker)?;

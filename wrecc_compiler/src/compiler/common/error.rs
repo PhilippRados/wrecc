@@ -111,6 +111,7 @@ pub enum ErrorKind {
     InvalidRvalueIncrement,
     NotAssignable(Type),
     NotLvalue(&'static str),
+    RegisterAddress(String),
     MismatchedArity(Type, usize, usize),
     MismatchedArgs(usize, Type, Type, Type),
     InvalidLogical(TokenKind, Type, Type),
@@ -346,7 +347,13 @@ impl ErrorKind {
             ErrorKind::NotAssignable(type_decl) => {
                 format!("type '{}' is not assignable", type_decl)
             }
-            ErrorKind::NotLvalue(s) => format!("expected lvalue {}", s),
+            ErrorKind::NotLvalue(s) => format!("lvalue required {}", s),
+            ErrorKind::RegisterAddress(var_name) => {
+                format!(
+                    "cannot take address of variable '{}' with 'register' storage-class",
+                    var_name
+                )
+            }
             ErrorKind::IncompleteArgType(index, type_decl) => {
                 format!(
                     "{} argument has incomplete type: '{}'",

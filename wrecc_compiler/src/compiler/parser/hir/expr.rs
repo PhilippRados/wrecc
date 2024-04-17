@@ -14,9 +14,6 @@ pub enum ExprKind {
         token: Token,
         right: Box<ExprKind>,
     },
-    Grouping {
-        expr: Box<ExprKind>,
-    },
     Assign {
         l_expr: Box<ExprKind>,
         token: Token,
@@ -107,9 +104,6 @@ impl PrintIndent for ExprKind {
                     token.kind,
                     indent_fmt(right.as_ref(), indent_level + 1)
                 )
-            }
-            ExprKind::Grouping { expr } => {
-                format!("Grouping:\n{}", indent_fmt(expr.as_ref(), indent_level + 1))
             }
             ExprKind::Assign { l_expr, r_expr, .. } => {
                 format!(

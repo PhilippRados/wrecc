@@ -600,7 +600,7 @@ impl TypeChecker {
 
         let expr = self.visit_expr(func, expr)?;
 
-        let expr = expr.decay();
+        let expr = expr.decay(token)?;
         Self::check_type_compatibility(token, type_decl, &expr)?;
         let expr = Self::maybe_cast(type_decl.clone(), expr);
 
@@ -1317,7 +1317,7 @@ impl TypeChecker {
         let expr = if let Some(expr) = expr {
             let expr = self.visit_expr(&mut Some(func), expr)?;
 
-            let expr = expr.decay();
+            let expr = expr.decay(&keyword)?;
             if !func.return_type.type_compatible(&expr.type_decl, &expr) {
                 return Err(Error::new(
                     &keyword,
@@ -1380,7 +1380,6 @@ impl TypeChecker {
                 self.evaluate_binary(func, *left, token, *right)
             }
             hir::expr::ExprKind::Unary { token, right } => self.evaluate_unary(func, token, *right),
-            hir::expr::ExprKind::Grouping { expr } => self.visit_expr(func, *expr),
             hir::expr::ExprKind::Literal(n, type_decl) => Ok(mir::expr::Expr {
                 kind: mir::expr::ExprKind::Literal(n),
                 type_decl,
@@ -1453,7 +1452,7 @@ impl TypeChecker {
         expr: hir::expr::ExprKind,
         decl_type: hir::decl::DeclType,
     ) -> Result<mir::expr::Expr, Error> {
-        let expr = self.visit_expr(func, expr)?.decay();
+        let expr = self.visit_expr(func, expr)?.decay(&token)?;
         let new_type = self.parse_type(&token, decl_type)?;
 
         if !new_type.is_void() && (!expr.type_decl.is_scalar() || !new_type.is_scalar()) {
@@ -1785,7 +1784,7 @@ impl TypeChecker {
             return Err(Error::new(&token, ErrorKind::IncompleteAssign(left.type_decl)));
         }
 
-        let right = right.decay();
+        let right = right.decay(&token)?;
         Self::check_type_compatibility(&token, &left.type_decl, &right)?;
         let right = Self::maybe_cast(left.type_decl.clone(), right);
 
@@ -1810,7 +1809,10 @@ impl TypeChecker {
 
         let mut args: Vec<mir::expr::Expr> = Vec::new();
         for (index, expr) in parsed_args.into_iter().enumerate() {
-            let arg = self.visit_expr(func, expr)?.decay().maybe_int_promote();
+            let arg = self
+                .visit_expr(func, expr)?
+                .decay(&left_paren)?
+                .maybe_int_promote();
 
             if !arg.type_decl.is_complete() {
                 return Err(Error::new(
@@ -1914,8 +1916,8 @@ impl TypeChecker {
         left.to_rval();
         right.to_rval();
 
-        let left = left.decay();
-        let right = right.decay();
+        let left = left.decay(&token)?;
+        let right = right.decay(&token)?;
 
         if !left.type_decl.is_scalar() || !right.type_decl.is_scalar() {
             return Err(Error::new(
@@ -1947,8 +1949,8 @@ impl TypeChecker {
         left.to_rval();
         right.to_rval();
 
-        let left = left.decay();
-        let right = right.decay();
+        let left = left.decay(&token)?;
+        let right = right.decay(&token)?;
 
         if !is_valid_comp(&left.type_decl, &left, &right.type_decl, &right) {
             return Err(Error::new(
@@ -1989,8 +1991,8 @@ impl TypeChecker {
         left.to_rval();
         right.to_rval();
 
-        let left = left.decay();
-        let right = right.decay();
+        let left = left.decay(&token)?;
+        let right = right.decay(&token)?;
 
         if !is_valid_bin(&token.kind, &left.type_decl, &right.type_decl, &right) {
             return Err(Error::new(
@@ -2077,7 +2079,7 @@ impl TypeChecker {
             // array doesn't decay during '&' expression
             self.check_address(token, right)
         } else {
-            let mut right = right.decay();
+            let mut right = right.decay(&token)?;
 
             match token.kind {
                 TokenKind::Star => self.check_deref(token, right),
@@ -2121,19 +2123,15 @@ impl TypeChecker {
     }
     fn check_address(&self, token: Token, right: mir::expr::Expr) -> Result<mir::expr::Expr, Error> {
         if right.value_kind == ValueKind::Lvalue {
-            // TODO: error if trying to get address of register ident (not too important since
-            // register semantics different in wrecc)
-            // if let mir::expr::ExprKind::Ident(name) = right.kind {
-            //     if let Ok(Symbols::Variable(Symbol {
-            //         storage_class: StorageClass::Register, ..
-            //     })) = self.env.get_symbol(&name).borrow()
-            //     {
-            //         return Err(Error::new(
-            //             &token,
-            //             ErrorKind::Regular("cannot take address of value with 'register' storage-class"),
-            //         ));
-            //     }
-            // }
+            if let mir::expr::ExprKind::Ident(symbol) = &right.kind {
+                if symbol.borrow().is_register() {
+                    return Err(Error::new(
+                        &token,
+                        ErrorKind::RegisterAddress(symbol.borrow().token.unwrap_string()),
+                    ));
+                }
+            }
+
             Ok(mir::expr::Expr {
                 type_decl: right.type_decl.clone().pointer_to(),
                 value_kind: ValueKind::Rvalue,
@@ -2143,10 +2141,7 @@ impl TypeChecker {
                 },
             })
         } else {
-            Err(Error::new(
-                &token,
-                ErrorKind::NotLvalue("as address-of '&' operand"),
-            ))
+            Err(Error::new(&token, ErrorKind::NotLvalue("as unary '&' operand")))
         }
     }
     fn check_deref(&self, token: Token, right: mir::expr::Expr) -> Result<mir::expr::Expr, Error> {
@@ -2308,7 +2303,11 @@ mod tests {
             let mut typechecker = TypeChecker::new();
             setup_env(&mut typechecker, $env);
 
-            let expr = typechecker.visit_expr(&mut None, expr).unwrap().decay();
+            let expr = typechecker
+                .visit_expr(&mut None, expr)
+                .unwrap()
+                .decay(&Token::default(TokenKind::Semicolon))
+                .unwrap();
 
             let actual = expr.is_constant();
 

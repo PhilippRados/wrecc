@@ -817,7 +817,6 @@ impl Compiler {
                 self.cg_binary(left_reg, &operator, right_reg)
             }
             ExprKind::Literal(n) => self.cg_literal(n, expr.type_decl),
-            ExprKind::Grouping { expr } => self.execute_expr(func, *expr),
             ExprKind::Unary { operator, right } => self.cg_unary(func, operator, *right, expr.type_decl),
             ExprKind::Logical { left, operator, right } => {
                 self.cg_logical(func, *left, operator, *right)

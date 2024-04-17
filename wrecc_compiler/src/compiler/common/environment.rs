@@ -57,6 +57,10 @@ impl Symbol {
         matches!(self.storage_class, Some(StorageClass::Static))
     }
 
+    pub fn is_register(&self) -> bool {
+        matches!(self.storage_class, Some(StorageClass::Register))
+    }
+
     pub fn is_extern(&self) -> bool {
         match self.storage_class {
             Some(StorageClass::Extern) => true,

@@ -33,4 +33,14 @@ error: static variables can only be initialized to compile-time constants
 |
 16   static int array[2] = {baz((int *)1)};
 |                           ^
-7 errors generated.
+error: cannot take address of variable 'arr' with 'register' storage-class
+|  --> in tests/fixtures/storage_class_err.c:22:16
+|
+22   int *b = arr + 3;
+|                 ^
+error: cannot take address of variable 'arr' with 'register' storage-class
+|  --> in tests/fixtures/storage_class_err.c:23:8
+|
+23   int *d = arr;
+|         ^
+9 errors generated.

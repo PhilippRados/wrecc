@@ -1,9 +1,9 @@
-error: expected lvalue as address-of '&' operand
+error: lvalue required as unary '&' operand
 |  --> in tests/fixtures/address_rvalue.c:8:7
 |
 8   a = &(b + 3);
 |       ^
-error: expected lvalue as address-of '&' operand
+error: lvalue required as unary '&' operand
 |  --> in tests/fixtures/address_rvalue.c:10:12
 |
 10   int *c = &(int)b;

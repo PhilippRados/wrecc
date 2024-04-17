@@ -1,10 +1,9 @@
-use crate::compiler::common::{environment::SymbolRef, token::TokenKind, types::*};
+use crate::compiler::common::{environment::SymbolRef, error::*, token::*, types::*};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExprKind {
     Binary { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
     Unary { operator: TokenKind, right: Box<Expr> },
-    Grouping { expr: Box<Expr> },
     Assign { l_expr: Box<Expr>, r_expr: Box<Expr> },
     CompoundAssign { expr: Box<Expr>, tmp_symbol: SymbolRef },
     Logical { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
@@ -45,18 +44,31 @@ impl Expr {
     // both arrays and function types decay into:
     // int a[4] => int *a;
     // int f() => int (*f)()
-    pub fn decay(self) -> Expr {
+    pub fn decay(self, token: &Token) -> Result<Expr, Error> {
         match self.type_decl.clone() {
-            Type::Array(of, _) => Expr {
-                value_kind: self.value_kind.clone(),
-                type_decl: of.pointer_to(),
+            Type::Array(of, _) => {
+                // is actually undefined behaviour but gcc and clang throw error
+                // so let's do that too ;)
+                if let ExprKind::Ident(symbol) = &self.kind {
+                    if symbol.borrow().is_register() {
+                        return Err(Error::new(
+                            token,
+                            ErrorKind::RegisterAddress(symbol.borrow().token.unwrap_string()),
+                        ));
+                    }
+                }
 
-                kind: ExprKind::Unary {
-                    operator: TokenKind::Amp,
-                    right: Box::new(self),
-                },
-            },
-            ty @ Type::Function(_) => Expr {
+                Ok(Expr {
+                    value_kind: self.value_kind.clone(),
+                    type_decl: of.pointer_to(),
+
+                    kind: ExprKind::Unary {
+                        operator: TokenKind::Amp,
+                        right: Box::new(self),
+                    },
+                })
+            }
+            ty @ Type::Function(_) => Ok(Expr {
                 value_kind: self.value_kind.clone(),
                 type_decl: ty.pointer_to(),
 
@@ -64,8 +76,8 @@ impl Expr {
                     operator: TokenKind::Amp,
                     right: Box::new(self),
                 },
-            },
-            _ => self,
+            }),
+            _ => Ok(self),
         }
     }
     pub fn to_rval(&mut self) {
@@ -99,9 +111,7 @@ impl Expr {
     pub fn is_constant(&self) -> bool {
         match &self.kind {
             ExprKind::String(_) | ExprKind::Literal(_) => true,
-            ExprKind::Cast { expr, .. }
-            | ExprKind::ScaleUp { expr, .. }
-            | ExprKind::Grouping { expr } => expr.is_constant(),
+            ExprKind::Cast { expr, .. } | ExprKind::ScaleUp { expr, .. } => expr.is_constant(),
 
             _ => self.is_address_constant(true),
         }
@@ -126,9 +136,9 @@ impl Expr {
                     _ => false,
                 }
             }
-            ExprKind::Cast { expr, .. }
-            | ExprKind::ScaleUp { expr, .. }
-            | ExprKind::Grouping { expr } => expr.is_address_constant(is_outer),
+            ExprKind::Cast { expr, .. } | ExprKind::ScaleUp { expr, .. } => {
+                expr.is_address_constant(is_outer)
+            }
             _ => false,
         }
     }

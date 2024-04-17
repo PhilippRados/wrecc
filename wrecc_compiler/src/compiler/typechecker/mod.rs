@@ -1463,8 +1463,10 @@ impl TypeChecker {
             ));
         }
 
-        // FIXME: has to be converted to rvalue too
-        Ok(Self::always_cast(expr, new_type))
+        let mut expr = Self::always_cast(expr, new_type);
+        expr.value_kind = ValueKind::Rvalue;
+
+        Ok(expr)
     }
     // ensures that equal sized expressions still have new type
     fn always_cast(expr: mir::expr::Expr, new_type: Type) -> mir::expr::Expr {
@@ -1776,7 +1778,7 @@ impl TypeChecker {
         }
 
         if left.value_kind != ValueKind::Lvalue {
-            return Err(Error::new(&token, ErrorKind::NotLvalue));
+            return Err(Error::new(&token, ErrorKind::NotLvalue("left of assignment")));
         }
 
         if !left.type_decl.is_complete() {
@@ -2143,7 +2145,7 @@ impl TypeChecker {
         } else {
             Err(Error::new(
                 &token,
-                ErrorKind::Regular("address-of operator '&' requires lvalue as operand"),
+                ErrorKind::NotLvalue("as address-of '&' operand"),
             ))
         }
     }
@@ -2373,6 +2375,12 @@ mod tests {
         assert_type_err!("1 == a", ErrorKind::InvalidComp(..), "long *a;");
         assert_type_err!("a == b", ErrorKind::InvalidComp(..), "int *a; long *b;");
     }
+    #[test]
+    fn cast_type() {
+        assert_type!("(int*)b", "int*", "long* b;");
+        assert_type_err!("&(int*)b", ErrorKind::NotLvalue(_), "long* b;");
+    }
+
     #[test]
     fn struct_union_expr() {
         let env = "struct Foo {

@@ -110,7 +110,7 @@ pub enum ErrorKind {
     InvalidIncrementType(Type),
     InvalidRvalueIncrement,
     NotAssignable(Type),
-    NotLvalue,
+    NotLvalue(&'static str),
     MismatchedArity(Type, usize, usize),
     MismatchedArgs(usize, Type, Type, Type),
     InvalidLogical(TokenKind, Type, Type),
@@ -346,7 +346,7 @@ impl ErrorKind {
             ErrorKind::NotAssignable(type_decl) => {
                 format!("type '{}' is not assignable", type_decl)
             }
-            ErrorKind::NotLvalue => "expected lvalue left of assignment".to_string(),
+            ErrorKind::NotLvalue(s) => format!("expected lvalue {}", s),
             ErrorKind::IncompleteArgType(index, type_decl) => {
                 format!(
                     "{} argument has incomplete type: '{}'",

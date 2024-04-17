@@ -1,6 +1,11 @@
-error: address-of operator '&' requires lvalue as operand
+error: expected lvalue as address-of '&' operand
 |  --> in tests/fixtures/address_rvalue.c:8:7
 |
 8   a = &(b + 3);
 |       ^
-1 error generated.
+error: expected lvalue as address-of '&' operand
+|  --> in tests/fixtures/address_rvalue.c:10:12
+|
+10   int *c = &(int)b;
+|             ^
+2 errors generated.

@@ -349,7 +349,7 @@ mod tests {
             Path::new(""),
             &Vec::new(),
             &Vec::new(),
-            HashMap::new(),
+            &HashMap::new(),
             input.to_string(),
         )
         .unwrap();
@@ -365,7 +365,7 @@ mod tests {
             Path::new(""),
             &Vec::new(),
             &Vec::new(),
-            HashMap::new(),
+            &HashMap::new(),
             input.to_string(),
         )
         .unwrap();

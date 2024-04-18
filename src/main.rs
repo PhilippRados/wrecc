@@ -13,6 +13,7 @@ mod temp_file;
 use cli_options::*;
 use temp_file::*;
 use wrecc_compiler::compiler::common::error::WreccError;
+use wrecc_compiler::preprocessor::PPToken;
 use wrecc_compiler::*;
 
 use std::collections::HashMap;
@@ -60,8 +61,8 @@ fn read_input_file(file: &Path) -> Result<String, WreccError> {
 }
 
 /// Writes the produced x86-64 assembly into a file
-fn generate_asm_file(options: &CliOptions, output: String) -> Result<OutFile, WreccError> {
-    let output_path = output_path(options, options.compile_only, "s");
+fn generate_asm_file(options: &CliOptions, file: &Path, output: String) -> Result<OutFile, WreccError> {
+    let output_path = output_path(file, &options.output_path, options.compile_only, "s");
 
     let mut output_file = std::fs::File::create(output_path.get()).map_err(|_| {
         WreccError::Sys(format!("could not create file '{}'", output_path.get().display()))
@@ -78,20 +79,25 @@ fn generate_asm_file(options: &CliOptions, output: String) -> Result<OutFile, Wr
 }
 
 /// Selects [OutFile] based on cli-args passed and which stage of execution is currently executed
-fn output_path(options: &CliOptions, is_last_phase: bool, extension: &'static str) -> OutFile {
-    match (&options.output_path, is_last_phase) {
+fn output_path(
+    file: &Path,
+    output_path: &Option<PathBuf>,
+    is_last_phase: bool,
+    extension: &'static str,
+) -> OutFile {
+    match (output_path, is_last_phase) {
         (Some(file), true) => OutFile::Regular(file.clone()),
-        (None, true) => OutFile::Regular(options.file_path.with_extension(extension)),
+        (None, true) => OutFile::Regular(file.with_extension(extension)),
         (_, false) => OutFile::Temp(TempFile::new(extension)),
     }
 }
 
 /// Invokes assembler `as` and stores its output in a file
-fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, WreccError> {
-    let output_path = output_path(options, options.no_link, "o");
+fn assemble(options: &CliOptions, file: &Path, asm_file: OutFile) -> Result<OutFile, WreccError> {
+    let output_path = output_path(file, &options.output_path, options.no_link, "o");
 
     let output = Command::new("as")
-        .arg(filename.get())
+        .arg(asm_file.get())
         .arg("-o")
         .arg(output_path.get())
         .output()
@@ -113,7 +119,7 @@ fn assemble(options: &CliOptions, filename: OutFile) -> Result<OutFile, WreccErr
 /// Options `-l` and `-L` are also passed to the linker.<br>
 /// If the default search path doesn't include libc on your system you can pass it using `-L`
 /// and linking libc should work.
-fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
+fn link(options: CliOptions, files: Vec<OutFile>) -> Result<(), WreccError> {
     let mut cmd = Command::new("ld");
     match std::env::consts::OS {
         "macos" => {
@@ -122,9 +128,11 @@ fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
                 .arg("-L/usr/lib")
                 .arg("-L/usr/local/lib")
                 .arg("-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib")
-                .arg("-L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/")
-                .arg(filename.get());
+                .arg("-L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/");
 
+            for filename in &files {
+                cmd.arg(filename.get());
+            }
             for path in options.lib_paths {
                 cmd.arg(format!("-L{}", path.display()));
             }
@@ -158,10 +166,11 @@ fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
             for path in lib_paths {
                 cmd.arg(format!("-L{}", path.display()));
             }
+            for filename in &files {
+                cmd.arg(filename.get());
+            }
 
-            cmd.arg(filename.get())
-                .arg("-lc")
-                .arg(format!("{}/crtn.o", lib_path.display()));
+            cmd.arg("-lc").arg(format!("{}/crtn.o", lib_path.display()));
         }
         _ => return Err(WreccError::Sys(String::from("only supports linux and macos"))),
     }
@@ -186,13 +195,37 @@ fn link(options: CliOptions, filename: OutFile) -> Result<(), WreccError> {
     }
 }
 
-/// Actually runs the [preprocessor] and the [compiler] to create the binary.
-fn run(options: CliOptions) -> Result<(), WreccError> {
-    let source = read_input_file(&options.file_path)?;
+fn print_pp(pp_source: Vec<PPToken>, options: &CliOptions) -> Result<(), WreccError> {
+    let pp_string: String = pp_source.iter().map(|s| s.kind.to_string()).collect();
 
-    let standard_headers = init_standard_headers();
+    if let Some(pp_file) = &options.output_path {
+        let mut output_file = std::fs::File::create(pp_file)
+            .map_err(|_| WreccError::Sys(format!("could not create file '{}'", pp_file.display())))?;
+
+        if writeln!(output_file, "{}", pp_string).is_err() {
+            Err(WreccError::Sys(format!(
+                "could not write to file '{}'",
+                pp_file.display()
+            )))
+        } else {
+            Ok(())
+        }
+    } else {
+        eprintln!("{}", pp_string);
+        Ok(())
+    }
+}
+
+/// Actually runs the [preprocessor] and the [compiler] to create an object file
+fn process_file(
+    options: &CliOptions,
+    file: &Path,
+    standard_headers: &HashMap<PathBuf, &'static str>,
+) -> Result<Option<OutFile>, WreccError> {
+    let source = read_input_file(&file)?;
+
     let pp_source = preprocess(
-        &options.file_path,
+        &file,
         &options.user_include_dirs,
         &options.defines,
         standard_headers,
@@ -200,34 +233,57 @@ fn run(options: CliOptions) -> Result<(), WreccError> {
     )?;
 
     if options.preprocess_only {
-        return Ok(pp_source.iter().for_each(|s| eprint!("{}", s.kind.to_string())));
+        print_pp(pp_source, &options)?;
+        return Ok(None);
     }
 
     let asm_source = compile(pp_source, options.dump_ast)?;
 
-    let asm_file = generate_asm_file(&options, asm_source)?;
+    let asm_file = generate_asm_file(&options, file, asm_source)?;
 
     if options.compile_only {
+        return Ok(None);
+    }
+
+    let object_file = assemble(&options, file, asm_file)?;
+
+    Ok(Some(object_file))
+}
+
+/// Iterates over all input files and links the resulting object files into a single binary
+fn run(options: CliOptions) -> Result<(), Vec<WreccError>> {
+    let mut object_files = Vec::new();
+    let mut errors = Vec::new();
+    let mut early_exit = false;
+    let standard_headers = init_standard_headers();
+
+    for file in options.files.iter() {
+        match process_file(&options, file, &standard_headers) {
+            Ok(Some(obj)) => object_files.push(obj),
+            Ok(None) => early_exit = true,
+            Err(e) => errors.push(e),
+        }
+    }
+
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    if options.no_link || early_exit {
         return Ok(());
     }
 
-    let object_file = assemble(&options, asm_file)?;
-
-    if options.no_link {
-        return Ok(());
-    }
-
-    link(options, object_file)?;
+    link(options, object_files).map_err(|e| vec![e])?;
 
     Ok(())
 }
 
 /// Seperate main to clean up all destructors
 fn real_main() -> Result<(), ()> {
-    let options = CliOptions::parse().map_err(|errs| errs.print(false))?;
+    let options = CliOptions::parse().map_err(|e| e.print(false))?;
     let no_color = options.no_color;
 
-    run(options).map_err(|errs| errs.print(no_color))
+    run(options).map_err(|errs| errs.into_iter().map(|e| e.print(no_color)).collect())
 }
 
 /// Main entrypoint only calls [real_main] and returns correct exit-code according to result

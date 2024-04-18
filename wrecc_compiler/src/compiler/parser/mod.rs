@@ -1407,7 +1407,7 @@ pub mod tests {
             Path::new(""),
             &Vec::new(),
             &Vec::new(),
-            HashMap::new(),
+            &HashMap::new(),
             input.to_string(),
         )
         .unwrap();

@@ -34,7 +34,7 @@ options:
     -v | --version                      Prints version information
 
 file:
-    The C source file to be read";
+    One or more C source files to be compiled";
 
 fn sys_info(msg: &str) -> ! {
     eprintln!("{msg}");
@@ -44,7 +44,7 @@ fn sys_info(msg: &str) -> ! {
 /// Struct holding all possible cli-args to be passed when running `wrecc`
 pub struct CliOptions {
     /// Required argument specifying file to compile
-    pub file_path: PathBuf,
+    pub files: Vec<PathBuf>,
 
     /// Optional argument specifying output-file to write to
     pub output_path: Option<PathBuf>,
@@ -80,7 +80,7 @@ pub struct CliOptions {
 impl CliOptions {
     fn new() -> CliOptions {
         CliOptions {
-            file_path: PathBuf::new(),
+            files: Vec::new(),
             user_include_dirs: Vec::new(),
             defines: Vec::new(),
             lib_paths: Vec::new(),
@@ -174,19 +174,32 @@ impl CliOptions {
                     _ => return Err(WreccError::Cli(vec![format!("illegal option '{}'", arg)])),
                 }
             } else {
-                cli_options.file_path = PathBuf::from(arg);
+                cli_options.files.push(PathBuf::from(arg));
             }
         }
 
-        if cli_options.file_path.to_string_lossy().is_empty() {
+        if cli_options.output_path.is_some() && cli_options.files.len() > 1 {
+            if cli_options.preprocess_only || cli_options.compile_only || cli_options.no_link {
+                return Err(WreccError::Cli(vec![
+                    "cannot specify '-o' with '-E', '-S' or '-c' when compiling multiple files"
+                        .to_string(),
+                ]));
+            }
+        }
+
+        if cli_options.files.is_empty() {
             Err(WreccError::Cli(vec!["no input files given".to_string()]))
-        } else if let Some(Some("c")) = cli_options.file_path.extension().map(|s| s.to_str()) {
-            Ok(cli_options)
-        } else {
+        } else if let Some(file) = cli_options
+            .files
+            .iter()
+            .find(|f| !matches!(f.extension().map(|e| e.to_str()), Some(Some("c"))))
+        {
             Err(WreccError::Cli(vec![format!(
                 "file '{}' is not a valid C source file",
-                cli_options.file_path.display()
+                file.display()
             )]))
+        } else {
+            Ok(cli_options)
         }
     }
 }

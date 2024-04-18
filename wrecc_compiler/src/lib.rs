@@ -17,7 +17,7 @@ pub fn preprocess(
     filename: &Path,
     user_include_dirs: &Vec<PathBuf>,
     defines: &Vec<(String, String)>,
-    standard_headers: HashMap<PathBuf, &'static str>,
+    standard_headers: &HashMap<PathBuf, &'static str>,
     source: String,
 ) -> Result<Vec<PPToken>, WreccError> {
     let tokens = PPScanner::new(source).scan_token();
@@ -34,7 +34,7 @@ pub fn preprocess(
         PPScanner::new(dummy_defines).scan_token(),
         HashMap::new(),
         user_include_dirs,
-        &standard_headers,
+        standard_headers,
         include_depth,
     )
     .start()
@@ -45,7 +45,7 @@ pub fn preprocess(
         tokens,
         defines,
         user_include_dirs,
-        &standard_headers,
+        standard_headers,
         include_depth,
     )
     .start()

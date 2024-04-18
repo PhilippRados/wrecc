@@ -3,8 +3,10 @@ use crate::compiler::parser::hir;
 use crate::compiler::typechecker::align;
 use crate::compiler::typechecker::mir::{expr::*, stmt::*};
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 pub enum ExternalDeclaration {
     Declaration(Vec<Declarator>),
@@ -84,7 +86,7 @@ pub struct Function {
     pub current_bp_offset: usize,
 
     /// Switch information, about cases and defaults
-    pub switches: VecDeque<Vec<CaseKind>>,
+    pub switches: VecDeque<Rc<RefCell<Vec<CaseKind>>>>,
 
     // TODO: should be done via control-flow-graph
     /// Checks if all paths return from a function
@@ -183,7 +185,7 @@ macro_rules! find_scope {
 pub enum ScopeKind {
     Other,
     Loop,
-    Switch(Vec<CaseKind>),
+    Switch(Rc<RefCell<Vec<CaseKind>>>),
 }
 
 #[derive(Debug, PartialEq)]

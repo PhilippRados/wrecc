@@ -13,6 +13,7 @@ use self::mir::decl::{CaseKind, ScopeKind};
 use self::mir::expr::{CastDirection, ValueKind};
 use crate::find_scope;
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -1073,14 +1074,13 @@ impl TypeChecker {
                 ErrorKind::NotInteger("switch conditional", cond.type_decl),
             ));
         }
-        func.scope.push(ScopeKind::Switch(Vec::new()));
+        let labels = Rc::new(RefCell::new(Vec::new()));
+        func.scope.push(ScopeKind::Switch(Rc::clone(&labels)));
+        func.switches.push_back(Rc::clone(&labels));
+
         let stmt = self.visit_stmt(func, body);
 
-        let Some(ScopeKind::Switch(labels)) = func.scope.pop() else {
-            unreachable!("all other scopes should be popped off by themselves")
-        };
-
-        func.switches.push_back(labels);
+        func.scope.pop();
 
         Ok(mir::stmt::Stmt::Switch(cond, Box::new(stmt?)))
     }
@@ -1095,8 +1095,8 @@ impl TypeChecker {
 
         match find_scope!(&mut func.scope, ScopeKind::Switch(..)) {
             Some(ScopeKind::Switch(labels)) => {
-                if !labels.contains(&CaseKind::Case(value)) {
-                    labels.push(CaseKind::Case(value))
+                if !labels.borrow().contains(&CaseKind::Case(value)) {
+                    labels.borrow_mut().push(CaseKind::Case(value))
                 } else {
                     return Err(Error::new(&token, ErrorKind::DuplicateCase(value)));
                 }
@@ -1118,8 +1118,8 @@ impl TypeChecker {
     ) -> Result<mir::stmt::Stmt, Error> {
         match find_scope!(&mut func.scope, ScopeKind::Switch(..)) {
             Some(ScopeKind::Switch(labels)) => {
-                if !labels.contains(&CaseKind::Default) {
-                    labels.push(CaseKind::Default)
+                if !labels.borrow().contains(&CaseKind::Default) {
+                    labels.borrow_mut().push(CaseKind::Default)
                 } else {
                     return Err(Error::new(&token, ErrorKind::MultipleDefaults));
                 }
@@ -2515,19 +2515,18 @@ int a;";
     fn finds_nested_loop() {
         let mut scopes = vec![
             ScopeKind::Loop,
-            ScopeKind::Switch(Vec::new()),
-            ScopeKind::Switch(Vec::new()),
+            ScopeKind::Switch(Rc::new(RefCell::new(Vec::new()))),
+            ScopeKind::Switch(Rc::new(RefCell::new(Vec::new()))),
         ];
-        let expected = true;
         let actual = find_scope!(scopes, ScopeKind::Loop).is_some();
 
-        assert_eq!(actual, expected);
+        assert!(actual);
     }
     #[test]
     fn doesnt_find_switch() {
         let mut scopes = vec![ScopeKind::Loop, ScopeKind::Loop];
-        let expected = false;
         let actual = find_scope!(scopes, ScopeKind::Switch(..)).is_some();
+        let expected = false;
 
         assert_eq!(actual, expected);
     }
@@ -2535,21 +2534,25 @@ int a;";
     fn finds_and_mutates_scope() {
         let mut scopes = vec![
             ScopeKind::Loop,
-            ScopeKind::Switch(Vec::new()),
-            ScopeKind::Switch(Vec::new()),
+            ScopeKind::Switch(Rc::new(RefCell::new(Vec::new()))),
+            ScopeKind::Switch(Rc::new(RefCell::new(Vec::new()))),
             ScopeKind::Loop,
         ];
         let expected = vec![
             ScopeKind::Loop,
-            ScopeKind::Switch(Vec::new()),
-            ScopeKind::Switch(vec![CaseKind::Case(1), CaseKind::Default, CaseKind::Case(3)]),
+            ScopeKind::Switch(Rc::new(RefCell::new(Vec::new()))),
+            ScopeKind::Switch(Rc::new(RefCell::new(vec![
+                CaseKind::Case(1),
+                CaseKind::Default,
+                CaseKind::Case(3),
+            ]))),
             ScopeKind::Loop,
         ];
         let ScopeKind::Switch(labels) =
             find_scope!(scopes, ScopeKind::Switch(..)).unwrap() else {unreachable!()};
-        labels.push(CaseKind::Case(1));
-        labels.push(CaseKind::Default);
-        labels.push(CaseKind::Case(3));
+        labels.borrow_mut().push(CaseKind::Case(1));
+        labels.borrow_mut().push(CaseKind::Default);
+        labels.borrow_mut().push(CaseKind::Case(3));
 
         assert_eq!(scopes, expected);
     }

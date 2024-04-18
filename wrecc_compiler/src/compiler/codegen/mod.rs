@@ -11,7 +11,7 @@ use crate::compiler::common::{environment::SymbolRef, token::*, types::*};
 use crate::compiler::typechecker::mir::{decl::*, expr::*, stmt::*};
 use crate::compiler::typechecker::{align_by, create_label, ConstLabels};
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 // converts a register into a scratch-register if it matches the pattern
@@ -67,7 +67,7 @@ pub struct Compiler {
 
     // case/default-labels get defined in each switch and then the
     // respective case/default-statements pop them in order of appearance
-    switch_labels: VecDeque<usize>,
+    switch_labels: Vec<usize>,
 }
 impl Compiler {
     pub fn new(const_labels: ConstLabels) -> Self {
@@ -80,7 +80,7 @@ impl Compiler {
             instr_counter: 0,
             label_index: 0,
             jump_labels: Vec::new(),
-            switch_labels: VecDeque::new(),
+            switch_labels: Vec::new(),
         }
     }
 
@@ -158,17 +158,16 @@ impl Compiler {
     fn switch_statement(&mut self, func: &mut Function, cond: Expr, body: Stmt) {
         let switch_labels = func.switches.pop_front().unwrap();
 
-        let jump_labels: Vec<usize> = (0..switch_labels.len())
+        let switch_jump_labels: Vec<usize> = (0..switch_labels.borrow().len())
             .map(|_| create_label(&mut self.label_index))
             .collect();
 
         let mut cond_reg = self.execute_expr(func, cond);
 
         let mut default_label = None;
-        for (kind, label) in switch_labels.iter().zip(jump_labels.clone()) {
+        for (kind, label) in switch_labels.borrow().iter().zip(switch_jump_labels.clone()) {
             match kind {
                 CaseKind::Case(case_value) => {
-                    // WARN: literal can also be negative so needs type i64
                     cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
                     self.write_out(Lir::Cmp(
@@ -183,7 +182,8 @@ impl Compiler {
         let end_label = create_label(&mut self.label_index);
 
         self.jump_labels.push((end_label, 0));
-        self.switch_labels.append(&mut jump_labels.into());
+        self.switch_labels
+            .append(&mut switch_jump_labels.into_iter().rev().collect());
 
         // default label has to be jumped to at the end (even if there are cases following it) if no other cases match
         if let Some(label) = default_label {
@@ -201,7 +201,7 @@ impl Compiler {
         self.jump_labels.pop();
     }
     fn case_statement(&mut self, func: &mut Function, body: Stmt) {
-        let label = self.switch_labels.pop_front().unwrap();
+        let label = self.switch_labels.pop().unwrap();
 
         self.write_out(Lir::LabelDefinition(label));
 

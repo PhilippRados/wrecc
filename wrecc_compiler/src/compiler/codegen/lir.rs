@@ -128,7 +128,7 @@ impl Lir {
                 // have to keep stack 16B aligned
                 if stack_size > 0 {
                     let size = format!(
-                        "\tsubq    ${},%rsp\n",
+                        "\tsubq    ${},%rsp",
                         crate::compiler::typechecker::align_by(stack_size, 16)
                     );
                     result.push_str(&size);

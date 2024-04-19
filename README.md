@@ -37,7 +37,7 @@ The compiler emits [x86-64](https://en.wikipedia.org/wiki/X86-64) assembly in [A
 ### Pre-built binaries <a name="binaries"></a>
 If you don't have the rust toolchain installed on your system you can install the latest binary (MacOs, Linux) from the releases directly:
 ```
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/PhilippRados/wrecc/releases/download/v0.1.0/wrecc-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/PhilippRados/wrecc/releases/download/v0.2.0/wrecc-installer.sh | sh
 ```
 ### Cargo
 Using `cargo binstall`
@@ -56,7 +56,7 @@ The preprocessor implements all [C99 preprocessor directives](https://en.cpprefe
 
 ### Compiler
 #### Supported Keywords <a name="keywords"></a>
-<img width="487" alt="keywords" src="https://github.com/PhilippRados/wrecc/assets/60818062/b738b6e0-9ca3-4a8d-9a5a-e1a6da0c31ed">
+<img width="481" alt="keywords" src="https://github.com/PhilippRados/wrecc/assets/60818062/d293cea2-1a76-42d1-91a4-3be9c40e1c27">
 
 #### Other than that it even supports:
 <details>
@@ -111,7 +111,7 @@ The preprocessor implements all [C99 preprocessor directives](https://en.cpprefe
 #### Unimplemented Features <a name="unimplemented"></a>
 Aside from the missing keywords these are the main missing features:
 - [x] Arrays with unspecified size
-- [ ] Compiling multiple files at once
+- [x] Compiling multiple files at once
 - [ ] Raw structs/unions as function argument-/return-types
 - [ ] Floating point types<br>
 

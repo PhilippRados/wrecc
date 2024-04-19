@@ -114,7 +114,7 @@ impl PrintIndent for ExprKind {
             }
             ExprKind::Literal(n, _) => format!("Literal: {}", n),
             ExprKind::Ident(name) => format!("Ident: '{}'", name.unwrap_string()),
-            ExprKind::String(token) => format!("String: '{}'", token.unwrap_string()),
+            ExprKind::String(token) => format!("String: {:?}", token.unwrap_string()),
             ExprKind::Logical { token, left, right } => format!(
                 "Logical: {}\n{}\n{}",
                 token.kind,

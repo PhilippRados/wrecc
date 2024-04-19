@@ -60,10 +60,10 @@ impl PrintIndent for Stmt {
                 format!("Block:\n{}", body)
             }
             Stmt::If(_, cond, then, else_branch) => format!(
-                "If:\n{}\n{}\n{}",
+                "If:\n{}\n{}{}",
                 indent_fmt(cond, indent_level + 1),
                 indent_fmt(then.as_ref(), indent_level + 1),
-                display_option(else_branch.as_ref().map(|t| t.as_ref()), indent_level + 1, false)
+                display_option(else_branch.as_ref().map(|t| t.as_ref()), indent_level + 1, true)
             ),
             Stmt::While(_, cond, body) => format!(
                 "While:\n{}\n{}",
@@ -76,16 +76,16 @@ impl PrintIndent for Stmt {
                 indent_fmt(body.as_ref(), indent_level + 1)
             ),
             Stmt::For(_, init, cond, inc, body) => format!(
-                "For:\n{}{}{}{}",
+                "For:{}{}{}\n{}",
                 display_option(init.as_ref().map(|t| t.as_ref()), indent_level + 1, true),
                 display_option(cond.as_ref(), indent_level + 1, true),
                 display_option(inc.as_ref(), indent_level + 1, true),
                 indent_fmt(body.as_ref(), indent_level + 1)
             ),
             Stmt::Return(_, expr) => {
-                let mut expr = display_option(expr.as_ref(), indent_level + 1, false);
+                let mut expr = display_option(expr.as_ref(), indent_level + 1, true);
                 if !expr.is_empty() {
-                    expr.insert_str(0, ":\n");
+                    expr.insert(0, ':');
                 }
                 format!("Return{}", expr)
             }
@@ -122,7 +122,11 @@ impl std::fmt::Display for Stmt {
 
 fn display_option<T: PrintIndent>(object: Option<&T>, indent_level: usize, newline: bool) -> String {
     if let Some(object) = object {
-        indent_fmt(object, indent_level) + if newline { "\n" } else { "" }
+        format!(
+            "{}{}",
+            if newline { "\n" } else { "" },
+            indent_fmt(object, indent_level)
+        )
     } else {
         "".to_string()
     }

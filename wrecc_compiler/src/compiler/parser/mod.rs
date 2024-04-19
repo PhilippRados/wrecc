@@ -1597,13 +1597,13 @@ FuncDef: 'main'
 -------Expr:
 --------FuncCall:
 ---------Ident: 'printf'
----------String: 'case'
+---------String: "case"
 -------Break
 -----Default:
 ------Expr:
 -------FuncCall:
 --------Ident: 'printf'
---------String: 'hello'
+--------String: "hello"
 --Block:
 ---For:
 ----Declaration:
@@ -1668,6 +1668,45 @@ FuncDef: 'some'
 --Empty
 -Return:
 --Ident: 'a'";
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn newline_string() {
+        let actual = setup_stmt(
+            r#"
+int main() {
+    if (argc != 2) {
+      printf("Usage: %s <number>\n", argv[0]);
+      return 1;
+    }
+
+    int cookies = read_cookies();
+}"#,
+        );
+
+        let expected = r#"FuncDef: 'main'
+-If:
+--Comparison: '!='
+---Ident: 'argc'
+---Literal: 2
+--Block:
+---Expr:
+----FuncCall:
+-----Ident: 'printf'
+-----String: "Usage: %s <number>\n"
+-----Unary: '*'
+------Binary: '+'
+-------Ident: 'argv'
+-------Literal: 0
+---Return:
+----Literal: 1
+-Declaration:
+--Init: 'cookies'
+---Scalar:
+----FuncCall:
+-----Ident: 'read_cookies'"#;
 
         assert_eq!(actual, expected);
     }

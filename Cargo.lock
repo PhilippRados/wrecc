@@ -4,11 +4,11 @@ version = 3
 
 [[package]]
 name = "wrecc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "wrecc_compiler",
 ]
 
 [[package]]
 name = "wrecc_compiler"
-version = "0.1.0"
+version = "0.2.0"

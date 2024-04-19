@@ -56,7 +56,7 @@ The preprocessor implements all [C99 preprocessor directives](https://en.cpprefe
 
 ### Compiler
 #### Supported Keywords <a name="keywords"></a>
-<img width="481" alt="keywords" src="https://github.com/PhilippRados/wrecc/assets/60818062/d293cea2-1a76-42d1-91a4-3be9c40e1c27">
+<img width="481" alt="keywords" src="https://github.com/PhilippRados/wrecc/assets/60818062/492cdf56-ee83-4333-9084-02fcd8a08356">
 
 #### Other than that it even supports:
 <details>

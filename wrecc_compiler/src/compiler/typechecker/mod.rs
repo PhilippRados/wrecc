@@ -240,7 +240,7 @@ impl TypeChecker {
         let mut specifier_kind_list: Vec<hir::decl::SpecifierKind> =
             specifiers.into_iter().map(|spec| spec.kind).collect();
 
-        specifier_kind_list.sort_by_key(|spec| std::cmp::Reverse(spec.order()));
+        specifier_kind_list.sort_by_key(|spec| spec.order());
 
         match specifier_kind_list.as_slice() {
             [hir::decl::SpecifierKind::Struct(name, members)]
@@ -263,6 +263,10 @@ impl TypeChecker {
 
             [hir::decl::SpecifierKind::Void] => Ok(Type::Primitive(Primitive::Void)),
             [hir::decl::SpecifierKind::Char] => Ok(Type::Primitive(Primitive::Char)),
+            [hir::decl::SpecifierKind::Short]
+            | [hir::decl::SpecifierKind::Short, hir::decl::SpecifierKind::Int] => {
+                Ok(Type::Primitive(Primitive::Short))
+            }
             [hir::decl::SpecifierKind::Int] => Ok(Type::Primitive(Primitive::Int)),
             [hir::decl::SpecifierKind::Long]
             | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Int]
@@ -2559,8 +2563,8 @@ int a;";
 
     #[test]
     fn array_init_list() {
-        let actual = setup_init_list("int a[3] = {1,2};").unwrap();
-        let expected = vec![(0, "1", "int"), (4, "2", "int")];
+        let actual = setup_init_list("short a[3] = {1,2};").unwrap();
+        let expected = vec![(0, "1", "short"), (2, "2", "short")];
 
         assert_init(actual, expected);
     }

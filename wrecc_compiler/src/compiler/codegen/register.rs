@@ -7,13 +7,13 @@ use crate::compiler::typechecker::mir::expr::ValueKind;
 use super::lir::maybe_prefix_underscore;
 
 /// Registers used for passing arguments to functions
-pub static ARG_REGS: &[[&str; 3]; 6] = &[
-    ["%rdi", "%edi", "%dil"],
-    ["%rsi", "%esi", "%sil"],
-    ["%rdx", "%edx", "%dl"],
-    ["%rcx", "%ecx", "%cl"],
-    ["%r8", "%r8d", "%r8b"],
-    ["%r9", "%r9d", "%r9b"],
+pub static ARG_REGS: &[[&str; 4]; 6] = &[
+    ["%rdi", "%edi", "%di", "%dil"],
+    ["%rsi", "%esi", "%si", "%sil"],
+    ["%rdx", "%edx", "%dx", "%dl"],
+    ["%rcx", "%ecx", "%cx", "%cl"],
+    ["%r8", "%r8d", "%r8w", "%r8b"],
+    ["%r9", "%r9d", "%r9w", "%r9b"],
 ];
 
 /// All possible operands to an instruction in [LIR](crate::compiler::codegen::lir)
@@ -376,7 +376,7 @@ impl ArgRegister {
 #[derive(Debug, PartialEq, Clone)]
 pub struct ArgRegisterKind {
     in_use: bool,
-    names: [&'static str; 3],
+    names: [&'static str; 4],
 }
 impl ArgRegisterKind {
     pub fn new(index: usize) -> Self {
@@ -389,7 +389,8 @@ impl ScratchRegister for ArgRegisterKind {
     }
     fn name(&self, type_decl: &Type) -> String {
         match type_decl {
-            Type::Primitive(Primitive::Char) => self.names[2],
+            Type::Primitive(Primitive::Char) => self.names[3],
+            Type::Primitive(Primitive::Short) => self.names[2],
             Type::Primitive(Primitive::Int) | Type::Enum(..) => self.names[1],
             Type::Primitive(Primitive::Long) | Type::Pointer(_) | Type::Array { .. } => self.names[0],
             _ => unimplemented!("aggregate types are not yet implemented as function args"),

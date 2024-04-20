@@ -649,6 +649,7 @@ mod tests {
         assert_fold_type("2147483648 + (int*)1", "(int*)8589934593", "int*");
 
         assert_fold_type("'a'", "'a'", "char");
+        assert_fold_type("'a' + (short)3", "100", "int");
         assert_fold_type("-'a'", "-'a'", "int");
         assert_fold_type("+'a'", "(int)'a'", "int");
 
@@ -685,6 +686,7 @@ mod tests {
         );
 
         assert_fold_type("(char)127 + 2", "129", "int");
+        assert_fold_type("(short)127 + 2", "129", "int");
         assert_fold_type("2147483648 + 1", "2147483649", "long");
     }
 

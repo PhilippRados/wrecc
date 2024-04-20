@@ -6,7 +6,7 @@ use crate::compiler::parser::hir::expr::*;
 use std::fmt::Display;
 use std::rc::Rc;
 
-static RETURN_REG: &[&str; 3] = &["%al", "%eax", "%rax"];
+static RETURN_REG: &[&str; 4] = &["%al", "%ax", "%eax", "%rax"];
 
 pub trait TypeInfo {
     /// Returns size of type in bytes
@@ -248,6 +248,7 @@ impl Type {
     pub fn maybe_wrap(&self, n: i64) -> Option<i64> {
         match self {
             Type::Primitive(Primitive::Char) => Some(n as i8 as i64),
+            Type::Primitive(Primitive::Short) => Some(n as i16 as i64),
             Type::Primitive(Primitive::Int) | Type::Enum(..) => Some(n as i32 as i64),
             Type::Pointer(_) | Type::Primitive(Primitive::Long) => Some(n),
             _ => None,
@@ -282,6 +283,7 @@ pub struct FuncType {
 pub enum Primitive {
     Void,
     Char,
+    Short,
     Int,
     Long,
 }
@@ -292,6 +294,7 @@ impl TypeInfo for Primitive {
         match self {
             Primitive::Void => 0,
             Primitive::Char => 1,
+            Primitive::Short => 2,
             Primitive::Int => 4,
             Primitive::Long => 8,
         }
@@ -300,6 +303,7 @@ impl TypeInfo for Primitive {
         String::from(match self {
             Primitive::Void => unreachable!(),
             Primitive::Char => "b",
+            Primitive::Short => "w",
             Primitive::Int => "d",
             Primitive::Long => "",
         })
@@ -311,6 +315,7 @@ impl TypeInfo for Primitive {
         String::from(match self {
             Primitive::Void => "zero",
             Primitive::Char => "byte",
+            Primitive::Short => "word",
             Primitive::Int => "long",
             Primitive::Long => "quad",
         })
@@ -319,8 +324,9 @@ impl TypeInfo for Primitive {
         String::from(match self {
             Primitive::Void => unreachable!("doesnt have return register when returning void"),
             Primitive::Char => RETURN_REG[0],
-            Primitive::Int => RETURN_REG[1],
-            Primitive::Long => RETURN_REG[2],
+            Primitive::Short => RETURN_REG[1],
+            Primitive::Int => RETURN_REG[2],
+            Primitive::Long => RETURN_REG[3],
         })
     }
 }
@@ -329,6 +335,7 @@ impl Primitive {
         match self {
             Primitive::Void => "void",
             Primitive::Char => "char",
+            Primitive::Short => "short",
             Primitive::Int => "int",
             Primitive::Long => "long",
         }
@@ -338,6 +345,7 @@ impl Primitive {
         match self {
             Primitive::Void => unreachable!(),
             Primitive::Char => i8::MAX as i64,
+            Primitive::Short => i16::MAX as i64,
             Primitive::Int => i32::MAX as i64,
             Primitive::Long => i64::MAX,
         }
@@ -346,6 +354,7 @@ impl Primitive {
         match self {
             Primitive::Void => unreachable!(),
             Primitive::Char => i8::MIN as i64,
+            Primitive::Short => i16::MIN as i64,
             Primitive::Int => i32::MIN as i64,
             Primitive::Long => i64::MIN,
         }
@@ -623,7 +632,7 @@ pub mod tests {
         assert_type_print("char *(**)", "char ***");
 
         assert_type_print("char *(*)[3][4][2]", "char *(*)[3][4][2]");
-        assert_type_print("char (**[3][4])[2]", "char (**[3][4])[2]");
+        assert_type_print("short (**[3][4])[2]", "short (**[3][4])[2]");
         assert_type_print("char (**(*)[4])[2]", "char (**(*)[4])[2]");
         assert_type_print("char(**(*[3])[4])[2]", "char (**(*[3])[4])[2]");
 
@@ -645,6 +654,6 @@ pub mod tests {
             "int (**(int *, char (*)()))[3]",
         );
 
-        assert_type_print("int *(int**, ...)", "int *(int **, ...)");
+        assert_type_print("short *(short int**, ...)", "short *(short **, ...)");
     }
 }

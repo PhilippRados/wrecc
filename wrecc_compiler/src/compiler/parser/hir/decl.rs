@@ -61,6 +61,7 @@ pub struct MemberDeclarator {
 pub enum SpecifierKind {
     Void,
     Char,
+    Short,
     Int,
     Long,
 
@@ -75,9 +76,12 @@ impl SpecifierKind {
         match self {
             SpecifierKind::Void => 0,
             SpecifierKind::Char => 1,
-            SpecifierKind::Int => 2,
+            SpecifierKind::Short => 2,
             SpecifierKind::Long => 3,
-            _ => 4,
+            // int is last in specifier order because thats easier to read:
+            // eg: `short int` `long int`
+            SpecifierKind::Int => 4,
+            _ => 5,
         }
     }
 }

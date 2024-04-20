@@ -66,6 +66,7 @@ pub enum TokenKind {
     Long,
     Int,
     Char,
+    Short,
     Struct,
     Union,
     Enum,
@@ -196,6 +197,7 @@ impl Display for TokenKind {
                 TokenKind::Char => "'char'",
                 TokenKind::CharLit(_) => "'char'",
                 TokenKind::Int => "'int'",
+                TokenKind::Short => "'short'",
                 TokenKind::Long => "'long'",
                 TokenKind::Struct => "'struct'",
                 TokenKind::TypeDef => "'typedef'",
@@ -302,6 +304,7 @@ impl Token {
                 | TokenKind::Struct
                 | TokenKind::Void
                 | TokenKind::Char
+                | TokenKind::Short
                 | TokenKind::Int
                 | TokenKind::Long
         )
@@ -328,9 +331,10 @@ impl PartialEq for Token {
 impl Into<SpecifierKind> for Token {
     fn into(self) -> SpecifierKind {
         match self.kind {
-            TokenKind::Int => SpecifierKind::Int,
-            TokenKind::Char => SpecifierKind::Char,
             TokenKind::Void => SpecifierKind::Void,
+            TokenKind::Char => SpecifierKind::Char,
+            TokenKind::Short => SpecifierKind::Short,
+            TokenKind::Int => SpecifierKind::Int,
             TokenKind::Long => SpecifierKind::Long,
             _ => unreachable!("token not specifier"),
         }

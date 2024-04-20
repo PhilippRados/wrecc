@@ -23,6 +23,7 @@ impl<'a> Scanner<'a> {
                 ("int", TokenKind::Int),
                 ("long", TokenKind::Long),
                 ("char", TokenKind::Char),
+                ("short", TokenKind::Short),
                 ("struct", TokenKind::Struct),
                 ("union", TokenKind::Union),
                 ("enum", TokenKind::Enum),

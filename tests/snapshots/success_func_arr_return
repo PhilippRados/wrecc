@@ -1,8 +1,8 @@
 error: functions cannot return type 'int [2]'
-|  --> in tests/fixtures/func_arr_return.c:3:9
+|  --> in tests/fixtures/func_arr_return.c:3:5
 |
 3 arr some() {
-|         ^
+|     ^
 error: functions cannot return type 'int [2]'
 |  --> in tests/fixtures/func_arr_return.c:10:8
 |

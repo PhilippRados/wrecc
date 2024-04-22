@@ -964,7 +964,25 @@ impl TypeChecker {
             })?;
 
         if return_type.is_func() || return_type.is_array() {
-            return Err(Error::new(&token, ErrorKind::InvalidReturnType(return_type)));
+            return Err(Error::new(
+                &func_decl.name,
+                ErrorKind::InvalidReturnType(return_type),
+            ));
+        }
+
+        if name_string == "main" {
+            if return_type != Type::Primitive(Primitive::Int) {
+                return Err(Error::new(
+                    &func_decl.name,
+                    ErrorKind::InvalidMainReturn(return_type),
+                ));
+            }
+            if func_decl.is_inline {
+                return Err(Error::new(
+                    &func_decl.name,
+                    ErrorKind::Regular("'main' function cannot be declared 'inline'"),
+                ));
+            }
         }
 
         // have to push scope before declaring local variables
@@ -1010,27 +1028,35 @@ impl TypeChecker {
                 return Err(Error::new(&func_decl.name, ErrorKind::UnnamedFuncParams));
             }
         }
+        let mut errors = Vec::new();
+        let mut func_body = Vec::new();
 
-        // check function body
-        let body = self.block(&mut func, body);
+        match self.block(&mut func, body) {
+            Ok(mir::stmt::Stmt::Block(stmts)) => func_body = stmts,
+            Err(Error { kind: ErrorKind::Multiple(errs), .. }) => {
+                errors = errs;
+            }
+            _ => unreachable!(),
+        };
 
-        func.compare_gotos()?;
+        if let Err(e) = func.compare_gotos() {
+            errors.push(e);
+        }
 
-        let mir::stmt::Stmt::Block(mut body) = body? else {unreachable!()};
+        func.implicit_main_return(&mut func_body);
 
-        func.main_return(&func_decl.name, &mut body)?;
-
-        if !func.return_type.is_void() && !func.returns_all_paths {
+        if errors.is_empty() {
+            if !func.return_type.is_void() && !func.returns_all_paths {
+                return Err(Error::new(
+                    &func_decl.name,
+                    ErrorKind::NoReturnAllPaths(name_string),
+                ));
+            }
             func.returns_all_paths = false;
 
-            Err(Error::new(
-                &func_decl.name,
-                ErrorKind::NoReturnAllPaths(name_string),
-            ))
+            Ok(mir::decl::ExternalDeclaration::Function(func, symbol, func_body))
         } else {
-            func.returns_all_paths = false;
-
-            Ok(mir::decl::ExternalDeclaration::Function(func, symbol, body))
+            Err(Error::new_multiple(errors))
         }
     }
     fn visit_stmt(
@@ -2970,7 +2996,7 @@ int main(){
 inline static foo();
 inline int bar;
 
-void some(){
+int main() {
     extern inline char goo(inline some);
 
     inline char zoo();
@@ -2978,14 +3004,12 @@ void some(){
 
     typedef inline boo(void);
 }
-
-int inline main() {}
 ",
         )
         .unwrap_err();
 
         assert!(matches!(
-            dbg!(actual.as_slice()),
+            actual.as_slice(),
             &[
                 Error {
                     kind: ErrorKind::Regular(..),
@@ -3001,10 +3025,28 @@ int inline main() {}
                     kind: ErrorKind::Regular("'inline' not allowed with 'typedef' storage-class"),
                     ..
                 },
-                Error {
-                    kind: ErrorKind::Regular("'main' function cannot be declared 'inline'"),
-                    ..
-                },
+            ]
+        ));
+    }
+    #[test]
+    fn missing_goto() {
+        let actual = typecheck(
+            "
+int foo(){
+    char c = &1;
+    goto b;
+    int *p = c;
+}
+        ",
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            actual.as_slice(),
+            &[
+                Error { kind: ErrorKind::NotLvalue(..), .. },
+                Error { kind: ErrorKind::IllegalAssign(..), .. },
+                Error { kind: ErrorKind::UndeclaredLabel(..), .. },
             ]
         ));
     }

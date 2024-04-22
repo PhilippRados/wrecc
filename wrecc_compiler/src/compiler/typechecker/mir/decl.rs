@@ -149,20 +149,8 @@ impl Function {
         }
         Ok(())
     }
-    pub fn main_return(&mut self, token: &Token, body: &mut Vec<Stmt>) -> Result<(), Error> {
+    pub fn implicit_main_return(&mut self, body: &mut Vec<Stmt>) {
         if self.name == "main" {
-            if self.return_type != Type::Primitive(Primitive::Int) {
-                return Err(Error::new(
-                    token,
-                    ErrorKind::InvalidMainReturn(self.return_type.clone()),
-                ));
-            }
-            if self.is_inline {
-                return Err(Error::new(
-                    token,
-                    ErrorKind::Regular("'main' function cannot be declared 'inline'"),
-                ));
-            }
             if !self.returns_all_paths {
                 self.returns_all_paths = true;
 
@@ -173,7 +161,6 @@ impl Function {
                 })));
             }
         }
-        Ok(())
     }
 }
 

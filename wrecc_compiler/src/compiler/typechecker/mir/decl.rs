@@ -73,7 +73,10 @@ pub struct Function {
     /// If function contains var-args
     pub variadic: bool,
 
-    /// How much stack space a function needs to allocate info given in typechecker
+    /// If function was declared as `inline`
+    pub is_inline: bool,
+
+    /// How much stack space a function needs to allocate
     pub stack_size: usize,
 
     /// All the goto-labels that are unique to that function
@@ -100,12 +103,13 @@ pub struct Function {
     pub scope: Vec<ScopeKind>,
 }
 impl Function {
-    pub fn new(name: String, return_type: Type, variadic: bool) -> Self {
+    pub fn new(name: String, return_type: Type, variadic: bool, is_inline: bool) -> Self {
         Function {
             name,
             params: Vec::new(),
             return_type,
             variadic,
+            is_inline,
             stack_size: 0,
             labels: HashMap::new(),
             static_declarations: Vec::new(),
@@ -151,6 +155,12 @@ impl Function {
                 return Err(Error::new(
                     token,
                     ErrorKind::InvalidMainReturn(self.return_type.clone()),
+                ));
+            }
+            if self.is_inline {
+                return Err(Error::new(
+                    token,
+                    ErrorKind::Regular("'main' function cannot be declared 'inline'"),
                 ));
             }
             if !self.returns_all_paths {

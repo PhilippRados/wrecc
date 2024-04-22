@@ -13,14 +13,31 @@ pub enum ExternalDeclaration {
 pub struct Declaration {
     pub specifiers: Vec<DeclSpecifier>,
     pub storage_classes: Vec<StorageClass>,
+    pub is_inline: bool,
     pub declarators: Vec<(Declarator, Option<Init>)>,
 }
 
 pub struct FuncDecl {
     pub specifiers: Vec<DeclSpecifier>,
     pub storage_classes: Vec<StorageClass>,
+    pub is_inline: bool,
     pub name: Token,
     pub modifiers: Vec<DeclModifier>,
+}
+
+pub struct ParsedSpecifiers {
+    pub specifiers: Vec<DeclSpecifier>,
+    pub storage_classes: Vec<StorageClass>,
+    pub is_inline: bool,
+}
+impl ParsedSpecifiers {
+    pub fn new() -> Self {
+        ParsedSpecifiers {
+            specifiers: Vec::new(),
+            storage_classes: Vec::new(),
+            is_inline: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -90,6 +107,7 @@ impl SpecifierKind {
 pub struct ParamDecl {
     pub specifiers: Vec<DeclSpecifier>,
     pub storage_classes: Vec<StorageClass>,
+    pub is_inline: bool,
     pub declarator: Declarator,
 }
 

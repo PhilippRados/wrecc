@@ -32,6 +32,7 @@ impl<'a> Scanner<'a> {
                 ("static", TokenKind::Static),
                 ("auto", TokenKind::Auto),
                 ("register", TokenKind::Register),
+                ("inline", TokenKind::Inline),
                 ("if", TokenKind::If),
                 ("switch", TokenKind::Switch),
                 ("case", TokenKind::Case),

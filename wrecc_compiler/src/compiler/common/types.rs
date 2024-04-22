@@ -131,7 +131,7 @@ impl Type {
         matches!(self, Type::Array { .. })
     }
     pub fn is_ptr(&self) -> bool {
-        matches!(*self, Type::Pointer(_))
+        matches!(self, Type::Pointer(_))
     }
     pub fn type_compatible(&self, other: &Type, other_expr: &impl IsZero) -> bool {
         match (self, other) {

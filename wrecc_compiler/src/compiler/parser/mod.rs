@@ -130,12 +130,13 @@ impl Parser {
     // <external-declaration> ::= <function-definition>
     //                          | <declaration>
     pub fn external_declaration(&mut self) -> Result<ExternalDeclaration, Error> {
-        let (specifiers, storage_classes) = self.declaration_specifiers(true)?;
+        let decl_specs = self.declaration_specifiers(true)?;
 
         if match_next!(self, TokenKind::Semicolon).is_some() {
             return Ok(ExternalDeclaration::Declaration(Declaration {
-                specifiers,
-                storage_classes,
+                specifiers: decl_specs.specifiers,
+                storage_classes: decl_specs.storage_classes,
+                is_inline: decl_specs.is_inline,
                 declarators: Vec::new(),
             }));
         }
@@ -145,34 +146,35 @@ impl Parser {
         if matches!(declarator.modifiers.last(), Some(DeclModifier::Function { .. }))
             && matches!(self.tokens.peek(""), Ok(Token { kind: TokenKind::LeftBrace, .. }))
         {
-            return self.function_definition(specifiers, storage_classes, declarator);
+            return self.function_definition(decl_specs, declarator);
         }
 
-        self.declaration(specifiers, storage_classes, declarator)
+        self.declaration(decl_specs, declarator)
     }
 
     // <declaration-specifier> ::= <storage-class-specifier>
     //                           | <type-specifier>
     //                           | <type-qualifier> (not supported)
+    //                           | <function-specifier>
     // <storage-class-specifier> ::= auto
     //                             | register
     //                             | static
     //                             | extern
     //                             | typedef
+    // <function-specifier> ::= inline
     fn declaration_specifiers(
         &mut self,
         allow_storage_classes: bool,
-    ) -> Result<(Vec<DeclSpecifier>, Vec<StorageClass>), Error> {
-        let mut specifiers = Vec::new();
-        let mut storage_classes = Vec::new();
+    ) -> Result<ParsedSpecifiers, Error> {
+        let mut result = ParsedSpecifiers::new();
 
         while let Ok(token) = self.tokens.peek("") {
             if self.is_type(token) {
-                if matches!(token.kind, TokenKind::Ident(..)) && !specifiers.is_empty() {
+                if matches!(token.kind, TokenKind::Ident(..)) && !result.specifiers.is_empty() {
                     break;
                 }
 
-                specifiers.push(DeclSpecifier {
+                result.specifiers.push(DeclSpecifier {
                     token: token.clone(),
                     kind: self.type_specifier()?,
                 });
@@ -191,13 +193,24 @@ impl Parser {
                     ));
                 }
 
-                storage_classes.push(StorageClass { kind: token.kind.clone().into(), token });
+                result
+                    .storage_classes
+                    .push(StorageClass { kind: token.kind.clone().into(), token });
+            } else if let Some(token) = match_next!(self, TokenKind::Inline) {
+                if !allow_storage_classes {
+                    return Err(Error::new(
+                        &token,
+                        ErrorKind::Regular("'inline' not allowed in this specifier"),
+                    ));
+                }
+
+                result.is_inline = true;
             } else {
                 break;
             };
         }
 
-        Ok((specifiers, storage_classes))
+        Ok(result)
     }
 
     // <declarator> ::= <pointers> <direct-declarator> {<type-suffix>}*
@@ -335,15 +348,21 @@ impl Parser {
     //                           | {<declaration-specifier>}+ <abstract-declarator>
     //                           | {<declaration-specifier>}+
     fn parameter_declaration(&mut self) -> Result<ParamDecl, Error> {
-        let (specifiers, storage_classes) = self.declaration_specifiers(true)?;
+        let ParsedSpecifiers { specifiers, storage_classes, is_inline } =
+            self.declaration_specifiers(true)?;
         let declarator = self.declarator(DeclaratorKind::MaybeAbstract)?;
 
-        Ok(ParamDecl { specifiers, storage_classes, declarator })
+        Ok(ParamDecl {
+            specifiers,
+            storage_classes,
+            declarator,
+            is_inline,
+        })
     }
 
     // <type-name> ::= {<specifier-qualifier>}+ {<abstract-declarator>}?
     pub fn type_name(&mut self) -> Result<DeclType, Error> {
-        let (specifiers, _) = self.declaration_specifiers(false)?;
+        let ParsedSpecifiers { specifiers, .. } = self.declaration_specifiers(false)?;
         let Declarator { modifiers, .. } = self.declarator(DeclaratorKind::Abstract)?;
 
         Ok(DeclType { specifiers, modifiers })
@@ -351,8 +370,7 @@ impl Parser {
 
     fn function_definition(
         &mut self,
-        specifiers: Vec<DeclSpecifier>,
-        storage_classes: Vec<StorageClass>,
+        ParsedSpecifiers { specifiers, storage_classes, is_inline }: ParsedSpecifiers,
         declarator: Declarator,
     ) -> Result<ExternalDeclaration, Error> {
         self.tokens.next().expect("consume peeked left-brace");
@@ -363,6 +381,7 @@ impl Parser {
             FuncDecl {
                 specifiers,
                 storage_classes,
+                is_inline,
                 name: declarator.name.expect("external-decls cannot be abstract"),
                 modifiers: declarator.modifiers,
             },
@@ -372,8 +391,7 @@ impl Parser {
 
     fn declaration(
         &mut self,
-        specifiers: Vec<DeclSpecifier>,
-        storage_classes: Vec<StorageClass>,
+        ParsedSpecifiers { specifiers, storage_classes, is_inline }: ParsedSpecifiers,
         declarator: Declarator,
     ) -> Result<ExternalDeclaration, Error> {
         let mut declarators = Vec::new();
@@ -392,6 +410,7 @@ impl Parser {
         Ok(ExternalDeclaration::Declaration(Declaration {
             specifiers,
             declarators,
+            is_inline,
             storage_classes,
         }))
     }
@@ -598,7 +617,7 @@ impl Parser {
                 break;
             }
             let result = || -> Result<(), Error> {
-                let (specifiers, _) = self.declaration_specifiers(false)?;
+                let ParsedSpecifiers { specifiers, .. } = self.declaration_specifiers(false)?;
                 let mut declarators = Vec::new();
 
                 loop {
@@ -1357,7 +1376,7 @@ impl Parser {
         token.is_type()
     }
     fn is_specifier(&self, token: &Token) -> bool {
-        self.is_type(token) || token.is_storageclass()
+        self.is_type(token) || token.is_storageclass() || matches!(token.kind, TokenKind::Inline)
     }
 }
 

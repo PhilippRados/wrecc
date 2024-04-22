@@ -102,6 +102,7 @@ impl TypeChecker {
             if let Some(d) = self.declarator(
                 specifier_type.clone(),
                 storage_class.clone(),
+                decl.is_inline,
                 declarator,
                 &mut func,
             )? {
@@ -115,12 +116,20 @@ impl TypeChecker {
         &mut self,
         specifier_type: Type,
         storage_class: Option<mir::decl::StorageClass>,
+        is_inline: bool,
         (declarator, init): (hir::decl::Declarator, Option<hir::decl::Init>),
         func: &mut Option<&mut mir::decl::Function>,
     ) -> Result<Option<mir::decl::Declarator>, Error> {
         let type_decl = self.parse_modifiers(specifier_type, declarator.modifiers)?;
 
         if let Some(name) = declarator.name {
+            if !type_decl.is_func() && is_inline {
+                return Err(Error::new(
+                    &name,
+                    ErrorKind::Regular("'inline' can only appear on functions"),
+                ));
+            }
+
             match storage_class {
                 Some(sc @ (mir::decl::StorageClass::Register | mir::decl::StorageClass::Auto))
                     if self.env.is_global() || type_decl.is_func() =>
@@ -153,12 +162,18 @@ impl TypeChecker {
                         ),
                     ))
                 }
+                Some(mir::decl::StorageClass::TypeDef) if is_inline => {
+                    return Err(Error::new(
+                        &name,
+                        ErrorKind::Regular("'inline' not allowed with 'typedef' storage-class"),
+                    ))
+                }
 
                 _ => (),
             }
 
             let symbol = Symbol {
-                storage_class: storage_class.clone(),
+                storage_class,
                 kind: if init.is_some() {
                     InitType::Definition
                 } else {
@@ -520,15 +535,24 @@ impl TypeChecker {
             let storage_class = self.parse_storage_classes(&param.storage_classes)?;
             let mut parsed_type = self.parse_modifiers(specifier_type, param.declarator.modifiers)?;
 
+            let token_name = if let Some(name) = &param.declarator.name {
+                name
+            } else {
+                token
+            };
+
+            if param.is_inline {
+                return Err(Error::new(
+                    token_name,
+                    ErrorKind::Regular("cannot have 'inline' on function parameters"),
+                ));
+            }
+
             let storage_class = match storage_class {
                 Some(sc @ mir::decl::StorageClass::Register) => Some(sc),
                 Some(sc) => {
                     return Err(Error::new(
-                        if let Some(name) = &param.declarator.name {
-                            name
-                        } else {
-                            token
-                        },
+                        token_name,
                         ErrorKind::InvalidStorageClass(sc, "function-parameter"),
                     ));
                 }
@@ -948,7 +972,12 @@ impl TypeChecker {
 
         let params = self.parse_params(&token, params)?;
 
-        let mut func = mir::decl::Function::new(name_string.clone(), return_type.clone(), variadic);
+        let mut func = mir::decl::Function::new(
+            name_string.clone(),
+            return_type.clone(),
+            variadic,
+            func_decl.is_inline,
+        );
 
         let type_decl = Type::Function(FuncType {
             return_type: Box::new(return_type),
@@ -2323,13 +2352,19 @@ mod tests {
         let hir::decl::ExternalDeclaration::Declaration(decls) =
                 setup(input).external_declaration().unwrap() else {unreachable!("only passing type")};
 
-        let hir::decl::Declaration { specifiers, declarators, storage_classes } = decls;
+        let hir::decl::Declaration {
+            specifiers,
+            declarators,
+            storage_classes,
+            is_inline,
+        } = decls;
         let mut typechecker = TypeChecker::new();
 
         let decl = declarators[0].clone();
         let specifier_type = typechecker.parse_specifiers(specifiers).unwrap();
         let storage_class = typechecker.parse_storage_classes(&storage_classes).unwrap();
-        let declarator = typechecker.declarator(specifier_type, storage_class, decl, &mut None)?;
+        let declarator =
+            typechecker.declarator(specifier_type, storage_class, is_inline, decl, &mut None)?;
 
         Ok(declarator.unwrap().init.unwrap())
     }
@@ -2925,6 +2960,51 @@ int main(){
                     line_index: 5,
                     ..
                 }
+            ]
+        ));
+    }
+    #[test]
+    fn inline() {
+        let actual = typecheck(
+            "
+inline static foo();
+inline int bar;
+
+void some(){
+    extern inline char goo(inline some);
+
+    inline char zoo();
+    char zoo();
+
+    typedef inline boo(void);
+}
+
+int inline main() {}
+",
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            dbg!(actual.as_slice()),
+            &[
+                Error {
+                    kind: ErrorKind::Regular(..),
+                    line_index: 3,
+                    ..
+                },
+                Error {
+                    kind: ErrorKind::Regular("cannot have 'inline' on function parameters"),
+                    line_index: 6,
+                    ..
+                },
+                Error {
+                    kind: ErrorKind::Regular("'inline' not allowed with 'typedef' storage-class"),
+                    ..
+                },
+                Error {
+                    kind: ErrorKind::Regular("'main' function cannot be declared 'inline'"),
+                    ..
+                },
             ]
         ));
     }

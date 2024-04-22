@@ -652,7 +652,7 @@ impl Compiler {
         self.write_out(Lir::FuncSetup(
             func.name.clone(),
             func.stack_size,
-            func_symbol.borrow().is_static(),
+            func_symbol.borrow().is_static() || (!func_symbol.borrow().is_extern() && func.is_inline),
         ));
 
         // initialize parameters

@@ -11,43 +11,56 @@ pub enum ExternalDeclaration {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Declaration {
-    pub specifiers: Vec<DeclSpecifier>,
-    pub storage_classes: Vec<StorageClass>,
-    pub is_inline: bool,
+    pub decl_specs: DeclSpecs,
     pub declarators: Vec<(Declarator, Option<Init>)>,
 }
 
 pub struct FuncDecl {
-    pub specifiers: Vec<DeclSpecifier>,
-    pub storage_classes: Vec<StorageClass>,
-    pub is_inline: bool,
+    pub decl_specs: DeclSpecs,
     pub name: Token,
     pub modifiers: Vec<DeclModifier>,
 }
 
-pub struct ParsedSpecifiers {
-    pub specifiers: Vec<DeclSpecifier>,
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclSpecs {
+    pub specifiers: Vec<Specifier>,
     pub storage_classes: Vec<StorageClass>,
+    pub qualifiers: Vec<Qualifier>,
     pub is_inline: bool,
 }
-impl ParsedSpecifiers {
+impl DeclSpecs {
     pub fn new() -> Self {
-        ParsedSpecifiers {
+        DeclSpecs {
             specifiers: Vec::new(),
             storage_classes: Vec::new(),
+            qualifiers: Vec::new(),
             is_inline: false,
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Qualifier {
+    pub token: Token,
+    pub kind: QualifierKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum QualifierKind {
+    Const,
+    Volatile,
+    Restrict,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct DeclType {
-    pub specifiers: Vec<DeclSpecifier>,
+    pub specifiers: Vec<Specifier>,
+    pub qualifiers: Vec<Qualifier>,
     pub modifiers: Vec<DeclModifier>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct DeclSpecifier {
+pub struct Specifier {
     pub token: Token,
     pub kind: SpecifierKind,
 }
@@ -66,7 +79,12 @@ pub enum StorageClassKind {
     Register,
 }
 
-pub type MemberDeclaration = (Vec<DeclSpecifier>, Vec<MemberDeclarator>);
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemberDecl {
+    pub specifiers: Vec<Specifier>,
+    pub qualifiers: Vec<Qualifier>,
+    pub declarators: Vec<MemberDeclarator>,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MemberDeclarator {
@@ -82,8 +100,8 @@ pub enum SpecifierKind {
     Int,
     Long,
 
-    Struct(Option<Token>, Option<Vec<MemberDeclaration>>),
-    Union(Option<Token>, Option<Vec<MemberDeclaration>>),
+    Struct(Option<Token>, Option<Vec<MemberDecl>>),
+    Union(Option<Token>, Option<Vec<MemberDecl>>),
     Enum(Option<Token>, Option<Vec<(Token, Option<ExprKind>)>>),
 
     UserType,
@@ -105,15 +123,13 @@ impl SpecifierKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ParamDecl {
-    pub specifiers: Vec<DeclSpecifier>,
-    pub storage_classes: Vec<StorageClass>,
-    pub is_inline: bool,
+    pub decl_specs: DeclSpecs,
     pub declarator: Declarator,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DeclModifier {
-    Pointer,
+    Pointer(Vec<Qualifier>),
     Array(Token, Option<ExprKind>),
     Function { params: Vec<ParamDecl>, variadic: bool, token: Token },
 }
@@ -217,6 +233,7 @@ impl PrintIndent for Declaration {
             .or_empty(indent_level);
 
         let typedef = if self
+            .decl_specs
             .storage_classes
             .iter()
             .any(|storage| storage.kind == StorageClassKind::TypeDef)

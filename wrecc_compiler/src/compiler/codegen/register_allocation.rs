@@ -188,11 +188,11 @@ impl RegisterAllocation {
         // save the current register
         let mut prev = reg.clone();
         prev.reg = Some(entry.clone());
-        prev.type_decl = type_decl.clone();
+        prev.ty = type_decl.clone();
 
         // generate the new stack-position to spill to
         let mut new = reg.clone();
-        new.type_decl = type_decl.clone();
+        new.ty = type_decl.clone();
         new.reg = Some(TempKind::Spilled(StackRegister::new(
             &mut self.spill_bp_offset,
             type_decl.clone(),
@@ -211,11 +211,11 @@ impl RegisterAllocation {
         let Some(IntervalEntry{ type_decl, scratch:Some(entry),.. }) = self.live_intervals.get_mut(&reg.id) else {unreachable!()};
 
         let mut prev_reg = reg.clone();
-        prev_reg.type_decl = type_decl.clone();
+        prev_reg.ty = type_decl.clone();
         prev_reg.reg = Some(entry.clone());
 
         let mut new = reg.clone();
-        new.type_decl = type_decl.clone();
+        new.ty = type_decl.clone();
         new.reg = Some(self.get_scratch(ir, reg, other));
 
         ir.push(Lir::Mov(Register::Temp(prev_reg), Register::Temp(new.clone())));
@@ -492,13 +492,13 @@ mod tests {
                     id,
                     reg: reg.clone(),
                     start_idx: self.start,
-                    type_decl: self.type_decl.clone(),
+                    ty: self.type_decl.clone(),
                 }),
                 None => Register::Temp(TempRegister {
                     id,
                     reg: None,
                     start_idx: self.start,
-                    type_decl: self.type_decl.clone(),
+                    ty: self.type_decl.clone(),
                     value_kind: ValueKind::Rvalue,
                 }),
             }
@@ -723,7 +723,7 @@ mod tests {
             Lir::Mov(regs[15].clone(), regs[21].clone()),
             Lir::Call(Register::Label(LabelRegister::Var(
                 "foo".to_string(),
-                setup_type!("void (int, int)"),
+                setup_type!("void (int, int)").ty,
                 false,
             ))),
             Lir::RestoreRegs,
@@ -768,7 +768,7 @@ mod tests {
             Lir::Mov(filled_regs[15].clone(), filled_regs[21].clone()),
             Lir::Call(Register::Label(LabelRegister::Var(
                 "foo".to_string(),
-                setup_type!("void (int, int)"),
+                setup_type!("void (int, int)").ty,
                 false,
             ))),
         ];

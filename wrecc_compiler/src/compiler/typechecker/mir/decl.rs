@@ -62,7 +62,7 @@ pub enum Init {
 pub struct Function {
     pub name: String,
 
-    pub return_type: Type,
+    pub return_type: QualType,
 
     /// Declarations inside of a function-body are saved and declared after function-definition
     pub static_declarations: Vec<(String, Declarator)>,
@@ -103,7 +103,7 @@ pub struct Function {
     pub scope: Vec<ScopeKind>,
 }
 impl Function {
-    pub fn new(name: String, return_type: Type, variadic: bool, is_inline: bool) -> Self {
+    pub fn new(name: String, return_type: QualType, variadic: bool, is_inline: bool) -> Self {
         Function {
             name,
             params: Vec::new(),
@@ -123,8 +123,8 @@ impl Function {
     }
     pub fn increment_stack_size(&mut self, symbol: &SymbolRef) {
         if !symbol.borrow().is_extern() && !symbol.borrow().is_static() {
-            let mut size = self.stack_size + symbol.borrow().type_decl.size();
-            size = align(size, &symbol.borrow().type_decl);
+            let mut size = self.stack_size + symbol.borrow().qtype.ty.size();
+            size = align(size, &symbol.borrow().qtype.ty);
 
             self.stack_size = size;
         }
@@ -156,7 +156,7 @@ impl Function {
 
                 body.push(Stmt::Return(Some(Expr {
                     kind: ExprKind::Literal(0),
-                    type_decl: Type::Primitive(Primitive::Int),
+                    qtype: QualType::new(Type::Primitive(Primitive::Int)),
                     value_kind: ValueKind::Rvalue,
                 })));
             }

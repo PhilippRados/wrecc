@@ -7,21 +7,21 @@ use crate::compiler::typechecker::mir::expr::Expr;
 /// `int array[10] = {1,2,[6] = 8}`
 /// and keeping track of nested initializations
 #[derive(Clone)]
-pub struct CurrentObjects(pub Vec<(i64, i64, Type)>);
+pub struct CurrentObjects(pub Vec<(i64, i64, QualType)>);
 impl CurrentObjects {
-    pub fn new(type_decl: Type) -> Self {
-        CurrentObjects(vec![(0, 0, type_decl)])
+    pub fn new(qtype: QualType) -> Self {
+        CurrentObjects(vec![(0, 0, qtype)])
     }
     /// Updates current-objects when encountering designator
-    pub fn update(&mut self, (i, union_index, new_type): (i64, i64, Type)) {
+    pub fn update(&mut self, (i, union_index, new_type): (i64, i64, QualType)) {
         self.0.last_mut().unwrap().0 = i;
         self.0.last_mut().unwrap().1 = union_index;
         self.0.push((0, 0, new_type));
     }
-    pub fn current(&self) -> &(i64, i64, Type) {
+    pub fn current(&self) -> &(i64, i64, QualType) {
         self.0.last().unwrap()
     }
-    pub fn current_type(&mut self) -> &mut Type {
+    pub fn current_type(&mut self) -> &mut QualType {
         if let Some((.., type_decl)) = self.0.last_mut() {
             type_decl
         } else {
@@ -32,17 +32,17 @@ impl CurrentObjects {
     pub fn offset(&self) -> i64 {
         self.0
             .iter()
-            .fold(0, |acc, (i, _, type_decl)| acc + type_decl.offset(*i))
+            .fold(0, |acc, (i, _, qtype)| acc + qtype.ty.offset(*i))
     }
     /// Checks how much of a sub-type is already initialized and what new current-objects should be
     pub fn update_current(&mut self) {
         let mut remove_idx = None;
-        for (obj_index, (i, _, type_decl)) in self.0.iter().enumerate().rev() {
+        for (obj_index, (i, _, qtype)) in self.0.iter().enumerate().rev() {
             // if unknown array-size then object can never be full
-            if let Type::Array(_, ArraySize::Unknown) = type_decl {
+            if let Type::Array(_, ArraySize::Unknown) = qtype.ty {
                 break;
             }
-            if obj_index != 0 && (i + 1 >= type_decl.len() as i64) {
+            if obj_index != 0 && (i + 1 >= qtype.ty.len() as i64) {
                 remove_idx = Some(obj_index);
             } else {
                 break;
@@ -68,12 +68,15 @@ impl CurrentObjects {
             let mut offset = 0;
             for (other_obj, current_obj) in objects.0.iter().zip(&self.0) {
                 match (other_obj, current_obj) {
-                    ((_, i1, type_decl @ Type::Union(_)), (_, i2, Type::Union(_))) if i1 != i2 => {
+                    (
+                        (_, i1, qtype @ QualType { ty: Type::Union(_), .. }),
+                        (_, i2, QualType { ty: Type::Union(_), .. }),
+                    ) if i1 != i2 => {
                         // allowed call `size()` bc unions cannot contain unbounded array
-                        return Some((offset, type_decl.size()));
+                        return Some((offset, qtype.ty.size()));
                     }
                     ((i1, ..), (i2, ..)) if *i1 != *i2 => break,
-                    ((i, _, type_decl), ..) => offset += type_decl.offset(*i),
+                    ((i, _, qtype), ..) => offset += qtype.ty.offset(*i),
                 }
             }
         }
@@ -81,22 +84,10 @@ impl CurrentObjects {
     }
 }
 
-impl Type {
-    /// Returns the number of top level elements of type
-    pub fn len(&self) -> usize {
-        match self {
-            Type::Array(_, ArraySize::Known(size)) => *size,
-            Type::Array(_, ArraySize::Unknown) => {
-                unreachable!("unknown array-size is caught in update-current")
-            }
-            Type::Struct(s) => s.members().len(),
-            _ => 1,
-        }
-    }
-
+impl QualType {
     /// Returns the type of the field at index
-    pub fn at(&self, index: usize) -> Option<Type> {
-        match self {
+    pub fn at(&self, index: usize) -> Option<QualType> {
+        match &self.ty {
             Type::Array(of, ArraySize::Known(size)) => {
                 if index >= *size {
                     None
@@ -116,6 +107,21 @@ impl Type {
             _ => Some(self.clone()),
         }
     }
+}
+
+impl Type {
+    /// Returns the number of top level elements of type
+    pub fn len(&self) -> usize {
+        match self {
+            Type::Array(_, ArraySize::Known(size)) => *size,
+            Type::Array(_, ArraySize::Unknown) => {
+                unreachable!("unknown array-size is caught in update-current")
+            }
+            Type::Struct(s) => s.members().len(),
+            _ => 1,
+        }
+    }
+
     /// Calculates offset in typesize until given index
     pub fn offset(&self, index: i64) -> i64 {
         match self {
@@ -123,8 +129,8 @@ impl Type {
                 .members()
                 .iter()
                 .take(index as usize)
-                .fold(0, |acc, (m_type, _)| acc + m_type.size() as i64),
-            Type::Array(of, _) => of.size() as i64 * index,
+                .fold(0, |acc, (m_type, _)| acc + m_type.ty.size() as i64),
+            Type::Array(of, _) => of.ty.size() as i64 * index,
             _ => 0,
         }
     }

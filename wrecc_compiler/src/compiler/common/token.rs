@@ -1,5 +1,5 @@
 use crate::compiler::common::error::Location;
-use crate::compiler::parser::hir::decl::{SpecifierKind, StorageClassKind};
+use crate::compiler::parser::hir::decl::{QualifierKind, SpecifierKind, StorageClassKind};
 use std::fmt::Display;
 use std::path::PathBuf;
 
@@ -76,6 +76,9 @@ pub enum TokenKind {
     Auto,
     Register,
     Inline,
+    Const,
+    Restrict,
+    Volatile,
     Else,
     For,
     If,
@@ -207,6 +210,9 @@ impl Display for TokenKind {
                 TokenKind::Auto => "'auto'",
                 TokenKind::Register => "'register'",
                 TokenKind::Inline => "'inline'",
+                TokenKind::Const => "'const'",
+                TokenKind::Volatile => "'volatile'",
+                TokenKind::Restrict => "'restrict'",
                 TokenKind::Union => "'union'",
                 TokenKind::Enum => "'enum'",
                 TokenKind::Equal => "'='",
@@ -321,6 +327,12 @@ impl Token {
                 | TokenKind::Register
         )
     }
+    pub fn is_qualifier(&self) -> bool {
+        matches!(
+            self.kind,
+            TokenKind::Const | TokenKind::Volatile | TokenKind::Restrict
+        )
+    }
 }
 impl PartialEq for Token {
     fn eq(&self, other: &Token) -> bool {
@@ -351,6 +363,16 @@ impl Into<StorageClassKind> for TokenKind {
             TokenKind::Auto => StorageClassKind::Auto,
             TokenKind::Register => StorageClassKind::Register,
             _ => unreachable!("not a valid storage-class token"),
+        }
+    }
+}
+impl Into<QualifierKind> for TokenKind {
+    fn into(self) -> QualifierKind {
+        match self {
+            TokenKind::Const => QualifierKind::Const,
+            TokenKind::Volatile => QualifierKind::Volatile,
+            TokenKind::Restrict => QualifierKind::Restrict,
+            _ => unreachable!("not a valid qualifier token"),
         }
     }
 }

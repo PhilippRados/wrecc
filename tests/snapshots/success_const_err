@@ -1,0 +1,61 @@
+error: cannot assign variable which was declared 'const'
+|  --> in tests/fixtures/const_err.c:16:9
+|
+16   a.dig = Two;
+|          ^
+error: cannot assign to 'struct Foo' that contains member 'dig' declared 'const'
+|  --> in tests/fixtures/const_err.c:17:5
+|
+17   a = b;
+|      ^
+error: cannot assign variable which was declared 'const'
+|  --> in tests/fixtures/const_err.c:20:4
+|
+20   n++;
+|     ^
+error: cannot assign to type 'int *' with type 'const int *'
+|  --> in tests/fixtures/const_err.c:24:8
+|
+24   int *pi = nest[0];                     // Error: a[0] has type const int*
+|         ^
+error: cannot assign variable which was declared 'const'
+|  --> in tests/fixtures/const_err.c:28:11
+|
+28   str1[0] = 'h';
+|            ^
+error: cannot assign variable which was declared 'const'
+|  --> in tests/fixtures/const_err.c:30:8
+|
+30   str2 = "Goodbye";
+|         ^
+error: cannot assign variable which was declared 'const'
+|  --> in tests/fixtures/const_err.c:37:5
+|
+37   a = 5;
+|      ^
+error: cannot assign to type 'int *' with type 'const int *'
+|  --> in tests/fixtures/const_err.c:41:5
+|
+41   p = cp;            // Error: discards qualifiers (const int to int)
+|      ^
+error: cannot assign to type 'const char *' with type 'volatile char *'
+|  --> in tests/fixtures/const_err.c:46:7
+|
+46   jdk = pk;
+|        ^
+error: cannot assign to type 'long **' with type 'long *const *'
+|  --> in tests/fixtures/const_err.c:52:10
+|
+52   long **s1 = s0;
+|           ^
+error: cannot assign to type 'long **' with type 'long *const *'
+|  --> in tests/fixtures/const_err.c:55:10
+|
+55   long **sjj = sj;
+|           ^
+error: cannot assign to type 'const long **' with type 'long **'
+|  --> in tests/fixtures/const_err.c:61:16
+|
+61   const long **s2 = s;
+|                 ^
+12 errors generated.

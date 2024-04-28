@@ -8,7 +8,7 @@ use crate::compiler::typechecker::*;
 
 impl ExprKind {
     pub fn new_literal(value: i64, primitive_type: Primitive) -> Self {
-        ExprKind::Literal(value, Type::Primitive(primitive_type))
+        ExprKind::Literal(value, QualType::new(Type::Primitive(primitive_type)))
     }
     pub fn get_literal_constant(
         &mut self,
@@ -46,11 +46,11 @@ impl ExprKind {
                 // is only enum-constant
                 if let Ok(Symbol {
                     reg: Some(Register::Literal(n, _)),
-                    type_decl,
+                    qtype,
                     ..
                 }) = typechecker.env.get_symbol(name).map(|s| s.borrow().clone())
                 {
-                    Some(ExprKind::Literal(n, type_decl))
+                    Some(ExprKind::Literal(n, qtype))
                 } else {
                     None
                 }
@@ -88,7 +88,7 @@ impl ExprKind {
                 }
             }
             ExprKind::SizeofType { token, decl_type } => {
-                let size = typechecker.parse_type(&token, decl_type.clone())?.size();
+                let size = typechecker.parse_type(&token, decl_type.clone())?.ty.size();
                 Some(ExprKind::new_literal(size as i64, Primitive::Int))
             }
 
@@ -199,10 +199,10 @@ impl ExprKind {
             Ok(None)
         }
     }
-    fn shift_fold(token: Token, left_type: Type, left: i64, right: i64) -> Result<ExprKind, Error> {
+    fn shift_fold(token: Token, left_type: QualType, left: i64, right: i64) -> Result<ExprKind, Error> {
         // result type is only dependant on left operand
-        let left_type = if left_type.size() < Primitive::Int.size() {
-            Type::Primitive(Primitive::Int)
+        let left_type = if left_type.ty.size() < Primitive::Int.size() {
+            QualType::new(Type::Primitive(Primitive::Int))
         } else {
             left_type
         };
@@ -216,7 +216,7 @@ impl ExprKind {
             _ => unreachable!("not shift operation"),
         };
 
-        if overflow || Self::type_overflow(value, &left_type) {
+        if overflow || Self::type_overflow(value, &left_type.ty) {
             Err(Error::new(&token, ErrorKind::IntegerOverflow(left_type)))
         } else {
             Ok(ExprKind::Literal(value, left_type))
@@ -224,8 +224,8 @@ impl ExprKind {
     }
     fn div_fold(
         token: Token,
-        left_type: Type,
-        right_type: Type,
+        left_type: QualType,
+        right_type: QualType,
         left: i64,
         right: i64,
     ) -> Result<ExprKind, Error> {
@@ -242,31 +242,31 @@ impl ExprKind {
     }
     fn literal_type(
         token: Token,
-        left_type: Type,
-        right_type: Type,
+        left_type: QualType,
+        right_type: QualType,
         (value, overflow): (i64, bool),
     ) -> Result<ExprKind, Error> {
         let result_type = match (left_type, right_type) {
-            (ty @ Type::Pointer(_), _) | (_, ty @ Type::Pointer(_)) => ty,
-            (left, right) if left.size() > right.size() => left,
+            (qtype, _) | (_, qtype) if qtype.ty.is_ptr() => qtype,
+            (left, right) if left.ty.size() > right.ty.size() => left,
             (_, right) => right,
         };
 
-        let result_type = if result_type.size() < Primitive::Int.size() {
-            Type::Primitive(Primitive::Int)
+        let result_type = if result_type.ty.size() < Primitive::Int.size() {
+            QualType::new(Type::Primitive(Primitive::Int))
         } else {
             result_type
         };
 
         // calculation can overflow or type from literal can overflow
-        if overflow || Self::type_overflow(value, &result_type) {
+        if overflow || Self::type_overflow(value, &result_type.ty) {
             Err(Error::new(&token, ErrorKind::IntegerOverflow(result_type)))
         } else {
             Ok(ExprKind::Literal(value, result_type))
         }
     }
-    fn type_overflow(value: i64, type_decl: &Type) -> bool {
-        (value > type_decl.max()) || ((value) < type_decl.min())
+    fn type_overflow(value: i64, ty: &Type) -> bool {
+        (value > ty.max()) || ((value) < ty.min())
     }
 
     fn unary_fold(
@@ -284,7 +284,7 @@ impl ExprKind {
                 ExprKind::Literal(n, right_type),
                 TokenKind::Minus | TokenKind::Plus | TokenKind::Tilde,
             ) => {
-                if !right_type.is_integer() {
+                if !right_type.ty.is_integer() {
                     return Err(Error::new(
                         &token,
                         ErrorKind::InvalidUnary(token.kind.clone(), right_type.clone(), "integer"),
@@ -410,12 +410,12 @@ impl ExprKind {
     }
     fn valid_cast(
         token: Token,
-        old_type: Type,
-        new_type: Type,
+        old_type: QualType,
+        new_type: QualType,
         right_fold: i64,
-    ) -> Result<(i64, Type), Error> {
-        let result = if old_type.is_scalar() && new_type.is_scalar() {
-            new_type.maybe_wrap(right_fold)
+    ) -> Result<(i64, QualType), Error> {
+        let result = if old_type.ty.is_scalar() && new_type.ty.is_scalar() {
+            new_type.ty.maybe_wrap(right_fold)
         } else {
             None
         };
@@ -433,7 +433,6 @@ impl ExprKind {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::compiler::parser::tests::setup;
     use crate::setup_type;
@@ -555,11 +554,11 @@ mod tests {
     fn shift_fold_error() {
         assert_fold_error!(
             "-16 << 33",
-            ErrorKind::IntegerOverflow(Type::Primitive(Primitive::Int))
+            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Int), .. })
         );
         assert_fold_error!(
             "(long)-5 >> 64",
-            ErrorKind::IntegerOverflow(Type::Primitive(Primitive::Long))
+            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Long), .. })
         );
 
         // negative shift count is UB
@@ -572,7 +571,7 @@ mod tests {
 
         assert_fold_error!(
             "2147483647 << 2",
-            ErrorKind::IntegerOverflow(Type::Primitive(Primitive::Int))
+            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Int), .. })
         );
     }
 
@@ -611,16 +610,20 @@ mod tests {
 
         assert_fold_error!(
             "6 / (int *)1",
-            ErrorKind::InvalidBinary(_, Type::Primitive(Primitive::Int), Type::Pointer(_))
+            ErrorKind::InvalidBinary(
+                _,
+                QualType { ty: Type::Primitive(Primitive::Int), .. },
+                QualType { ty: Type::Pointer(_), .. }
+            )
         );
 
         assert_fold_error!(
             "-(long *)1",
-            ErrorKind::InvalidUnary(_, Type::Pointer(_), "integer")
+            ErrorKind::InvalidUnary(_, QualType { ty: Type::Pointer(_), .. }, "integer")
         );
         assert_fold_error!(
             "~(char *)1",
-            ErrorKind::InvalidUnary(_, Type::Pointer(_), "integer")
+            ErrorKind::InvalidUnary(_, QualType { ty: Type::Pointer(_), .. }, "integer")
         );
     }
     #[test]
@@ -632,12 +635,18 @@ mod tests {
 
         assert_fold_error!(
             "1 == 2 ? 4 : (long*)9",
-            ErrorKind::TypeMismatch(Type::Primitive(Primitive::Int), Type::Pointer(_))
+            ErrorKind::TypeMismatch(
+                QualType { ty: Type::Primitive(Primitive::Int), .. },
+                QualType { ty: Type::Pointer(_), .. }
+            )
         );
 
         assert_fold_error!(
             "1 == 2 ? (int*)4 : (long*)9",
-            ErrorKind::TypeMismatch(Type::Pointer(_), Type::Pointer(_),)
+            ErrorKind::TypeMismatch(
+                QualType { ty: Type::Pointer(_), .. },
+                QualType { ty: Type::Pointer(_), .. }
+            )
         );
     }
     #[test]
@@ -665,24 +674,24 @@ mod tests {
     fn overflow_fold() {
         assert_fold_error!(
             "2147483647 + 1",
-            ErrorKind::IntegerOverflow(Type::Primitive(Primitive::Int))
+            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Int), .. })
         );
         assert_fold_error!(
             "9223372036854775807 * 2",
-            ErrorKind::IntegerOverflow(Type::Primitive(Primitive::Long))
+            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Long), .. })
         );
 
         assert_fold_error!(
             "(int)-2147483648 - 1",
-            ErrorKind::IntegerOverflow(Type::Primitive(Primitive::Int))
+            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Int), .. })
         );
         assert_fold_error!(
             "(int)-2147483648 * -1",
-            ErrorKind::IntegerOverflow(Type::Primitive(Primitive::Int))
+            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Int), .. })
         );
         assert_fold_error!(
             "-((int)-2147483648)",
-            ErrorKind::IntegerOverflow(Type::Primitive(Primitive::Int))
+            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Int), .. })
         );
 
         assert_fold_type("(char)127 + 2", "129", "int");
@@ -706,8 +715,11 @@ mod tests {
         assert_fold_error!(
             "(struct {int age;})2",
             ErrorKind::InvalidConstCast(
-                Type::Primitive(Primitive::Int),
-                Type::Struct(StructInfo::Unnamed(..)),
+                QualType { ty: Type::Primitive(Primitive::Int), .. },
+                QualType {
+                    ty: Type::Struct(StructKind::Unnamed(..)),
+                    ..
+                },
             )
         );
     }

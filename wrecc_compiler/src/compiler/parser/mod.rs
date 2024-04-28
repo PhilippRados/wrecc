@@ -134,9 +134,7 @@ impl Parser {
 
         if match_next!(self, TokenKind::Semicolon).is_some() {
             return Ok(ExternalDeclaration::Declaration(Declaration {
-                specifiers: decl_specs.specifiers,
-                storage_classes: decl_specs.storage_classes,
-                is_inline: decl_specs.is_inline,
+                decl_specs,
                 declarators: Vec::new(),
             }));
         }
@@ -154,30 +152,37 @@ impl Parser {
 
     // <declaration-specifier> ::= <storage-class-specifier>
     //                           | <type-specifier>
-    //                           | <type-qualifier> (not supported)
+    //                           | <type-qualifier>
     //                           | <function-specifier>
     // <storage-class-specifier> ::= auto
     //                             | register
     //                             | static
     //                             | extern
     //                             | typedef
+    // <type-qualifier> ::= const
+    //                    | volatile
+    //                    | restrict
     // <function-specifier> ::= inline
-    fn declaration_specifiers(
-        &mut self,
-        allow_storage_classes: bool,
-    ) -> Result<ParsedSpecifiers, Error> {
-        let mut result = ParsedSpecifiers::new();
+    fn declaration_specifiers(&mut self, allow_storage_classes: bool) -> Result<DeclSpecs, Error> {
+        let mut result = DeclSpecs::new();
 
         while let Ok(token) = self.tokens.peek("") {
             if self.is_type(token) {
-                if matches!(token.kind, TokenKind::Ident(..)) && !result.specifiers.is_empty() {
-                    break;
-                }
+                if token.is_qualifier() {
+                    let token = self.tokens.next().unwrap();
+                    result
+                        .qualifiers
+                        .push(Qualifier { kind: token.kind.clone().into(), token })
+                } else {
+                    if matches!(token.kind, TokenKind::Ident(..)) && !result.specifiers.is_empty() {
+                        break;
+                    }
 
-                result.specifiers.push(DeclSpecifier {
-                    token: token.clone(),
-                    kind: self.type_specifier()?,
-                });
+                    result.specifiers.push(Specifier {
+                        token: token.clone(),
+                        kind: self.type_specifier()?,
+                    });
+                }
             } else if let Some(token) = match_next!(
                 self,
                 TokenKind::TypeDef
@@ -230,7 +235,13 @@ impl Parser {
 
     fn pointers(&mut self, modifiers: &mut Vec<DeclModifier>) {
         while match_next!(self, TokenKind::Star).is_some() {
-            modifiers.push(DeclModifier::Pointer)
+            let mut qualifiers = Vec::new();
+            while let Some(token) =
+                match_next!(self, TokenKind::Const | TokenKind::Volatile | TokenKind::Restrict)
+            {
+                qualifiers.push(Qualifier { kind: token.kind.clone().into(), token })
+            }
+            modifiers.push(DeclModifier::Pointer(qualifiers))
         }
     }
 
@@ -348,29 +359,23 @@ impl Parser {
     //                           | {<declaration-specifier>}+ <abstract-declarator>
     //                           | {<declaration-specifier>}+
     fn parameter_declaration(&mut self) -> Result<ParamDecl, Error> {
-        let ParsedSpecifiers { specifiers, storage_classes, is_inline } =
-            self.declaration_specifiers(true)?;
+        let decl_specs = self.declaration_specifiers(true)?;
         let declarator = self.declarator(DeclaratorKind::MaybeAbstract)?;
 
-        Ok(ParamDecl {
-            specifiers,
-            storage_classes,
-            declarator,
-            is_inline,
-        })
+        Ok(ParamDecl { decl_specs, declarator })
     }
 
     // <type-name> ::= {<specifier-qualifier>}+ {<abstract-declarator>}?
     pub fn type_name(&mut self) -> Result<DeclType, Error> {
-        let ParsedSpecifiers { specifiers, .. } = self.declaration_specifiers(false)?;
+        let DeclSpecs { specifiers, qualifiers, .. } = self.declaration_specifiers(false)?;
         let Declarator { modifiers, .. } = self.declarator(DeclaratorKind::Abstract)?;
 
-        Ok(DeclType { specifiers, modifiers })
+        Ok(DeclType { specifiers, qualifiers, modifiers })
     }
 
     fn function_definition(
         &mut self,
-        ParsedSpecifiers { specifiers, storage_classes, is_inline }: ParsedSpecifiers,
+        decl_specs: DeclSpecs,
         declarator: Declarator,
     ) -> Result<ExternalDeclaration, Error> {
         self.tokens.next().expect("consume peeked left-brace");
@@ -379,9 +384,7 @@ impl Parser {
 
         Ok(ExternalDeclaration::Function(
             FuncDecl {
-                specifiers,
-                storage_classes,
-                is_inline,
+                decl_specs,
                 name: declarator.name.expect("external-decls cannot be abstract"),
                 modifiers: declarator.modifiers,
             },
@@ -391,27 +394,25 @@ impl Parser {
 
     fn declaration(
         &mut self,
-        ParsedSpecifiers { specifiers, storage_classes, is_inline }: ParsedSpecifiers,
+        decl_specs: DeclSpecs,
         declarator: Declarator,
     ) -> Result<ExternalDeclaration, Error> {
         let mut declarators = Vec::new();
-        let init = self.init_declarator(&storage_classes, &declarator)?;
+        let init = self.init_declarator(&decl_specs.storage_classes, &declarator)?;
 
         declarators.push((declarator, init));
 
         while match_next!(self, TokenKind::Comma).is_some() {
             let declarator = self.declarator(DeclaratorKind::NoAbstract)?;
-            let init = self.init_declarator(&storage_classes, &declarator)?;
+            let init = self.init_declarator(&decl_specs.storage_classes, &declarator)?;
 
             declarators.push((declarator, init));
         }
         consume!(self, TokenKind::Semicolon, "expected ';' after declaration")?;
 
         Ok(ExternalDeclaration::Declaration(Declaration {
-            specifiers,
+            decl_specs,
             declarators,
-            is_inline,
-            storage_classes,
         }))
     }
     fn init_declarator(
@@ -608,7 +609,7 @@ impl Parser {
     // <struct-declarator-list> ::= <struct-declarator>
     //                            | <struct-declarator-list> , <struct-declarator>
     // <struct-declarator> ::= <declarator>
-    fn struct_declaration(&mut self, token: &Token) -> Result<Vec<MemberDeclaration>, Error> {
+    fn struct_declaration(&mut self, token: &Token) -> Result<Vec<MemberDecl>, Error> {
         let mut members = Vec::new();
         let mut errors = Vec::new();
 
@@ -617,7 +618,7 @@ impl Parser {
                 break;
             }
             let result = || -> Result<(), Error> {
-                let ParsedSpecifiers { specifiers, .. } = self.declaration_specifiers(false)?;
+                let DeclSpecs { specifiers, qualifiers, .. } = self.declaration_specifiers(false)?;
                 let mut declarators = Vec::new();
 
                 loop {
@@ -636,7 +637,7 @@ impl Parser {
                         break;
                     }
                 }
-                members.push((specifiers, declarators));
+                members.push(MemberDecl { specifiers, qualifiers, declarators });
 
                 // dont return Error directly because then then can't sync properly
                 if let Err(e) = consume!(
@@ -652,7 +653,7 @@ impl Parser {
             self.maybe_sync(result, &mut errors, TokenKind::Semicolon);
         }
 
-        if members.iter().all(|(_, decl)| decl.is_empty()) {
+        if members.iter().all(|decl| decl.declarators.is_empty()) {
             errors.push(Error::new(token, ErrorKind::IsEmpty(token.kind.clone())))
         }
 
@@ -1184,7 +1185,7 @@ impl Parser {
                     ExprKind::CompoundAssign {
                         l_expr: Box::new(right),
                         token,
-                        r_expr: Box::new(ExprKind::Literal(1, Type::Primitive(Primitive::Int))),
+                        r_expr: Box::new(ExprKind::new_literal(1, Primitive::Int)),
                     }
                 }
                 // typecast
@@ -1312,12 +1313,15 @@ impl Parser {
     fn primary(&mut self) -> Result<ExprKind, Error> {
         if let Some(n) = match_next!(self, TokenKind::Number(_)) {
             let n = n.unwrap_num();
-            return Ok(ExprKind::Literal(n, Type::Primitive(integer_type(n))));
+            return Ok(ExprKind::Literal(
+                n,
+                QualType::new(Type::Primitive(integer_type(n))),
+            ));
         }
         if let Some(c) = match_next!(self, TokenKind::CharLit(_)) {
             return Ok(ExprKind::Literal(
                 c.unwrap_char() as i64,
-                Type::Primitive(Primitive::Char),
+                QualType::new(Type::Primitive(Primitive::Char)),
             ));
         }
         if let Some(s) = match_next!(self, TokenKind::Ident(_)) {
@@ -1373,7 +1377,7 @@ impl Parser {
         if let TokenKind::Ident(..) = token.kind {
             return self.typedefs.get(token.unwrap_string()).is_some();
         }
-        token.is_type()
+        token.is_type() || token.is_qualifier()
     }
     fn is_specifier(&self, token: &Token) -> bool {
         self.is_type(token) || token.is_storageclass() || matches!(token.kind, TokenKind::Inline)

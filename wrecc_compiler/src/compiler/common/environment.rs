@@ -20,7 +20,7 @@ pub type SymbolRef = Rc<RefCell<Symbol>>;
 #[derive(Clone, Debug)]
 pub struct Symbol {
     /// Type of identifier given in declaration
-    pub type_decl: Type,
+    pub qtype: QualType,
 
     /// Current storage-class of symbol
     pub storage_class: Option<StorageClass>,
@@ -64,7 +64,7 @@ impl Symbol {
     pub fn is_extern(&self) -> bool {
         match self.storage_class {
             Some(StorageClass::Extern) => true,
-            None if self.type_decl.is_func() && self.kind == InitType::Declaration => true,
+            None if self.qtype.ty.is_func() && self.kind == InitType::Declaration => true,
             _ => false,
         }
     }
@@ -79,7 +79,7 @@ impl Symbol {
 
     /// Compares current-symbols type to the already existing symbol
     fn cmp(&self, name: &Token, other: &Symbol) -> Result<(), Error> {
-        match (&self.type_decl, &other.type_decl) {
+        match (&self.qtype, &other.qtype) {
             _ if (self.is_typedef() && !other.is_typedef())
                 || (!self.is_typedef() && other.is_typedef()) =>
             {
@@ -88,16 +88,16 @@ impl Symbol {
                     ErrorKind::RedefOtherSymbol(name.unwrap_string(), other.to_string()),
                 ))
             }
-            (ty1 @ Type::Array(..), ty2 @ Type::Array(..))
-                if !self.is_typedef()
+            (qtype1, qtype2)
+                if qtype1.ty.is_array() && qtype2.ty.is_array() && !self.is_typedef()
                     // placeholder expression
-                    && ty1.type_compatible(&ty2, &ExprKind::Nop) =>
+                    && qtype1.type_compatible(&qtype2, &ExprKind::Nop) =>
             {
                 Ok(())
             }
-            (ty1, ty2) if ty1 != ty2 => Err(Error::new(
+            (qtype1, qtype2) if qtype1 != qtype2 => Err(Error::new(
                 name,
-                ErrorKind::RedefTypeMismatch(name.unwrap_string(), ty1.clone(), ty2.clone()),
+                ErrorKind::RedefTypeMismatch(name.unwrap_string(), qtype1.clone(), qtype2.clone()),
             )),
             _ => Ok(()),
         }
@@ -233,9 +233,9 @@ impl Environment {
     fn check_storage_class_mismatch(
         &self,
         var_name: &Token,
-        type_decl: &Type,
         current: &Option<StorageClass>,
         existing: &Option<StorageClass>,
+        is_func: bool,
     ) -> Result<(), Error> {
         let mismatch = if self.is_global() {
             match (current, existing) {
@@ -253,7 +253,7 @@ impl Environment {
         } else {
             match (current, existing) {
                 // local function-decl can only be extern
-                _ if type_decl.is_func() => Ok(()),
+                _ if is_func => Ok(()),
                 (current, Some(StorageClass::Extern)) if current != &Some(StorageClass::Extern) => {
                     Err(("non-extern", "extern"))
                 }
@@ -291,9 +291,9 @@ impl Environment {
 
         self.check_storage_class_mismatch(
             var_name,
-            &current_symbol.type_decl,
             &current_symbol.storage_class,
             &existing_symbol.borrow().storage_class,
+            current_symbol.qtype.ty.is_func(),
         )?;
 
         let existing_kind = existing_symbol.borrow().kind.clone();
@@ -303,14 +303,14 @@ impl Environment {
             | (InitType::Declaration, InitType::Declaration) => {
                 // make sure that current symbol has known array-size if existing array-size was
                 // was known
-                if !current_symbol.is_typedef() && current_symbol.type_decl.is_unbounded_array() {
-                    current_symbol.type_decl = existing_symbol.borrow().type_decl.clone();
+                if !current_symbol.is_typedef() && current_symbol.qtype.ty.is_unbounded_array() {
+                    current_symbol.qtype = existing_symbol.borrow().qtype.clone();
                 }
 
                 // storage classes with extern are either extern or existing storage-class
-                if (!current_symbol.type_decl.is_func()
+                if (!current_symbol.qtype.ty.is_func()
                     && matches!(current_symbol.storage_class, Some(StorageClass::Extern)))
-                    || (current_symbol.type_decl.is_func()
+                    || (current_symbol.qtype.ty.is_func()
                         && existing_symbol.borrow().storage_class.is_some())
                 {
                     current_symbol.storage_class = existing_symbol.borrow().storage_class.clone();
@@ -321,7 +321,7 @@ impl Environment {
             }
 
             (InitType::Declaration, InitType::Definition) => {
-                if current_symbol.type_decl.is_func() && existing_symbol.borrow().storage_class.is_none()
+                if current_symbol.qtype.ty.is_func() && existing_symbol.borrow().storage_class.is_none()
                 {
                     existing_symbol.borrow_mut().storage_class = current_symbol.storage_class;
                 }
@@ -377,16 +377,16 @@ impl Environment {
         let mut errors = Vec::new();
 
         for symbol in globals.values() {
-            let type_decl = &symbol.borrow().type_decl;
+            let qtype = &symbol.borrow().qtype;
 
-            if !type_decl.is_complete()
-                && !type_decl.is_unbounded_array()
-                && !type_decl.is_void()
+            if !qtype.ty.is_complete()
+                && !qtype.ty.is_unbounded_array()
+                && !qtype.ty.is_void()
                 && !matches!(symbol.borrow().storage_class, Some(StorageClass::Extern))
             {
                 errors.push(Error::new(
                     &symbol.borrow().token,
-                    ErrorKind::IncompleteTentative(symbol.borrow().type_decl.clone()),
+                    ErrorKind::IncompleteTentative(symbol.borrow().qtype.clone()),
                 ));
             }
         }
@@ -412,7 +412,7 @@ pub mod tests {
                 kind:$kind,
                 storage_class:None,
                 token: token.clone(),
-                type_decl: setup_type!($ty),
+                qtype: setup_type!($ty),
                 reg: None,
             };
             (token, symbol)
@@ -424,7 +424,7 @@ pub mod tests {
                 kind:$kind,
                 storage_class:Some($sc),
                 token: token.clone(),
-                type_decl: setup_type!($ty),
+                qtype: setup_type!($ty),
                 reg: None,
             };
             (token, symbol)
@@ -468,7 +468,7 @@ pub mod tests {
         declare(&mut env,symbol!("n", "long", InitType::Declaration),false).unwrap();
         assert!(matches!(
             env.symbols.get_current("n").map(|sy|sy.borrow().clone()),
-            Some(Symbol {type_decl: Type::Primitive(Primitive::Long),..})
+            Some(Symbol {qtype: QualType{ty:Type::Primitive(Primitive::Long),..},..})
         ));
         assert!(env.symbols.get_current("s").is_some());
 
@@ -543,13 +543,13 @@ pub mod tests {
         assert!(env.symbols.get_current("a").is_none());
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbol {type_decl:Type::Primitive(Primitive::Int),..})
+            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Int),..},..})
         ));
 
         declare(&mut env, symbol!("a", "long", InitType::Declaration),false).unwrap();
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbol {type_decl:Type::Primitive(Primitive::Long),..})
+            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Long),..},..})
         ));
         env.enter();
 
@@ -562,7 +562,7 @@ pub mod tests {
         assert!(env.symbols.get_current("a").is_none());
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbol {type_decl:Type::Primitive(Primitive::Long),..})
+            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Long),..},..})
         ));
         assert!(env.symbols.get("foo".to_string()).is_some());
 
@@ -570,12 +570,12 @@ pub mod tests {
         assert!(env.symbols.get("foo".to_string()).is_none());
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbol {type_decl:Type::Primitive(Primitive::Long),..})
+            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Long),..},..})
         ));
         env.exit();
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbol {type_decl:Type::Primitive(Primitive::Int),..})
+            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Int),..},..})
         ));
         env.exit();
 
@@ -596,7 +596,7 @@ pub mod tests {
         env.enter();
         assert!(matches!(
             env.symbols.get("foo".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbol {kind:InitType::Definition,type_decl:Type::Function(_),..}
+            Some(Symbol {kind:InitType::Definition,qtype:QualType{ty:Type::Function(_),..},..}
         )));
         assert!(env.symbols.get_current("foo").is_none());
 

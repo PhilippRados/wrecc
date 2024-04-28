@@ -33,6 +33,9 @@ impl<'a> Scanner<'a> {
                 ("auto", TokenKind::Auto),
                 ("register", TokenKind::Register),
                 ("inline", TokenKind::Inline),
+                ("const", TokenKind::Const),
+                ("volatile", TokenKind::Volatile),
+                ("register", TokenKind::Register),
                 ("if", TokenKind::If),
                 ("switch", TokenKind::Switch),
                 ("case", TokenKind::Case),
@@ -420,12 +423,13 @@ mod tests {
     }
     #[test]
     fn token_basic_math_expression() {
-        let actual = setup("3 + 1 / 4");
+        let actual = setup("3 + 1 / -4");
         let expected = vec![
             TokenKind::Number(3),
             TokenKind::Plus,
             TokenKind::Number(1),
             TokenKind::Slash,
+            TokenKind::Minus,
             TokenKind::Number(4),
         ];
         assert_eq!(actual, expected);

@@ -95,14 +95,16 @@ impl TypeChecker {
         mut func: Option<&mut mir::decl::Function>,
     ) -> Result<Vec<mir::decl::Declarator>, Error> {
         let mut declarators = Vec::new();
-        let specifier_type = self.parse_specifiers(decl.specifiers)?;
-        let storage_class = self.parse_storage_classes(&decl.storage_classes)?;
+
+        let storage_class = self.parse_storage_classes(&decl.decl_specs.storage_classes)?;
+        let qtype = self.parse_specifiers(decl.decl_specs.specifiers)?;
+        let qtype = Self::parse_qualifiers(qtype, &decl.decl_specs.qualifiers)?;
 
         for declarator in decl.declarators {
             if let Some(d) = self.declarator(
-                specifier_type.clone(),
+                qtype.clone(),
                 storage_class.clone(),
-                decl.is_inline,
+                decl.decl_specs.is_inline,
                 declarator,
                 &mut func,
             )? {
@@ -114,16 +116,16 @@ impl TypeChecker {
     }
     fn declarator(
         &mut self,
-        specifier_type: Type,
+        qtype: QualType,
         storage_class: Option<mir::decl::StorageClass>,
         is_inline: bool,
         (declarator, init): (hir::decl::Declarator, Option<hir::decl::Init>),
         func: &mut Option<&mut mir::decl::Function>,
     ) -> Result<Option<mir::decl::Declarator>, Error> {
-        let type_decl = self.parse_modifiers(specifier_type, declarator.modifiers)?;
+        let qtype = self.parse_modifiers(qtype, declarator.modifiers)?;
 
         if let Some(name) = declarator.name {
-            if !type_decl.is_func() && is_inline {
+            if !qtype.ty.is_func() && is_inline {
                 return Err(Error::new(
                     &name,
                     ErrorKind::Regular("'inline' can only appear on functions"),
@@ -132,13 +134,13 @@ impl TypeChecker {
 
             match storage_class {
                 Some(sc @ (mir::decl::StorageClass::Register | mir::decl::StorageClass::Auto))
-                    if self.env.is_global() || type_decl.is_func() =>
+                    if self.env.is_global() || qtype.ty.is_func() =>
                 {
                     return Err(Error::new(
                         &name,
                         ErrorKind::InvalidStorageClass(
                             sc,
-                            if type_decl.is_func() {
+                            if qtype.ty.is_func() {
                                 "function"
                             } else {
                                 "global variable"
@@ -152,9 +154,7 @@ impl TypeChecker {
                         ErrorKind::Regular("variable declared with 'extern' cannot have initializer"),
                     ))
                 }
-                Some(mir::decl::StorageClass::Static)
-                    if !self.env.is_global() && type_decl.is_func() =>
-                {
+                Some(mir::decl::StorageClass::Static) if !self.env.is_global() && qtype.ty.is_func() => {
                     return Err(Error::new(
                         &name,
                         ErrorKind::Regular(
@@ -181,13 +181,13 @@ impl TypeChecker {
                 },
                 reg: None,
                 token: name.clone(),
-                type_decl: type_decl.clone(),
+                qtype: qtype.clone(),
             };
 
             let entry = self.env.declare_symbol(&name, symbol)?;
             let is_typedef = entry.borrow().is_typedef();
 
-            if (is_typedef || type_decl.is_func()) && init.is_some() {
+            if (is_typedef || qtype.ty.is_func()) && init.is_some() {
                 return Err(Error::new(
                     &name,
                     ErrorKind::Regular("only variables can be initialized"),
@@ -198,23 +198,23 @@ impl TypeChecker {
                 return Ok(None);
             }
 
-            let mut symbol_type = entry.borrow().type_decl.clone();
+            let mut symbol_type = entry.borrow().qtype.clone();
 
             let init = if let Some(init) = init {
-                if !symbol_type.is_unbounded_array() && !symbol_type.is_complete() {
+                if !symbol_type.ty.is_unbounded_array() && !symbol_type.ty.is_complete() {
                     return Err(Error::new(&name, ErrorKind::IncompleteType(symbol_type.clone())));
                 }
                 let init = self.init_check(func, &mut symbol_type, init, entry.borrow().is_static())?;
 
                 // update symbol type if was unbounded array
-                if let ty @ Type::Array(_, ArraySize::Unknown) = &mut entry.borrow_mut().type_decl {
-                    *ty = symbol_type.clone();
+                if let ty @ Type::Array(_, ArraySize::Unknown) = &mut entry.borrow_mut().qtype.ty {
+                    *ty = symbol_type.clone().ty;
                 }
 
                 Some(init)
             } else {
-                let tentative_decl = self.env.is_global() && symbol_type.is_aggregate();
-                if !symbol_type.is_complete() && !tentative_decl && !entry.borrow().is_extern() {
+                let tentative_decl = self.env.is_global() && symbol_type.ty.is_aggregate();
+                if !symbol_type.ty.is_complete() && !tentative_decl && !entry.borrow().is_extern() {
                     return Err(Error::new(&name, ErrorKind::IncompleteType(symbol_type)));
                 }
                 None
@@ -234,67 +234,116 @@ impl TypeChecker {
         }
     }
 
-    pub fn parse_type(&mut self, token: &Token, decl_type: hir::decl::DeclType) -> Result<Type, Error> {
-        let specifier_type = self.parse_specifiers(decl_type.specifiers)?;
-        let parsed_type = self.parse_modifiers(specifier_type, decl_type.modifiers)?;
+    pub fn parse_type(
+        &mut self,
+        token: &Token,
+        decl_type: hir::decl::DeclType,
+    ) -> Result<QualType, Error> {
+        let qtype = self.parse_specifiers(decl_type.specifiers)?;
+        let qtype = Self::parse_qualifiers(qtype, &decl_type.qualifiers)?;
+        let qtype = self.parse_modifiers(qtype, decl_type.modifiers)?;
 
-        if !parsed_type.is_void() && !parsed_type.is_complete() {
-            return Err(Error::new(token, ErrorKind::IncompleteType(parsed_type)));
+        if !qtype.ty.is_void() && !qtype.ty.is_complete() {
+            return Err(Error::new(token, ErrorKind::IncompleteType(qtype)));
         }
 
-        Ok(parsed_type)
+        Ok(qtype)
     }
-    fn parse_specifiers(&mut self, specifiers: Vec<hir::decl::DeclSpecifier>) -> Result<Type, Error> {
-        if specifiers.is_empty() {
+    fn parse_specifiers(&mut self, specifiers: Vec<hir::decl::Specifier>) -> Result<QualType, Error> {
+        let ty = if specifiers.is_empty() {
             // WARN: since C99 this should at least issue a warning
-            return Ok(Type::Primitive(Primitive::Int));
-        }
+            // problem: requires token so should probably already error in parser
+            Type::Primitive(Primitive::Int)
+        } else {
+            let token = specifiers[0].token.clone();
 
-        let token = specifiers[0].token.clone();
+            let mut specifier_kind_list: Vec<hir::decl::SpecifierKind> =
+                specifiers.into_iter().map(|spec| spec.kind).collect();
 
-        let mut specifier_kind_list: Vec<hir::decl::SpecifierKind> =
-            specifiers.into_iter().map(|spec| spec.kind).collect();
+            specifier_kind_list.sort_by_key(|spec| spec.order());
 
-        specifier_kind_list.sort_by_key(|spec| spec.order());
+            match specifier_kind_list.as_slice() {
+                [hir::decl::SpecifierKind::Struct(name, members)]
+                | [hir::decl::SpecifierKind::Union(name, members)] => {
+                    self.struct_or_union_specifier(token, name, members)?
+                }
+                [hir::decl::SpecifierKind::Enum(name, enum_constants)] => {
+                    self.enum_specifier(token, name, enum_constants)?
+                }
+                [hir::decl::SpecifierKind::UserType] => {
+                    return self.env.get_symbol(&token).and_then(|symbol| {
+                        if symbol.borrow().is_typedef() {
+                            Ok(symbol.borrow().qtype.clone())
+                        } else {
+                            Err(Error::new(
+                                &token,
+                                ErrorKind::InvalidSymbol(token.unwrap_string(), "user-type"),
+                            ))
+                        }
+                    })
+                }
 
-        match specifier_kind_list.as_slice() {
-            [hir::decl::SpecifierKind::Struct(name, members)]
-            | [hir::decl::SpecifierKind::Union(name, members)] => {
-                self.struct_or_union_specifier(token, name, members)
-            }
-            [hir::decl::SpecifierKind::Enum(name, enum_constants)] => {
-                self.enum_specifier(token, name, enum_constants)
-            }
-            [hir::decl::SpecifierKind::UserType] => self.env.get_symbol(&token).and_then(|symbol| {
-                if symbol.borrow().is_typedef() {
-                    Ok(symbol.borrow().type_decl.clone())
-                } else {
-                    Err(Error::new(
+                [hir::decl::SpecifierKind::Void] => Type::Primitive(Primitive::Void),
+                [hir::decl::SpecifierKind::Char] => Type::Primitive(Primitive::Char),
+                [hir::decl::SpecifierKind::Short]
+                | [hir::decl::SpecifierKind::Short, hir::decl::SpecifierKind::Int] => {
+                    Type::Primitive(Primitive::Short)
+                }
+                [hir::decl::SpecifierKind::Int] => Type::Primitive(Primitive::Int),
+                [hir::decl::SpecifierKind::Long]
+                | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Int]
+                | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Long]
+                | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Int] => {
+                    Type::Primitive(Primitive::Long)
+                }
+                _ => {
+                    return Err(Error::new(
                         &token,
-                        ErrorKind::InvalidSymbol(token.unwrap_string(), "user-type"),
+                        ErrorKind::Regular("invalid combination of type-specifiers"),
                     ))
                 }
-            }),
+            }
+        };
 
-            [hir::decl::SpecifierKind::Void] => Ok(Type::Primitive(Primitive::Void)),
-            [hir::decl::SpecifierKind::Char] => Ok(Type::Primitive(Primitive::Char)),
-            [hir::decl::SpecifierKind::Short]
-            | [hir::decl::SpecifierKind::Short, hir::decl::SpecifierKind::Int] => {
-                Ok(Type::Primitive(Primitive::Short))
-            }
-            [hir::decl::SpecifierKind::Int] => Ok(Type::Primitive(Primitive::Int)),
-            [hir::decl::SpecifierKind::Long]
-            | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Int]
-            | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Long]
-            | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Int] => {
-                Ok(Type::Primitive(Primitive::Long))
-            }
-            _ => Err(Error::new(
-                &token,
-                ErrorKind::Regular("invalid combination of type-specifiers"),
-            )),
-        }
+        Ok(QualType::new(ty))
     }
+    fn parse_qualifiers(
+        mut qtype: QualType,
+        new_qualifiers: &Vec<hir::decl::Qualifier>,
+    ) -> Result<QualType, Error> {
+        if let Some(qualifier) = new_qualifiers
+            .iter()
+            .find(|q| q.kind == hir::decl::QualifierKind::Restrict)
+        {
+            if !qtype.ty.is_ptr() {
+                return Err(Error::new(&qualifier.token, ErrorKind::InvalidRestrict(qtype)));
+            }
+        }
+        let new_qualifiers = Qualifiers::from(new_qualifiers);
+
+        // if an array is const then its element type is too
+        if new_qualifiers.is_const {
+            if let Type::Array(of, _) = &mut qtype.ty {
+                *of = Box::new(Self::parse_qualifiers(
+                    *of.clone(),
+                    &vec![hir::decl::Qualifier {
+                        kind: hir::decl::QualifierKind::Const,
+                        token: Token::default(TokenKind::Semicolon),
+                    }],
+                )?);
+            }
+        }
+
+        Ok(QualType {
+            qualifiers: Qualifiers {
+                is_const: new_qualifiers.is_const | qtype.qualifiers.is_const,
+                is_restrict: new_qualifiers.is_restrict | qtype.qualifiers.is_restrict,
+                is_volatile: new_qualifiers.is_volatile | qtype.qualifiers.is_volatile,
+            },
+            ..qtype
+        })
+    }
+
     fn parse_storage_classes(
         &mut self,
         storage_classes: &Vec<hir::decl::StorageClass>,
@@ -310,30 +359,35 @@ impl TypeChecker {
     }
     fn parse_modifiers(
         &mut self,
-        mut spec_type: Type,
+        mut qtype: QualType,
         modifiers: Vec<hir::decl::DeclModifier>,
-    ) -> Result<Type, Error> {
+    ) -> Result<QualType, Error> {
         for m in modifiers {
-            spec_type = match m {
-                hir::decl::DeclModifier::Pointer => spec_type.pointer_to(),
+            qtype = match m {
+                hir::decl::DeclModifier::Pointer(qualifiers) => {
+                    qtype.pointer_to(Qualifiers::from(&qualifiers))
+                }
                 hir::decl::DeclModifier::Array(token, size) => {
-                    if spec_type.is_func() || spec_type.is_unbounded_array() {
-                        return Err(Error::new(&token, ErrorKind::InvalidArray(spec_type)));
+                    if qtype.ty.is_func() || qtype.ty.is_unbounded_array() {
+                        return Err(Error::new(&token, ErrorKind::InvalidArray(qtype)));
                     }
 
                     if let Some(mut expr) = size {
                         let amount = expr.get_literal_constant(self, &token, "array size specifier")?;
 
                         if amount > 0 {
-                            if i64::overflowing_mul(spec_type.size() as i64, amount).1 {
+                            if i64::overflowing_mul(qtype.ty.size() as i64, amount).1 {
                                 return Err(Error::new(&token, ErrorKind::ArraySizeOverflow));
                             }
-                            Type::Array(Box::new(spec_type), ArraySize::Known(amount as usize))
+                            QualType::new(Type::Array(
+                                Box::new(qtype),
+                                ArraySize::Known(amount as usize),
+                            ))
                         } else {
                             return Err(Error::new(&token, ErrorKind::NegativeArraySize));
                         }
                     } else {
-                        Type::Array(Box::new(spec_type), ArraySize::Unknown)
+                        QualType::new(Type::Array(Box::new(qtype), ArraySize::Unknown))
                     }
                 }
                 hir::decl::DeclModifier::Function { token, params, variadic } => {
@@ -342,26 +396,26 @@ impl TypeChecker {
                     let params = self
                         .parse_params(&token, params)?
                         .into_iter()
-                        .map(|(type_decl, _)| type_decl)
+                        .map(|(qtype, _)| qtype)
                         .collect();
                     self.env.exit();
 
-                    if spec_type.is_func() || spec_type.is_array() {
-                        return Err(Error::new(&token, ErrorKind::InvalidReturnType(spec_type)));
+                    if qtype.ty.is_func() || qtype.ty.is_array() {
+                        return Err(Error::new(&token, ErrorKind::InvalidReturnType(qtype)));
                     }
 
-                    spec_type.function_of(params, variadic)
+                    qtype.function_of(params, variadic)
                 }
             };
         }
 
-        Ok(spec_type)
+        Ok(qtype)
     }
     fn struct_or_union_specifier(
         &mut self,
         token: Token,
         name: &Option<Token>,
-        members: &Option<Vec<hir::decl::MemberDeclaration>>,
+        members: &Option<Vec<hir::decl::MemberDecl>>,
     ) -> Result<Type, Error> {
         let members = match (&name, members) {
             (Some(name), Some(members)) => {
@@ -376,7 +430,7 @@ impl TypeChecker {
                 }
                 let members = custom_type.borrow().clone().unwrap_aggr();
 
-                StructInfo::Named(name.unwrap_string(), members)
+                StructKind::Named(name.unwrap_string(), members)
             }
 
             (Some(name), None) => {
@@ -394,11 +448,11 @@ impl TypeChecker {
 
                 let members = custom_type.borrow().clone().unwrap_aggr();
 
-                StructInfo::Named(name.unwrap_string(), members)
+                StructKind::Named(name.unwrap_string(), members)
             }
             (None, Some(members)) => {
                 let members = self.struct_declaration(members.clone())?;
-                StructInfo::Unnamed(token.clone(), members)
+                StructKind::Unnamed(token.clone(), members)
             }
             (None, None) => {
                 return Err(Error::new(&token, ErrorKind::EmptyAggregate(token.kind.clone())));
@@ -413,20 +467,21 @@ impl TypeChecker {
     }
     fn struct_declaration(
         &mut self,
-        members: Vec<hir::decl::MemberDeclaration>,
-    ) -> Result<Vec<(Type, Token)>, Error> {
+        members: Vec<hir::decl::MemberDecl>,
+    ) -> Result<Vec<(QualType, Token)>, Error> {
         let mut parsed_members = Vec::new();
 
-        for (spec, declarators) in members {
-            let specifier_type = self.parse_specifiers(spec)?;
+        for member in members {
+            let qtype = self.parse_specifiers(member.specifiers)?;
+            let qtype = Self::parse_qualifiers(qtype, &member.qualifiers)?;
 
-            for hir::decl::MemberDeclarator { name, modifiers } in declarators {
-                let parsed_type = self.parse_modifiers(specifier_type.clone(), modifiers)?;
+            for hir::decl::MemberDeclarator { name, modifiers } in member.declarators {
+                let parsed_type = self.parse_modifiers(qtype.clone(), modifiers)?;
 
-                if !parsed_type.is_complete() {
+                if !parsed_type.ty.is_complete() {
                     return Err(Error::new(&name, ErrorKind::IncompleteType(parsed_type)));
                 }
-                if parsed_type.is_func() {
+                if parsed_type.ty.is_func() {
                     return Err(Error::new(
                         &name,
                         ErrorKind::FunctionMember(name.unwrap_string(), parsed_type),
@@ -441,7 +496,7 @@ impl TypeChecker {
 
         Ok(parsed_members)
     }
-    fn check_duplicate_members(vec: &[(Type, Token)]) -> Result<(), Error> {
+    fn check_duplicate_members(vec: &[(QualType, Token)]) -> Result<(), Error> {
         use std::collections::HashSet;
         let mut set = HashSet::new();
         for token in vec.iter().map(|(_, name)| name) {
@@ -506,7 +561,7 @@ impl TypeChecker {
                 Symbol {
                     storage_class: None,
                     token: name.clone(),
-                    type_decl: Type::Primitive(Primitive::Int),
+                    qtype: QualType::new(Type::Primitive(Primitive::Int)),
                     kind: InitType::Definition,
                     reg: Some(Register::Literal(index as i64, Type::Primitive(Primitive::Int))),
                 },
@@ -527,13 +582,14 @@ impl TypeChecker {
         &mut self,
         token: &Token,
         params: Vec<hir::decl::ParamDecl>,
-    ) -> Result<Vec<(Type, Option<(Token, SymbolRef)>)>, Error> {
+    ) -> Result<Vec<(QualType, Option<(Token, SymbolRef)>)>, Error> {
         let mut parsed_params = Vec::new();
 
         for param in params {
-            let specifier_type = self.parse_specifiers(param.specifiers.clone())?;
-            let storage_class = self.parse_storage_classes(&param.storage_classes)?;
-            let mut parsed_type = self.parse_modifiers(specifier_type, param.declarator.modifiers)?;
+            let storage_class = self.parse_storage_classes(&param.decl_specs.storage_classes)?;
+            let qtype = self.parse_specifiers(param.decl_specs.specifiers.clone())?;
+            let qtype = Self::parse_qualifiers(qtype, &param.decl_specs.qualifiers)?;
+            let mut qtype = self.parse_modifiers(qtype, param.declarator.modifiers)?;
 
             let token_name = if let Some(name) = &param.declarator.name {
                 name
@@ -541,7 +597,7 @@ impl TypeChecker {
                 token
             };
 
-            if param.is_inline {
+            if param.decl_specs.is_inline {
                 return Err(Error::new(
                     token_name,
                     ErrorKind::Regular("cannot have 'inline' on function parameters"),
@@ -559,10 +615,10 @@ impl TypeChecker {
                 None => None,
             };
 
-            parsed_type = match parsed_type {
-                Type::Array(of, _) => of.pointer_to(),
-                Type::Function { .. } => parsed_type.pointer_to(),
-                ty => ty,
+            qtype = match qtype.ty {
+                Type::Array(of, _) => of.pointer_to(Qualifiers::default()),
+                Type::Function { .. } => qtype.pointer_to(Qualifiers::default()),
+                _ => qtype,
             };
 
             let name = if let Some(name) = param.declarator.name {
@@ -571,7 +627,7 @@ impl TypeChecker {
                     Symbol {
                         storage_class,
                         token: name.clone(),
-                        type_decl: parsed_type.clone(),
+                        qtype: qtype.clone(),
                         kind: InitType::Declaration,
                         reg: None,
                     },
@@ -582,13 +638,14 @@ impl TypeChecker {
                 None
             };
 
-            parsed_params.push((parsed_type, name));
+            parsed_params.push((qtype, name));
         }
 
         // single unnamed void param is equivalent to empty params
-        if let [(Type::Primitive(Primitive::Void), None)] = parsed_params.as_slice() {
+        if let [(QualType { ty: Type::Primitive(Primitive::Void), .. }, None)] = parsed_params.as_slice()
+        {
             parsed_params.pop();
-        } else if parsed_params.iter().any(|(type_decl, _)| type_decl.is_void()) {
+        } else if parsed_params.iter().any(|(qtype, _)| qtype.ty.is_void()) {
             return Err(Error::new(token, ErrorKind::VoidFuncArg));
         }
 
@@ -598,40 +655,40 @@ impl TypeChecker {
     fn init_check(
         &mut self,
         func: &mut Option<&mut mir::decl::Function>,
-        type_decl: &mut Type,
+        qtype: &mut QualType,
         mut init: hir::decl::Init,
         is_static: bool,
     ) -> Result<mir::decl::Init, Error> {
-        if let Some((string, size)) = Self::is_string_init(type_decl, &init)? {
+        if let Some((string, size)) = Self::is_string_init(qtype, &init)? {
             init.kind = Self::char_array(init.token.clone(), string, size)?;
         }
 
         match init.kind {
             hir::decl::InitKind::Scalar(expr) => {
-                self.init_scalar(func, type_decl, &init.token, expr, is_static)
+                self.init_scalar(func, qtype, &init.token, expr, is_static)
             }
             hir::decl::InitKind::Aggr(list) => {
-                self.init_aggregate(func, type_decl, init.token, list, is_static)
+                self.init_aggregate(func, qtype, init.token, list, is_static)
             }
         }
     }
     fn init_scalar(
         &mut self,
         func: &mut Option<&mut mir::decl::Function>,
-        type_decl: &Type,
+        qtype: &QualType,
         token: &Token,
         expr: hir::expr::ExprKind,
         is_static: bool,
     ) -> Result<mir::decl::Init, Error> {
-        if type_decl.is_array() {
-            return Err(Error::new(token, ErrorKind::InvalidAggrInit(type_decl.clone())));
+        if qtype.ty.is_array() {
+            return Err(Error::new(token, ErrorKind::InvalidAggrInit(qtype.clone())));
         }
 
-        let expr = self.visit_expr(func, expr)?;
+        let mut expr = self.visit_expr(func, expr)?.decay(token)?;
+        expr.to_rval();
 
-        let expr = expr.decay(token)?;
-        Self::check_type_compatibility(token, type_decl, &expr)?;
-        let expr = Self::maybe_cast(type_decl.clone(), expr);
+        Self::check_type_compatibility(token, qtype, &expr)?;
+        let expr = Self::maybe_cast(qtype.clone(), expr);
 
         let should_be_const = self.env.is_global() || is_static;
         if should_be_const && !expr.is_constant() {
@@ -650,15 +707,15 @@ impl TypeChecker {
     fn init_aggregate(
         &mut self,
         func: &mut Option<&mut mir::decl::Function>,
-        type_decl: &mut Type,
+        qtype: &mut QualType,
         token: Token,
         mut list: Vec<Box<hir::decl::Init>>,
         is_static: bool,
     ) -> Result<mir::decl::Init, Error> {
-        match type_decl {
+        match qtype.ty {
             Type::Array { .. } | Type::Struct(_) | Type::Union(_) => {
                 let mut new_list = Vec::new();
-                let mut objects = CurrentObjects::new(type_decl.clone());
+                let mut objects = CurrentObjects::new(qtype.clone());
                 let mut max_index: usize = 0;
 
                 // INFO: int array[3] = {} is a gnu-extension
@@ -702,31 +759,29 @@ impl TypeChecker {
                     //         int a;
                     //         struct X s;
                     //     } = {.s = foo};
-                    let mut sub_type = objects.current_type();
+                    let mut sub_qtype = objects.current_type();
                     if let hir::decl::InitKind::Scalar(expr) = first.kind.clone() {
                         // placeholder expression
                         let left = mir::expr::Expr {
                             kind: mir::expr::ExprKind::Nop,
-                            type_decl: sub_type.clone(),
+                            qtype: sub_qtype.clone(),
                             value_kind: ValueKind::Lvalue,
                         };
                         let right = self.visit_expr(func, expr)?;
 
-                        while !sub_type.is_scalar()
-                            && Self::is_string_init(sub_type, first)?.is_none()
-                            && self
-                                .assign_var(left.clone(), token.clone(), right.clone())
-                                .is_err()
+                        while !sub_qtype.ty.is_scalar()
+                            && Self::is_string_init(sub_qtype, first)?.is_none()
+                            && self.assign(left.clone(), token.clone(), right.clone()).is_err()
                         {
                             let new_sub_type = objects.current_type().at(0).unwrap();
                             objects.0.push((0, 0, new_sub_type));
 
-                            sub_type = objects.current_type();
+                            sub_qtype = objects.current_type();
                         }
                     }
 
-                    let init = self.init_check(func, sub_type, *list.remove(0), is_static)?;
-                    let sub_type_size = sub_type.size() as i64;
+                    let init = self.init_check(func, sub_qtype, *list.remove(0), is_static)?;
+                    let sub_type_size = sub_qtype.ty.size() as i64;
                     let init_offset = objects.offset();
 
                     // remove overriding elements
@@ -762,7 +817,7 @@ impl TypeChecker {
                 }
 
                 // set size of unbounded array to biggest designator index
-                if let Type::Array(_, size @ ArraySize::Unknown) = type_decl {
+                if let Type::Array(_, size @ ArraySize::Unknown) = &mut qtype.ty {
                     *size = ArraySize::Known(max_index + 1);
                 }
 
@@ -776,7 +831,7 @@ impl TypeChecker {
             }
             _ => match list.as_slice() {
                 [single_init] if matches!(single_init.kind, hir::decl::InitKind::Scalar(_)) => {
-                    self.init_check(func, type_decl, *single_init.clone(), is_static)
+                    self.init_check(func, qtype, *single_init.clone(), is_static)
                 }
                 [single_init] => Err(Error::new(
                     &single_init.token,
@@ -793,10 +848,10 @@ impl TypeChecker {
 
     fn designator_index(
         &mut self,
-        type_decl: &Type,
+        qtype: &QualType,
         designator: hir::decl::Designator,
-    ) -> Result<(i64, i64, Type), Error> {
-        match (designator.kind, type_decl) {
+    ) -> Result<(i64, i64, QualType), Error> {
+        match (designator.kind, &qtype.ty) {
             (hir::decl::DesignatorKind::Array(mut expr), Type::Array(of, size)) => {
                 let literal = expr.get_literal_constant(self, &designator.token, "array designator")?;
                 if literal < 0 {
@@ -823,7 +878,7 @@ impl TypeChecker {
 
             (hir::decl::DesignatorKind::Array(_), Type::Struct(_) | Type::Union(_)) => Err(Error::new(
                 &designator.token,
-                ErrorKind::InvalidArrayDesignator(type_decl.clone()),
+                ErrorKind::InvalidArrayDesignator(qtype.clone()),
             )),
             (hir::decl::DesignatorKind::Member(m), Type::Struct(s) | Type::Union(s)) => {
                 if let Some(i) = s
@@ -832,7 +887,7 @@ impl TypeChecker {
                     .position(|(_, m_token)| *m == m_token.unwrap_string())
                 {
                     // unions only have single index
-                    if let Type::Union(_) = type_decl {
+                    if let Type::Union(_) = qtype.ty {
                         Ok((0, i as i64, s.member_type(&m)))
                     } else {
                         Ok((i as i64, i as i64, s.member_type(&m)))
@@ -840,14 +895,14 @@ impl TypeChecker {
                 } else {
                     Err(Error::new(
                         &designator.token,
-                        ErrorKind::NonExistantMember(m.clone(), type_decl.clone()),
+                        ErrorKind::NonExistantMember(m.clone(), qtype.clone()),
                     ))
                 }
             }
 
             (..) => Err(Error::new(
                 &designator.token,
-                ErrorKind::NonAggregateDesignator(type_decl.clone()),
+                ErrorKind::NonAggregateDesignator(qtype.clone()),
             )),
         }
     }
@@ -856,10 +911,10 @@ impl TypeChecker {
     // - char arr[4] = "foo";
     // - char arr[4] = {"foo"};
     fn is_string_init<'a>(
-        type_decl: &'a Type,
+        qtype: &'a QualType,
         init: &hir::decl::Init,
     ) -> Result<Option<(String, &'a ArraySize)>, Error> {
-        if let Some(size) = type_decl.is_char_array() {
+        if let Some(size) = qtype.ty.is_char_array() {
             match &init.kind {
                 hir::decl::InitKind::Scalar(hir::expr::ExprKind::String(s)) => {
                     return Ok(Some((s.unwrap_string(), size)))
@@ -916,7 +971,7 @@ impl TypeChecker {
                         token: token.clone(),
                         kind: hir::decl::InitKind::Scalar(hir::expr::ExprKind::Literal(
                             *c as i64,
-                            Type::Primitive(Primitive::Char),
+                            QualType::new(Type::Primitive(Primitive::Char)),
                         )),
                         designator: None,
                     })
@@ -937,7 +992,7 @@ impl TypeChecker {
             unreachable!("last modifier has to be function to be func-def");
         };
 
-        let storage_class = self.parse_storage_classes(&func_decl.storage_classes)?;
+        let storage_class = self.parse_storage_classes(&func_decl.decl_specs.storage_classes)?;
         match storage_class {
             None | Some(mir::decl::StorageClass::Static) | Some(mir::decl::StorageClass::Extern) => (),
             Some(sc) => {
@@ -952,7 +1007,8 @@ impl TypeChecker {
             .parse_type(
                 &func_decl.name,
                 hir::decl::DeclType {
-                    specifiers: func_decl.specifiers,
+                    specifiers: func_decl.decl_specs.specifiers,
+                    qualifiers: func_decl.decl_specs.qualifiers,
                     modifiers: func_decl.modifiers,
                 },
             )
@@ -963,7 +1019,7 @@ impl TypeChecker {
                 err
             })?;
 
-        if return_type.is_func() || return_type.is_array() {
+        if return_type.ty.is_func() || return_type.ty.is_array() {
             return Err(Error::new(
                 &func_decl.name,
                 ErrorKind::InvalidReturnType(return_type),
@@ -971,13 +1027,13 @@ impl TypeChecker {
         }
 
         if name_string == "main" {
-            if return_type != Type::Primitive(Primitive::Int) {
+            if return_type.ty != Type::Primitive(Primitive::Int) {
                 return Err(Error::new(
                     &func_decl.name,
                     ErrorKind::InvalidMainReturn(return_type),
                 ));
             }
-            if func_decl.is_inline {
+            if func_decl.decl_specs.is_inline {
                 return Err(Error::new(
                     &func_decl.name,
                     ErrorKind::Regular("'main' function cannot be declared 'inline'"),
@@ -994,30 +1050,29 @@ impl TypeChecker {
             name_string.clone(),
             return_type.clone(),
             variadic,
-            func_decl.is_inline,
+            func_decl.decl_specs.is_inline,
         );
 
-        let type_decl = Type::Function(FuncType {
-            return_type: Box::new(return_type),
-            params: params.iter().map(|(ty, _)| ty.clone()).collect(),
-            variadic,
-        });
         let symbol = self.env.declare_global(
             &func_decl.name,
             Symbol {
                 storage_class,
-                type_decl: type_decl.clone(),
+                qtype: QualType::new(Type::Function(FuncType {
+                    return_type: Box::new(return_type),
+                    params: params.iter().map(|(ty, _)| ty.clone()).collect(),
+                    variadic,
+                })),
                 kind: InitType::Definition,
                 reg: None,
                 token: func_decl.name.clone(),
             },
         )?;
 
-        for (type_decl, param_name) in params.into_iter() {
-            if !type_decl.is_complete() {
+        for (qtype, param_name) in params.into_iter() {
+            if !qtype.ty.is_complete() {
                 return Err(Error::new(
                     &func_decl.name,
-                    ErrorKind::IncompleteFuncParam(name_string, type_decl),
+                    ErrorKind::IncompleteFuncParam(name_string, qtype),
                 ));
             }
             if let Some((_, var_symbol)) = param_name {
@@ -1046,7 +1101,7 @@ impl TypeChecker {
         func.implicit_main_return(&mut func_body);
 
         if errors.is_empty() {
-            if !func.return_type.is_void() && !func.returns_all_paths {
+            if !func.return_type.ty.is_void() && !func.returns_all_paths {
                 return Err(Error::new(
                     &func_decl.name,
                     ErrorKind::NoReturnAllPaths(name_string),
@@ -1127,10 +1182,10 @@ impl TypeChecker {
         body: hir::stmt::Stmt,
     ) -> Result<mir::stmt::Stmt, Error> {
         let cond = self.visit_expr(&mut Some(func), cond)?;
-        if !cond.type_decl.is_integer() {
+        if !cond.qtype.ty.is_integer() {
             return Err(Error::new(
                 &token,
-                ErrorKind::NotInteger("switch conditional", cond.type_decl),
+                ErrorKind::NotInteger("switch conditional", cond.qtype),
             ));
         }
         let labels = Rc::new(RefCell::new(Vec::new()));
@@ -1203,10 +1258,10 @@ impl TypeChecker {
         func.scope.pop();
 
         let cond = self.visit_expr(&mut Some(func), cond)?;
-        if !cond.type_decl.is_scalar() {
+        if !cond.qtype.ty.is_scalar() {
             return Err(Error::new(
                 &token,
-                ErrorKind::NotScalar("conditional", cond.type_decl),
+                ErrorKind::NotScalar("conditional", cond.qtype),
             ));
         }
 
@@ -1227,7 +1282,7 @@ impl TypeChecker {
 
         let init = match init.map(|stmt| *stmt) {
             Some(hir::stmt::Stmt::Declaration(decl)) => {
-                let storage_classes = self.parse_storage_classes(&decl.storage_classes)?;
+                let storage_classes = self.parse_storage_classes(&decl.decl_specs.storage_classes)?;
                 match storage_classes {
                     None
                     | Some(mir::decl::StorageClass::Auto)
@@ -1248,10 +1303,10 @@ impl TypeChecker {
 
         let cond = if let Some(cond) = cond {
             let cond = self.visit_expr(&mut Some(func), cond)?;
-            if !cond.type_decl.is_scalar() {
+            if !cond.qtype.ty.is_scalar() {
                 return Err(Error::new(
                     &left_paren,
-                    ErrorKind::NotScalar("conditional", cond.type_decl),
+                    ErrorKind::NotScalar("conditional", cond.qtype),
                 ));
             }
             Some(cond)
@@ -1310,10 +1365,10 @@ impl TypeChecker {
         body: hir::stmt::Stmt,
     ) -> Result<mir::stmt::Stmt, Error> {
         let cond = self.visit_expr(&mut Some(func), cond)?;
-        if !cond.type_decl.is_scalar() {
+        if !cond.qtype.ty.is_scalar() {
             return Err(Error::new(
                 &left_paren,
-                ErrorKind::NotScalar("conditional", cond.type_decl),
+                ErrorKind::NotScalar("conditional", cond.qtype),
             ));
         }
 
@@ -1335,10 +1390,10 @@ impl TypeChecker {
         else_branch: Option<Box<hir::stmt::Stmt>>,
     ) -> Result<mir::stmt::Stmt, Error> {
         let cond = self.visit_expr(&mut Some(func), cond)?;
-        if !cond.type_decl.is_scalar() {
+        if !cond.qtype.ty.is_scalar() {
             return Err(Error::new(
                 &keyword,
-                ErrorKind::NotScalar("conditional", cond.type_decl),
+                ErrorKind::NotScalar("conditional", cond.qtype),
             ));
         }
 
@@ -1377,17 +1432,17 @@ impl TypeChecker {
             let expr = self.visit_expr(&mut Some(func), expr)?;
 
             let expr = expr.decay(&keyword)?;
-            if !func.return_type.type_compatible(&expr.type_decl, &expr) {
+            if !func.return_type.type_compatible(&expr.qtype, &expr) {
                 return Err(Error::new(
                     &keyword,
-                    ErrorKind::MismatchedFunctionReturn(func.return_type.clone(), expr.type_decl),
+                    ErrorKind::MismatchedFunctionReturn(func.return_type.clone(), expr.qtype),
                 ));
             }
             let expr = Self::maybe_cast(func.return_type.clone(), expr);
 
             Some(expr)
         } else {
-            let return_type = Type::Primitive(Primitive::Void);
+            let return_type = QualType::new(Type::Primitive(Primitive::Void));
             let return_expr = hir::expr::ExprKind::Nop;
 
             if !func.return_type.type_compatible(&return_type, &return_expr) {
@@ -1439,9 +1494,9 @@ impl TypeChecker {
                 self.evaluate_binary(func, *left, token, *right)
             }
             hir::expr::ExprKind::Unary { token, right } => self.evaluate_unary(func, token, *right),
-            hir::expr::ExprKind::Literal(n, type_decl) => Ok(mir::expr::Expr {
+            hir::expr::ExprKind::Literal(n, qtype) => Ok(mir::expr::Expr {
+                qtype,
                 kind: mir::expr::ExprKind::Literal(n),
-                type_decl,
                 value_kind: ValueKind::Rvalue,
             }),
             hir::expr::ExprKind::String(token) => self.string(token.unwrap_string()),
@@ -1456,7 +1511,7 @@ impl TypeChecker {
                 let left = self.visit_expr(func, *l_expr)?;
                 let right = self.visit_expr(func, *r_expr)?;
 
-                self.assign_var(left, token, right)
+                self.assign(left, token, right)
             }
             hir::expr::ExprKind::CompoundAssign { l_expr, token, r_expr } => {
                 self.compound_assign(func, *l_expr, token, *r_expr)
@@ -1481,23 +1536,23 @@ impl TypeChecker {
             hir::expr::ExprKind::SizeofExpr { token, expr } => self.sizeof_expr(func, token, *expr),
             hir::expr::ExprKind::Nop => Ok(mir::expr::Expr {
                 kind: mir::expr::ExprKind::Nop,
-                type_decl: Type::Primitive(Primitive::Void),
+                qtype: QualType::new(Type::Primitive(Primitive::Void)),
                 value_kind: ValueKind::Rvalue,
             }),
         }
     }
     fn check_type_compatibility(
         token: &Token,
-        left_type: &Type,
+        left_qtype: &QualType,
         right: &mir::expr::Expr,
     ) -> Result<(), Error> {
-        if left_type.is_void()
-            || right.type_decl.is_void()
-            || !left_type.type_compatible(&right.type_decl, right)
+        if left_qtype.ty.is_void()
+            || right.qtype.ty.is_void()
+            || !left_qtype.type_compatible(&right.qtype, right)
         {
             Err(Error::new(
                 token,
-                ErrorKind::IllegalAssign(left_type.clone(), right.type_decl.clone()),
+                ErrorKind::IllegalAssign(left_qtype.clone(), right.qtype.clone()),
             ))
         } else {
             Ok(())
@@ -1514,28 +1569,28 @@ impl TypeChecker {
         let expr = self.visit_expr(func, expr)?.decay(&token)?;
         let new_type = self.parse_type(&token, decl_type)?;
 
-        if !new_type.is_void() && (!expr.type_decl.is_scalar() || !new_type.is_scalar()) {
+        if !new_type.ty.is_void() && (!expr.qtype.ty.is_scalar() || !new_type.ty.is_scalar()) {
             return Err(Error::new(
                 &token,
-                ErrorKind::InvalidExplicitCast(expr.type_decl, new_type.clone()),
+                ErrorKind::InvalidExplicitCast(expr.qtype, new_type.clone()),
             ));
         }
 
         let mut expr = Self::always_cast(expr, new_type);
-        expr.value_kind = ValueKind::Rvalue;
+        expr.to_rval();
 
         Ok(expr)
     }
     // ensures that equal sized expressions still have new type
-    fn always_cast(expr: mir::expr::Expr, new_type: Type) -> mir::expr::Expr {
-        match expr.type_decl.size().cmp(&new_type.size()) {
+    fn always_cast(expr: mir::expr::Expr, new_type: QualType) -> mir::expr::Expr {
+        match expr.qtype.ty.size().cmp(&new_type.ty.size()) {
             Ordering::Less => expr.cast_to(new_type, CastDirection::Up),
             Ordering::Greater => expr.cast_to(new_type, CastDirection::Down),
             Ordering::Equal => expr.cast_to(new_type, CastDirection::Equal),
         }
     }
-    fn maybe_cast(new_type: Type, expr: mir::expr::Expr) -> mir::expr::Expr {
-        match expr.type_decl.size().cmp(&new_type.size()) {
+    fn maybe_cast(new_type: QualType, expr: mir::expr::Expr) -> mir::expr::Expr {
+        match expr.qtype.ty.size().cmp(&new_type.ty.size()) {
             Ordering::Less => expr.cast_to(new_type, CastDirection::Up),
             Ordering::Greater => expr.cast_to(new_type, CastDirection::Down),
             Ordering::Equal => expr,
@@ -1547,11 +1602,11 @@ impl TypeChecker {
         token: Token,
         decl_type: hir::decl::DeclType,
     ) -> Result<mir::expr::Expr, Error> {
-        let type_decl = self.parse_type(&token, decl_type)?;
+        let qtype = self.parse_type(&token, decl_type)?;
 
         Ok(mir::expr::Expr {
-            kind: mir::expr::ExprKind::Literal(type_decl.size() as i64),
-            type_decl: Type::Primitive(Primitive::Int),
+            kind: mir::expr::ExprKind::Literal(qtype.ty.size() as i64),
+            qtype: QualType::new(Type::Primitive(Primitive::Int)),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -1564,13 +1619,13 @@ impl TypeChecker {
     ) -> Result<mir::expr::Expr, Error> {
         let expr = self.visit_expr(func, expr)?;
 
-        if !expr.type_decl.is_void() && !expr.type_decl.is_complete() {
-            return Err(Error::new(&token, ErrorKind::IncompleteType(expr.type_decl)));
+        if !expr.qtype.ty.is_void() && !expr.qtype.ty.is_complete() {
+            return Err(Error::new(&token, ErrorKind::IncompleteType(expr.qtype)));
         }
 
         Ok(mir::expr::Expr {
-            kind: mir::expr::ExprKind::Literal(expr.type_decl.size() as i64),
-            type_decl: Type::Primitive(Primitive::Int),
+            kind: mir::expr::ExprKind::Literal(expr.qtype.ty.size() as i64),
+            qtype: QualType::new(Type::Primitive(Primitive::Int)),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -1585,7 +1640,7 @@ impl TypeChecker {
 
         Ok(mir::expr::Expr {
             value_kind: ValueKind::Rvalue,
-            type_decl: right.type_decl.clone(),
+            qtype: right.qtype.clone(),
             kind: mir::expr::ExprKind::Comma {
                 left: Box::new(left),
                 right: Box::new(right),
@@ -1601,43 +1656,39 @@ impl TypeChecker {
         false_expr: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
         let cond = self.visit_expr(func, cond)?;
-        if !cond.type_decl.is_scalar() {
+        if !cond.qtype.ty.is_scalar() {
             return Err(Error::new(
                 &token,
-                ErrorKind::NotScalar("conditional", cond.type_decl),
+                ErrorKind::NotScalar("conditional", cond.qtype),
             ));
         }
         let true_expr = self.visit_expr(func, true_expr)?;
         let false_expr = self.visit_expr(func, false_expr)?;
 
-        if !true_expr
-            .type_decl
-            .type_compatible(&false_expr.type_decl, &false_expr)
-        {
+        if !true_expr.qtype.type_compatible(&false_expr.qtype, &false_expr) {
             return Err(Error::new(
                 &token,
-                ErrorKind::TypeMismatch(true_expr.type_decl, false_expr.type_decl),
+                ErrorKind::TypeMismatch(true_expr.qtype, false_expr.qtype),
             ));
         }
 
         let true_expr = true_expr.maybe_int_promote();
         let false_expr = false_expr.maybe_int_promote();
 
-        let (true_expr, false_expr) = match true_expr.type_decl.size().cmp(&false_expr.type_decl.size())
-        {
+        let (true_expr, false_expr) = match true_expr.qtype.ty.size().cmp(&false_expr.qtype.ty.size()) {
             Ordering::Greater => (
                 true_expr.clone(),
-                false_expr.cast_to(true_expr.type_decl, CastDirection::Up),
+                false_expr.cast_to(true_expr.qtype, CastDirection::Up),
             ),
             Ordering::Less => (
-                true_expr.cast_to(false_expr.type_decl.clone(), CastDirection::Up),
+                true_expr.cast_to(false_expr.qtype.clone(), CastDirection::Up),
                 false_expr,
             ),
             Ordering::Equal => (true_expr, false_expr),
         };
 
         Ok(mir::expr::Expr {
-            type_decl: true_expr.type_decl.clone(),
+            qtype: true_expr.qtype.clone(),
             value_kind: ValueKind::Rvalue,
             kind: mir::expr::ExprKind::Ternary {
                 cond: Box::new(cond),
@@ -1656,9 +1707,9 @@ impl TypeChecker {
             ));
         }
 
-        let type_decl = symbol.borrow().type_decl.clone();
+        let qtype = symbol.borrow().qtype.clone();
         Ok(mir::expr::Expr {
-            type_decl,
+            qtype,
             kind: mir::expr::ExprKind::Ident(Rc::clone(&symbol)),
             value_kind: ValueKind::Lvalue,
         })
@@ -1672,14 +1723,11 @@ impl TypeChecker {
     ) -> Result<mir::expr::Expr, Error> {
         let expr = self.visit_expr(func, expr)?;
 
-        if !expr.type_decl.is_complete() {
-            return Err(Error::new(
-                &token,
-                ErrorKind::IncompleteMemberAccess(expr.type_decl),
-            ));
+        if !expr.qtype.ty.is_complete() {
+            return Err(Error::new(&token, ErrorKind::IncompleteMemberAccess(expr.qtype)));
         }
 
-        match &expr.type_decl {
+        match &expr.qtype.ty {
             Type::Struct(s) | Type::Union(s) => {
                 let member = member.unwrap_string();
 
@@ -1690,17 +1738,17 @@ impl TypeChecker {
                 {
                     Ok(mir::expr::Expr {
                         kind: mir::expr::ExprKind::MemberAccess { member, expr: Box::new(expr) },
-                        type_decl: member_type.clone(),
+                        qtype: member_type.clone(),
                         value_kind: ValueKind::Lvalue,
                     })
                 } else {
                     Err(Error::new(
                         &token,
-                        ErrorKind::NonExistantMember(member, expr.type_decl),
+                        ErrorKind::NonExistantMember(member, expr.qtype),
                     ))
                 }
             }
-            _ => Err(Error::new(&token, ErrorKind::InvalidMemberAccess(expr.type_decl))),
+            _ => Err(Error::new(&token, ErrorKind::InvalidMemberAccess(expr.qtype))),
         }
     }
     fn evaluate_postunary(
@@ -1709,7 +1757,7 @@ impl TypeChecker {
         token: Token,
         expr: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let type_decl = self.visit_expr(func, expr.clone())?.type_decl;
+        let qtype = self.visit_expr(func, expr.clone())?.qtype;
 
         let (comp_op, bin_op) = match token.kind {
             TokenKind::PlusPlus => (TokenKind::PlusEqual, TokenKind::Minus),
@@ -1722,18 +1770,15 @@ impl TypeChecker {
             left: Box::new(hir::expr::ExprKind::CompoundAssign {
                 l_expr: Box::new(expr),
                 token: Token { kind: comp_op, ..token.clone() },
-                r_expr: Box::new(hir::expr::ExprKind::Literal(1, Type::Primitive(Primitive::Int))),
+                r_expr: Box::new(hir::expr::ExprKind::new_literal(1, Primitive::Int)),
             }),
             token: Token { kind: bin_op, ..token },
-            right: Box::new(hir::expr::ExprKind::Literal(1, Type::Primitive(Primitive::Int))),
+            right: Box::new(hir::expr::ExprKind::new_literal(1, Primitive::Int)),
         };
 
         // need to cast back to left-type since binary operation integer promotes
         // char c; typeof(c--) == char
-        Ok(Self::maybe_cast(
-            type_decl,
-            self.visit_expr(func, postunary_sugar)?,
-        ))
+        Ok(Self::maybe_cast(qtype, self.visit_expr(func, postunary_sugar)?))
     }
     fn string(&mut self, data: String) -> Result<mir::expr::Expr, Error> {
         let len = data.len() + 1; // extra byte for \0-Terminator
@@ -1742,7 +1787,10 @@ impl TypeChecker {
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::String(data),
-            type_decl: Type::Array(Box::new(Type::Primitive(Primitive::Char)), ArraySize::Known(len)),
+            qtype: QualType::new(Type::Array(
+                Box::new(QualType::new(Type::Primitive(Primitive::Char))),
+                ArraySize::Known(len),
+            )),
             value_kind: ValueKind::Lvalue,
         })
     }
@@ -1753,7 +1801,7 @@ impl TypeChecker {
         token: Token,
         r_expr: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let type_decl = self.visit_expr(func, l_expr.clone())?.type_decl;
+        let qtype = self.visit_expr(func, l_expr.clone())?.qtype;
 
         // to not evaluate l-expr twice convert `A op= B` to `tmp = &A, *tmp = *tmp op B`
         self.env.enter();
@@ -1762,14 +1810,14 @@ impl TypeChecker {
             kind: TokenKind::Ident(format!("tmp{}{}", token.line_index, token.column)),
             ..token.clone()
         };
-        let tmp_type = type_decl.pointer_to();
+        let tmp_type = qtype.pointer_to(Qualifiers::default());
         let tmp_symbol = self
             .env
             .declare_symbol(
                 &tmp_token,
                 Symbol {
                     storage_class: None,
-                    type_decl: tmp_type.clone(),
+                    qtype: tmp_type.clone(),
                     kind: InitType::Declaration,
                     reg: None,
                     token: token.clone(),
@@ -1820,35 +1868,54 @@ impl TypeChecker {
 
         // INFO: still need to pass var-symbol here so that codegen declares var when it has the correct base-pointer offset
         Ok(mir::expr::Expr {
-            type_decl: expr.type_decl.clone(),
+            qtype: expr.qtype.clone(),
             kind: mir::expr::ExprKind::CompoundAssign { tmp_symbol, expr: Box::new(expr) },
             value_kind: ValueKind::Rvalue,
         })
     }
-    fn assign_var(
+    fn assign(
         &mut self,
-        left: mir::expr::Expr,
+        mut left: mir::expr::Expr,
         token: Token,
         right: mir::expr::Expr,
     ) -> Result<mir::expr::Expr, Error> {
-        if left.type_decl.is_array() || left.type_decl.is_func() {
-            return Err(Error::new(&token, ErrorKind::NotAssignable(left.type_decl)));
+        if left.qtype.ty.is_array() || left.qtype.ty.is_func() {
+            return Err(Error::new(&token, ErrorKind::NotAssignable(left.qtype)));
         }
 
         if left.value_kind != ValueKind::Lvalue {
             return Err(Error::new(&token, ErrorKind::NotLvalue("left of assignment")));
         }
 
-        if !left.type_decl.is_complete() {
-            return Err(Error::new(&token, ErrorKind::IncompleteAssign(left.type_decl)));
+        if !left.qtype.ty.is_complete() {
+            return Err(Error::new(&token, ErrorKind::IncompleteAssign(left.qtype)));
         }
 
-        let right = right.decay(&token)?;
-        Self::check_type_compatibility(&token, &left.type_decl, &right)?;
-        let right = Self::maybe_cast(left.type_decl.clone(), right);
+        if left.qtype.qualifiers.is_const {
+            return Err(Error::new(&token, ErrorKind::ConstAssign));
+        }
+        if let Type::Struct(s) | Type::Union(s) = &left.qtype.ty {
+            if let Some((_, member)) = s.members().iter().find(|(qtype, _)| qtype.qualifiers.is_const) {
+                return Err(Error::new(
+                    &token,
+                    ErrorKind::ConstStructAssign(left.qtype.clone(), member.unwrap_string()),
+                ));
+            }
+        }
+
+        let mut right = right.decay(&token)?;
+        right.to_rval();
+
+        Self::check_type_compatibility(&token, &left.qtype, &right)?;
+        let right = Self::maybe_cast(left.qtype.clone(), right);
+
+        // 6.5.16.3 The type of an assignment expression is the type
+        // of the left operand unless the left operand has qualified type,
+        // in which case it is the unqualified version of the type of the left operand
+        left.qtype.qualifiers = Qualifiers::default();
 
         Ok(mir::expr::Expr {
-            type_decl: left.type_decl.clone(),
+            qtype: left.qtype.clone(),
             value_kind: ValueKind::Rvalue,
             kind: mir::expr::ExprKind::Assign {
                 l_expr: Box::new(left),
@@ -1873,32 +1940,29 @@ impl TypeChecker {
                 .decay(&left_paren)?
                 .maybe_int_promote();
 
-            if !arg.type_decl.is_complete() {
+            if !arg.qtype.ty.is_complete() {
                 return Err(Error::new(
                     &left_paren,
-                    ErrorKind::IncompleteArgType(index, arg.type_decl),
+                    ErrorKind::IncompleteArgType(index, arg.qtype),
                 ));
             }
 
             args.push(arg);
         }
 
-        let func_type = match caller.type_decl.clone() {
+        let func_type = match caller.qtype.ty.clone() {
             Type::Function(func_type) => func_type,
             ty => {
                 let mut pointer_to_func = None;
                 if let Type::Pointer(to) = ty {
-                    if let Type::Function(func_type) = *to {
+                    if let Type::Function(func_type) = to.ty {
                         pointer_to_func = Some(func_type)
                     }
                 }
                 if let Some(func_type) = pointer_to_func {
                     func_type
                 } else {
-                    return Err(Error::new(
-                        &left_paren,
-                        ErrorKind::InvalidCaller(caller.type_decl),
-                    ));
+                    return Err(Error::new(&left_paren, ErrorKind::InvalidCaller(caller.qtype)));
                 }
             }
         };
@@ -1908,12 +1972,12 @@ impl TypeChecker {
         {
             return Err(Error::new(
                 &left_paren,
-                ErrorKind::MismatchedArity(caller.type_decl, func_type.params.len(), args.len()),
+                ErrorKind::MismatchedArity(caller.qtype, func_type.params.len(), args.len()),
             ));
         }
-        let args = self.args_and_params_match(&left_paren, &caller.type_decl, func_type.params, args)?;
+        let args = self.args_and_params_match(&left_paren, &caller.qtype, func_type.params, args)?;
 
-        let caller = if caller.type_decl.is_ptr() {
+        let caller = if caller.qtype.ty.is_ptr() {
             self.check_deref(Token { kind: TokenKind::Star, ..left_paren }, caller)
                 .expect("already checked if caller is ptr")
         } else {
@@ -1922,15 +1986,15 @@ impl TypeChecker {
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Call { caller: Box::new(caller), args },
-            type_decl: *func_type.return_type,
+            qtype: *func_type.return_type,
             value_kind: ValueKind::Rvalue,
         })
     }
     fn args_and_params_match(
         &self,
         left_paren: &Token,
-        type_decl: &Type,
-        params: Vec<Type>,
+        qtype: &QualType,
+        params: Vec<QualType>,
         mut args: Vec<mir::expr::Expr>,
     ) -> Result<Vec<mir::expr::Expr>, Error> {
         let mut new_args = Vec::new();
@@ -1941,20 +2005,17 @@ impl TypeChecker {
         for (index, (arg, param_type)) in args.into_iter().zip(params).enumerate() {
             Self::check_type_compatibility(left_paren, &param_type, &arg).or(Err(Error::new(
                 left_paren,
-                ErrorKind::MismatchedArgs(
-                    index,
-                    type_decl.clone(),
-                    param_type.clone(),
-                    arg.type_decl.clone(),
-                ),
+                ErrorKind::MismatchedArgs(index, qtype.clone(), param_type.clone(), arg.qtype.clone()),
             )))?;
 
             // cast argument to the correct parameter type
-            new_args.push(if param_type.size() > Type::Primitive(Primitive::Char).size() {
-                Self::maybe_cast(param_type, arg)
-            } else {
-                arg
-            });
+            new_args.push(
+                if param_type.ty.size() > Type::Primitive(Primitive::Char).size() {
+                    Self::maybe_cast(param_type, arg)
+                } else {
+                    arg
+                },
+            );
         }
 
         new_args.extend(remaining_args);
@@ -1978,10 +2039,10 @@ impl TypeChecker {
         let left = left.decay(&token)?;
         let right = right.decay(&token)?;
 
-        if !left.type_decl.is_scalar() || !right.type_decl.is_scalar() {
+        if !left.qtype.ty.is_scalar() || !right.qtype.ty.is_scalar() {
             return Err(Error::new(
                 &token,
-                ErrorKind::InvalidLogical(token.kind.clone(), left.type_decl, right.type_decl),
+                ErrorKind::InvalidLogical(token.kind.clone(), left.qtype, right.qtype),
             ));
         }
 
@@ -1991,7 +2052,7 @@ impl TypeChecker {
                 right: Box::new(right),
                 operator: token.kind,
             },
-            type_decl: Type::Primitive(Primitive::Int),
+            qtype: QualType::new(Type::Primitive(Primitive::Int)),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -2011,19 +2072,19 @@ impl TypeChecker {
         let left = left.decay(&token)?;
         let right = right.decay(&token)?;
 
-        if !is_valid_comp(&left.type_decl, &left, &right.type_decl, &right) {
+        if !is_valid_comp(&left.qtype, &left, &right.qtype, &right) {
             return Err(Error::new(
                 &token,
-                ErrorKind::InvalidComp(token.kind.clone(), left.type_decl, right.type_decl),
+                ErrorKind::InvalidComp(token.kind.clone(), left.qtype, right.qtype),
             ));
         }
 
         let mut left = left.maybe_int_promote();
         let mut right = right.maybe_int_promote();
 
-        match left.type_decl.size().cmp(&right.type_decl.size()) {
-            Ordering::Greater => right = right.cast_to(left.type_decl.clone(), CastDirection::Up),
-            Ordering::Less => left = left.cast_to(right.type_decl.clone(), CastDirection::Up),
+        match left.qtype.ty.size().cmp(&right.qtype.ty.size()) {
+            Ordering::Greater => right = right.cast_to(left.qtype.clone(), CastDirection::Up),
+            Ordering::Less => left = left.cast_to(right.qtype.clone(), CastDirection::Up),
             Ordering::Equal => (),
         }
 
@@ -2033,7 +2094,7 @@ impl TypeChecker {
                 left: Box::new(left),
                 right: Box::new(right),
             },
-            type_decl: Type::Primitive(Primitive::Int),
+            qtype: QualType::new(Type::Primitive(Primitive::Int)),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -2053,22 +2114,19 @@ impl TypeChecker {
         let left = left.decay(&token)?;
         let right = right.decay(&token)?;
 
-        if !is_valid_bin(&token.kind, &left.type_decl, &right.type_decl, &right) {
+        if !is_valid_bin(&token.kind, &left.qtype, &right.qtype, &right) {
             return Err(Error::new(
                 &token,
-                ErrorKind::InvalidBinary(token.kind.clone(), left.type_decl, right.type_decl),
+                ErrorKind::InvalidBinary(token.kind.clone(), left.qtype, right.qtype),
             ));
         }
 
         let mut left = left.maybe_int_promote();
         let mut right = right.maybe_int_promote();
 
-        if let Some((expr, amount)) = maybe_scale_index(
-            &left.type_decl.clone(),
-            &right.type_decl.clone(),
-            &mut left,
-            &mut right,
-        ) {
+        if let Some((expr, amount)) =
+            maybe_scale_index(&left.qtype.clone(), &right.qtype.clone(), &mut left, &mut right)
+        {
             expr.kind = mir::expr::ExprKind::ScaleUp { by: amount, expr: Box::new(expr.clone()) };
         }
 
@@ -2079,32 +2137,32 @@ impl TypeChecker {
         left: mir::expr::Expr,
         right: mir::expr::Expr,
     ) -> mir::expr::Expr {
-        let (left, right, scale_factor) =
-            match (left.type_decl.clone(), right.type_decl.clone(), &operator) {
-                // shift operations always have the type of the left operand
-                (.., TokenKind::GreaterGreater | TokenKind::LessLess) => (left, right, None),
+        let (left, right, scale_factor) = match (&left.qtype.ty, &right.qtype.ty, &operator) {
+            // shift operations always have the type of the left operand
+            (.., TokenKind::GreaterGreater | TokenKind::LessLess) => (left, right, None),
 
-                // if pointer - pointer, scale result before operation to match left-pointers type
-                (Type::Pointer(inner), Type::Pointer(_), _) => (left, right, Some(inner.size())),
+            // if pointer - pointer, scale result before operation to match left-pointers type
+            (Type::Pointer(inner), Type::Pointer(_), _) => {
+                let scale_factor = inner.ty.size();
+                (left, right, Some(scale_factor))
+            }
 
-                // if integer type and pointer then result is always pointer the pointer type
-                (.., right_type @ Type::Pointer(_), _) => {
-                    (Self::always_cast(left, right_type), right, None)
-                }
-                (left_type @ Type::Pointer(_), ..) => (left, Self::always_cast(right, left_type), None),
+            // if integer type and pointer then result is always the pointer type
+            (.., Type::Pointer(_), _) => (Self::always_cast(left, right.qtype.clone()), right, None),
+            (Type::Pointer(_), ..) => (left.clone(), Self::always_cast(right, left.qtype), None),
 
-                // otherwise cast to bigger type if unequal types
-                (left_type, right_type, _) if left_type.size() > right_type.size() => {
-                    (left, Self::always_cast(right, left_type), None)
-                }
-                (left_type, right_type, _) if left_type.size() < right_type.size() => {
-                    (Self::always_cast(left, right_type), right, None)
-                }
-                _ => (left, right, None),
-            };
+            // otherwise cast to bigger type if unequal types
+            (left_type, right_type, _) if left_type.size() > right_type.size() => {
+                (left.clone(), Self::always_cast(right, left.qtype), None)
+            }
+            (left_type, right_type, _) if left_type.size() < right_type.size() => {
+                (Self::always_cast(left, right.qtype.clone()), right, None)
+            }
+            _ => (left, right, None),
+        };
 
         let result = mir::expr::Expr {
-            type_decl: left.type_decl.clone(),
+            qtype: left.qtype.clone(),
             kind: mir::expr::ExprKind::Binary {
                 operator,
                 left: Box::new(left),
@@ -2119,7 +2177,7 @@ impl TypeChecker {
                     shift_amount: log_2(scale_factor as i32),
                     expr: Box::new(result),
                 },
-                type_decl: Type::Primitive(Primitive::Long),
+                qtype: QualType::new(Type::Primitive(Primitive::Long)),
                 value_kind: mir::expr::ValueKind::Rvalue,
             }
         } else {
@@ -2146,16 +2204,16 @@ impl TypeChecker {
                     right.to_rval();
                     let right = Box::new(right.maybe_int_promote());
 
-                    if !right.type_decl.is_scalar() {
+                    if !right.qtype.ty.is_scalar() {
                         return Err(Error::new(
                             &token,
-                            ErrorKind::InvalidUnary(token.kind.clone(), right.type_decl, "scalar"),
+                            ErrorKind::InvalidUnary(token.kind.clone(), right.qtype, "scalar"),
                         ));
                     }
 
                     Ok(mir::expr::Expr {
                         kind: mir::expr::ExprKind::Unary { operator: token.kind, right },
-                        type_decl: Type::Primitive(Primitive::Int),
+                        qtype: QualType::new(Type::Primitive(Primitive::Int)),
                         value_kind: ValueKind::Rvalue,
                     })
                 }
@@ -2163,15 +2221,15 @@ impl TypeChecker {
                     right.to_rval();
                     let right = Box::new(right.maybe_int_promote());
 
-                    if !right.type_decl.is_integer() {
+                    if !right.qtype.ty.is_integer() {
                         return Err(Error::new(
                             &token,
-                            ErrorKind::InvalidUnary(token.kind.clone(), right.type_decl, "integer"),
+                            ErrorKind::InvalidUnary(token.kind.clone(), right.qtype, "integer"),
                         ));
                     }
 
                     Ok(mir::expr::Expr {
-                        type_decl: right.type_decl.clone(),
+                        qtype: right.qtype.clone(),
                         kind: mir::expr::ExprKind::Unary { operator: token.kind, right },
                         value_kind: ValueKind::Rvalue,
                     })
@@ -2192,7 +2250,7 @@ impl TypeChecker {
             }
 
             Ok(mir::expr::Expr {
-                type_decl: right.type_decl.clone().pointer_to(),
+                qtype: right.qtype.clone().pointer_to(Qualifiers::default()),
                 value_kind: ValueKind::Rvalue,
                 kind: mir::expr::ExprKind::Unary {
                     right: Box::new(right),
@@ -2204,17 +2262,17 @@ impl TypeChecker {
         }
     }
     fn check_deref(&self, token: Token, right: mir::expr::Expr) -> Result<mir::expr::Expr, Error> {
-        if let Some(inner) = right.type_decl.deref_at() {
+        if let Some(inner) = right.qtype.deref_at() {
             Ok(mir::expr::Expr {
                 value_kind: ValueKind::Lvalue,
-                type_decl: inner,
+                qtype: inner,
                 kind: mir::expr::ExprKind::Unary {
                     right: Box::new(right),
                     operator: token.kind,
                 },
             })
         } else {
-            Err(Error::new(&token, ErrorKind::InvalidDerefType(right.type_decl)))
+            Err(Error::new(&token, ErrorKind::InvalidDerefType(right.qtype)))
         }
     }
 }
@@ -2235,11 +2293,11 @@ pub fn create_label(index: &mut usize) -> usize {
 // cannot just pass mir-expr since also used in fold which uses hir
 pub fn is_valid_bin(
     operator: &TokenKind,
-    left_type: &Type,
-    right_type: &Type,
+    left_type: &QualType,
+    right_type: &QualType,
     right_expr: &impl hir::expr::IsZero,
 ) -> bool {
-    match (&left_type, &right_type) {
+    match (&left_type.ty, &right_type.ty) {
         (Type::Primitive(Primitive::Void), _)
         | (_, Type::Primitive(Primitive::Void))
         | (Type::Struct(..), _)
@@ -2260,13 +2318,13 @@ pub fn is_valid_bin(
     }
 }
 pub fn is_valid_comp(
-    left_type: &Type,
+    left_type: &QualType,
     left_expr: &impl hir::expr::IsZero,
-    right_type: &Type,
+    right_type: &QualType,
     right_expr: &impl hir::expr::IsZero,
 ) -> bool {
-    let integer_operands = left_type.is_integer() && right_type.is_integer();
-    let compatible_pointers = (left_type.is_ptr() || right_type.is_ptr())
+    let integer_operands = left_type.ty.is_integer() && right_type.ty.is_integer();
+    let compatible_pointers = (left_type.ty.is_ptr() || right_type.ty.is_ptr())
                 // have to unfortunately check in both directions since either expr can be 0 literal
             && (left_type.type_compatible(right_type, right_expr)
             || right_type.type_compatible(left_type, left_expr));
@@ -2276,14 +2334,18 @@ pub fn is_valid_comp(
 
 // scale index when pointer arithmetic
 pub fn maybe_scale_index<'a, T>(
-    left_type: &Type,
-    right_type: &Type,
+    left_type: &QualType,
+    right_type: &QualType,
     left_expr: &'a mut T,
     right_expr: &'a mut T,
 ) -> Option<(&'a mut T, usize)> {
-    match (left_type, right_type) {
-        (t, Type::Pointer(inner)) if !t.is_ptr() && inner.size() > 1 => Some((left_expr, inner.size())),
-        (Type::Pointer(inner), t) if !t.is_ptr() && inner.size() > 1 => Some((right_expr, inner.size())),
+    match (&left_type.ty, &right_type.ty) {
+        (t, Type::Pointer(inner)) if !t.is_ptr() && inner.ty.size() > 1 => {
+            Some((left_expr, inner.ty.size()))
+        }
+        (Type::Pointer(inner), t) if !t.is_ptr() && inner.ty.size() > 1 => {
+            Some((right_expr, inner.ty.size()))
+        }
         _ => None,
     }
 }
@@ -2329,9 +2391,9 @@ mod tests {
             let expected_type = setup_type!($expected_type, typechecker);
 
             assert!(
-                actual.type_decl == expected_type,
+                actual.qtype == expected_type,
                 "actual: {}, expected: {}",
-                actual.type_decl,
+                actual.qtype,
                 expected_type.to_string(),
             );
         };
@@ -2378,19 +2440,18 @@ mod tests {
         let hir::decl::ExternalDeclaration::Declaration(decls) =
                 setup(input).external_declaration().unwrap() else {unreachable!("only passing type")};
 
-        let hir::decl::Declaration {
-            specifiers,
-            declarators,
-            storage_classes,
-            is_inline,
-        } = decls;
+        let hir::decl::Declaration { decl_specs, declarators } = decls;
         let mut typechecker = TypeChecker::new();
 
-        let decl = declarators[0].clone();
-        let specifier_type = typechecker.parse_specifiers(specifiers).unwrap();
-        let storage_class = typechecker.parse_storage_classes(&storage_classes).unwrap();
+        let declarator = declarators[0].clone();
+        let storage_class = typechecker
+            .parse_storage_classes(&decl_specs.storage_classes)
+            .unwrap();
+        let qtype = typechecker.parse_specifiers(decl_specs.specifiers).unwrap();
+        let qtype = TypeChecker::parse_qualifiers(qtype, &decl_specs.qualifiers)?;
+
         let declarator =
-            typechecker.declarator(specifier_type, storage_class, is_inline, decl, &mut None)?;
+            typechecker.declarator(qtype, storage_class, decl_specs.is_inline, declarator, &mut None)?;
 
         Ok(declarator.unwrap().init.unwrap())
     }
@@ -2654,7 +2715,7 @@ int a;";
         assert!(matches!(
             actual,
             Err(Error {
-                kind: ErrorKind::InitializerOverflow(Type::Union(_)),
+                kind: ErrorKind::InitializerOverflow(QualType { ty: Type::Union(_), .. }),
                 ..
             })
         ));
@@ -2969,20 +3030,23 @@ int main(){
             actual.as_slice(),
             &[
                 Error {
-                    kind: ErrorKind::IncompleteType(Type::Primitive(Primitive::Void)),
+                    kind: ErrorKind::IncompleteType(QualType {
+                        ty: Type::Primitive(Primitive::Void),
+                        ..
+                    }),
                     line_index: 3,
                     ..
                 },
                 Error {
-                    kind: ErrorKind::IncompleteType(Type::Struct(_)),
+                    kind: ErrorKind::IncompleteType(QualType { ty: Type::Struct(_), .. }),
                     ..
                 },
                 Error {
-                    kind: ErrorKind::IncompleteArgType(1, Type::Struct(_)),
+                    kind: ErrorKind::IncompleteArgType(1, QualType { ty: Type::Struct(_), .. }),
                     ..
                 },
                 Error {
-                    kind: ErrorKind::IncompleteTentative(Type::Struct(_)),
+                    kind: ErrorKind::IncompleteTentative(QualType { ty: Type::Struct(_), .. }),
                     line_index: 5,
                     ..
                 }
@@ -3048,6 +3112,28 @@ int foo(){
                 Error { kind: ErrorKind::IllegalAssign(..), .. },
                 Error { kind: ErrorKind::UndeclaredLabel(..), .. },
             ]
+        ));
+    }
+    #[test]
+    fn const_array_assign() {
+        let actual = typecheck(
+            "
+int main() {
+    typedef int A[2][3];
+    const A a = {{4, 5, 6}, {7, 8, 9}};
+    int *pi = a[0];
+}
+",
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            actual.as_slice(),
+            &[Error {
+                kind: ErrorKind::IllegalAssign(..),
+                line_index: 5,
+                ..
+            },]
         ));
     }
 }

@@ -37,7 +37,7 @@ pub enum ValueKind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Expr {
     pub kind: ExprKind,
-    pub type_decl: Type,
+    pub qtype: QualType,
     pub value_kind: ValueKind,
 }
 impl Expr {
@@ -45,7 +45,7 @@ impl Expr {
     // int a[4] => int *a;
     // int f() => int (*f)()
     pub fn decay(self, token: &Token) -> Result<Expr, Error> {
-        match self.type_decl.clone() {
+        match &self.qtype.ty {
             Type::Array(of, _) => {
                 // is actually undefined behaviour but gcc and clang throw error
                 // so let's do that too ;)
@@ -59,8 +59,8 @@ impl Expr {
                 }
 
                 Ok(Expr {
-                    value_kind: self.value_kind.clone(),
-                    type_decl: of.pointer_to(),
+                    value_kind: ValueKind::Rvalue,
+                    qtype: of.clone().pointer_to(Qualifiers::default()),
 
                     kind: ExprKind::Unary {
                         operator: TokenKind::Amp,
@@ -68,9 +68,9 @@ impl Expr {
                     },
                 })
             }
-            ty @ Type::Function(_) => Ok(Expr {
-                value_kind: self.value_kind.clone(),
-                type_decl: ty.pointer_to(),
+            Type::Function(_) => Ok(Expr {
+                value_kind: ValueKind::Rvalue,
+                qtype: self.qtype.clone().pointer_to(Qualifiers::default()),
 
                 kind: ExprKind::Unary {
                     operator: TokenKind::Amp,
@@ -81,26 +81,35 @@ impl Expr {
         }
     }
     pub fn to_rval(&mut self) {
+        self.qtype.qualifiers = Qualifiers::default();
         self.value_kind = ValueKind::Rvalue;
+        // Expr {
+        //     qtype: QualType {
+        //         qualifiers: Qualifiers::default(),
+        //         ..self.qtype
+        //     },
+        //     value_kind: ValueKind::Rvalue,
+        //     ..self
+        // }
     }
-    pub fn cast_to(self, new_type: Type, direction: CastDirection) -> Expr {
+    pub fn cast_to(self, new_type: QualType, direction: CastDirection) -> Expr {
         Expr {
-            type_decl: new_type.clone(),
+            qtype: new_type.clone(),
             value_kind: self.value_kind.clone(),
             kind: ExprKind::Cast {
-                new_type,
+                new_type: new_type.ty,
                 direction,
                 expr: Box::new(self),
             },
         }
     }
     pub fn maybe_int_promote(self) -> Expr {
-        if self.type_decl.get_primitive().is_none() || self.type_decl.is_void() {
+        if self.qtype.ty.get_primitive().is_none() || self.qtype.ty.is_void() {
             return self;
         }
 
-        if self.type_decl.size() < Type::Primitive(Primitive::Int).size() {
-            self.cast_to(Type::Primitive(Primitive::Int), CastDirection::Up)
+        if self.qtype.ty.size() < Type::Primitive(Primitive::Int).size() {
+            self.cast_to(QualType::new(Type::Primitive(Primitive::Int)), CastDirection::Up)
         } else {
             self
         }
@@ -112,7 +121,6 @@ impl Expr {
         match &self.kind {
             ExprKind::String(_) | ExprKind::Literal(_) => true,
             ExprKind::Cast { expr, .. } | ExprKind::ScaleUp { expr, .. } => expr.is_constant(),
-
             _ => self.is_address_constant(true),
         }
     }

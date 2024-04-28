@@ -62,77 +62,80 @@ pub enum ErrorKind {
     NegativeArraySize,
     IsEmpty(TokenKind),
     EnumOverflow,
-    IncompleteType(Type),
-    IncompleteReturnType(String, Type),
-    IncompleteFuncParam(String, Type),
-    IncompleteArgType(usize, Type),
-    IncompleteAssign(Type),
-    IncompleteTentative(Type),
+    IncompleteType(QualType),
+    IncompleteReturnType(String, QualType),
+    IncompleteFuncParam(String, QualType),
+    IncompleteArgType(usize, QualType),
+    IncompleteAssign(QualType),
+    IncompleteTentative(QualType),
     VoidFuncArg,
-    IncompleteMemberAccess(Type),
+    IncompleteMemberAccess(QualType),
     TypeAlreadyExists(String, TokenKind),
     EnumForwardDecl,
     EmptyAggregate(TokenKind),
     Redefinition(&'static str, String),
     RedefOtherSymbol(String, String),
-    RedefTypeMismatch(String, Type, Type),
-    NonExistantMember(String, Type),
+    RedefTypeMismatch(String, QualType, QualType),
+    NonExistantMember(String, QualType),
     DuplicateMember(String),
-    InvalidArrayDesignator(Type),
+    InvalidArrayDesignator(QualType),
     TooLong(&'static str, usize, usize),
-    NonAggregateInitializer(Type, Type),
+    NonAggregateInitializer(QualType, QualType),
     ExpectedExpression(TokenKind),
     NotType(TokenKind),
     UndeclaredType(String),
     InvalidVariadic,
+    InvalidRestrict(QualType),
 
     // folding errors
     DivideByZero,
     NegativeShift,
-    InvalidConstCast(Type, Type),
-    IntegerOverflow(Type),
+    InvalidConstCast(QualType, QualType),
+    IntegerOverflow(QualType),
 
     // typechecker errors
     UndeclaredLabel(String),
-    NotInteger(&'static str, Type),
-    NotScalar(&'static str, Type),
+    NotInteger(&'static str, QualType),
+    NotScalar(&'static str, QualType),
     DuplicateCase(i64),
     NotIn(&'static str, &'static str),
     MultipleDefaults,
-    IllegalAssign(Type, Type),
+    IllegalAssign(QualType, QualType),
     NotConstantInit(&'static str),
-    InvalidExplicitCast(Type, Type),
+    InvalidExplicitCast(QualType, QualType),
     NoReturnAllPaths(String),
-    InvalidMainReturn(Type),
-    TypeMismatch(Type, Type),
+    InvalidMainReturn(QualType),
+    TypeMismatch(QualType, QualType),
     InvalidSymbol(String, &'static str),
-    InvalidMemberAccess(Type),
-    InvalidIncrementType(Type),
+    InvalidMemberAccess(QualType),
+    InvalidIncrementType(QualType),
     InvalidRvalueIncrement,
-    NotAssignable(Type),
+    NotAssignable(QualType),
     NotLvalue(&'static str),
     RegisterAddress(String),
-    MismatchedArity(Type, usize, usize),
-    MismatchedArgs(usize, Type, Type, Type),
-    InvalidLogical(TokenKind, Type, Type),
-    InvalidBinary(TokenKind, Type, Type),
-    InvalidComp(TokenKind, Type, Type),
-    InvalidDerefType(Type),
-    MismatchedFunctionReturn(Type, Type),
-    InvalidUnary(TokenKind, Type, &'static str),
+    MismatchedArity(QualType, usize, usize),
+    MismatchedArgs(usize, QualType, QualType, QualType),
+    InvalidLogical(TokenKind, QualType, QualType),
+    InvalidBinary(TokenKind, QualType, QualType),
+    InvalidComp(TokenKind, QualType, QualType),
+    InvalidDerefType(QualType),
+    MismatchedFunctionReturn(QualType, QualType),
+    InvalidUnary(TokenKind, QualType, &'static str),
     UnnamedFuncParams,
     InvalidStorageClass(StorageClass, &'static str),
-    InvalidReturnType(Type),
-    NonAggregateDesignator(Type),
+    InvalidReturnType(QualType),
+    NonAggregateDesignator(QualType),
     DesignatorOverflow(usize, i64),
-    InitializerOverflow(Type),
+    InitializerOverflow(QualType),
     ScalarOverflow,
-    InvalidArray(Type),
-    InvalidCaller(Type),
-    FunctionMember(String, Type),
+    InvalidArray(QualType),
+    InvalidCaller(QualType),
+    FunctionMember(String, QualType),
     ArraySizeOverflow,
     EmptyInit,
-    InvalidAggrInit(Type),
+    InvalidAggrInit(QualType),
+    ConstAssign,
+    ConstStructAssign(QualType, String),
 
     // environment errors
     UndeclaredSymbol(String),
@@ -203,6 +206,9 @@ impl ErrorKind {
             ErrorKind::InvalidVariadic => {
                 "expected at least one named parameter before variadic arguments".to_string()
             }
+            ErrorKind::InvalidRestrict(ty) => {
+                format!("'restrict' can only appear on pointer types, not: '{}'", ty)
+            }
             ErrorKind::IncompleteMemberAccess(type_decl) => {
                 format!(
                     "cannot access members of type that contains incomplete type '{}'",
@@ -258,6 +264,13 @@ impl ErrorKind {
             ErrorKind::InvalidAggrInit(type_decl) => {
                 format!("cannot initialize '{}' with scalar", type_decl)
             }
+            ErrorKind::ConstAssign => "cannot assign variable which was declared 'const'".to_string(),
+            ErrorKind::ConstStructAssign(ty, member) => {
+                format!(
+                    "cannot assign to '{}' that contains member '{}' declared 'const'",
+                    ty, member
+                )
+            }
             ErrorKind::InvalidArray(type_decl) => format!("invalid array-type: '{}'", type_decl),
             ErrorKind::InvalidCaller(type_decl) => format!(
                 "called object type: '{}' is not function or function pointer",
@@ -288,7 +301,7 @@ impl ErrorKind {
 
             ErrorKind::DivideByZero => "cannot divide by zero".to_string(),
             ErrorKind::InvalidConstCast(old_type, new_type) => {
-                format!("invalid constant-cast from '{}' to '{}'", old_type, new_type,)
+                format!("invalid constant-cast from '{}' to '{}'", old_type, new_type)
             }
             ErrorKind::NegativeShift => "shift amount has to positive".to_string(),
             ErrorKind::IntegerOverflow(type_decl) => {
@@ -322,7 +335,11 @@ impl ErrorKind {
                     "invalid cast from '{}' to '{}', '{}' is not a scalar type",
                     old_type,
                     new_type,
-                    if !old_type.is_scalar() { old_type } else { new_type }
+                    if !old_type.ty.is_scalar() {
+                        old_type
+                    } else {
+                        new_type
+                    }
                 )
             }
             ErrorKind::NoReturnAllPaths(name) => {

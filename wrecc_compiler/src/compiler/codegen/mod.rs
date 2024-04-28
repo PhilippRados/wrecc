@@ -372,7 +372,7 @@ impl Compiler {
     fn global_declaration(&mut self, declarators: Vec<Declarator>) {
         for declarator in declarators {
             let var_symbol = declarator.entry.borrow().clone();
-            let type_decl = var_symbol.type_decl.clone();
+            let ty = var_symbol.qtype.ty.clone();
 
             if declarator.name == var_symbol.token && !var_symbol.is_extern() {
                 let name = declarator.name.unwrap_string();
@@ -382,7 +382,7 @@ impl Compiler {
                     name
                 };
 
-                self.declare_global_var(label_name, type_decl, declarator.entry, declarator.init)
+                self.declare_global_var(label_name, ty, declarator.entry, declarator.init)
             }
             // if variable is declared but its initialization is after the first use then
             // still needs a register to access:
@@ -397,7 +397,7 @@ impl Compiler {
                     .borrow_mut()
                     .set_reg(Register::Label(LabelRegister::Var(
                         declarator.name.unwrap_string(),
-                        type_decl,
+                        ty,
                         var_symbol.is_extern(),
                     )))
             }
@@ -407,48 +407,44 @@ impl Compiler {
     fn declare_global_var(
         &mut self,
         label_name: String,
-        type_decl: Type,
+        ty: Type,
         var_symbol: SymbolRef,
         init: Option<Init>,
     ) {
         self.write_out(Lir::GlobalDeclaration(
             label_name.clone(),
-            type_decl.is_ptr(),
+            ty.is_ptr(),
             var_symbol.borrow().is_static(),
         ));
 
         if let Some(init) = init {
-            self.init_global_var(label_name, type_decl, var_symbol, init);
+            self.init_global_var(label_name, ty, var_symbol, init);
         } else {
             self.write_out(Lir::GlobalInit(
                 Type::Primitive(Primitive::Void),
-                StaticRegister::Literal(type_decl.size() as i64, Type::Primitive(Primitive::Long)),
+                StaticRegister::Literal(ty.size() as i64, Type::Primitive(Primitive::Long)),
             ));
 
             // since external declarations don't emit any code it is fine to assume that this label
             // doesn't have run-time addressing
-            let reg = Register::Label(LabelRegister::Var(label_name, type_decl, false));
+            let reg = Register::Label(LabelRegister::Var(label_name, ty, false));
 
             var_symbol.borrow_mut().set_reg(reg);
         }
     }
-    fn init_global_var(&mut self, name: String, type_decl: Type, var_symbol: SymbolRef, init: Init) {
+    fn init_global_var(&mut self, name: String, ty: Type, var_symbol: SymbolRef, init: Init) {
         var_symbol
             .borrow_mut()
-            .set_reg(Register::Label(LabelRegister::Var(
-                name,
-                type_decl.clone(),
-                false,
-            )));
+            .set_reg(Register::Label(LabelRegister::Var(name, ty.clone(), false)));
 
         match init {
             Init::Scalar(expr) => {
                 let value_reg = self.execute_global_expr(expr);
 
-                self.write_out(Lir::GlobalInit(type_decl, value_reg));
+                self.write_out(Lir::GlobalInit(ty, value_reg));
             }
             Init::Aggr(list) => {
-                let mut size = type_decl.size() as i64;
+                let mut size = ty.size() as i64;
                 let mut prev_offset: i64 = 0;
 
                 for (expr, offset) in list {
@@ -502,14 +498,14 @@ impl Compiler {
                         .borrow_mut()
                         .set_reg(Register::Label(LabelRegister::Var(
                             label_name.clone(),
-                            var_symbol.type_decl.clone(),
+                            var_symbol.qtype.ty.clone(),
                             var_symbol.is_extern(),
                         )));
 
                     func.static_declarations.push((label_name, declarator));
                 }
                 None | Some(StorageClass::Auto | StorageClass::Register)
-                    if declarator.name == var_symbol.token && !var_symbol.type_decl.is_func() =>
+                    if declarator.name == var_symbol.token && !var_symbol.qtype.ty.is_func() =>
                 {
                     self.declare_var(func, declarator.entry, declarator.init)
                 }
@@ -520,7 +516,7 @@ impl Compiler {
                         .borrow_mut()
                         .set_reg(Register::Label(LabelRegister::Var(
                             declarator.name.unwrap_string(),
-                            var_symbol.type_decl.clone(),
+                            var_symbol.qtype.ty.clone(),
                             var_symbol.is_extern(),
                         )))
                 }
@@ -530,10 +526,10 @@ impl Compiler {
     }
 
     fn declare_var(&mut self, func: &mut Function, var_symbol: SymbolRef, init: Option<Init>) {
-        let type_decl = var_symbol.borrow().type_decl.clone();
-        let size = align(type_decl.size(), &type_decl);
+        let ty = var_symbol.borrow().qtype.ty.clone();
+        let size = align(ty.size(), &ty);
 
-        let reg = Register::Stack(StackRegister::new(&mut func.current_bp_offset, type_decl));
+        let reg = Register::Stack(StackRegister::new(&mut func.current_bp_offset, ty));
         var_symbol.borrow_mut().set_reg(reg);
 
         if let Some(init) = init {
@@ -616,7 +612,7 @@ impl Compiler {
             .borrow_mut()
             .set_reg(Register::Label(LabelRegister::Var(
                 func.name.clone(),
-                func.return_type.clone(),
+                func.return_type.ty.clone(),
                 // since function is defined in this translation unit,
                 // it doesn't have to be accessed using `@GOTPCREL`
                 false,
@@ -641,7 +637,7 @@ impl Compiler {
             if declarator.name == var_symbol.token && !var_symbol.is_extern() {
                 self.declare_global_var(
                     label_name,
-                    var_symbol.type_decl,
+                    var_symbol.qtype.ty,
                     declarator.entry,
                     declarator.init,
                 )
@@ -657,11 +653,11 @@ impl Compiler {
 
         // initialize parameters
         for (i, param_symbol) in func.params.clone().into_iter().enumerate() {
-            let type_decl = param_symbol.borrow().type_decl.clone();
+            let ty = param_symbol.borrow().qtype.ty.clone();
             if i < ARG_REGS.len() {
                 let arg = Register::Arg(ArgRegister::new(
                     i,
-                    type_decl,
+                    ty,
                     &mut self.interval_counter,
                     self.instr_counter,
                 ));
@@ -669,7 +665,7 @@ impl Compiler {
             } else {
                 // if not in designated arg-register get from stack
                 let reg = Register::Temp(TempRegister::new(
-                    type_decl,
+                    ty,
                     &mut self.interval_counter,
                     self.instr_counter,
                 ));
@@ -690,8 +686,8 @@ impl Compiler {
         self.cg_stmts(func, statements)
     }
 
-    fn cg_literal(&mut self, n: i64, type_decl: Type) -> Register {
-        let literal_reg = Register::Literal(n, type_decl);
+    fn cg_literal(&mut self, n: i64, ty: Type) -> Register {
+        let literal_reg = Register::Literal(n, ty);
 
         // 64bit literals are only allowed to move to scratch-register
         if let Primitive::Long = integer_type(n) {
@@ -711,24 +707,24 @@ impl Compiler {
             ExprKind::String(name) => {
                 StaticRegister::Label(LabelRegister::String(self.const_labels[&name]))
             }
-            ExprKind::Literal(n) => StaticRegister::Literal(n, expr.type_decl),
-            ExprKind::Cast { new_type, expr, .. } => {
+            ExprKind::Literal(n) => StaticRegister::Literal(n, expr.qtype.ty),
+            ExprKind::Cast { expr, new_type, .. } => {
                 let mut reg = self.execute_global_expr(*expr);
                 reg.set_type(new_type);
                 reg
             }
             ExprKind::ScaleUp { by, expr } => {
-                if let StaticRegister::Literal(n, type_decl) = self.execute_global_expr(*expr) {
+                if let StaticRegister::Literal(n, ty) = self.execute_global_expr(*expr) {
                     let n = n.overflowing_mul(by as i64).0;
                     let scaled_type = integer_type(n);
 
-                    let type_decl = if type_decl.size() < scaled_type.size() {
+                    let ty = if ty.size() < scaled_type.size() {
                         Type::Primitive(scaled_type)
                     } else {
-                        type_decl
+                        ty
                     };
 
-                    StaticRegister::Literal(n, type_decl)
+                    StaticRegister::Literal(n, ty)
                 } else {
                     unreachable!("can only scale literal value")
                 }
@@ -736,8 +732,10 @@ impl Compiler {
             ExprKind::Unary { operator, right } => {
                 let mut reg = self.execute_global_expr(*right);
                 match operator {
-                    TokenKind::Amp => reg.set_type(Type::Pointer(Box::new(reg.get_type()))),
-                    TokenKind::Star => reg.set_type(expr.type_decl),
+                    TokenKind::Amp => {
+                        reg.set_type(Type::Pointer(Box::new(QualType::new(reg.get_type()))))
+                    }
+                    TokenKind::Star => reg.set_type(expr.qtype.ty),
                     _ => unreachable!("non-constant unary expression"),
                 }
                 reg
@@ -750,7 +748,7 @@ impl Compiler {
                         let offset = s.member_offset(&member);
                         let member_type = s.member_type(&member);
 
-                        reg.set_type(member_type);
+                        reg.set_type(member_type.ty);
                         match reg {
                             StaticRegister::Label(label_reg) => {
                                 StaticRegister::LabelOffset(label_reg, offset as i64, TokenKind::Plus)
@@ -768,7 +766,7 @@ impl Compiler {
                     }
                     Type::Union(s) => {
                         let member_type = s.member_type(&member);
-                        reg.set_type(member_type);
+                        reg.set_type(member_type.ty);
                         reg
                     }
                     _ => unreachable!("{:?}", reg.get_type()),
@@ -816,8 +814,8 @@ impl Compiler {
 
                 self.cg_binary(left_reg, &operator, right_reg)
             }
-            ExprKind::Literal(n) => self.cg_literal(n, expr.type_decl),
-            ExprKind::Unary { operator, right } => self.cg_unary(func, operator, *right, expr.type_decl),
+            ExprKind::Literal(n) => self.cg_literal(n, expr.qtype.ty),
+            ExprKind::Unary { operator, right } => self.cg_unary(func, operator, *right, expr.qtype.ty),
             ExprKind::Logical { left, operator, right } => {
                 self.cg_logical(func, *left, operator, *right)
             }
@@ -834,7 +832,7 @@ impl Compiler {
                 self.cg_comp_assign(func, *expr, tmp_symbol)
             }
             ExprKind::Ident(var_symbol) => self.ident(var_symbol),
-            ExprKind::Call { caller, args } => self.cg_call(func, *caller, args, expr.type_decl),
+            ExprKind::Call { caller, args } => self.cg_call(func, *caller, args, expr.qtype.ty),
             ExprKind::Cast { expr, direction, new_type } => {
                 self.cg_cast(func, new_type, *expr, direction)
             }
@@ -859,7 +857,7 @@ impl Compiler {
         // to be dereferences first
         if let Register::Label(LabelRegister::Var(.., true)) = &reg {
             let original_type = reg.get_type();
-            reg.set_type(original_type.clone().pointer_to());
+            reg.set_type(Type::Pointer(Box::new(QualType::new(original_type.clone()))));
             self.cg_deref(reg, original_type)
         } else {
             reg
@@ -893,7 +891,7 @@ impl Compiler {
         self.free(cond_reg);
 
         let result = Register::Temp(TempRegister::new(
-            true_expr.clone().type_decl,
+            true_expr.clone().qtype.ty,
             &mut self.interval_counter,
             self.instr_counter,
         ));
@@ -930,7 +928,7 @@ impl Compiler {
                 address
             };
 
-            result.set_type(member_type);
+            result.set_type(member_type.ty);
             result.set_value_kind(ValueKind::Lvalue);
             result
         } else if let Type::Union(s) = reg.get_type() {
@@ -938,7 +936,7 @@ impl Compiler {
 
             let mut result = self.cg_address_at(reg, free);
 
-            result.set_type(member_type);
+            result.set_type(member_type.ty);
             result.set_value_kind(ValueKind::Lvalue);
             result
         } else {
@@ -1060,13 +1058,13 @@ impl Compiler {
         // moving the arguments into their designated registers
         for (i, expr) in args.into_iter().enumerate().rev() {
             let mut reg = self.execute_expr(func, expr);
-            let type_decl = reg.get_type();
+            let ty = reg.get_type();
 
             // put first six registers into designated argument-registers; others pushed onto stack
             if i < ARG_REGS.len() {
                 let arg = Register::Arg(ArgRegister::new(
                     i,
-                    type_decl,
+                    ty,
                     &mut self.interval_counter,
                     self.instr_counter,
                 ));
@@ -1331,7 +1329,7 @@ impl Compiler {
     }
     fn cg_address_at(&mut self, reg: Register, free: bool) -> Register {
         let dest = Register::Temp(TempRegister::new(
-            Type::Pointer(Box::new(reg.get_type())),
+            Type::Pointer(Box::new(QualType::new(reg.get_type()))),
             &mut self.interval_counter,
             self.instr_counter,
         ));
@@ -1537,14 +1535,14 @@ impl Compiler {
                 assert!(!self.live_intervals.contains_key(&reg.id));
                 self.live_intervals.insert(
                     reg.id,
-                    IntervalEntry::new(reg.start_idx, self.instr_counter, None, reg.type_decl),
+                    IntervalEntry::new(reg.start_idx, self.instr_counter, None, reg.ty),
                 );
             }
             Register::Arg(reg) => {
                 assert!(!self.live_intervals.contains_key(&reg.id));
                 self.live_intervals.insert(
                     reg.id,
-                    IntervalEntry::new(reg.start_idx, self.instr_counter, Some(reg.reg), reg.type_decl),
+                    IntervalEntry::new(reg.start_idx, self.instr_counter, Some(reg.reg), reg.ty),
                 );
             }
             _ => (),
@@ -1552,10 +1550,10 @@ impl Compiler {
     }
 }
 
-pub fn align(offset: usize, type_decl: &Type) -> usize {
-    let size = match type_decl {
-        Type::Array(of, _) => of.size(),
-        _ => type_decl.size(),
+pub fn align(offset: usize, ty: &Type) -> usize {
+    let size = match ty {
+        Type::Array(of, _) => of.ty.size(),
+        _ => ty.size(),
     };
     align_by(offset, size)
 }

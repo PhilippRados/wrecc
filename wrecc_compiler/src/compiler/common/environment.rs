@@ -2,7 +2,6 @@
 
 use crate::compiler::codegen::register::*;
 use crate::compiler::common::{error::*, token::*, types::*};
-use crate::compiler::parser::hir::expr::ExprKind;
 use crate::compiler::typechecker::mir::decl::StorageClass;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -77,7 +76,7 @@ impl Symbol {
         self.reg.clone().unwrap()
     }
 
-    /// Compares current-symbols type to the already existing symbol
+    /// Compares current symbols type to the already existing symbol
     fn cmp(&self, name: &Token, other: &Symbol) -> Result<(), Error> {
         match (&self.qtype, &other.qtype) {
             _ if (self.is_typedef() && !other.is_typedef())
@@ -88,18 +87,25 @@ impl Symbol {
                     ErrorKind::RedefOtherSymbol(name.unwrap_string(), other.to_string()),
                 ))
             }
-            (qtype1, qtype2)
-                if qtype1.ty.is_array() && qtype2.ty.is_array() && !self.is_typedef()
-                    // placeholder expression
-                    && qtype1.type_compatible(&qtype2, &ExprKind::Nop) =>
-            {
-                Ok(())
+            (qtype1, qtype2) => {
+                // HACK: because arrays are considered equal if their sizes match, have to compare the
+                // types' string represantation to exactly compare two types
+                let exact_equal = qtype1.to_string() == qtype2.to_string();
+                let equal = qtype1 == qtype2;
+
+                if !equal || (self.is_typedef() && !exact_equal) {
+                    Err(Error::new(
+                        name,
+                        ErrorKind::RedefTypeMismatch(
+                            name.unwrap_string(),
+                            qtype1.clone(),
+                            qtype2.clone(),
+                        ),
+                    ))
+                } else {
+                    Ok(())
+                }
             }
-            (qtype1, qtype2) if qtype1 != qtype2 => Err(Error::new(
-                name,
-                ErrorKind::RedefTypeMismatch(name.unwrap_string(), qtype1.clone(), qtype2.clone()),
-            )),
-            _ => Ok(()),
         }
     }
 }

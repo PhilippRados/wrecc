@@ -59,12 +59,21 @@ pub enum Type {
     Function(FuncType),
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Debug)]
 pub enum ArraySize {
     Known(usize),
     Unknown,
 }
-
+impl PartialEq for ArraySize {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ArraySize::Known(size1), ArraySize::Known(size2)) => size1 == size2,
+            (ArraySize::Unknown, ArraySize::Unknown)
+            | (ArraySize::Known(_), ArraySize::Unknown)
+            | (ArraySize::Unknown, ArraySize::Known(_)) => true,
+        }
+    }
+}
 impl QualType {
     pub fn new(ty: Type) -> QualType {
         QualType { ty, qualifiers: Qualifiers::default() }
@@ -89,11 +98,6 @@ impl QualType {
                 true
             }
 
-            // have to catch this since otherwise arrays are compared deeply
-            (Type::Pointer(l), Type::Pointer(r)) if l.ty.is_array() && r.ty.is_array() => {
-                l.type_compatible(&r, other_expr) && l.qualifiers.contains_all(&r.qualifiers)
-            }
-
             // 6.5.16.1 both operands are pointers to qualified or unqualified versions of compatible types,
             // and the type pointed to by the left has all the qualifiers of the type pointed to by the right
             (Type::Pointer(inner1), Type::Pointer(inner2)) => {
@@ -106,15 +110,9 @@ impl QualType {
                     }
             }
 
-            (Type::Array(of1, ArraySize::Known(size1)), Type::Array(of2, ArraySize::Known(size2))) => {
-                size1 == size2 && of1.type_compatible(&of2, other_expr)
-            }
-            // unspecified arrays are compatible if they have the same type
-            (Type::Array(of1, ArraySize::Unknown), Type::Array(of2, ArraySize::Unknown))
-            | (Type::Array(of1, ArraySize::Known(_)), Type::Array(of2, ArraySize::Unknown))
-            | (Type::Array(of1, ArraySize::Unknown), Type::Array(of2, ArraySize::Known(_))) => {
-                of1.type_compatible(&of2, other_expr)
-            }
+            // unspecified arrays are compatible if they have the same type and their sizes are
+            // compatible (see PartialEq for ArraySize)
+            (Type::Array(..), Type::Array(..)) => self.ty == other.ty,
 
             // two structs/unions are compatible if they refer to the same definition
             (Type::Struct(s_l), Type::Struct(s_r)) | (Type::Union(s_l), Type::Union(s_r)) => s_l == s_r,

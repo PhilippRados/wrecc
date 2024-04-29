@@ -38,6 +38,8 @@ int main() {
   long *first[] = {(long *)1, (void *)2};
   long *sec[] = {(long *)2, (void *)3};
   long(*three[])[] = {first, sec};
+
+  long(*also2)[][2] = &also;
 }
 
 int global[] = {1};

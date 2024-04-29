@@ -63,9 +63,14 @@ error: cannot assign to type 'long (*)[]' with type 'long **'
 |
 40   long(*three[])[] = {first, sec};
 |                        ^
-error: invalid array-type: 'int []'
-|  --> in tests/fixtures/unsized_array_err.c:46:15
+error: cannot assign to type 'long (*)[][2]' with type 'int (*)[3][2]'
+|  --> in tests/fixtures/unsized_array_err.c:42:9
 |
-46 int func(int a[2][]) { return 0; }
+42   long(*also2)[][2] = &also;
+|          ^
+error: invalid array-type: 'int []'
+|  --> in tests/fixtures/unsized_array_err.c:48:15
+|
+48 int func(int a[2][]) { return 0; }
 |                ^
-14 errors generated.
+15 errors generated.

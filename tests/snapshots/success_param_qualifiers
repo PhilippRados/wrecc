@@ -1,0 +1,16 @@
+error: conflicting types for 'foo': 'int (const int *)' vs 'int (volatile int *)'
+|  --> in tests/fixtures/param_qualifiers.c:6:5
+|
+6 int foo(const int *);
+|     ^
+error: conflicting types for 'goo': 'int (void *)' vs 'const int (void *)'
+|  --> in tests/fixtures/param_qualifiers.c:12:5
+|
+12 int goo(void *);
+|      ^
+error: cannot assign to type 'int (*)(int *const)' with type 'int (*)(volatile int *)'
+|  --> in tests/fixtures/param_qualifiers.c:15:9
+|
+15   int (*bar)(int *const) = foo;
+|          ^
+3 errors generated.

@@ -642,8 +642,20 @@ impl TypeChecker {
         }
 
         // single unnamed void param is equivalent to empty params
-        if let [(QualType { ty: Type::Primitive(Primitive::Void), .. }, None)] = parsed_params.as_slice()
+        if let [(
+            QualType {
+                ty: Type::Primitive(Primitive::Void),
+                qualifiers,
+            },
+            None,
+        )] = parsed_params.as_slice()
         {
+            if !qualifiers.is_empty() {
+                return Err(Error::new(
+                    token,
+                    ErrorKind::Regular("'void' parameter cannot have type-qualifiers"),
+                ));
+            }
             parsed_params.pop();
         } else if parsed_params.iter().any(|(qtype, _)| qtype.ty.is_void()) {
             return Err(Error::new(token, ErrorKind::VoidFuncArg));

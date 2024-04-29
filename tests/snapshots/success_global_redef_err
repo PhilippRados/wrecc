@@ -28,4 +28,9 @@ error: redefinition of symbol 'a'
 |
 29   int a;
 |        ^
-6 errors generated.
+error: conflicting types for 'g': 'int' vs 'const int'
+|  --> in tests/fixtures/global_redef_err.c:33:5
+|
+33 int g;
+|      ^
+7 errors generated.

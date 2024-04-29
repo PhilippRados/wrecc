@@ -28,3 +28,6 @@ some main() {
   int a;
   int a;
 }
+
+const int g;
+int g;

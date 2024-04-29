@@ -35,6 +35,9 @@ impl Qualifiers {
             && self.is_volatile >= other.is_volatile
             && self.is_restrict >= other.is_restrict
     }
+    pub fn is_empty(&self) -> bool {
+        self == &Qualifiers::default()
+    }
 }
 impl From<&Vec<hir::decl::Qualifier>> for Qualifiers {
     fn from(qualifiers: &Vec<hir::decl::Qualifier>) -> Self {
@@ -141,6 +144,16 @@ impl QualType {
         match &self.ty {
             Type::Pointer(inner) => Some(*inner.clone()),
             _ => None,
+        }
+    }
+    pub fn unqualified(&self) -> QualType {
+        if self.qualifiers.is_empty() {
+            self.clone()
+        } else {
+            QualType {
+                qualifiers: Qualifiers::default(),
+                ..self.clone()
+            }
         }
     }
 }
@@ -323,11 +336,23 @@ impl Type {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Debug)]
 pub struct FuncType {
     pub return_type: Box<QualType>,
     pub params: Vec<QualType>,
     pub variadic: bool,
+}
+impl PartialEq for FuncType {
+    fn eq(&self, other: &Self) -> bool {
+        self.return_type == other.return_type
+            && self.variadic == other.variadic
+            && self.params.len() == other.params.len()
+            && self
+                .params
+                .iter()
+                .zip(&other.params)
+                .all(|(p1, p2)| p1.unqualified() == p2.unqualified())
+    }
 }
 
 #[derive(Clone, PartialEq, PartialOrd, Debug)]

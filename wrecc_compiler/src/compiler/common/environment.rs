@@ -90,6 +90,11 @@ impl Symbol {
             (qtype1, qtype2) => {
                 // HACK: because arrays are considered equal if their sizes match, have to compare the
                 // types' string represantation to exactly compare two types
+                // necessary because:
+                // `int arr[]; int arr[2]` is valid but
+                // `typedef int arr[]; typedef int arr[2]` is not
+                // WARN: but this doesn't allow typedefs of function declarations with
+                // mismatched qualifiers: `typedef int f(const int); typedef int f(int)`
                 let exact_equal = qtype1.to_string() == qtype2.to_string();
                 let equal = qtype1 == qtype2;
 

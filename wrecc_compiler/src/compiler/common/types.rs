@@ -628,7 +628,12 @@ impl Display for QualType {
                     )),
                     Type::Pointer(_) => {
                         let precedence = pointer_precedence(&modifiers, i);
-                        let quals = print_qualifiers(&modifier.qualifiers);
+                        let mut quals = print_qualifiers(&modifier.qualifiers);
+                        // trim trailing whitespace of last pointer to be printed
+                        // otherwise `int *const` would be printed `int *const `
+                        if pointers.is_empty() {
+                            quals = quals.trim_end().to_string()
+                        }
 
                         pointers.push(match precedence {
                             true if pointers.is_empty() && suffixes.is_empty() => {
@@ -754,6 +759,13 @@ pub mod tests {
         assert_type_print("const int", "const int");
         assert_type_print("const int*", "const int *");
         assert_type_print("int *const", "int *const");
+        assert_type_print("int *const[4]", "int *const[4]");
+        assert_type_print(
+            "char (*const restrict *(*volatile)[4])[2]",
+            "char (*const restrict *(*volatile)[4])[2]",
+        );
+
+        assert_type_print("const int (int *restrict)", "const int (int *restrict)");
     }
 
     #[test]

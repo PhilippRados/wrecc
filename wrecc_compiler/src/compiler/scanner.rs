@@ -35,7 +35,7 @@ impl<'a> Scanner<'a> {
                 ("inline", TokenKind::Inline),
                 ("const", TokenKind::Const),
                 ("volatile", TokenKind::Volatile),
-                ("register", TokenKind::Register),
+                ("restrict", TokenKind::Restrict),
                 ("if", TokenKind::If),
                 ("switch", TokenKind::Switch),
                 ("case", TokenKind::Case),

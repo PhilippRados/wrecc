@@ -69,21 +69,6 @@ impl QualType {
     pub fn new(ty: Type) -> QualType {
         QualType { ty, qualifiers: Qualifiers::default() }
     }
-    // deeply compares the type for exact equality and qualifiers just have to be compatible
-    fn compatible_qualified_type(&self, other: &QualType) -> bool {
-        let compatible_qualifiers = self.qualifiers.contains_all(&other.qualifiers);
-        if !compatible_qualifiers {
-            return false;
-        }
-
-        match (&self.ty, &other.ty) {
-            (Type::Array(of1, size1), Type::Array(of2, size2)) => {
-                of1.compatible_qualified_type(of2) && size1 == size2
-            }
-            (Type::Pointer(to1), Type::Pointer(to2)) => to1.compatible_qualified_type(to2),
-            _ => self.ty == other.ty,
-        }
-    }
 
     pub fn type_compatible(&self, other: &QualType, other_expr: &impl hir::expr::IsZero) -> bool {
         match (&self.ty, &other.ty) {
@@ -96,25 +81,30 @@ impl QualType {
 
             // pointer to null-pointer-constant is always valid
             (Type::Pointer(_), _) if other_expr.is_zero() => true,
+
             // void* is compatible to any other pointer
             (Type::Pointer(t), Type::Pointer(_)) | (Type::Pointer(_), Type::Pointer(t))
                 if matches!(t.ty, Type::Primitive(Primitive::Void)) =>
             {
                 true
             }
-            // have to catch this since otherwise pointers are compared deeply
-            (Type::Pointer(l), Type::Pointer(r)) if l.ty.is_aggregate() && r.ty.is_aggregate() => {
-                l.type_compatible(&r, other_expr) && self.qualifiers.contains_all(&other.qualifiers)
+
+            // have to catch this since otherwise arrays are compared deeply
+            (Type::Pointer(l), Type::Pointer(r)) if l.ty.is_array() && r.ty.is_array() => {
+                l.type_compatible(&r, other_expr) && l.qualifiers.contains_all(&r.qualifiers)
             }
 
-            // type-qualifier compatibility exception: https://c-faq.com/ansi/constmismatch.html
-            // top-most qualifiers should only be compatible and the rest have to match exactly
-            (Type::Pointer(inner1), Type::Pointer(inner2))
-                if inner1.ty.is_ptr() && inner2.ty.is_ptr() =>
-            {
-                self.compatible_qualified_type(other) && inner1 == inner2
+            // 6.5.16.1 both operands are pointers to qualified or unqualified versions of compatible types,
+            // and the type pointed to by the left has all the qualifiers of the type pointed to by the right
+            (Type::Pointer(inner1), Type::Pointer(inner2)) => {
+                inner1.qualifiers.contains_all(&inner2.qualifiers)
+                    && if let (Type::Pointer(nested1), Type::Pointer(nested2)) = (&inner1.ty, &inner2.ty)
+                    {
+                        nested1 == nested2
+                    } else {
+                        inner1.ty == inner2.ty
+                    }
             }
-            (Type::Pointer(_), Type::Pointer(_)) => self.compatible_qualified_type(other),
 
             (Type::Array(of1, ArraySize::Known(size1)), Type::Array(of2, ArraySize::Known(size2))) => {
                 size1 == size2 && of1.type_compatible(&of2, other_expr)
@@ -127,13 +117,7 @@ impl QualType {
             }
 
             // two structs/unions are compatible if they refer to the same definition
-            (Type::Struct(s_l), Type::Struct(s_r)) | (Type::Union(s_l), Type::Union(s_r)) => {
-                match (s_l, s_r) {
-                    (StructKind::Named(_, l_ref), StructKind::Named(_, r_ref)) => l_ref == r_ref,
-                    (StructKind::Unnamed(name_l, _), StructKind::Unnamed(name_r, _)) => name_l == name_r,
-                    _ => false,
-                }
-            }
+            (Type::Struct(s_l), Type::Struct(s_r)) | (Type::Union(s_l), Type::Union(s_r)) => s_l == s_r,
 
             // func is compatible to func if they have the exact same signature
             (Type::Function(f1), Type::Function(f2)) => f1 == f2,

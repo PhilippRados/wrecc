@@ -61,4 +61,7 @@ int main() {
   const long **s2 = s;
   long *s3;
   const long *s4 = s3;
+
+  int **s10;
+  int *const *s11 = s10;
 }

@@ -80,17 +80,16 @@ impl Expr {
             _ => Ok(self),
         }
     }
-    pub fn to_rval(&mut self) {
-        self.qtype.qualifiers = Qualifiers::default();
-        self.value_kind = ValueKind::Rvalue;
-        // Expr {
-        //     qtype: QualType {
-        //         qualifiers: Qualifiers::default(),
-        //         ..self.qtype
-        //     },
-        //     value_kind: ValueKind::Rvalue,
-        //     ..self
-        // }
+    pub fn to_rval(self) -> Expr {
+        Expr {
+            // all qualifiers are lost in lvalue-to-rvalue conversion
+            qtype: QualType {
+                qualifiers: Qualifiers::default(),
+                ..self.qtype
+            },
+            value_kind: ValueKind::Rvalue,
+            kind: self.kind,
+        }
     }
     pub fn cast_to(self, new_type: QualType, direction: CastDirection) -> Expr {
         Expr {

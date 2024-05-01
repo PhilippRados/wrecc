@@ -696,9 +696,7 @@ impl TypeChecker {
             return Err(Error::new(token, ErrorKind::InvalidAggrInit(qtype.clone())));
         }
 
-        let mut expr = self.visit_expr(func, expr)?.decay(token)?;
-        expr.to_rval();
-
+        let expr = self.visit_expr(func, expr)?.decay(token)?.to_rval();
         Self::check_type_compatibility(token, qtype, &expr)?;
         let expr = Self::maybe_cast(qtype.clone(), expr);
 
@@ -1588,10 +1586,7 @@ impl TypeChecker {
             ));
         }
 
-        let mut expr = Self::always_cast(expr, new_type);
-        expr.to_rval();
-
-        Ok(expr)
+        Ok(Self::always_cast(expr, new_type).to_rval())
     }
     // ensures that equal sized expressions still have new type
     fn always_cast(expr: mir::expr::Expr, new_type: QualType) -> mir::expr::Expr {
@@ -1887,7 +1882,7 @@ impl TypeChecker {
     }
     fn assign(
         &mut self,
-        mut left: mir::expr::Expr,
+        left: mir::expr::Expr,
         token: Token,
         right: mir::expr::Expr,
     ) -> Result<mir::expr::Expr, Error> {
@@ -1915,19 +1910,15 @@ impl TypeChecker {
             }
         }
 
-        let mut right = right.decay(&token)?;
-        right.to_rval();
-
+        let right = right.decay(&token)?.to_rval();
         Self::check_type_compatibility(&token, &left.qtype, &right)?;
         let right = Self::maybe_cast(left.qtype.clone(), right);
 
-        // 6.5.16.3 The type of an assignment expression is the type
-        // of the left operand unless the left operand has qualified type,
-        // in which case it is the unqualified version of the type of the left operand
-        left.qtype.qualifiers = Qualifiers::default();
-
         Ok(mir::expr::Expr {
-            qtype: left.qtype.clone(),
+            // 6.5.16.3 The type of an assignment expression is the type
+            // of the left operand unless the left operand has qualified type,
+            // in which case it is the unqualified version of the type of the left operand
+            qtype: left.qtype.unqualified(),
             value_kind: ValueKind::Rvalue,
             kind: mir::expr::ExprKind::Assign {
                 l_expr: Box::new(left),
@@ -2042,14 +2033,8 @@ impl TypeChecker {
         token: Token,
         right: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let mut left = self.visit_expr(func, left)?;
-        let mut right = self.visit_expr(func, right)?;
-
-        left.to_rval();
-        right.to_rval();
-
-        let left = left.decay(&token)?;
-        let right = right.decay(&token)?;
+        let left = self.visit_expr(func, left)?.to_rval().decay(&token)?;
+        let right = self.visit_expr(func, right)?.to_rval().decay(&token)?;
 
         if !left.qtype.ty.is_scalar() || !right.qtype.ty.is_scalar() {
             return Err(Error::new(
@@ -2075,14 +2060,8 @@ impl TypeChecker {
         token: Token,
         right: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let mut left = self.visit_expr(func, left)?;
-        let mut right = self.visit_expr(func, right)?;
-
-        left.to_rval();
-        right.to_rval();
-
-        let left = left.decay(&token)?;
-        let right = right.decay(&token)?;
+        let left = self.visit_expr(func, left)?.to_rval().decay(&token)?;
+        let right = self.visit_expr(func, right)?.to_rval().decay(&token)?;
 
         if !is_valid_comp(&left.qtype, &left, &right.qtype, &right) {
             return Err(Error::new(
@@ -2117,14 +2096,8 @@ impl TypeChecker {
         token: Token,
         right: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        let mut left = self.visit_expr(func, left)?;
-        let mut right = self.visit_expr(func, right)?;
-
-        left.to_rval();
-        right.to_rval();
-
-        let left = left.decay(&token)?;
-        let right = right.decay(&token)?;
+        let left = self.visit_expr(func, left)?.to_rval().decay(&token)?;
+        let right = self.visit_expr(func, right)?.to_rval().decay(&token)?;
 
         if !is_valid_bin(&token.kind, &left.qtype, &right.qtype, &right) {
             return Err(Error::new(
@@ -2208,12 +2181,12 @@ impl TypeChecker {
             // array doesn't decay during '&' expression
             self.check_address(token, right)
         } else {
-            let mut right = right.decay(&token)?;
+            let right = right.decay(&token)?;
 
             match token.kind {
                 TokenKind::Star => self.check_deref(token, right),
                 TokenKind::Bang => {
-                    right.to_rval();
+                    let right = right.to_rval();
                     let right = Box::new(right.maybe_int_promote());
 
                     if !right.qtype.ty.is_scalar() {
@@ -2230,7 +2203,7 @@ impl TypeChecker {
                     })
                 }
                 TokenKind::Minus | TokenKind::Tilde | TokenKind::Plus => {
-                    right.to_rval();
+                    let right = right.to_rval();
                     let right = Box::new(right.maybe_int_promote());
 
                     if !right.qtype.ty.is_integer() {

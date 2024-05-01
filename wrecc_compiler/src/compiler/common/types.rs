@@ -320,8 +320,8 @@ impl Type {
     }
 
     pub fn get_primitive(&self) -> Option<&Primitive> {
-        if let Type::Primitive(type_decl) = self {
-            Some(type_decl)
+        if let Type::Primitive(prim) = self {
+            Some(prim)
         } else {
             None
         }
@@ -596,8 +596,8 @@ impl Display for QualType {
             result
         }
 
-        fn print_type(type_decl: &QualType) -> String {
-            let mut current = type_decl;
+        fn print_type(qtype: &QualType) -> String {
+            let mut current = qtype;
             let mut modifiers = Vec::new();
 
             while let Type::Pointer(new)

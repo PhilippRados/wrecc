@@ -209,16 +209,16 @@ impl ErrorKind {
             ErrorKind::InvalidRestrict(ty) => {
                 format!("'restrict' can only appear on pointer types, not: '{}'", ty)
             }
-            ErrorKind::IncompleteMemberAccess(type_decl) => {
+            ErrorKind::IncompleteMemberAccess(qtype) => {
                 format!(
                     "cannot access members of type that contains incomplete type '{}'",
-                    type_decl
+                    qtype
                 )
             }
-            ErrorKind::IncompleteFuncParam(func_name, type_decl) => {
+            ErrorKind::IncompleteFuncParam(func_name, qtype) => {
                 format!(
                     "function '{}' contains incomplete type '{}' as parameter",
-                    func_name, type_decl
+                    func_name, qtype
                 )
             }
             ErrorKind::VoidFuncArg => {
@@ -240,29 +240,28 @@ impl ErrorKind {
             ErrorKind::RedefTypeMismatch(name, new, old) => {
                 format!("conflicting types for '{}': '{}' vs '{}'", name, new, old)
             }
-            ErrorKind::NonExistantMember(member, type_decl) => {
-                format!("no member '{}' in '{}'", member, type_decl)
+            ErrorKind::NonExistantMember(member, qtype) => {
+                format!("no member '{}' in '{}'", member, qtype)
             }
-            ErrorKind::InvalidArrayDesignator(type_decl) => format!(
-                "can only use array designator on type 'array' not '{}'",
-                type_decl
-            ),
+            ErrorKind::InvalidArrayDesignator(qtype) => {
+                format!("can only use array designator on type 'array' not '{}'", qtype)
+            }
             ErrorKind::DesignatorOverflow(expected, actual) => {
                 format!(
                     "array designator index '{}' exceeds type-size: '{}'",
                     actual, expected
                 )
             }
-            ErrorKind::InitializerOverflow(type_decl) => {
-                format!("initializer overflow, excess elements in '{}'", type_decl)
+            ErrorKind::InitializerOverflow(qtype) => {
+                format!("initializer overflow, excess elements in '{}'", qtype)
             }
             ErrorKind::ScalarOverflow => "excess elements in scalar initializer".to_string(),
             ErrorKind::ArraySizeOverflow => {
                 "array-size exceeds maximum size of 9223372036854775807".to_string()
             }
             ErrorKind::EmptyInit => "cannot have empty aggregate-initializer".to_string(),
-            ErrorKind::InvalidAggrInit(type_decl) => {
-                format!("cannot initialize '{}' with scalar", type_decl)
+            ErrorKind::InvalidAggrInit(qtype) => {
+                format!("cannot initialize '{}' with scalar", qtype)
             }
             ErrorKind::ConstAssign => "cannot assign variable which was declared 'const'".to_string(),
             ErrorKind::ConstStructAssign(ty, member) => {
@@ -271,10 +270,10 @@ impl ErrorKind {
                     ty, member
                 )
             }
-            ErrorKind::InvalidArray(type_decl) => format!("invalid array-type: '{}'", type_decl),
-            ErrorKind::InvalidCaller(type_decl) => format!(
+            ErrorKind::InvalidArray(qtype) => format!("invalid array-type: '{}'", qtype),
+            ErrorKind::InvalidCaller(qtype) => format!(
                 "called object type: '{}' is not function or function pointer",
-                type_decl
+                qtype
             ),
             ErrorKind::FunctionMember(member_name, member_type) => {
                 format!(
@@ -283,10 +282,10 @@ impl ErrorKind {
                 )
             }
 
-            ErrorKind::NonAggregateDesignator(type_decl) => {
+            ErrorKind::NonAggregateDesignator(qtype) => {
                 format!(
                     "can only use designator when initializing aggregate types, not '{}'",
-                    type_decl
+                    qtype
                 )
             }
             ErrorKind::TooLong(s, expected, actual) => {
@@ -304,18 +303,18 @@ impl ErrorKind {
                 format!("invalid constant-cast from '{}' to '{}'", old_type, new_type)
             }
             ErrorKind::NegativeShift => "shift amount has to positive".to_string(),
-            ErrorKind::IntegerOverflow(type_decl) => {
-                format!("integer overflow with type: '{}'", type_decl)
+            ErrorKind::IntegerOverflow(qtype) => {
+                format!("integer overflow with type: '{}'", qtype)
             }
 
             ErrorKind::UndeclaredLabel(label) => {
                 format!("undeclared label '{}'", label)
             }
-            ErrorKind::NotInteger(s, type_decl) => {
-                format!("{} must be integer type, found '{}'", s, type_decl)
+            ErrorKind::NotInteger(s, qtype) => {
+                format!("{} must be integer type, found '{}'", s, qtype)
             }
-            ErrorKind::NotScalar(s, type_decl) => {
-                format!("{} must be scalar type, found '{}'", s, type_decl)
+            ErrorKind::NotScalar(s, qtype) => {
+                format!("{} must be scalar type, found '{}'", s, qtype)
             }
             ErrorKind::DuplicateCase(n) => format!("duplicate 'case'-statement with value {}", n),
             ErrorKind::NotIn(inner, outer) => {
@@ -345,8 +344,8 @@ impl ErrorKind {
             ErrorKind::NoReturnAllPaths(name) => {
                 format!("non-void function '{}' doesn't return in all code paths", name)
             }
-            ErrorKind::InvalidMainReturn(type_decl) => {
-                format!("expected 'main' return type 'int', found: '{}'", type_decl)
+            ErrorKind::InvalidMainReturn(qtype) => {
+                format!("expected 'main' return type 'int', found: '{}'", qtype)
             }
             ErrorKind::TypeMismatch(left, right) => {
                 format!("mismatched operand types: '{}' and '{}'", left, right)
@@ -354,15 +353,15 @@ impl ErrorKind {
             ErrorKind::InvalidSymbol(name, symbol) => {
                 format!("symbol '{}' already exists, but not as {}", name, symbol)
             }
-            ErrorKind::InvalidMemberAccess(type_decl) => {
-                format!("can only access members of structs/unions, not '{}'", type_decl)
+            ErrorKind::InvalidMemberAccess(qtype) => {
+                format!("can only access members of structs/unions, not '{}'", qtype)
             }
-            ErrorKind::InvalidIncrementType(type_decl) => {
-                format!("cannot increment value of type '{}'", type_decl)
+            ErrorKind::InvalidIncrementType(qtype) => {
+                format!("cannot increment value of type '{}'", qtype)
             }
             ErrorKind::InvalidRvalueIncrement => "cannot increment rvalues".to_string(),
-            ErrorKind::NotAssignable(type_decl) => {
-                format!("type '{}' is not assignable", type_decl)
+            ErrorKind::NotAssignable(qtype) => {
+                format!("type '{}' is not assignable", qtype)
             }
             ErrorKind::NotLvalue(s) => format!("lvalue required {}", s),
             ErrorKind::RegisterAddress(var_name) => {
@@ -371,23 +370,23 @@ impl ErrorKind {
                     var_name
                 )
             }
-            ErrorKind::IncompleteArgType(index, type_decl) => {
+            ErrorKind::IncompleteArgType(index, qtype) => {
                 format!(
                     "{} argument has incomplete type: '{}'",
                     num_to_ord(index + 1),
-                    type_decl
+                    qtype
                 )
             }
-            ErrorKind::MismatchedArity(type_decl, expected, actual) => {
+            ErrorKind::MismatchedArity(qtype, expected, actual) => {
                 format!(
                     "function of type '{}' expected {} argument(s) found {}",
-                    type_decl, expected, actual
+                    qtype, expected, actual
                 )
             }
-            ErrorKind::MismatchedArgs(index, type_decl, expected, actual) => {
+            ErrorKind::MismatchedArgs(index, qtype, expected, actual) => {
                 format!(
                             "mismatched arguments in function of type '{}': expected {} parameter to be of type '{}', found '{}'",
-                            type_decl,num_to_ord(index + 1),  expected, actual
+                            qtype,num_to_ord(index + 1),  expected, actual
                         )
             }
             ErrorKind::InvalidLogical(token, left_type, right_type) => {
@@ -405,10 +404,10 @@ impl ErrorKind {
                     left_type, token, right_type
                 )
             }
-            ErrorKind::InvalidDerefType(type_decl) => {
+            ErrorKind::InvalidDerefType(qtype) => {
                 format!(
                     "cannot dereference value-type '{}', expected type 'pointer'",
-                    type_decl,
+                    qtype,
                 )
             }
             ErrorKind::MismatchedFunctionReturn(func_return, body_return) => {
@@ -439,8 +438,8 @@ impl ErrorKind {
             ErrorKind::InvalidStorageClass(sc, s) => {
                 format!("invalid storage-class specifier '{}' in {}", sc.to_string(), s)
             }
-            ErrorKind::InvalidReturnType(type_decl) => {
-                format!("functions cannot return type '{}'", type_decl)
+            ErrorKind::InvalidReturnType(qtype) => {
+                format!("functions cannot return type '{}'", qtype)
             }
 
             ErrorKind::InvalidHeader(s) => format!("'{}' is not a valid header file", s),

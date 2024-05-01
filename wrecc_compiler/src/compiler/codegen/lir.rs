@@ -99,8 +99,8 @@ impl Lir {
                     name
                 )
             }
-            Lir::GlobalInit(type_decl, reg) => {
-                format!("\t.{} {}", type_decl.complete_suffix(), reg.name())
+            Lir::GlobalInit(ty, reg) => {
+                format!("\t.{} {}", ty.complete_suffix(), reg.name())
             }
             Lir::StringDeclaration(label_index, s) =>
             // INFO: use {:?} so escapes aren't applied:

@@ -22,8 +22,8 @@ impl CurrentObjects {
         self.0.last().unwrap()
     }
     pub fn current_type(&mut self) -> &mut QualType {
-        if let Some((.., type_decl)) = self.0.last_mut() {
-            type_decl
+        if let Some((.., qtype)) = self.0.last_mut() {
+            qtype
         } else {
             unreachable!("always at least one current objects")
         }

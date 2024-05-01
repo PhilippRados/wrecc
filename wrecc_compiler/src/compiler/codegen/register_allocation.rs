@@ -12,18 +12,12 @@ pub struct IntervalEntry {
     start: usize,
     end: usize,
     arg: Option<ArgRegisterKind>,
-    type_decl: Type,
+    ty: Type,
     scratch: Option<TempKind>,
 }
 impl IntervalEntry {
-    pub fn new(start: usize, end: usize, arg: Option<ArgRegisterKind>, type_decl: Type) -> Self {
-        IntervalEntry {
-            start,
-            end,
-            arg,
-            type_decl,
-            scratch: None,
-        }
+    pub fn new(start: usize, end: usize, arg: Option<ArgRegisterKind>, ty: Type) -> Self {
+        IntervalEntry { start, end, arg, ty, scratch: None }
     }
 }
 
@@ -183,19 +177,19 @@ impl RegisterAllocation {
     fn spill(&mut self, ir: &mut Vec<Lir>, reg: &mut TempRegister, other: Vec<usize>) -> TempKind {
         let spill_reg_idx = self.choose_spill_reg(other);
         let spill_interval = self.get_interval_of_reg(spill_reg_idx);
-        let Some(IntervalEntry{ type_decl,scratch:Some(entry),.. }) = self.live_intervals.get_mut(&spill_interval) else {unreachable!()};
+        let Some(IntervalEntry{ ty,scratch:Some(entry),.. }) = self.live_intervals.get_mut(&spill_interval) else {unreachable!()};
 
         // save the current register
         let mut prev = reg.clone();
         prev.reg = Some(entry.clone());
-        prev.ty = type_decl.clone();
+        prev.ty = ty.clone();
 
         // generate the new stack-position to spill to
         let mut new = reg.clone();
-        new.ty = type_decl.clone();
+        new.ty = ty.clone();
         new.reg = Some(TempKind::Spilled(StackRegister::new(
             &mut self.spill_bp_offset,
-            type_decl.clone(),
+            ty.clone(),
         )));
 
         // change the interval register to the stackregister
@@ -208,14 +202,14 @@ impl RegisterAllocation {
     }
 
     fn unspill(&mut self, ir: &mut Vec<Lir>, reg: &mut TempRegister, other: Vec<usize>) -> TempKind {
-        let Some(IntervalEntry{ type_decl, scratch:Some(entry),.. }) = self.live_intervals.get_mut(&reg.id) else {unreachable!()};
+        let Some(IntervalEntry{ ty, scratch:Some(entry),.. }) = self.live_intervals.get_mut(&reg.id) else {unreachable!()};
 
         let mut prev_reg = reg.clone();
-        prev_reg.ty = type_decl.clone();
+        prev_reg.ty = ty.clone();
         prev_reg.reg = Some(entry.clone());
 
         let mut new = reg.clone();
-        new.ty = type_decl.clone();
+        new.ty = ty.clone();
         new.reg = Some(self.get_scratch(ir, reg, other));
 
         ir.push(Lir::Mov(Register::Temp(prev_reg), Register::Temp(new.clone())));
@@ -492,13 +486,13 @@ mod tests {
                     id,
                     reg: reg.clone(),
                     start_idx: self.start,
-                    ty: self.type_decl.clone(),
+                    ty: self.ty.clone(),
                 }),
                 None => Register::Temp(TempRegister {
                     id,
                     reg: None,
                     start_idx: self.start,
-                    ty: self.type_decl.clone(),
+                    ty: self.ty.clone(),
                     value_kind: ValueKind::Rvalue,
                 }),
             }

@@ -319,21 +319,30 @@ impl TypeChecker {
                 return Err(Error::new(&qualifier.token, ErrorKind::InvalidRestrict(qtype)));
             }
         }
-        let new_qualifiers = Qualifiers::from(new_qualifiers);
 
-        // if an array is const then its element type is too
-        if new_qualifiers.is_const {
-            if let Type::Array(of, _) = &mut qtype.ty {
-                *of = Box::new(Self::parse_qualifiers(
-                    *of.clone(),
-                    &vec![hir::decl::Qualifier {
-                        kind: hir::decl::QualifierKind::Const,
-                        token: Token::default(TokenKind::Semicolon),
-                    }],
-                )?);
+        // if an aggregate type has qualifiers then the same qualifiers apply to its element-type
+        match &mut qtype.ty {
+            Type::Array(of, _) => {
+                *of = Box::new(Self::parse_qualifiers(*of.clone(), new_qualifiers)?);
             }
+            Type::Struct(s) | Type::Union(s) => {
+                let old_members = s.members();
+                let mut new_qualified_members = Vec::new();
+
+                for (old_qtype, old_token) in old_members.iter() {
+                    let new_qualified_type = Self::parse_qualifiers(old_qtype.clone(), new_qualifiers)?;
+                    new_qualified_members.push((new_qualified_type, old_token.clone()));
+                }
+
+                match s {
+                    StructKind::Named(_, struct_ref) => struct_ref.update_members(new_qualified_members),
+                    StructKind::Unnamed(_, members) => *members = new_qualified_members,
+                }
+            }
+            _ => (),
         }
 
+        let new_qualifiers = Qualifiers::from(new_qualifiers);
         Ok(QualType {
             qualifiers: Qualifiers {
                 is_const: new_qualifiers.is_const | qtype.qualifiers.is_const,
@@ -426,7 +435,7 @@ impl TypeChecker {
                 let members = self.struct_declaration(members.clone())?;
 
                 if let Tags::Aggregate(struct_ref) = &*custom_type.borrow_mut() {
-                    struct_ref.update(members);
+                    struct_ref.complete_def(members);
                 }
                 let members = custom_type.borrow().clone().unwrap_aggr();
 

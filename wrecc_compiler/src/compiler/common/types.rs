@@ -519,7 +519,7 @@ mod struct_ref {
             CUSTOMS.with(|list| {
                 let mut types = list.borrow_mut();
                 let index = types.len();
-                types.push(Rc::new(vec![]));
+                types.push(Rc::new(Vec::new()));
 
                 StructRef { index, kind }
             })
@@ -527,11 +527,16 @@ mod struct_ref {
         pub fn get_kind(&self) -> &TokenKind {
             &self.kind
         }
-
         pub fn get(&self) -> Rc<Vec<(QualType, Token)>> {
             CUSTOMS.with(|list| list.borrow()[self.index].clone())
         }
-        pub fn update(&self, members: Vec<(QualType, Token)>) {
+        pub fn update_members(&self, members: Vec<(QualType, Token)>) {
+            CUSTOMS.with(|list| {
+                let mut types = list.borrow_mut();
+                types[self.index] = members.into();
+            });
+        }
+        pub fn complete_def(&self, members: Vec<(QualType, Token)>) {
             CUSTOMS_INFO.with(|list| {
                 let mut types = list.borrow_mut();
                 types[self.index].0 = true;
@@ -540,10 +545,7 @@ mod struct_ref {
                 let mut types = list.borrow_mut();
                 types[self.index].1 = false;
             });
-            CUSTOMS.with(|list| {
-                let mut types = list.borrow_mut();
-                types[self.index] = members.into();
-            });
+            self.update_members(members);
         }
         pub fn is_complete(&self) -> bool {
             CUSTOMS_INFO.with(|list| list.borrow()[self.index].0)

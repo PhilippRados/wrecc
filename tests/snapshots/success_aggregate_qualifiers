@@ -1,0 +1,21 @@
+error: cannot assign to type 'int *' with type 'volatile int *'
+|  --> in tests/fixtures/aggregate_qualifiers.c:4:8
+|
+4   int *pi = a[0];
+|        ^
+error: cannot assign to type 'volatile int' with type 'int *'
+|  --> in tests/fixtures/aggregate_qualifiers.c:14:11
+|
+14   foo.age = pi;
+|            ^
+error: cannot assign variable which was declared 'const'
+|  --> in tests/fixtures/aggregate_qualifiers.c:17:11
+|
+17   bar.age = *pi;
+|            ^
+error: cannot assign variable which was declared 'const'
+|  --> in tests/fixtures/aggregate_qualifiers.c:18:16
+|
+18   bar.nest.coo = 2;
+|                 ^
+4 errors generated.

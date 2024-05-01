@@ -453,7 +453,7 @@ pub enum StructKind {
 impl StructKind {
     pub fn members(&self) -> Rc<Vec<(QualType, Token)>> {
         match self {
-            StructKind::Named(_, s) => s.get(),
+            StructKind::Named(_, s) => s.get_members(),
             StructKind::Unnamed(_, m) => Rc::new(m.clone()),
         }
     }
@@ -497,12 +497,14 @@ mod struct_ref {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    type IsComplete = bool;
-    type InDefinition = bool;
+    struct StructInfo {
+        members: Rc<Vec<(QualType, Token)>>,
+        is_complete: bool,
+        in_definition: bool,
+    }
 
     thread_local! {
-        static CUSTOMS: RefCell<Vec<Rc<Vec<(QualType, Token)>>>> = Default::default();
-        static CUSTOMS_INFO: RefCell<Vec<(IsComplete,InDefinition)>> = Default::default();
+        static CUSTOMS: RefCell<Vec<StructInfo>> = Default::default();
     }
 
     #[derive(Clone, PartialEq, Debug)]
@@ -513,13 +515,14 @@ mod struct_ref {
 
     impl StructRef {
         pub fn new(kind: TokenKind, is_definition: bool) -> StructRef {
-            CUSTOMS_INFO.with(|list| {
-                list.borrow_mut().push((false, is_definition));
-            });
             CUSTOMS.with(|list| {
                 let mut types = list.borrow_mut();
                 let index = types.len();
-                types.push(Rc::new(Vec::new()));
+                types.push(StructInfo {
+                    members: Rc::new(Vec::new()),
+                    is_complete: false,
+                    in_definition: is_definition,
+                });
 
                 StructRef { index, kind }
             })
@@ -527,35 +530,33 @@ mod struct_ref {
         pub fn get_kind(&self) -> &TokenKind {
             &self.kind
         }
-        pub fn get(&self) -> Rc<Vec<(QualType, Token)>> {
-            CUSTOMS.with(|list| list.borrow()[self.index].clone())
+        pub fn get_members(&self) -> Rc<Vec<(QualType, Token)>> {
+            CUSTOMS.with(|list| list.borrow()[self.index].members.clone())
         }
         pub fn update_members(&self, members: Vec<(QualType, Token)>) {
             CUSTOMS.with(|list| {
                 let mut types = list.borrow_mut();
-                types[self.index] = members.into();
+                types[self.index].members = members.into();
             });
         }
         pub fn complete_def(&self, members: Vec<(QualType, Token)>) {
-            CUSTOMS_INFO.with(|list| {
+            CUSTOMS.with(|list| {
                 let mut types = list.borrow_mut();
-                types[self.index].0 = true;
+                types[self.index].is_complete = true;
+                types[self.index].in_definition = false;
             });
-            CUSTOMS_INFO.with(|list| {
-                let mut types = list.borrow_mut();
-                types[self.index].1 = false;
-            });
+
             self.update_members(members);
         }
         pub fn is_complete(&self) -> bool {
-            CUSTOMS_INFO.with(|list| list.borrow()[self.index].0)
+            CUSTOMS.with(|list| list.borrow()[self.index].is_complete)
         }
         pub fn in_definition(&self) -> bool {
-            CUSTOMS_INFO.with(|list| list.borrow()[self.index].1)
+            CUSTOMS.with(|list| list.borrow()[self.index].in_definition)
         }
 
         pub fn being_defined(&self) {
-            CUSTOMS_INFO.with(|list| list.borrow_mut()[self.index].1 = true)
+            CUSTOMS.with(|list| list.borrow_mut()[self.index].in_definition = true)
         }
     }
 }

@@ -320,26 +320,33 @@ impl TypeChecker {
             }
         }
 
-        // if an aggregate type has qualifiers then the same qualifiers apply to its element-type
-        match &mut qtype.ty {
-            Type::Array(of, _) => {
-                *of = Box::new(Self::parse_qualifiers(*of.clone(), new_qualifiers)?);
-            }
-            Type::Struct(s) | Type::Union(s) => {
-                let old_members = s.members();
-                let mut new_qualified_members = Vec::new();
-
-                for (old_qtype, old_token) in old_members.iter() {
-                    let new_qualified_type = Self::parse_qualifiers(old_qtype.clone(), new_qualifiers)?;
-                    new_qualified_members.push((new_qualified_type, old_token.clone()));
+        // if an aggregate type has const or volatile qualifiers then the same qualifiers apply to its element-type
+        if new_qualifiers.iter().any(|q| {
+            q.kind == hir::decl::QualifierKind::Const || q.kind == hir::decl::QualifierKind::Volatile
+        }) {
+            match &mut qtype.ty {
+                Type::Array(of, _) => {
+                    *of = Box::new(Self::parse_qualifiers(*of.clone(), new_qualifiers)?);
                 }
+                Type::Struct(s) | Type::Union(s) => {
+                    let old_members = s.members();
+                    let mut new_qualified_members = Vec::new();
 
-                match s {
-                    StructKind::Named(_, struct_ref) => struct_ref.update_members(new_qualified_members),
-                    StructKind::Unnamed(_, members) => *members = new_qualified_members,
+                    for (old_qtype, old_token) in old_members.iter() {
+                        let new_qualified_type =
+                            Self::parse_qualifiers(old_qtype.clone(), new_qualifiers)?;
+                        new_qualified_members.push((new_qualified_type, old_token.clone()));
+                    }
+
+                    match s {
+                        StructKind::Named(_, struct_ref) => {
+                            struct_ref.update_members(new_qualified_members)
+                        }
+                        StructKind::Unnamed(_, members) => *members = new_qualified_members,
+                    }
                 }
+                _ => (),
             }
-            _ => (),
         }
 
         let new_qualifiers = Qualifiers::from(new_qualifiers);

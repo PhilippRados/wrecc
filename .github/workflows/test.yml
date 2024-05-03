@@ -6,7 +6,8 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # have to use macos-13 because newer versions are arm-based
+        os: [ubuntu-latest, macos-13]
 
     runs-on: ${{ matrix.os }}
 

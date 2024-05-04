@@ -126,9 +126,9 @@ impl QualType {
             _ => false,
         }
     }
-    pub fn pointer_to(self, qualifiers: Qualifiers) -> QualType {
+    pub fn pointer_to(self) -> QualType {
         QualType {
-            qualifiers,
+            qualifiers: Qualifiers::default(),
             ty: Type::Pointer(Box::new(self.clone())),
         }
     }

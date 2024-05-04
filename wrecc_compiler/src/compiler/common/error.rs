@@ -207,7 +207,10 @@ impl ErrorKind {
                 "expected at least one named parameter before variadic arguments".to_string()
             }
             ErrorKind::InvalidRestrict(ty) => {
-                format!("'restrict' can only appear on pointer types, not: '{}'", ty)
+                format!(
+                    "'restrict' can only appear on pointers to object-types, not: '{}'",
+                    ty
+                )
             }
             ErrorKind::IncompleteMemberAccess(qtype) => {
                 format!(

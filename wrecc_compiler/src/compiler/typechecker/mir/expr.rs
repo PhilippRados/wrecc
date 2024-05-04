@@ -60,7 +60,7 @@ impl Expr {
 
                 Ok(Expr {
                     value_kind: ValueKind::Rvalue,
-                    qtype: of.clone().pointer_to(Qualifiers::default()),
+                    qtype: of.clone().pointer_to(),
 
                     kind: ExprKind::Unary {
                         operator: TokenKind::Amp,
@@ -70,7 +70,7 @@ impl Expr {
             }
             Type::Function(_) => Ok(Expr {
                 value_kind: ValueKind::Rvalue,
-                qtype: self.qtype.clone().pointer_to(Qualifiers::default()),
+                qtype: self.qtype.clone().pointer_to(),
 
                 kind: ExprKind::Unary {
                     operator: TokenKind::Amp,

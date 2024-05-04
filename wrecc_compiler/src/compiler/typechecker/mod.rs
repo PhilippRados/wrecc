@@ -315,8 +315,9 @@ impl TypeChecker {
             .iter()
             .find(|q| q.kind == hir::decl::QualifierKind::Restrict)
         {
-            if !qtype.ty.is_ptr() {
-                return Err(Error::new(&qualifier.token, ErrorKind::InvalidRestrict(qtype)));
+            match &qtype.ty {
+                Type::Pointer(to) if !to.ty.is_func() => (),
+                _ => return Err(Error::new(&qualifier.token, ErrorKind::InvalidRestrict(qtype))),
             }
         }
 
@@ -381,7 +382,7 @@ impl TypeChecker {
         for m in modifiers {
             qtype = match m {
                 hir::decl::DeclModifier::Pointer(qualifiers) => {
-                    qtype.pointer_to(Qualifiers::from(&qualifiers))
+                    Self::parse_qualifiers(qtype.pointer_to(), &qualifiers)?
                 }
                 hir::decl::DeclModifier::Array(token, size) => {
                     if qtype.ty.is_func() || qtype.ty.is_unbounded_array() {
@@ -632,8 +633,8 @@ impl TypeChecker {
             };
 
             qtype = match qtype.ty {
-                Type::Array(of, _) => of.pointer_to(Qualifiers::default()),
-                Type::Function { .. } => qtype.pointer_to(Qualifiers::default()),
+                Type::Array(of, _) => of.pointer_to(),
+                Type::Function { .. } => qtype.pointer_to(),
                 _ => qtype,
             };
 
@@ -1833,7 +1834,7 @@ impl TypeChecker {
             kind: TokenKind::Ident(format!("tmp{}{}", token.line_index, token.column)),
             ..token.clone()
         };
-        let tmp_type = qtype.pointer_to(Qualifiers::default());
+        let tmp_type = qtype.pointer_to();
         let tmp_symbol = self
             .env
             .declare_symbol(
@@ -2251,7 +2252,7 @@ impl TypeChecker {
             }
 
             Ok(mir::expr::Expr {
-                qtype: right.qtype.clone().pointer_to(Qualifiers::default()),
+                qtype: right.qtype.clone().pointer_to(),
                 value_kind: ValueKind::Rvalue,
                 kind: mir::expr::ExprKind::Unary {
                     right: Box::new(right),
@@ -3135,6 +3136,34 @@ int main() {
                 line_index: 5,
                 ..
             },]
+        ));
+    }
+    #[test]
+    fn restrict_qualifier() {
+        let actual = typecheck(
+            "
+int main() {
+  restrict int *sig;
+  int (*restrict f0)(void);
+  int (**restrict f1)(void); // fine
+}
+",
+        )
+        .unwrap_err();
+        assert!(matches!(
+            actual.as_slice(),
+            &[
+                Error {
+                    kind: ErrorKind::InvalidRestrict(..),
+                    line_index: 3,
+                    ..
+                },
+                Error {
+                    kind: ErrorKind::InvalidRestrict(..),
+                    line_index: 4,
+                    ..
+                }
+            ]
         ));
     }
 }

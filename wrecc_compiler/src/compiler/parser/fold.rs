@@ -164,12 +164,36 @@ impl ExprKind {
                     right_type,
                     i64::overflowing_add(left_n, right_n),
                 )?,
-                TokenKind::Minus => Self::literal_type(
-                    token,
-                    left_type,
-                    right_type,
-                    i64::overflowing_sub(left_n, right_n),
-                )?,
+                TokenKind::Minus => {
+                    let (left_type, right_type, scale_factor) = match (&left_type.ty, &right_type.ty) {
+                        (Type::Pointer(inner), Type::Pointer(_)) => {
+                            let result_type = QualType::new(Type::Primitive(Primitive::Long));
+                            (result_type.clone(), result_type, Some(inner.ty.size()))
+                        }
+                        _ => (left_type, right_type, None),
+                    };
+
+                    let result = Self::literal_type(
+                        token.clone(),
+                        left_type,
+                        right_type,
+                        i64::overflowing_sub(left_n, right_n),
+                    )?;
+
+                    if let Some(scale_factor) = scale_factor {
+                        match result {
+                            ExprKind::Literal(n, result_type) => Self::literal_type(
+                                token,
+                                result_type.clone(),
+                                result_type,
+                                i64::overflowing_div(n, scale_factor as i64),
+                            )?,
+                            _ => unreachable!("literal_type always returns literal"),
+                        }
+                    } else {
+                        result
+                    }
+                }
                 TokenKind::Star => Self::literal_type(
                     token,
                     left_type,
@@ -607,6 +631,9 @@ mod tests {
     fn ptr_fold() {
         assert_fold_type("(long *)1 + 3", "(long*)25", "long*");
         assert_fold_type("2 + (char *)1 + 3", "(char*)6", "char*");
+        assert_fold_type("(int*)100 - (int *)2", "(long)24", "long");
+        assert_fold_type("(const short*)2 - (short*)100", "(long)-49", "long");
+        assert_fold_type("(char*)5 - (char *)10", "(long)-5", "long");
 
         assert_fold_error!(
             "6 / (int *)1",

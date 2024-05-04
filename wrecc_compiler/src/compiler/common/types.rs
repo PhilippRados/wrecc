@@ -1,6 +1,6 @@
 pub use struct_ref::StructRef;
 
-use crate::compiler::common::token::*;
+use crate::compiler::common::{error::*, token::*};
 use crate::compiler::parser::hir;
 
 use std::fmt::Display;
@@ -352,6 +352,50 @@ impl PartialEq for FuncType {
                 .iter()
                 .zip(&other.params)
                 .all(|(p1, p2)| p1.unqualified() == p2.unqualified())
+    }
+}
+impl FuncType {
+    pub fn check_main_signature(&self, token: &Token, is_inline: bool) -> Result<(), Error> {
+        if self.return_type.ty != Type::Primitive(Primitive::Int) {
+            return Err(Error::new(
+                token,
+                ErrorKind::InvalidMainReturn(*self.return_type.clone()),
+            ));
+        }
+        if is_inline {
+            return Err(Error::new(
+                token,
+                ErrorKind::Regular("'main' function cannot be declared 'inline'"),
+            ));
+        }
+        if self.variadic {
+            return Err(Error::new(
+                token,
+                ErrorKind::Regular("'main' function cannot be declared variadic"),
+            ));
+        }
+        let unqualified_params = self.params.iter().map(|qtype| &qtype.ty).collect::<Vec<_>>();
+
+        match unqualified_params.as_slice() {
+            [] => (),
+            [Type::Primitive(Primitive::Int), Type::Pointer(to)] => match &to.ty {
+                Type::Pointer(nested_to) if nested_to.ty == Type::Primitive(Primitive::Char) => (),
+                _ => {
+                    return Err(Error::new(
+                        token,
+                        ErrorKind::Regular("second parameter of 'main' must be of type 'char **'"),
+                    ))
+                }
+            },
+            _ => {
+                return Err(Error::new(
+                    token,
+                    ErrorKind::Regular("invalid parameters to 'main' function"),
+                ))
+            }
+        }
+
+        Ok(())
     }
 }
 

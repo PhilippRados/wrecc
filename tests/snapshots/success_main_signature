@@ -1,0 +1,16 @@
+error: expected 'main' return type 'int', found: 'char'
+|  --> in tests/fixtures/main_signature.c:1:6
+|
+1 char main() { return 0; }
+|      ^
+error: invalid parameters to 'main' function
+|  --> in tests/fixtures/main_signature.c:4:13
+|
+4   const int main(int);
+|             ^
+error: second parameter of 'main' must be of type 'char **'
+|  --> in tests/fixtures/main_signature.c:6:7
+|
+6   int main(int, int **);
+|       ^
+3 errors generated.

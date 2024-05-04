@@ -131,6 +131,11 @@ impl TypeChecker {
                     ErrorKind::Regular("'inline' can only appear on functions"),
                 ));
             }
+            if let Type::Function(func_type) = &qtype.ty {
+                if name.unwrap_string() == "main" {
+                    func_type.check_main_signature(&name, is_inline)?;
+                }
+            }
 
             match storage_class {
                 Some(sc @ (mir::decl::StorageClass::Register | mir::decl::StorageClass::Auto))
@@ -1053,25 +1058,19 @@ impl TypeChecker {
             ));
         }
 
-        if name_string == "main" {
-            if return_type.ty != Type::Primitive(Primitive::Int) {
-                return Err(Error::new(
-                    &func_decl.name,
-                    ErrorKind::InvalidMainReturn(return_type),
-                ));
-            }
-            if func_decl.decl_specs.is_inline {
-                return Err(Error::new(
-                    &func_decl.name,
-                    ErrorKind::Regular("'main' function cannot be declared 'inline'"),
-                ));
-            }
-        }
-
         // have to push scope before declaring local variables
         self.env.enter();
 
         let params = self.parse_params(&token, params)?;
+        let func_type = FuncType {
+            return_type: Box::new(return_type.clone()),
+            params: params.iter().map(|(ty, _)| ty.clone()).collect(),
+            variadic,
+        };
+
+        if name_string == "main" {
+            func_type.check_main_signature(&func_decl.name, func_decl.decl_specs.is_inline)?;
+        }
 
         let mut func = mir::decl::Function::new(
             name_string.clone(),
@@ -1084,11 +1083,7 @@ impl TypeChecker {
             &func_decl.name,
             Symbol {
                 storage_class,
-                qtype: QualType::new(Type::Function(FuncType {
-                    return_type: Box::new(return_type),
-                    params: params.iter().map(|(ty, _)| ty.clone()).collect(),
-                    variadic,
-                })),
+                qtype: QualType::new(Type::Function(func_type)),
                 kind: InitType::Definition,
                 reg: None,
                 token: func_decl.name.clone(),

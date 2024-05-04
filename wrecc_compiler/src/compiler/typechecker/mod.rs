@@ -2126,10 +2126,14 @@ impl TypeChecker {
         let mut left = left.maybe_int_promote();
         let mut right = right.maybe_int_promote();
 
-        if let Some((expr, amount)) =
+        if let Some((expr, by_amount)) =
             maybe_scale_index(&left.qtype.clone(), &right.qtype.clone(), &mut left, &mut right)
         {
-            expr.kind = mir::expr::ExprKind::ScaleUp { by: amount, expr: Box::new(expr.clone()) };
+            expr.kind = mir::expr::ExprKind::Scale {
+                by_amount,
+                direction: mir::expr::ScaleDirection::Up,
+                expr: Box::new(expr.clone()),
+            };
         }
 
         Ok(Self::binary_type_promotion(token.kind, left, right))
@@ -2175,8 +2179,9 @@ impl TypeChecker {
 
         if let Some(scale_factor) = scale_factor {
             mir::expr::Expr {
-                kind: mir::expr::ExprKind::ScaleDown {
-                    shift_amount: log_2(scale_factor as i32),
+                kind: mir::expr::ExprKind::Scale {
+                    by_amount: scale_factor,
+                    direction: mir::expr::ScaleDirection::Down,
                     expr: Box::new(result),
                 },
                 qtype: QualType::new(Type::Primitive(Primitive::Long)),
@@ -2350,16 +2355,6 @@ pub fn maybe_scale_index<'a, T>(
         }
         _ => None,
     }
-}
-
-// helper function for calculating log2
-const fn num_bits<T>() -> usize {
-    std::mem::size_of::<T>() * 8
-}
-
-fn log_2(x: i32) -> usize {
-    assert!(x > 0);
-    (num_bits::<i32>() as u32 - x.leading_zeros() - 1) as usize
 }
 
 #[cfg(test)]

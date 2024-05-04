@@ -713,9 +713,13 @@ impl Compiler {
                 reg.set_type(new_type);
                 reg
             }
-            ExprKind::ScaleUp { by, expr } => {
+            ExprKind::Scale {
+                by_amount,
+                direction: ScaleDirection::Up,
+                expr,
+            } => {
                 if let StaticRegister::Literal(n, ty) = self.execute_global_expr(*expr) {
-                    let n = n.overflowing_mul(by as i64).0;
+                    let n = n.overflowing_mul(by_amount as i64).0;
                     let scaled_type = integer_type(n);
 
                     let ty = if ty.size() < scaled_type.size() {
@@ -836,8 +840,9 @@ impl Compiler {
             ExprKind::Cast { expr, direction, new_type } => {
                 self.cg_cast(func, new_type, *expr, direction)
             }
-            ExprKind::ScaleUp { expr, by } => self.cg_scale_up(func, *expr, by),
-            ExprKind::ScaleDown { expr, shift_amount } => self.cg_scale_down(func, *expr, shift_amount),
+            ExprKind::Scale { expr, direction, by_amount } => {
+                self.cg_scale(func, direction, *expr, by_amount)
+            }
             ExprKind::String(name) => self.cg_string(name),
             ExprKind::MemberAccess { expr, member } => {
                 let reg = self.execute_expr(func, *expr);
@@ -951,27 +956,24 @@ impl Compiler {
     fn cg_string(&mut self, name: String) -> Register {
         Register::Label(LabelRegister::String(self.const_labels[&name]))
     }
-    fn cg_scale_down(&mut self, func: &mut Function, expr: Expr, by_amount: usize) -> Register {
-        let value_reg = self.execute_expr(func, expr);
-        let value_reg = convert_reg!(self, value_reg, Register::Literal(..));
-
-        // right shift number, equivalent to division (works bc type-size is 2^n)
-        self.write_out(Lir::Shift(
-            "r",
-            Register::Literal(by_amount as i64, Type::Primitive(Primitive::Int)),
-            value_reg.clone(),
-        ));
-
-        value_reg
-    }
-    fn cg_scale_up(&mut self, func: &mut Function, expr: Expr, by_amount: usize) -> Register {
+    fn cg_scale(
+        &mut self,
+        func: &mut Function,
+        direction: ScaleDirection,
+        expr: Expr,
+        by_amount: usize,
+    ) -> Register {
         let value_reg = self.execute_expr(func, expr);
         let value_reg = self.convert_to_rval(value_reg);
+        let by_amount = Register::Literal(by_amount as i64, value_reg.get_type());
 
-        self.cg_mult(
-            Register::Literal(by_amount as i64, Type::Primitive(Primitive::Int)),
-            value_reg,
-        )
+        match direction {
+            ScaleDirection::Up => self.cg_mult(by_amount, value_reg),
+            ScaleDirection::Down => {
+                let by_amount = self.make_temp(by_amount);
+                self.cg_div(value_reg, by_amount)
+            }
+        }
     }
     fn cg_cast(
         &mut self,

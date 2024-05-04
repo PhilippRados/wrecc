@@ -10,8 +10,7 @@ pub enum ExprKind {
     Comparison { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
     Call { caller: Box<Expr>, args: Vec<Expr> },
     Cast { new_type: Type, direction: CastDirection, expr: Box<Expr> },
-    ScaleUp { by: usize, expr: Box<Expr> },
-    ScaleDown { shift_amount: usize, expr: Box<Expr> },
+    Scale { by_amount: usize, direction: ScaleDirection, expr: Box<Expr> },
     MemberAccess { member: String, expr: Box<Expr> },
     Ternary { cond: Box<Expr>, true_expr: Box<Expr>, false_expr: Box<Expr> },
     Comma { left: Box<Expr>, right: Box<Expr> },
@@ -26,6 +25,12 @@ pub enum CastDirection {
     Up,
     Down,
     Equal,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ScaleDirection {
+    Up,
+    Down,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -119,7 +124,8 @@ impl Expr {
     pub fn is_constant(&self) -> bool {
         match &self.kind {
             ExprKind::String(_) | ExprKind::Literal(_) => true,
-            ExprKind::Cast { expr, .. } | ExprKind::ScaleUp { expr, .. } => expr.is_constant(),
+            ExprKind::Cast { expr, .. }
+            | ExprKind::Scale { expr, direction: ScaleDirection::Up, .. } => expr.is_constant(),
             _ => self.is_address_constant(true),
         }
     }
@@ -143,7 +149,8 @@ impl Expr {
                     _ => false,
                 }
             }
-            ExprKind::Cast { expr, .. } | ExprKind::ScaleUp { expr, .. } => {
+            ExprKind::Cast { expr, .. }
+            | ExprKind::Scale { expr, direction: ScaleDirection::Up, .. } => {
                 expr.is_address_constant(is_outer)
             }
             _ => false,
@@ -151,7 +158,8 @@ impl Expr {
     }
     fn is_const_literal(&self) -> bool {
         match &self.kind {
-            ExprKind::Cast { expr, .. } | ExprKind::ScaleUp { expr, .. } => expr.is_const_literal(),
+            ExprKind::Cast { expr, .. }
+            | ExprKind::Scale { expr, direction: ScaleDirection::Up, .. } => expr.is_const_literal(),
             ExprKind::Literal(_) => true,
             _ => false,
         }

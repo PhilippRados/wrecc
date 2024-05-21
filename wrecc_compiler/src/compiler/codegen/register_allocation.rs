@@ -557,7 +557,7 @@ mod tests {
         ($reg:expr,$start:expr,$end:expr) => {
             (
                 Some(Box::new($reg)),
-                IntervalEntry::new($start, $end, None, Type::Primitive(Primitive::Int)),
+                IntervalEntry::new($start, $end, None, Type::Primitive(Primitive::Int(false))),
             )
         };
     }
@@ -565,7 +565,12 @@ mod tests {
         ($reg:expr,$start:expr,$end:expr) => {
             (
                 None,
-                IntervalEntry::new($start, $end, Some($reg), Type::Primitive(Primitive::Int)),
+                IntervalEntry::new(
+                    $start,
+                    $end,
+                    Some($reg),
+                    Type::Primitive(Primitive::Int(false)),
+                ),
             )
         };
     }
@@ -637,7 +642,8 @@ mod tests {
         ];
 
         // Reg0 is spilled because is Lir::Or there are no regs left.
-        let spilled_reg = Register::Stack(StackRegister::new(&mut 0, Type::Primitive(Primitive::Int)));
+        let spilled_reg =
+            Register::Stack(StackRegister::new(&mut 0, Type::Primitive(Primitive::Int(false))));
 
         // When it is unspilled again because it is needed in instruction 6, %r10 is not available
         // because when Reg4 was freed %r10 was marked as available again and was assigned to Reg6.
@@ -724,10 +730,22 @@ mod tests {
         ];
 
         let mut bp = 0;
-        let spilled_reg1 = Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
-        let spilled_reg2 = Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
-        let spilled_reg3 = Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
-        let spilled_reg4 = Register::Stack(StackRegister::new(&mut bp, Type::Primitive(Primitive::Int)));
+        let spilled_reg1 = Register::Stack(StackRegister::new(
+            &mut bp,
+            Type::Primitive(Primitive::Int(false)),
+        ));
+        let spilled_reg2 = Register::Stack(StackRegister::new(
+            &mut bp,
+            Type::Primitive(Primitive::Int(false)),
+        ));
+        let spilled_reg3 = Register::Stack(StackRegister::new(
+            &mut bp,
+            Type::Primitive(Primitive::Int(false)),
+        ));
+        let spilled_reg4 = Register::Stack(StackRegister::new(
+            &mut bp,
+            Type::Primitive(Primitive::Int(false)),
+        ));
 
         let unspilled_reg_1 = if let Register::Temp(filled) = filled_regs[10].clone() {
             Register::Temp(TempRegister {

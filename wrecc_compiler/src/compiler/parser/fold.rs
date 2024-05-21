@@ -6,16 +6,92 @@ use crate::compiler::parser::hir::decl::DeclType;
 use crate::compiler::parser::hir::expr::*;
 use crate::compiler::typechecker::*;
 
+fn overflow_bin_op(
+    left: &LiteralKind,
+    right: &LiteralKind,
+    signed_op: fn(i64, i64) -> (i64, bool),
+    unsigned_op: fn(u64, u64) -> (u64, bool),
+) -> (LiteralKind, bool) {
+    match (left, right) {
+        (LiteralKind::Signed(left), LiteralKind::Signed(right)) => {
+            let (value, overflow) = signed_op(*left, *right);
+            (LiteralKind::Signed(value), overflow)
+        }
+        (LiteralKind::Unsigned(left), LiteralKind::Unsigned(right)) => {
+            let (value, overflow) = unsigned_op(*left, *right);
+            (LiteralKind::Unsigned(value), overflow)
+        }
+        (LiteralKind::Unsigned(left), LiteralKind::Signed(right)) => {
+            let (value, overflow) = unsigned_op(*left, *right as u64);
+            (LiteralKind::Unsigned(value), overflow)
+        }
+        (LiteralKind::Signed(left), LiteralKind::Unsigned(right)) => {
+            let (value, overflow) = unsigned_op(*left as u64, *right);
+            (LiteralKind::Unsigned(value), overflow)
+        }
+    }
+}
+
+macro_rules! safe_bin_op {
+    ($left:expr,$op:tt,$right:expr) => {{
+        let value = match ($left, $right) {
+            (LiteralKind::Signed(left), LiteralKind::Signed(right)) => {
+                LiteralKind::Signed((left $op right).into())
+            }
+            (LiteralKind::Unsigned(left), LiteralKind::Unsigned(right)) => {
+                LiteralKind::Unsigned((left $op right).into())
+            }
+            (LiteralKind::Unsigned(left), LiteralKind::Signed(right)) => {
+                LiteralKind::Unsigned((left $op right as u64).into())
+            }
+            (LiteralKind::Signed(left), LiteralKind::Unsigned(right)) => {
+                LiteralKind::Unsigned((left as u64 $op right).into())
+            }
+        };
+
+        (value, false)
+    }};
+}
+
+macro_rules! safe_comp_op {
+    ($left:expr,$op:tt,$right:expr) => {{
+        let (literal, _) = safe_bin_op!($left, $op, $right);
+        match literal {
+            LiteralKind::Signed(n) => n,
+            LiteralKind::Unsigned(n) => n as i64,
+        }
+    }};
+}
+fn overflow_unary_op(
+    literal: &LiteralKind,
+    signed_op: fn(i64) -> (i64, bool),
+    unsigned_op: fn(u64) -> (u64, bool),
+) -> (LiteralKind, bool) {
+    match literal {
+        LiteralKind::Signed(n) => {
+            let (value, overflow) = signed_op(*n);
+            (LiteralKind::Signed(value), overflow)
+        }
+        LiteralKind::Unsigned(n) => {
+            let (value, overflow) = unsigned_op(*n);
+            (LiteralKind::Unsigned(value), overflow)
+        }
+    }
+}
+
 impl ExprKind {
     pub fn new_literal(value: i64, primitive_type: Primitive) -> Self {
-        ExprKind::Literal(value, QualType::new(Type::Primitive(primitive_type)))
+        ExprKind::Literal(
+            LiteralKind::Signed(value),
+            QualType::new(Type::Primitive(primitive_type)),
+        )
     }
     pub fn get_literal_constant(
         &mut self,
         typechecker: &mut TypeChecker,
         token: &Token,
         msg: &'static str,
-    ) -> Result<i64, Error> {
+    ) -> Result<LiteralKind, Error> {
         self.integer_const_fold(typechecker)?;
 
         if let ExprKind::Literal(n, _) = self {
@@ -24,7 +100,7 @@ impl ExprKind {
             Err(Error::new(token, ErrorKind::NotIntegerConstant(msg)))
         }
     }
-    pub fn preprocessor_constant(&mut self, pp: &impl Location) -> Result<i64, Error> {
+    pub fn preprocessor_constant(&mut self, pp: &impl Location) -> Result<LiteralKind, Error> {
         let mut typechecker = TypeChecker::new();
         self.integer_const_fold(&mut typechecker)?;
 
@@ -82,14 +158,14 @@ impl ExprKind {
                 }
 
                 match cond.as_ref() {
-                    ExprKind::Literal(0, _) => Some(false_expr.as_ref().clone()),
+                    ExprKind::Literal(lit, _) if lit.is_zero() => Some(false_expr.as_ref().clone()),
                     ExprKind::Literal(..) => Some(true_expr.as_ref().clone()),
                     _ => None,
                 }
             }
             ExprKind::SizeofType { token, decl_type } => {
                 let size = typechecker.parse_type(&token, decl_type.clone())?.ty.size();
-                Some(ExprKind::new_literal(size as i64, Primitive::Int))
+                Some(ExprKind::new_literal(size as i64, Primitive::Int(true)))
             }
 
             ExprKind::Assign { l_expr, r_expr, .. } => {
@@ -154,7 +230,13 @@ impl ExprKind {
             if let Some((literal, amount)) =
                 maybe_scale_index(&left_type, &right_type, &mut left_n, &mut right_n)
             {
-                *literal = literal.overflowing_mul(amount as i64).0;
+                *literal = overflow_bin_op(
+                    &literal,
+                    &LiteralKind::Signed(amount as i64),
+                    i64::overflowing_mul,
+                    u64::overflowing_mul,
+                )
+                .0;
             }
 
             Ok(Some(match token.kind {
@@ -162,12 +244,12 @@ impl ExprKind {
                     token,
                     left_type,
                     right_type,
-                    i64::overflowing_add(left_n, right_n),
+                    overflow_bin_op(&left_n, &right_n, i64::overflowing_add, u64::overflowing_add),
                 )?,
                 TokenKind::Minus => {
                     let (left_type, right_type, scale_factor) = match (&left_type.ty, &right_type.ty) {
                         (Type::Pointer(inner), Type::Pointer(_)) => {
-                            let result_type = QualType::new(Type::Primitive(Primitive::Long));
+                            let result_type = QualType::new(Type::Primitive(Primitive::Long(false)));
                             (result_type.clone(), result_type, Some(inner.ty.size()))
                         }
                         _ => (left_type, right_type, None),
@@ -177,7 +259,7 @@ impl ExprKind {
                         token.clone(),
                         left_type,
                         right_type,
-                        i64::overflowing_sub(left_n, right_n),
+                        overflow_bin_op(&left_n, &right_n, i64::overflowing_sub, u64::overflowing_sub),
                     )?;
 
                     if let Some(scale_factor) = scale_factor {
@@ -186,7 +268,12 @@ impl ExprKind {
                                 token,
                                 result_type.clone(),
                                 result_type,
-                                i64::overflowing_div(n, scale_factor as i64),
+                                overflow_bin_op(
+                                    &n,
+                                    &LiteralKind::Signed(scale_factor as i64),
+                                    i64::overflowing_div,
+                                    u64::overflowing_div,
+                                ),
                             )?,
                             _ => unreachable!("literal_type always returns literal"),
                         }
@@ -198,7 +285,7 @@ impl ExprKind {
                     token,
                     left_type,
                     right_type,
-                    i64::overflowing_mul(left_n, right_n),
+                    overflow_bin_op(&left_n, &right_n, i64::overflowing_mul, u64::overflowing_mul),
                 )?,
                 TokenKind::Slash | TokenKind::Mod => {
                     Self::div_fold(token, left_type, right_type, left_n, right_n)?
@@ -208,13 +295,13 @@ impl ExprKind {
                 }
 
                 TokenKind::Pipe => {
-                    Self::literal_type(token, left_type, right_type, (left_n | right_n, false))?
+                    Self::literal_type(token, left_type, right_type, safe_bin_op!(left_n, |, right_n))?
                 }
                 TokenKind::Xor => {
-                    Self::literal_type(token, left_type, right_type, (left_n ^ right_n, false))?
+                    Self::literal_type(token, left_type, right_type, safe_bin_op!(left_n, ^, right_n))?
                 }
                 TokenKind::Amp => {
-                    Self::literal_type(token, left_type, right_type, (left_n & right_n, false))?
+                    Self::literal_type(token, left_type, right_type, safe_bin_op!(left_n, &, right_n))?
                 }
 
                 _ => unreachable!("not binary token"),
@@ -223,20 +310,43 @@ impl ExprKind {
             Ok(None)
         }
     }
-    fn shift_fold(token: Token, left_type: QualType, left: i64, right: i64) -> Result<ExprKind, Error> {
+    fn shift_fold(
+        token: Token,
+        left_type: QualType,
+        left: LiteralKind,
+        right: LiteralKind,
+    ) -> Result<ExprKind, Error> {
         // result type is only dependant on left operand
-        let left_type = if left_type.ty.size() < Primitive::Int.size() {
-            QualType::new(Type::Primitive(Primitive::Int))
+        let left_type = if left_type.ty.size() < Primitive::Int(false).size() {
+            QualType::new(Type::Primitive(Primitive::Int(false)))
         } else {
             left_type
         };
-        if right < 0 {
+        if right.is_negative() {
             return Err(Error::new(&token, ErrorKind::NegativeShift));
         }
+        let right = match right {
+            LiteralKind::Signed(n) => n as u32,
+            LiteralKind::Unsigned(n) => n as u32,
+        };
 
-        let (value, overflow) = match token.kind {
-            TokenKind::GreaterGreater => i64::overflowing_shr(left, right as u32),
-            TokenKind::LessLess => i64::overflowing_shl(left, right as u32),
+        let (value, overflow) = match (token.kind, left) {
+            (TokenKind::GreaterGreater, LiteralKind::Unsigned(n)) => {
+                let (value, overflow) = u64::overflowing_shr(n, right);
+                (LiteralKind::Unsigned(value), overflow)
+            }
+            (TokenKind::GreaterGreater, LiteralKind::Signed(n)) => {
+                let (value, overflow) = i64::overflowing_shr(n, right);
+                (LiteralKind::Signed(value), overflow)
+            }
+            (TokenKind::LessLess, LiteralKind::Unsigned(n)) => {
+                let (value, overflow) = u64::overflowing_shl(n, right);
+                (LiteralKind::Unsigned(value), overflow)
+            }
+            (TokenKind::LessLess, LiteralKind::Signed(n)) => {
+                let (value, overflow) = i64::overflowing_shl(n, right);
+                (LiteralKind::Signed(value), overflow)
+            }
             _ => unreachable!("not shift operation"),
         };
 
@@ -250,25 +360,28 @@ impl ExprKind {
         token: Token,
         left_type: QualType,
         right_type: QualType,
-        left: i64,
-        right: i64,
+        left: LiteralKind,
+        right: LiteralKind,
     ) -> Result<ExprKind, Error> {
-        if right == 0 {
+        if right.is_zero() {
             return Err(Error::new(&token, ErrorKind::DivideByZero));
         }
 
         let operation = match token.kind {
-            TokenKind::Slash => i64::overflowing_div(left, right),
-            TokenKind::Mod => i64::overflowing_rem(left, right),
+            TokenKind::Slash => {
+                overflow_bin_op(&left, &right, i64::overflowing_div, u64::overflowing_div)
+            }
+            TokenKind::Mod => overflow_bin_op(&left, &right, i64::overflowing_rem, u64::overflowing_rem),
             _ => unreachable!("not shift operation"),
         };
+
         Self::literal_type(token, left_type, right_type, operation)
     }
     fn literal_type(
         token: Token,
         left_type: QualType,
         right_type: QualType,
-        (value, overflow): (i64, bool),
+        (value, overflow): (LiteralKind, bool),
     ) -> Result<ExprKind, Error> {
         let result_type = match (left_type, right_type) {
             (qtype, _) | (_, qtype) if qtype.ty.is_ptr() => qtype,
@@ -276,8 +389,8 @@ impl ExprKind {
             (_, right) => right,
         };
 
-        let result_type = if result_type.ty.size() < Primitive::Int.size() {
-            QualType::new(Type::Primitive(Primitive::Int))
+        let result_type = if result_type.ty.size() < Primitive::Int(false).size() {
+            QualType::new(Type::Primitive(Primitive::Int(false)))
         } else {
             result_type
         };
@@ -289,7 +402,7 @@ impl ExprKind {
             Ok(ExprKind::Literal(value, result_type))
         }
     }
-    fn type_overflow(value: i64, ty: &Type) -> bool {
+    fn type_overflow(value: LiteralKind, ty: &Type) -> bool {
         (value > ty.max()) || ((value) < ty.min())
     }
 
@@ -301,11 +414,12 @@ impl ExprKind {
         right.integer_const_fold(typechecker)?;
 
         Ok(match (right.as_ref(), &token.kind) {
-            (ExprKind::Literal(n, _), TokenKind::Bang) => {
-                Some(ExprKind::new_literal(if *n == 0 { 1 } else { 0 }, Primitive::Int))
-            }
+            (ExprKind::Literal(literal, _), TokenKind::Bang) => Some(ExprKind::new_literal(
+                if literal.is_zero() { 1 } else { 0 },
+                Primitive::Int(false),
+            )),
             (
-                ExprKind::Literal(n, right_type),
+                ExprKind::Literal(literal, right_type),
                 TokenKind::Minus | TokenKind::Plus | TokenKind::Tilde,
             ) => {
                 if !right_type.ty.is_integer() {
@@ -320,11 +434,17 @@ impl ExprKind {
                     right_type.clone(),
                     right_type.clone(),
                     if token.kind == TokenKind::Plus {
-                        (*n, false)
+                        (*literal, false)
                     } else if token.kind == TokenKind::Tilde {
-                        (!n, false)
+                        (
+                            match literal {
+                                LiteralKind::Signed(n) => LiteralKind::Signed(!*n),
+                                LiteralKind::Unsigned(n) => LiteralKind::Unsigned(!*n),
+                            },
+                            false,
+                        )
                     } else {
-                        n.overflowing_neg()
+                        overflow_unary_op(literal, i64::overflowing_neg, u64::overflowing_neg)
                     },
                 )?)
             }
@@ -342,27 +462,27 @@ impl ExprKind {
 
         Ok(match token.kind {
             TokenKind::AmpAmp => match (left.as_ref(), right.as_ref()) {
-                (ExprKind::Literal(0, _), _) => Some(ExprKind::new_literal(0, Primitive::Int)),
+                (ExprKind::Literal(0, _), _) => Some(ExprKind::new_literal(0, Primitive::Int(false))),
                 (ExprKind::Literal(left_n, _), ExprKind::Literal(right_n, _))
                     if *left_n != 0 && *right_n != 0 =>
                 {
-                    Some(ExprKind::new_literal(1, Primitive::Int))
+                    Some(ExprKind::new_literal(1, Primitive::Int(false)))
                 }
                 (ExprKind::Literal(..), ExprKind::Literal(..)) => {
-                    Some(ExprKind::new_literal(0, Primitive::Int))
+                    Some(ExprKind::new_literal(0, Primitive::Int(false)))
                 }
                 _ => None,
             },
 
             TokenKind::PipePipe => match (left.as_ref(), right.as_ref()) {
-                (ExprKind::Literal(1, _), _) => Some(ExprKind::new_literal(1, Primitive::Int)),
+                (ExprKind::Literal(1, _), _) => Some(ExprKind::new_literal(1, Primitive::Int(false))),
                 (ExprKind::Literal(left, _), ExprKind::Literal(right, _))
                     if *left == 0 && *right == 0 =>
                 {
-                    Some(ExprKind::new_literal(0, Primitive::Int))
+                    Some(ExprKind::new_literal(0, Primitive::Int(false)))
                 }
                 (ExprKind::Literal(..), ExprKind::Literal(..)) => {
-                    Some(ExprKind::new_literal(1, Primitive::Int))
+                    Some(ExprKind::new_literal(1, Primitive::Int(false)))
                 }
                 _ => None,
             },
@@ -395,19 +515,23 @@ impl ExprKind {
 
             Ok(Some(match token.kind {
                 TokenKind::BangEqual => {
-                    ExprKind::new_literal((left_n != right_n).into(), Primitive::Int)
+                    ExprKind::new_literal((left_n != right_n).into(), Primitive::Int(false))
                 }
                 TokenKind::EqualEqual => {
-                    ExprKind::new_literal((left_n == right_n).into(), Primitive::Int)
+                    ExprKind::new_literal((left_n == right_n).into(), Primitive::Int(false))
                 }
 
-                TokenKind::Greater => ExprKind::new_literal((left_n > right_n).into(), Primitive::Int),
-                TokenKind::GreaterEqual => {
-                    ExprKind::new_literal((left_n >= right_n).into(), Primitive::Int)
+                TokenKind::Greater => {
+                    ExprKind::new_literal(safe_comp_op!(left_n, >, right_n), Primitive::Int(false))
                 }
-                TokenKind::Less => ExprKind::new_literal((left_n < right_n).into(), Primitive::Int),
+                TokenKind::GreaterEqual => {
+                    ExprKind::new_literal(safe_comp_op!(left_n, >=, right_n), Primitive::Int(false))
+                }
+                TokenKind::Less => {
+                    ExprKind::new_literal(safe_comp_op!(left_n, <, right_n), Primitive::Int(false))
+                }
                 TokenKind::LessEqual => {
-                    ExprKind::new_literal((left_n <= right_n).into(), Primitive::Int)
+                    ExprKind::new_literal(safe_comp_op!(left_n, <= ,right_n), Primitive::Int(false))
                 }
                 _ => unreachable!("not valid comparison token"),
             }))
@@ -436,8 +560,8 @@ impl ExprKind {
         token: Token,
         old_type: QualType,
         new_type: QualType,
-        right_fold: i64,
-    ) -> Result<(i64, QualType), Error> {
+        right_fold: i128,
+    ) -> Result<(i128, QualType), Error> {
         let result = if old_type.ty.is_scalar() && new_type.ty.is_scalar() {
             new_type.ty.maybe_wrap(right_fold)
         } else {
@@ -578,11 +702,17 @@ mod tests {
     fn shift_fold_error() {
         assert_fold_error!(
             "-16 << 33",
-            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Int), .. })
+            ErrorKind::IntegerOverflow(QualType {
+                ty: Type::Primitive(Primitive::Int(false)),
+                ..
+            })
         );
         assert_fold_error!(
             "(long)-5 >> 64",
-            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Long), .. })
+            ErrorKind::IntegerOverflow(QualType {
+                ty: Type::Primitive(Primitive::Long(false)),
+                ..
+            })
         );
 
         // negative shift count is UB
@@ -595,7 +725,10 @@ mod tests {
 
         assert_fold_error!(
             "2147483647 << 2",
-            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Int), .. })
+            ErrorKind::IntegerOverflow(QualType {
+                ty: Type::Primitive(Primitive::Int(false)),
+                ..
+            })
         );
     }
 
@@ -639,7 +772,10 @@ mod tests {
             "6 / (int *)1",
             ErrorKind::InvalidBinary(
                 _,
-                QualType { ty: Type::Primitive(Primitive::Int), .. },
+                QualType {
+                    ty: Type::Primitive(Primitive::Int(false)),
+                    ..
+                },
                 QualType { ty: Type::Pointer(_), .. }
             )
         );
@@ -663,7 +799,10 @@ mod tests {
         assert_fold_error!(
             "1 == 2 ? 4 : (long*)9",
             ErrorKind::TypeMismatch(
-                QualType { ty: Type::Primitive(Primitive::Int), .. },
+                QualType {
+                    ty: Type::Primitive(Primitive::Int(false)),
+                    ..
+                },
                 QualType { ty: Type::Pointer(_), .. }
             )
         );
@@ -701,24 +840,39 @@ mod tests {
     fn overflow_fold() {
         assert_fold_error!(
             "2147483647 + 1",
-            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Int), .. })
+            ErrorKind::IntegerOverflow(QualType {
+                ty: Type::Primitive(Primitive::Int(false)),
+                ..
+            })
         );
         assert_fold_error!(
             "9223372036854775807 * 2",
-            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Long), .. })
+            ErrorKind::IntegerOverflow(QualType {
+                ty: Type::Primitive(Primitive::Long(false)),
+                ..
+            })
         );
 
         assert_fold_error!(
             "(int)-2147483648 - 1",
-            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Int), .. })
+            ErrorKind::IntegerOverflow(QualType {
+                ty: Type::Primitive(Primitive::Int(false)),
+                ..
+            })
         );
         assert_fold_error!(
             "(int)-2147483648 * -1",
-            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Int), .. })
+            ErrorKind::IntegerOverflow(QualType {
+                ty: Type::Primitive(Primitive::Int(false)),
+                ..
+            })
         );
         assert_fold_error!(
             "-((int)-2147483648)",
-            ErrorKind::IntegerOverflow(QualType { ty: Type::Primitive(Primitive::Int), .. })
+            ErrorKind::IntegerOverflow(QualType {
+                ty: Type::Primitive(Primitive::Int(false)),
+                ..
+            })
         );
 
         assert_fold_type("(char)127 + 2", "129", "int");
@@ -742,7 +896,10 @@ mod tests {
         assert_fold_error!(
             "(struct {int age;})2",
             ErrorKind::InvalidConstCast(
-                QualType { ty: Type::Primitive(Primitive::Int), .. },
+                QualType {
+                    ty: Type::Primitive(Primitive::Int(false)),
+                    ..
+                },
                 QualType {
                     ty: Type::Struct(StructKind::Unnamed(..)),
                     ..

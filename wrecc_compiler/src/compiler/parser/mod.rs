@@ -1185,7 +1185,7 @@ impl Parser {
                     ExprKind::CompoundAssign {
                         l_expr: Box::new(right),
                         token,
-                        r_expr: Box::new(ExprKind::new_literal(1, Primitive::Int)),
+                        r_expr: Box::new(ExprKind::new_literal(1, Primitive::Int(false))),
                     }
                 }
                 // typecast
@@ -1314,14 +1314,14 @@ impl Parser {
         if let Some(n) = match_next!(self, TokenKind::Number(_)) {
             let n = n.unwrap_num();
             return Ok(ExprKind::Literal(
-                n,
+                LiteralKind::Signed(n as i64),
                 QualType::new(Type::Primitive(integer_type(n))),
             ));
         }
         if let Some(c) = match_next!(self, TokenKind::CharLit(_)) {
             return Ok(ExprKind::Literal(
-                c.unwrap_char() as i64,
-                QualType::new(Type::Primitive(Primitive::Char)),
+                LiteralKind::Signed(c.unwrap_char() as i64),
+                QualType::new(Type::Primitive(Primitive::Char(false))),
             ));
         }
         if let Some(s) = match_next!(self, TokenKind::Ident(_)) {

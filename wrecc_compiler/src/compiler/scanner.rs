@@ -20,6 +20,8 @@ impl<'a> Scanner<'a> {
             source: source.into_iter().peekable(),
             keywords: HashMap::from([
                 ("void", TokenKind::Void),
+                ("unsigned", TokenKind::Unsigned),
+                ("signed", TokenKind::Signed),
                 ("int", TokenKind::Int),
                 ("long", TokenKind::Long),
                 ("char", TokenKind::Char),
@@ -208,10 +210,10 @@ impl<'a> Scanner<'a> {
                     tokens.push(pp_token, TokenKind::String(string))
                 }
                 PPKind::CharLit(ref s) => match self.char_lit(&pp_token, s) {
-                    Ok(char) => tokens.push(pp_token, TokenKind::CharLit(char as i8)),
+                    Ok(char) => tokens.push(pp_token, TokenKind::CharLit(char)),
                     Err(e) => errors.push(e),
                 },
-                PPKind::Number(ref num) => match num.parse::<i64>() {
+                PPKind::Number(ref num) => match num.parse::<u64>() {
                     Ok(n) => tokens.push(pp_token, TokenKind::Number(n)),
                     Err(e) => {
                         errors.push(Error::new(
@@ -566,7 +568,7 @@ mod tests {
             TokenKind::Char,
             TokenKind::Ident("some".to_string()),
             TokenKind::Equal,
-            TokenKind::CharLit('1' as i8),
+            TokenKind::CharLit('1'),
         ];
         assert_eq!(actual, expected);
     }
@@ -599,7 +601,7 @@ mod tests {
         let expected = vec![
             TokenKind::Ident("c".to_string()),
             TokenKind::Equal,
-            TokenKind::CharLit(39),
+            TokenKind::CharLit(39 as char),
             TokenKind::Semicolon,
         ];
 

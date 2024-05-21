@@ -58,8 +58,8 @@ pub enum TokenKind {
     // Literals.
     Ident(String),
     String(String),
-    CharLit(i8),
-    Number(i64),
+    CharLit(char),
+    Number(u64),
 
     // Keywords.
     Void,
@@ -67,6 +67,8 @@ pub enum TokenKind {
     Int,
     Char,
     Short,
+    Unsigned,
+    Signed,
     Struct,
     Union,
     Enum,
@@ -200,6 +202,8 @@ impl Display for TokenKind {
                 TokenKind::XorEqual => "'^='",
                 TokenKind::Char => "'char'",
                 TokenKind::CharLit(_) => "'char'",
+                TokenKind::Signed => "'signed'",
+                TokenKind::Unsigned => "'unsigned'",
                 TokenKind::Int => "'int'",
                 TokenKind::Short => "'short'",
                 TokenKind::Long => "'long'",
@@ -292,13 +296,13 @@ impl Token {
             _ => panic!("cant unwrap string on {} token", self.kind),
         }
     }
-    pub fn unwrap_num(&self) -> i64 {
+    pub fn unwrap_num(&self) -> u64 {
         match &self.kind {
             TokenKind::Number(n) => *n,
             _ => panic!("cant unwrap number on {} token", self.kind),
         }
     }
-    pub fn unwrap_char(&self) -> i8 {
+    pub fn unwrap_char(&self) -> char {
         match &self.kind {
             TokenKind::CharLit(c) => *c,
             _ => panic!("cant unwrap char on {} token", self.kind),
@@ -311,6 +315,8 @@ impl Token {
                 | TokenKind::Union
                 | TokenKind::Struct
                 | TokenKind::Void
+                | TokenKind::Unsigned
+                | TokenKind::Signed
                 | TokenKind::Char
                 | TokenKind::Short
                 | TokenKind::Int
@@ -346,6 +352,8 @@ impl Into<SpecifierKind> for Token {
     fn into(self) -> SpecifierKind {
         match self.kind {
             TokenKind::Void => SpecifierKind::Void,
+            TokenKind::Signed => SpecifierKind::Signed,
+            TokenKind::Unsigned => SpecifierKind::Unsigned,
             TokenKind::Char => SpecifierKind::Char,
             TokenKind::Short => SpecifierKind::Short,
             TokenKind::Int => SpecifierKind::Int,

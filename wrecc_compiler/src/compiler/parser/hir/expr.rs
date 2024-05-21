@@ -72,7 +72,7 @@ pub enum ExprKind {
         expr: Box<ExprKind>,
     },
     String(Token),
-    Literal(i64, QualType),
+    Literal(LiteralKind, QualType),
     Ident(Token),
     Nop,
 }
@@ -82,7 +82,10 @@ pub trait IsZero {
 }
 impl IsZero for ExprKind {
     fn is_zero(&self) -> bool {
-        matches!(self, ExprKind::Literal(0, _))
+        match self {
+            ExprKind::Literal(literal, _) => literal.is_zero(),
+            _ => false,
+        }
     }
 }
 
@@ -112,7 +115,13 @@ impl PrintIndent for ExprKind {
                     indent_fmt(r_expr.as_ref(), indent_level + 1)
                 )
             }
-            ExprKind::Literal(n, _) => format!("Literal: {}", n),
+            ExprKind::Literal(literal, _) => format!(
+                "Literal: {}",
+                match literal {
+                    LiteralKind::Signed(n) => *n as i128,
+                    LiteralKind::Unsigned(n) => *n as i128,
+                }
+            ),
             ExprKind::Ident(name) => format!("Ident: '{}'", name.unwrap_string()),
             ExprKind::String(token) => format!("String: {:?}", token.unwrap_string()),
             ExprKind::Logical { token, left, right } => format!(

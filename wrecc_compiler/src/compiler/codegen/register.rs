@@ -107,7 +107,7 @@ impl LabelRegister {
     pub fn get_type(&self) -> Type {
         match self {
             LabelRegister::String(_) => {
-                Type::Pointer(Box::new(QualType::new(Type::Primitive(Primitive::Char))))
+                Type::Pointer(Box::new(QualType::new(Type::Primitive(Primitive::Char(false)))))
             }
             LabelRegister::Var(_, ty, _) => ty.clone(),
         }
@@ -172,7 +172,7 @@ impl StaticRegister {
                     TokenKind::Minus => '-',
                     _ => unreachable!(),
                 },
-                offset
+                *offset as i64
             ),
             StaticRegister::Literal(n, ty) => literal_name(n, ty),
         }
@@ -205,12 +205,13 @@ impl StackRegister {
         assert!(arg_index >= 6);
         let arg_stack_index: usize = (arg_index as isize - ARG_REGS.len() as isize) as usize;
         const PUSHED_PARAM_OFFSET: usize = 16;
-        let bp_offset = PUSHED_PARAM_OFFSET + arg_stack_index * Type::Primitive(Primitive::Long).size();
+        let bp_offset =
+            PUSHED_PARAM_OFFSET + arg_stack_index * Type::Primitive(Primitive::Long(true)).size();
 
         Self {
             bp_offset,
             kind: StackKind::Unsigned,
-            ty: Type::Primitive(Primitive::Long),
+            ty: Type::Primitive(Primitive::Long(true)),
         }
     }
     pub fn name(&self) -> String {
@@ -253,7 +254,7 @@ impl TempRegister {
     // boilerplate register that is only used to access it's base-name
     pub fn default(reg: Box<dyn ScratchRegister>) -> Self {
         TempRegister {
-            ty: Type::Primitive(Primitive::Int),
+            ty: Type::Primitive(Primitive::Int(false)),
             id: 0,
             reg: Some(TempKind::Scratch(reg)),
             start_idx: 0,
@@ -383,10 +384,10 @@ impl ScratchRegister for ArgRegisterKind {
     }
     fn name(&self, ty: &Type) -> String {
         match ty {
-            Type::Primitive(Primitive::Char) => self.names[3],
-            Type::Primitive(Primitive::Short) => self.names[2],
-            Type::Primitive(Primitive::Int) | Type::Enum(..) => self.names[1],
-            Type::Primitive(Primitive::Long) | Type::Pointer(_) | Type::Array { .. } => self.names[0],
+            Type::Primitive(Primitive::Char(_)) => self.names[3],
+            Type::Primitive(Primitive::Short(_)) => self.names[2],
+            Type::Primitive(Primitive::Int(_)) | Type::Enum(..) => self.names[1],
+            Type::Primitive(Primitive::Long(_)) | Type::Pointer(_) | Type::Array { .. } => self.names[0],
             _ => unimplemented!("aggregate types are not yet implemented as function args"),
         }
         .to_string()

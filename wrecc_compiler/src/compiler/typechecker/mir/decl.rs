@@ -156,7 +156,7 @@ impl Function {
 
                 body.push(Stmt::Return(Some(Expr {
                     kind: ExprKind::Literal(0),
-                    qtype: QualType::new(Type::Primitive(Primitive::Int)),
+                    qtype: QualType::new(Type::Primitive(Primitive::Int(false))),
                     value_kind: ValueKind::Rvalue,
                 })));
             }
@@ -187,6 +187,6 @@ pub enum ScopeKind {
 
 #[derive(Debug, PartialEq)]
 pub enum CaseKind {
-    Case(i64),
+    Case(i32),
     Default,
 }

@@ -427,7 +427,7 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
-    fn pp_const_value(&self, if_kind: Token, cond: Vec<Token>) -> Result<i64, Error> {
+    fn pp_const_value(&self, if_kind: Token, cond: Vec<Token>) -> Result<i128, Error> {
         let cond = cond
             .into_iter()
             .map(|t| PPToken::from(&t, self.filename))

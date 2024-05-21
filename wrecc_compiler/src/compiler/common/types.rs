@@ -181,8 +181,8 @@ impl TypeInfo for Type {
             Type::Primitive(t) => t.size(),
             Type::Struct(s) => s.members().iter().fold(0, |acc, (t, _)| acc + t.ty.size()),
             Type::Union(_) => self.union_biggest().ty.size(),
-            Type::Pointer(_) => Type::Primitive(Primitive::Long).size(),
-            Type::Enum(..) => Type::Primitive(Primitive::Int).size(),
+            Type::Pointer(_) => Type::Primitive(Primitive::Long(true)).size(),
+            Type::Enum(..) => Type::Primitive(Primitive::Int(false)).size(),
             Type::Array(element_type, ArraySize::Known(amount)) => amount * element_type.ty.size(),
             // INFO: tentative array assumed to have one element
             Type::Array(element_type, ArraySize::Unknown) => element_type.ty.size(),
@@ -193,9 +193,9 @@ impl TypeInfo for Type {
         match self {
             Type::Primitive(t) => t.reg_suffix(),
             Type::Union(_) => self.union_biggest().ty.reg_suffix(),
-            Type::Enum(..) => Type::Primitive(Primitive::Int).reg_suffix(),
+            Type::Enum(..) => Type::Primitive(Primitive::Int(false)).reg_suffix(),
             Type::Pointer(_) | Type::Array { .. } | Type::Struct(..) => {
-                Type::Primitive(Primitive::Long).reg_suffix()
+                Type::Primitive(Primitive::Long(true)).reg_suffix()
             }
             Type::Function { .. } => unreachable!("no plain function type used"),
         }
@@ -204,9 +204,9 @@ impl TypeInfo for Type {
         match self {
             Type::Primitive(t) => t.suffix(),
             Type::Union(_) => self.union_biggest().ty.suffix(),
-            Type::Enum(..) => Type::Primitive(Primitive::Int).suffix(),
+            Type::Enum(..) => Type::Primitive(Primitive::Int(false)).suffix(),
             Type::Pointer(_) | Type::Array { .. } | Type::Struct(..) => {
-                Type::Primitive(Primitive::Long).suffix()
+                Type::Primitive(Primitive::Long(true)).suffix()
             }
             Type::Function { .. } => unreachable!("no plain function type used"),
         }
@@ -215,9 +215,9 @@ impl TypeInfo for Type {
         match self {
             Type::Primitive(t) => t.complete_suffix(),
             Type::Union(_) => self.union_biggest().ty.complete_suffix(),
-            Type::Enum(..) => Type::Primitive(Primitive::Int).complete_suffix(),
+            Type::Enum(..) => Type::Primitive(Primitive::Int(false)).complete_suffix(),
             Type::Pointer(_) | Type::Array { .. } | Type::Struct(..) => {
-                Type::Primitive(Primitive::Long).complete_suffix()
+                Type::Primitive(Primitive::Long(true)).complete_suffix()
             }
             Type::Function { .. } => unreachable!("no plain function type used"),
         }
@@ -225,8 +225,8 @@ impl TypeInfo for Type {
     fn return_reg(&self) -> String {
         match self {
             Type::Primitive(t) => t.return_reg(),
-            Type::Pointer(_) | Type::Array { .. } => Type::Primitive(Primitive::Long).return_reg(),
-            Type::Enum(..) => Type::Primitive(Primitive::Int).return_reg(),
+            Type::Pointer(_) | Type::Array { .. } => Type::Primitive(Primitive::Long(true)).return_reg(),
+            Type::Enum(..) => Type::Primitive(Primitive::Int(false)).return_reg(),
             Type::Union(..) => self.union_biggest().ty.return_reg(),
             Type::Struct(..) => unimplemented!("currently can't return structs"),
             Type::Function { .. } => unreachable!("no plain function type used"),
@@ -292,29 +292,33 @@ impl Type {
         }
     }
 
-    pub fn max(&self) -> i64 {
+    pub fn max(&self) -> i128 {
         match self {
             Type::Primitive(t) => t.max(),
-            Type::Enum(..) => i32::MAX as i64,
-            Type::Pointer(_) => i64::MAX,
+            Type::Enum(..) => i32::MAX as i128,
+            Type::Pointer(_) => u64::MAX as i128,
             _ => unreachable!(),
         }
     }
-    pub fn min(&self) -> i64 {
+    pub fn min(&self) -> i128 {
         match self {
             Type::Primitive(t) => t.min(),
-            Type::Enum(..) => i32::MIN as i64,
-            Type::Pointer(_) => i64::MIN,
+            Type::Enum(..) => i32::MIN as i128,
+            Type::Pointer(_) => u64::MIN as i128,
             _ => unreachable!(),
         }
     }
 
     pub fn maybe_wrap(&self, n: i64) -> Option<i64> {
         match self {
-            Type::Primitive(Primitive::Char) => Some(n as i8 as i64),
-            Type::Primitive(Primitive::Short) => Some(n as i16 as i64),
-            Type::Primitive(Primitive::Int) | Type::Enum(..) => Some(n as i32 as i64),
-            Type::Pointer(_) | Type::Primitive(Primitive::Long) => Some(n),
+            Type::Primitive(Primitive::Char(false)) => Some(n as i8 as i128),
+            Type::Primitive(Primitive::Char(true)) => Some(n as u8 as i128),
+            Type::Primitive(Primitive::Short(false)) => Some(n as i16 as i128),
+            Type::Primitive(Primitive::Short(true)) => Some(n as u16 as i128),
+            Type::Primitive(Primitive::Int(false)) | Type::Enum(..) => Some(n as i32 as i128),
+            Type::Primitive(Primitive::Int(true)) => Some(n as u32 as i128),
+            Type::Primitive(Primitive::Long(false)) => Some(n as i64 as i128),
+            Type::Pointer(_) | Type::Primitive(Primitive::Long(true)) => Some(n as u64 as i128),
             _ => None,
         }
     }
@@ -328,7 +332,7 @@ impl Type {
     }
     pub fn is_char_array(&self) -> Option<&ArraySize> {
         if let Type::Array(of, size) = self {
-            if let Type::Primitive(Primitive::Char) = of.ty {
+            if let Type::Primitive(Primitive::Char(_)) = of.ty {
                 return Some(size);
             }
         }
@@ -356,7 +360,7 @@ impl PartialEq for FuncType {
 }
 impl FuncType {
     pub fn check_main_signature(&self, token: &Token, is_inline: bool) -> Result<(), Error> {
-        if self.return_type.ty != Type::Primitive(Primitive::Int) {
+        if self.return_type.ty != Type::Primitive(Primitive::Int(false)) {
             return Err(Error::new(
                 token,
                 ErrorKind::InvalidMainReturn(*self.return_type.clone()),
@@ -378,8 +382,10 @@ impl FuncType {
 
         match unqualified_params.as_slice() {
             [] => (),
-            [Type::Primitive(Primitive::Int), Type::Pointer(to)] => match &to.ty {
-                Type::Pointer(nested_to) if nested_to.ty == Type::Primitive(Primitive::Char) => (),
+            [Type::Primitive(Primitive::Int(false)), Type::Pointer(to)] => match &to.ty {
+                Type::Pointer(nested_to) if nested_to.ty == Type::Primitive(Primitive::Char(false)) => {
+                    ()
+                }
                 _ => {
                     return Err(Error::new(
                         token,
@@ -402,10 +408,11 @@ impl FuncType {
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum Primitive {
     Void,
-    Char,
-    Short,
-    Int,
-    Long,
+    // true if unsigned
+    Char(bool),
+    Short(bool),
+    Int(bool),
+    Long(bool),
 }
 
 impl TypeInfo for Primitive {
@@ -413,19 +420,19 @@ impl TypeInfo for Primitive {
     fn size(&self) -> usize {
         match self {
             Primitive::Void => 0,
-            Primitive::Char => 1,
-            Primitive::Short => 2,
-            Primitive::Int => 4,
-            Primitive::Long => 8,
+            Primitive::Char(_) => 1,
+            Primitive::Short(_) => 2,
+            Primitive::Int(_) => 4,
+            Primitive::Long(_) => 8,
         }
     }
     fn reg_suffix(&self) -> String {
         String::from(match self {
             Primitive::Void => unreachable!(),
-            Primitive::Char => "b",
-            Primitive::Short => "w",
-            Primitive::Int => "d",
-            Primitive::Long => "",
+            Primitive::Char(_) => "b",
+            Primitive::Short(_) => "w",
+            Primitive::Int(_) => "d",
+            Primitive::Long(_) => "",
         })
     }
     fn suffix(&self) -> String {
@@ -434,58 +441,102 @@ impl TypeInfo for Primitive {
     fn complete_suffix(&self) -> String {
         String::from(match self {
             Primitive::Void => "zero",
-            Primitive::Char => "byte",
-            Primitive::Short => "word",
-            Primitive::Int => "long",
-            Primitive::Long => "quad",
+            Primitive::Char(_) => "byte",
+            Primitive::Short(_) => "word",
+            Primitive::Int(_) => "long",
+            Primitive::Long(_) => "quad",
         })
     }
     fn return_reg(&self) -> String {
         String::from(match self {
             Primitive::Void => unreachable!("doesnt have return register when returning void"),
-            Primitive::Char => RETURN_REG[0],
-            Primitive::Short => RETURN_REG[1],
-            Primitive::Int => RETURN_REG[2],
-            Primitive::Long => RETURN_REG[3],
+            Primitive::Char(_) => RETURN_REG[0],
+            Primitive::Short(_) => RETURN_REG[1],
+            Primitive::Int(_) => RETURN_REG[2],
+            Primitive::Long(_) => RETURN_REG[3],
         })
     }
 }
 impl Primitive {
-    fn fmt(&self) -> &str {
+    pub fn is_unsigned(&self) -> bool {
         match self {
-            Primitive::Void => "void",
-            Primitive::Char => "char",
-            Primitive::Short => "short",
-            Primitive::Int => "int",
-            Primitive::Long => "long",
+            Primitive::Char(true)
+            | Primitive::Short(true)
+            | Primitive::Int(true)
+            | Primitive::Long(true) => true,
+            _ => false,
         }
     }
 
-    fn max(&self) -> i64 {
+    fn fmt(&self) -> &str {
         match self {
-            Primitive::Void => unreachable!(),
-            Primitive::Char => i8::MAX as i64,
-            Primitive::Short => i16::MAX as i64,
-            Primitive::Int => i32::MAX as i64,
-            Primitive::Long => i64::MAX,
+            Primitive::Void => "void",
+            Primitive::Char(false) => "char",
+            Primitive::Char(true) => "unsigned char",
+            Primitive::Short(false) => "short",
+            Primitive::Short(true) => "unsigned short",
+            Primitive::Int(false) => "int",
+            Primitive::Int(true) => "unsigned int",
+            Primitive::Long(false) => "long",
+            Primitive::Long(true) => "unsigned long",
         }
     }
-    fn min(&self) -> i64 {
+
+    fn max(&self) -> i128 {
         match self {
             Primitive::Void => unreachable!(),
-            Primitive::Char => i8::MIN as i64,
-            Primitive::Short => i16::MIN as i64,
-            Primitive::Int => i32::MIN as i64,
-            Primitive::Long => i64::MIN,
+            Primitive::Char(false) => i8::MAX as i128,
+            Primitive::Char(true) => u8::MAX as i128,
+            Primitive::Short(false) => i16::MAX as i128,
+            Primitive::Short(true) => u16::MAX as i128,
+            Primitive::Int(false) => i32::MAX as i128,
+            Primitive::Int(true) => u32::MAX as i128,
+            Primitive::Long(false) => i64::MAX as i128,
+            Primitive::Long(true) => u64::MAX as i128,
+        }
+    }
+    fn min(&self) -> i128 {
+        match self {
+            Primitive::Void => unreachable!(),
+            Primitive::Char(true)
+            | Primitive::Short(true)
+            | Primitive::Int(true)
+            | Primitive::Long(true) => u8::MIN as i128,
+            Primitive::Char(false) => i8::MIN as i128,
+            Primitive::Short(false) => i16::MIN as i128,
+            Primitive::Int(false) => i32::MIN as i128,
+            Primitive::Long(false) => i64::MIN as i128,
         }
     }
 }
 
-pub fn integer_type(n: i64) -> Primitive {
+#[derive(Debug, PartialEq, Clone)]
+pub enum LiteralKind {
+    Unsigned(u64),
+    Signed(i64),
+}
+impl LiteralKind {
+    pub fn is_zero(&self) -> bool {
+        match self {
+            LiteralKind::Signed(0) | LiteralKind::Unsigned(0) => true,
+            _ => false,
+        }
+    }
+    pub fn is_negative(&self) -> bool {
+        match self {
+            LiteralKind::Signed(n) => *n < 0,
+            LiteralKind::Unsigned(_) => false,
+        }
+    }
+}
+
+pub fn integer_type(n: u64) -> Primitive {
     if i32::try_from(n).is_ok() {
-        Primitive::Int
+        Primitive::Int(false)
+    } else if i64::try_from(n).is_ok() {
+        Primitive::Long(false)
     } else {
-        Primitive::Long
+        Primitive::Long(true)
     }
 }
 
@@ -832,5 +883,10 @@ pub mod tests {
         let right = Qualifiers::default();
 
         assert!(left.contains_all(&right));
+    }
+
+    #[test]
+    fn unsigned() {
+        assert_type_print("unsigned int", "unsigned int");
     }
 }

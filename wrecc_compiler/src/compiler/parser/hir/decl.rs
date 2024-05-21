@@ -95,6 +95,8 @@ pub struct MemberDeclarator {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SpecifierKind {
     Void,
+    Signed,
+    Unsigned,
     Char,
     Short,
     Int,
@@ -110,13 +112,15 @@ impl SpecifierKind {
     pub fn order(&self) -> usize {
         match self {
             SpecifierKind::Void => 0,
-            SpecifierKind::Char => 1,
-            SpecifierKind::Short => 2,
-            SpecifierKind::Long => 3,
+            SpecifierKind::Unsigned => 1,
+            SpecifierKind::Signed => 2,
+            SpecifierKind::Char => 3,
+            SpecifierKind::Short => 4,
+            SpecifierKind::Long => 5,
             // int is last in specifier order because thats easier to read:
             // eg: `short int` `long int`
-            SpecifierKind::Int => 4,
-            _ => 5,
+            SpecifierKind::Int => 6,
+            _ => 7,
         }
     }
 }

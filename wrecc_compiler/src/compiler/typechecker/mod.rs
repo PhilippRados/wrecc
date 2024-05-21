@@ -7,6 +7,7 @@ use crate::compiler::codegen::align;
 use crate::compiler::codegen::register::*;
 use crate::compiler::common::{environment::*, error::*, token::*, types::*};
 use crate::compiler::parser::hir;
+use crate::compiler::parser::hir::decl::SpecifierKind;
 
 use self::init::*;
 use self::mir::decl::{CaseKind, ScopeKind};
@@ -258,7 +259,7 @@ impl TypeChecker {
         let ty = if specifiers.is_empty() {
             // WARN: since C99 this should at least issue a warning
             // problem: requires token so should probably already error in parser
-            Type::Primitive(Primitive::Int)
+            Type::Primitive(Primitive::Int(false))
         } else {
             let token = specifiers[0].token.clone();
 
@@ -267,6 +268,7 @@ impl TypeChecker {
 
             specifier_kind_list.sort_by_key(|spec| spec.order());
 
+            // specifier combinations according to 6.7.2.2
             match specifier_kind_list.as_slice() {
                 [hir::decl::SpecifierKind::Struct(name, members)]
                 | [hir::decl::SpecifierKind::Union(name, members)] => {
@@ -288,18 +290,53 @@ impl TypeChecker {
                     })
                 }
 
-                [hir::decl::SpecifierKind::Void] => Type::Primitive(Primitive::Void),
-                [hir::decl::SpecifierKind::Char] => Type::Primitive(Primitive::Char),
-                [hir::decl::SpecifierKind::Short]
-                | [hir::decl::SpecifierKind::Short, hir::decl::SpecifierKind::Int] => {
-                    Type::Primitive(Primitive::Short)
+                // void
+                [SpecifierKind::Void] => Type::Primitive(Primitive::Void),
+                // char, signed char
+                [SpecifierKind::Char] | [SpecifierKind::Signed, SpecifierKind::Char] => {
+                    Type::Primitive(Primitive::Char(false))
                 }
-                [hir::decl::SpecifierKind::Int] => Type::Primitive(Primitive::Int),
-                [hir::decl::SpecifierKind::Long]
-                | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Int]
-                | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Long]
-                | [hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Long, hir::decl::SpecifierKind::Int] => {
-                    Type::Primitive(Primitive::Long)
+                // unsigned char
+                [SpecifierKind::Unsigned, SpecifierKind::Char] => Type::Primitive(Primitive::Char(true)),
+                // short, signed short, short int, signed short int
+                [SpecifierKind::Short]
+                | [SpecifierKind::Signed, SpecifierKind::Short]
+                | [SpecifierKind::Short, SpecifierKind::Int]
+                | [SpecifierKind::Signed, SpecifierKind::Short, SpecifierKind::Int] => {
+                    Type::Primitive(Primitive::Short(false))
+                }
+                // unsigned short, unsigned short int
+                [SpecifierKind::Unsigned, SpecifierKind::Short]
+                | [SpecifierKind::Unsigned, SpecifierKind::Short, SpecifierKind::Int] => {
+                    Type::Primitive(Primitive::Short(true))
+                }
+                // int, signed, signed int
+                [SpecifierKind::Int]
+                | [SpecifierKind::Signed]
+                | [SpecifierKind::Signed, SpecifierKind::Int] => Type::Primitive(Primitive::Int(false)),
+                // unsigned, unsigned int
+                [SpecifierKind::Unsigned] | [SpecifierKind::Unsigned, SpecifierKind::Int] => {
+                    Type::Primitive(Primitive::Int(true))
+                }
+                // long, signed long, long int, signed long int
+                // long long, signed long long, long long int, signed long long int
+                [SpecifierKind::Long]
+                | [SpecifierKind::Signed, SpecifierKind::Long]
+                | [SpecifierKind::Long, SpecifierKind::Int]
+                | [SpecifierKind::Signed, SpecifierKind::Long, SpecifierKind::Int]
+                | [SpecifierKind::Long, SpecifierKind::Long]
+                | [SpecifierKind::Signed, SpecifierKind::Long, SpecifierKind::Long]
+                | [SpecifierKind::Long, SpecifierKind::Long, SpecifierKind::Int]
+                | [SpecifierKind::Signed, SpecifierKind::Long, SpecifierKind::Long, SpecifierKind::Int] => {
+                    Type::Primitive(Primitive::Long(false))
+                }
+                // unsigned long, unsigned long int
+                // unsigned long long, unsigned long long int
+                [SpecifierKind::Unsigned, SpecifierKind::Long]
+                | [SpecifierKind::Unsigned, SpecifierKind::Long, SpecifierKind::Int]
+                | [SpecifierKind::Unsigned, SpecifierKind::Long, SpecifierKind::Long]
+                | [SpecifierKind::Unsigned, SpecifierKind::Long, SpecifierKind::Long, SpecifierKind::Int] => {
+                    Type::Primitive(Primitive::Long(false))
                 }
                 _ => {
                     return Err(Error::new(
@@ -583,9 +620,12 @@ impl TypeChecker {
                 Symbol {
                     storage_class: None,
                     token: name.clone(),
-                    qtype: QualType::new(Type::Primitive(Primitive::Int)),
+                    qtype: QualType::new(Type::Primitive(Primitive::Int(false))),
                     kind: InitType::Definition,
-                    reg: Some(Register::Literal(index as i64, Type::Primitive(Primitive::Int))),
+                    reg: Some(Register::Literal(
+                        index as i128,
+                        Type::Primitive(Primitive::Int(false)),
+                    )),
                 },
             )?;
 
@@ -813,13 +853,13 @@ impl TypeChecker {
                     }
 
                     let init = self.init_check(func, sub_qtype, *list.remove(0), is_static)?;
-                    let sub_type_size = sub_qtype.ty.size() as i64;
+                    let sub_type_size = sub_qtype.ty.size() as i128;
                     let init_offset = objects.offset();
 
                     // remove overriding elements
                     let init_interval = if let Some((offset, size)) = objects.find_same_union(&new_list)
                     {
-                        offset..offset + size as i64
+                        offset..offset + size as i128
                     } else {
                         init_offset..init_offset + sub_type_size
                     };
@@ -829,7 +869,7 @@ impl TypeChecker {
                     match init {
                         mir::decl::Init::Aggr(list) => {
                             for (expr, offset) in list {
-                                new_list.push((objects.clone(), expr, init_offset + offset as i64))
+                                new_list.push((objects.clone(), expr, init_offset + offset as i128))
                             }
                         }
                         mir::decl::Init::Scalar(expr) => {
@@ -882,7 +922,7 @@ impl TypeChecker {
         &mut self,
         qtype: &QualType,
         designator: hir::decl::Designator,
-    ) -> Result<(i64, i64, QualType), Error> {
+    ) -> Result<(i128, i128, QualType), Error> {
         match (designator.kind, &qtype.ty) {
             (hir::decl::DesignatorKind::Array(mut expr), Type::Array(of, size)) => {
                 let literal = expr.get_literal_constant(self, &designator.token, "array designator")?;
@@ -894,7 +934,7 @@ impl TypeChecker {
                 }
 
                 match size {
-                    ArraySize::Known(amount) if literal >= *amount as i64 => Err(Error::new(
+                    ArraySize::Known(amount) if literal >= *amount as i128 => Err(Error::new(
                         &designator.token,
                         ErrorKind::DesignatorOverflow(*amount, literal),
                     )),
@@ -920,9 +960,9 @@ impl TypeChecker {
                 {
                     // unions only have single index
                     if let Type::Union(_) = qtype.ty {
-                        Ok((0, i as i64, s.member_type(&m)))
+                        Ok((0, i as i128, s.member_type(&m)))
                     } else {
-                        Ok((i as i64, i as i64, s.member_type(&m)))
+                        Ok((i as i128, i as i128, s.member_type(&m)))
                     }
                 } else {
                     Err(Error::new(
@@ -1002,8 +1042,8 @@ impl TypeChecker {
                     Box::new(hir::decl::Init {
                         token: token.clone(),
                         kind: hir::decl::InitKind::Scalar(hir::expr::ExprKind::Literal(
-                            *c as i64,
-                            QualType::new(Type::Primitive(Primitive::Char)),
+                            *c as i128,
+                            QualType::new(Type::Primitive(Primitive::Char(false))),
                         )),
                         designator: None,
                     })
@@ -1227,7 +1267,7 @@ impl TypeChecker {
         mut value: hir::expr::ExprKind,
         body: hir::stmt::Stmt,
     ) -> Result<mir::stmt::Stmt, Error> {
-        let value = value.get_literal_constant(self, &token, "case value")?;
+        let value = value.get_literal_constant(self, &token, "case value")? as i32;
 
         match find_scope!(&mut func.scope, ScopeKind::Switch(..)) {
             Some(ScopeKind::Switch(labels)) => {
@@ -1624,8 +1664,8 @@ impl TypeChecker {
         let qtype = self.parse_type(&token, decl_type)?;
 
         Ok(mir::expr::Expr {
-            kind: mir::expr::ExprKind::Literal(qtype.ty.size() as i64),
-            qtype: QualType::new(Type::Primitive(Primitive::Int)),
+            kind: mir::expr::ExprKind::Literal(qtype.ty.size() as i128),
+            qtype: QualType::new(Type::Primitive(Primitive::Int(true))),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -1643,8 +1683,8 @@ impl TypeChecker {
         }
 
         Ok(mir::expr::Expr {
-            kind: mir::expr::ExprKind::Literal(expr.qtype.ty.size() as i64),
-            qtype: QualType::new(Type::Primitive(Primitive::Int)),
+            kind: mir::expr::ExprKind::Literal(expr.qtype.ty.size() as i128),
+            qtype: QualType::new(Type::Primitive(Primitive::Int(true))),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -1789,10 +1829,10 @@ impl TypeChecker {
             left: Box::new(hir::expr::ExprKind::CompoundAssign {
                 l_expr: Box::new(expr),
                 token: Token { kind: comp_op, ..token.clone() },
-                r_expr: Box::new(hir::expr::ExprKind::new_literal(1, Primitive::Int)),
+                r_expr: Box::new(hir::expr::ExprKind::new_literal(1, Primitive::Int(false))),
             }),
             token: Token { kind: bin_op, ..token },
-            right: Box::new(hir::expr::ExprKind::new_literal(1, Primitive::Int)),
+            right: Box::new(hir::expr::ExprKind::new_literal(1, Primitive::Int(false))),
         };
 
         // need to cast back to left-type since binary operation integer promotes
@@ -1807,7 +1847,7 @@ impl TypeChecker {
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::String(data),
             qtype: QualType::new(Type::Array(
-                Box::new(QualType::new(Type::Primitive(Primitive::Char))),
+                Box::new(QualType::new(Type::Primitive(Primitive::Char(false)))),
                 ArraySize::Known(len),
             )),
             value_kind: ValueKind::Lvalue,
@@ -2025,7 +2065,7 @@ impl TypeChecker {
 
             // cast argument to the correct parameter type
             new_args.push(
-                if param_type.ty.size() > Type::Primitive(Primitive::Char).size() {
+                if param_type.ty.size() > Type::Primitive(Primitive::Char(false)).size() {
                     Self::maybe_cast(param_type, arg)
                 } else {
                     arg
@@ -2061,7 +2101,7 @@ impl TypeChecker {
                 right: Box::new(right),
                 operator: token.kind,
             },
-            qtype: QualType::new(Type::Primitive(Primitive::Int)),
+            qtype: QualType::new(Type::Primitive(Primitive::Int(false))),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -2097,7 +2137,7 @@ impl TypeChecker {
                 left: Box::new(left),
                 right: Box::new(right),
             },
-            qtype: QualType::new(Type::Primitive(Primitive::Int)),
+            qtype: QualType::new(Type::Primitive(Primitive::Int(false))),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -2179,7 +2219,7 @@ impl TypeChecker {
                     direction: mir::expr::ScaleDirection::Down,
                     expr: Box::new(result),
                 },
-                qtype: QualType::new(Type::Primitive(Primitive::Long)),
+                qtype: QualType::new(Type::Primitive(Primitive::Long(false))),
                 value_kind: mir::expr::ValueKind::Rvalue,
             }
         } else {
@@ -2215,7 +2255,7 @@ impl TypeChecker {
 
                     Ok(mir::expr::Expr {
                         kind: mir::expr::ExprKind::Unary { operator: token.kind, right },
-                        qtype: QualType::new(Type::Primitive(Primitive::Int)),
+                        qtype: QualType::new(Type::Primitive(Primitive::Int(false))),
                         value_kind: ValueKind::Rvalue,
                     })
                 }

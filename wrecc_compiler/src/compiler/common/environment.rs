@@ -454,9 +454,9 @@ pub mod tests {
         // int main(){
         //     char* s;
         //     {
-        //         char* n;
+        //         int n;
         //     }
-        //     char* n;
+        //     long n;
         // };
 
         let mut env = Environment::new();
@@ -479,7 +479,7 @@ pub mod tests {
         declare(&mut env,symbol!("n", "long", InitType::Declaration),false).unwrap();
         assert!(matches!(
             env.symbols.get_current("n").map(|sy|sy.borrow().clone()),
-            Some(Symbol {qtype: QualType{ty:Type::Primitive(Primitive::Long),..},..})
+            Some(Symbol {qtype: QualType{ty:Type::Primitive(Primitive::Long(false)),..},..})
         ));
         assert!(env.symbols.get_current("s").is_some());
 
@@ -554,13 +554,13 @@ pub mod tests {
         assert!(env.symbols.get_current("a").is_none());
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Int),..},..})
+            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Int(false)),..},..})
         ));
 
         declare(&mut env, symbol!("a", "long", InitType::Declaration),false).unwrap();
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Long),..},..})
+            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Long(false)),..},..})
         ));
         env.enter();
 
@@ -573,7 +573,7 @@ pub mod tests {
         assert!(env.symbols.get_current("a").is_none());
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Long),..},..})
+            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Long(false)),..},..})
         ));
         assert!(env.symbols.get("foo".to_string()).is_some());
 
@@ -581,12 +581,12 @@ pub mod tests {
         assert!(env.symbols.get("foo".to_string()).is_none());
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Long),..},..})
+            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Long(false)),..},..})
         ));
         env.exit();
         assert!(matches!(
             env.symbols.get("a".to_string()).map(|sy|sy.borrow().clone()),
-            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Int),..},..})
+            Some(Symbol {qtype:QualType{ty:Type::Primitive(Primitive::Int(false)),..},..})
         ));
         env.exit();
 

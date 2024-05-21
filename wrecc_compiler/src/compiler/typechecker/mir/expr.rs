@@ -15,7 +15,7 @@ pub enum ExprKind {
     Ternary { cond: Box<Expr>, true_expr: Box<Expr>, false_expr: Box<Expr> },
     Comma { left: Box<Expr>, right: Box<Expr> },
     String(String),
-    Literal(i64),
+    Literal(u64),
     Ident(SymbolRef),
     Nop,
 }
@@ -112,8 +112,11 @@ impl Expr {
             return self;
         }
 
-        if self.qtype.ty.size() < Type::Primitive(Primitive::Int).size() {
-            self.cast_to(QualType::new(Type::Primitive(Primitive::Int)), CastDirection::Up)
+        if self.qtype.ty.size() < Type::Primitive(Primitive::Int(false)).size() {
+            self.cast_to(
+                QualType::new(Type::Primitive(Primitive::Int(false))),
+                CastDirection::Up,
+            )
         } else {
             self
         }

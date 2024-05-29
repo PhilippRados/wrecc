@@ -2,20 +2,63 @@ use crate::compiler::common::{environment::SymbolRef, error::*, token::*, types:
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExprKind {
-    Binary { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
-    Unary { operator: TokenKind, right: Box<Expr> },
-    Assign { l_expr: Box<Expr>, r_expr: Box<Expr> },
-    CompoundAssign { expr: Box<Expr>, tmp_symbol: SymbolRef },
-    Logical { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
-    Comparison { left: Box<Expr>, operator: TokenKind, right: Box<Expr> },
-    Call { caller: Box<Expr>, args: Vec<Expr> },
-    Cast { new_type: Type, direction: CastDirection, expr: Box<Expr> },
-    Scale { by_amount: usize, direction: ScaleDirection, expr: Box<Expr> },
-    MemberAccess { member: String, expr: Box<Expr> },
-    Ternary { cond: Box<Expr>, true_expr: Box<Expr>, false_expr: Box<Expr> },
-    Comma { left: Box<Expr>, right: Box<Expr> },
+    Binary {
+        left: Box<Expr>,
+        token: Token,
+        right: Box<Expr>,
+    },
+    Unary {
+        token: Token,
+        right: Box<Expr>,
+    },
+    Assign {
+        l_expr: Box<Expr>,
+        r_expr: Box<Expr>,
+    },
+    CompoundAssign {
+        expr: Box<Expr>,
+        tmp_symbol: SymbolRef,
+    },
+    Logical {
+        left: Box<Expr>,
+        token: Token,
+        right: Box<Expr>,
+    },
+    Comparison {
+        left: Box<Expr>,
+        token: Token,
+        right: Box<Expr>,
+    },
+    Call {
+        caller: Box<Expr>,
+        args: Vec<Expr>,
+    },
+    Cast {
+        new_type: Type,
+        direction: CastDirection,
+        expr: Box<Expr>,
+    },
+    Scale {
+        token: Token,
+        by_amount: usize,
+        direction: ScaleDirection,
+        expr: Box<Expr>,
+    },
+    MemberAccess {
+        member: String,
+        expr: Box<Expr>,
+    },
+    Ternary {
+        cond: Box<Expr>,
+        true_expr: Box<Expr>,
+        false_expr: Box<Expr>,
+    },
+    Comma {
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
     String(String),
-    Literal(u64),
+    Literal(LiteralKind),
     Ident(SymbolRef),
     Nop,
 }
@@ -68,7 +111,7 @@ impl Expr {
                     qtype: of.clone().pointer_to(),
 
                     kind: ExprKind::Unary {
-                        operator: TokenKind::Amp,
+                        token: Token { kind: TokenKind::Amp, ..token.clone() },
                         right: Box::new(self),
                     },
                 })
@@ -78,7 +121,7 @@ impl Expr {
                 qtype: self.qtype.clone().pointer_to(),
 
                 kind: ExprKind::Unary {
-                    operator: TokenKind::Amp,
+                    token: Token { kind: TokenKind::Amp, ..token.clone() },
                     right: Box::new(self),
                 },
             }),
@@ -122,6 +165,13 @@ impl Expr {
         }
     }
 
+    pub fn is_zero(&self) -> bool {
+        match &self.kind {
+            ExprKind::Literal(lit) => lit.is_zero(),
+            _ => false,
+        }
+    }
+
     // 6.6 Constant Expressions
     // returns true if expression is known at compile-time
     pub fn is_constant(&self) -> bool {
@@ -134,18 +184,18 @@ impl Expr {
     }
     fn is_address_constant(&self, is_outer: bool) -> bool {
         match &self.kind {
-            ExprKind::Unary { operator, right } if matches!(operator, TokenKind::Amp) => {
+            ExprKind::Unary { token, right } if matches!(token.kind, TokenKind::Amp) => {
                 matches!(right.kind, ExprKind::Ident(_) | ExprKind::String(_))
                     || right.is_address_constant(false)
             }
-            ExprKind::Unary { operator, right, .. }
-                if matches!(operator, TokenKind::Star) && !is_outer =>
+            ExprKind::Unary { token, right, .. }
+                if matches!(token.kind, TokenKind::Star) && !is_outer =>
             {
                 right.is_address_constant(is_outer)
             }
             ExprKind::MemberAccess { .. } if !is_outer => true,
-            ExprKind::Binary { left, operator, right }
-                if matches!(operator, TokenKind::Plus | TokenKind::Minus) =>
+            ExprKind::Binary { left, token, right }
+                if matches!(token.kind, TokenKind::Plus | TokenKind::Minus) =>
             {
                 match (&left, &right) {
                     (expr, n) | (n, expr) if n.is_const_literal() => expr.is_address_constant(is_outer),
@@ -166,11 +216,5 @@ impl Expr {
             ExprKind::Literal(_) => true,
             _ => false,
         }
-    }
-}
-
-impl crate::compiler::parser::hir::expr::IsZero for Expr {
-    fn is_zero(&self) -> bool {
-        matches!(self.kind, ExprKind::Literal(0))
     }
 }

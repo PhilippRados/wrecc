@@ -31,7 +31,7 @@ pub enum Register {
     /// Register used for return values
     Return(Type),
     /// Numerical constants
-    Literal(i64, Type),
+    Literal(LiteralKind, Type),
     /// Indicator register for functions returning void
     Void,
 }
@@ -136,8 +136,8 @@ impl LabelRegister {
     }
 }
 
-fn literal_name(n: &i64, ty: &Type) -> String {
-    format!("{}", ty.maybe_wrap(*n).expect("num literal has scalar type"))
+fn literal_name(literal: &LiteralKind, ty: &Type) -> String {
+    literal.wrap(ty).to_string()
 }
 
 /// Operands that are allowed in data/bss sections
@@ -145,7 +145,7 @@ fn literal_name(n: &i64, ty: &Type) -> String {
 pub enum StaticRegister {
     Label(LabelRegister),
     LabelOffset(LabelRegister, i64, TokenKind),
-    Literal(i64, Type),
+    Literal(LiteralKind, Type),
 }
 impl StaticRegister {
     pub fn set_type(&mut self, new: Type) {
@@ -172,7 +172,7 @@ impl StaticRegister {
                     TokenKind::Minus => '-',
                     _ => unreachable!(),
                 },
-                *offset as i64
+                *offset
             ),
             StaticRegister::Literal(n, ty) => literal_name(n, ty),
         }

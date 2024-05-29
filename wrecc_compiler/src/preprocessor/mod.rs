@@ -1,9 +1,10 @@
 //! Scans input file into preprocessor-tokens and handles all preprocessing-directives
 pub mod scanner;
 
-use crate::compiler::common::error::*;
+use crate::compiler::common::{error::*, types::LiteralKind};
 use crate::compiler::parser::{double_peek::*, Parser};
 use crate::compiler::scanner::*;
+use crate::compiler::typechecker::TypeChecker;
 
 use crate::preprocessor::scanner::{Token, TokenKind};
 use crate::PPScanner;
@@ -422,19 +423,19 @@ impl<'a> Preprocessor<'a> {
         }
 
         match self.pp_const_value(if_kind, cond)? {
-            0 => Ok(false),
+            literal if literal.is_zero() => Ok(false),
             _ => Ok(true),
         }
     }
 
-    fn pp_const_value(&self, if_kind: Token, cond: Vec<Token>) -> Result<i128, Error> {
+    fn pp_const_value(&self, if_kind: Token, cond: Vec<Token>) -> Result<LiteralKind, Error> {
         let cond = cond
             .into_iter()
             .map(|t| PPToken::from(&t, self.filename))
             .collect();
         let tokens = Scanner::new(cond).scan_token().map_err(Error::new_multiple)?;
         let mut parser = Parser::new(tokens);
-        let mut expr = parser.expression().map_err(|mut err| {
+        let expr = parser.expression().map_err(|mut err| {
             if let ErrorKind::Eof(msg) = err.kind {
                 err.kind = ErrorKind::Regular(msg)
             }
@@ -448,9 +449,9 @@ impl<'a> Preprocessor<'a> {
             ));
         }
 
-        let value = expr.preprocessor_constant(&PPToken::from(&if_kind, self.filename))?;
-
-        Ok(value)
+        TypeChecker::new()
+            .visit_expr(&mut None, expr)?
+            .preprocessor_constant(&PPToken::from(&if_kind, self.filename))
     }
 
     fn replace_define_expr(&mut self, cond: Vec<Token>) -> Result<Vec<Token>, Error> {

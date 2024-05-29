@@ -171,7 +171,7 @@ impl Compiler {
                     cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
                     self.write_out(Lir::Cmp(
-                        Register::Literal(*case_value as i128, Type::Primitive(Primitive::Int(false))),
+                        Register::Literal(case_value.clone(), Type::Primitive(Primitive::Int(false))),
                         cond_reg.clone(),
                     ));
                     self.write_out(Lir::JmpCond("e", label));
@@ -223,7 +223,7 @@ impl Compiler {
         cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
         self.write_out(Lir::Cmp(
-            Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
             cond_reg.clone(),
         ));
         self.write_out(Lir::JmpCond("ne", body_label));
@@ -277,7 +277,7 @@ impl Compiler {
                 cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
                 self.write_out(Lir::Cmp(
-                    Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+                    Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
                     cond_reg.clone(),
                 ));
                 self.write_out(Lir::JmpCond("ne", body_label));
@@ -309,7 +309,7 @@ impl Compiler {
         cond_reg = convert_reg!(self, cond_reg, Register::Literal(..));
 
         self.write_out(Lir::Cmp(
-            Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
             cond_reg.clone(),
         ));
         self.write_out(Lir::JmpCond("ne", body_label));
@@ -334,7 +334,7 @@ impl Compiler {
         let mut else_label = done_label;
 
         self.write_out(Lir::Cmp(
-            Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
             cond_reg.clone(),
         ));
         self.free(cond_reg);
@@ -422,7 +422,10 @@ impl Compiler {
         } else {
             self.write_out(Lir::GlobalInit(
                 Type::Primitive(Primitive::Void),
-                StaticRegister::Literal(ty.size() as i128, Type::Primitive(Primitive::Long(false))),
+                StaticRegister::Literal(
+                    LiteralKind::Signed(ty.size() as i64),
+                    Type::Primitive(Primitive::Long(false)),
+                ),
             ));
 
             // since external declarations don't emit any code it is fine to assume that this label
@@ -444,25 +447,28 @@ impl Compiler {
                 self.write_out(Lir::GlobalInit(ty, value_reg));
             }
             Init::Aggr(list) => {
-                let mut size = ty.size() as i128;
-                let mut prev_offset: i128 = 0;
+                let mut size = ty.size() as i64;
+                let mut prev_offset: i64 = 0;
 
                 for (expr, offset) in list {
                     let value_reg = self.execute_global_expr(expr);
                     let value_type = value_reg.get_type();
 
                     // fill gap in offset with zero
-                    let diff = offset as i128 - prev_offset;
+                    let diff = offset as i64 - prev_offset;
                     if diff != 0 {
                         self.write_out(Lir::GlobalInit(
                             Type::Primitive(Primitive::Void),
-                            StaticRegister::Literal(diff, Type::Primitive(Primitive::Long(false))),
+                            StaticRegister::Literal(
+                                LiteralKind::Signed(diff),
+                                Type::Primitive(Primitive::Long(false)),
+                            ),
                         ));
                         size -= diff;
                     }
 
-                    size -= value_type.size() as i128;
-                    prev_offset = offset as i128 + value_type.size() as i128;
+                    size -= value_type.size() as i64;
+                    prev_offset = offset as i64 + value_type.size() as i64;
 
                     self.write_out(Lir::GlobalInit(value_type, value_reg));
                 }
@@ -471,7 +477,10 @@ impl Compiler {
                 if size > 0 {
                     self.write_out(Lir::GlobalInit(
                         Type::Primitive(Primitive::Void),
-                        StaticRegister::Literal(size, Type::Primitive(Primitive::Long(false))),
+                        StaticRegister::Literal(
+                            LiteralKind::Signed(size),
+                            Type::Primitive(Primitive::Long(false)),
+                        ),
                     ));
                 }
             }
@@ -569,7 +578,6 @@ impl Compiler {
         // rdi at memory pos
         let var_reg = var_symbol.borrow().get_reg();
 
-        // TODO: can be optimized by writing 8Bytes (instead of 1) per repetition but that requires extra logic when amount and size don't align
         let eax_reg = Register::Return(Type::Primitive(Primitive::Char(false)));
         let ecx_reg = Register::Arg(ArgRegister::new(
             3,
@@ -585,11 +593,14 @@ impl Compiler {
         ));
 
         self.write_out(Lir::Mov(
-            Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
             eax_reg.clone(),
         ));
         self.write_out(Lir::Mov(
-            Register::Literal(amount as i128, Type::Primitive(Primitive::Long(false))),
+            Register::Literal(
+                LiteralKind::Signed(amount as i64),
+                Type::Primitive(Primitive::Long(false)),
+            ),
             ecx_reg.clone(),
         ));
         self.write_out(Lir::Load(var_reg, rdi_reg.clone()));
@@ -686,11 +697,12 @@ impl Compiler {
         self.cg_stmts(func, statements)
     }
 
-    fn cg_literal(&mut self, n: i128, ty: Type) -> Register {
-        let literal_reg = Register::Literal(n, ty);
+    fn cg_literal(&mut self, literal: LiteralKind, ty: Type) -> Register {
+        let overflow = literal.type_overflow(&Type::Primitive(Primitive::Int(false)));
+        let literal_reg = Register::Literal(literal, ty);
 
         // 64bit literals are only allowed to move to scratch-register
-        if let Primitive::Long(_) = integer_type(n) {
+        if overflow {
             let scratch_reg = Register::Temp(TempRegister::new(
                 literal_reg.get_type(),
                 &mut self.interval_counter,
@@ -707,7 +719,7 @@ impl Compiler {
             ExprKind::String(name) => {
                 StaticRegister::Label(LabelRegister::String(self.const_labels[&name]))
             }
-            ExprKind::Literal(n) => StaticRegister::Literal(n, expr.qtype.ty),
+            ExprKind::Literal(literal) => StaticRegister::Literal(literal, expr.qtype.ty),
             ExprKind::Cast { expr, new_type, .. } => {
                 let mut reg = self.execute_global_expr(*expr);
                 reg.set_type(new_type);
@@ -717,10 +729,14 @@ impl Compiler {
                 by_amount,
                 direction: ScaleDirection::Up,
                 expr,
+                ..
             } => {
-                if let StaticRegister::Literal(n, ty) = self.execute_global_expr(*expr) {
-                    let n = n.overflowing_mul(by_amount as i128).0;
-                    let scaled_type = integer_type(n);
+                if let StaticRegister::Literal(literal, ty) = self.execute_global_expr(*expr) {
+                    let n = match literal {
+                        LiteralKind::Signed(n) => n.wrapping_mul(by_amount as i64),
+                        LiteralKind::Unsigned(n) => (n as i64).wrapping_mul(by_amount as i64),
+                    };
+                    let scaled_type = LiteralKind::Signed(n).integer_type();
 
                     let ty = if ty.size() < scaled_type.size() {
                         Type::Primitive(scaled_type)
@@ -728,14 +744,14 @@ impl Compiler {
                         ty
                     };
 
-                    StaticRegister::Literal(n, ty)
+                    StaticRegister::Literal(literal, ty)
                 } else {
                     unreachable!("can only scale literal value")
                 }
             }
-            ExprKind::Unary { operator, right } => {
+            ExprKind::Unary { token, right } => {
                 let mut reg = self.execute_global_expr(*right);
-                match operator {
+                match token.kind {
                     TokenKind::Amp => {
                         reg.set_type(Type::Pointer(Box::new(QualType::new(reg.get_type()))))
                     }
@@ -755,10 +771,10 @@ impl Compiler {
                         reg.set_type(member_type.ty);
                         match reg {
                             StaticRegister::Label(label_reg) => {
-                                StaticRegister::LabelOffset(label_reg, offset as i128, TokenKind::Plus)
+                                StaticRegister::LabelOffset(label_reg, offset as i64, TokenKind::Plus)
                             }
                             StaticRegister::LabelOffset(reg, existant_offset, _) => {
-                                let offset = existant_offset.overflowing_add(offset as i128).0;
+                                let offset = existant_offset.wrapping_add(offset as i64);
                                 if offset < 0 {
                                     StaticRegister::LabelOffset(reg, offset.abs(), TokenKind::Minus)
                                 } else {
@@ -773,22 +789,37 @@ impl Compiler {
                         reg.set_type(member_type.ty);
                         reg
                     }
-                    _ => unreachable!("{:?}", reg.get_type()),
+                    _ => unreachable!("no members in type {:?}", reg.get_type()),
                 }
             }
-            ExprKind::Binary { left, operator, right } => {
+            ExprKind::Binary { left, token, right } => {
                 let left = self.execute_global_expr(*left);
                 let right = self.execute_global_expr(*right);
 
                 match (left, right) {
-                    (StaticRegister::Label(reg), StaticRegister::Literal(n, _))
-                    | (StaticRegister::Literal(n, _), StaticRegister::Label(reg)) => {
-                        StaticRegister::LabelOffset(reg, n, operator)
+                    (StaticRegister::Label(reg), StaticRegister::Literal(literal, _))
+                    | (StaticRegister::Literal(literal, _), StaticRegister::Label(reg)) => {
+                        let n = match literal {
+                            LiteralKind::Signed(n) => n,
+                            // nobody needs this big of an offset anyway
+                            LiteralKind::Unsigned(n) => n as i64,
+                        };
+                        StaticRegister::LabelOffset(reg, n, token.kind)
                     }
 
-                    (StaticRegister::LabelOffset(reg, offset, _), StaticRegister::Literal(n, _))
-                    | (StaticRegister::Literal(n, _), StaticRegister::LabelOffset(reg, offset, _)) => {
-                        let offset = n.overflowing_add(offset).0;
+                    (
+                        StaticRegister::LabelOffset(reg, offset, _),
+                        StaticRegister::Literal(literal, _),
+                    )
+                    | (
+                        StaticRegister::Literal(literal, _),
+                        StaticRegister::LabelOffset(reg, offset, _),
+                    ) => {
+                        let offset = match literal {
+                            LiteralKind::Signed(n) => n.wrapping_add(offset as i64),
+                            LiteralKind::Unsigned(n) => (n as i64).wrapping_add(offset as i64),
+                        };
+
                         if offset < 0 {
                             StaticRegister::LabelOffset(reg, offset.abs(), TokenKind::Minus)
                         } else {
@@ -812,20 +843,16 @@ impl Compiler {
     }
     pub fn execute_expr(&mut self, func: &mut Function, expr: Expr) -> Register {
         match expr.kind {
-            ExprKind::Binary { left, operator, right } => {
+            ExprKind::Binary { left, token, right } => {
                 let left_reg = self.execute_expr(func, *left);
                 let right_reg = self.execute_expr(func, *right);
 
-                self.cg_binary(left_reg, &operator, right_reg)
+                self.cg_binary(left_reg, &token.kind, right_reg)
             }
-            ExprKind::Literal(n) => self.cg_literal(n, expr.qtype.ty),
-            ExprKind::Unary { operator, right } => self.cg_unary(func, operator, *right, expr.qtype.ty),
-            ExprKind::Logical { left, operator, right } => {
-                self.cg_logical(func, *left, operator, *right)
-            }
-            ExprKind::Comparison { left, operator, right } => {
-                self.compare(func, *left, operator, *right)
-            }
+            ExprKind::Literal(literal) => self.cg_literal(literal, expr.qtype.ty),
+            ExprKind::Unary { token, right } => self.cg_unary(func, token.kind, *right, expr.qtype.ty),
+            ExprKind::Logical { left, token, right } => self.cg_logical(func, *left, token.kind, *right),
+            ExprKind::Comparison { left, token, right } => self.compare(func, *left, token.kind, *right),
             ExprKind::Assign { l_expr, r_expr } => {
                 let left_reg = self.execute_expr(func, *l_expr);
                 let right_reg = self.execute_expr(func, *r_expr);
@@ -840,7 +867,7 @@ impl Compiler {
             ExprKind::Cast { expr, direction, new_type } => {
                 self.cg_cast(func, new_type, *expr, direction)
             }
-            ExprKind::Scale { expr, direction, by_amount } => {
+            ExprKind::Scale { expr, direction, by_amount, .. } => {
                 self.cg_scale(func, direction, *expr, by_amount)
             }
             ExprKind::String(name) => self.cg_string(name),
@@ -889,7 +916,7 @@ impl Compiler {
         let else_label = create_label(&mut self.label_index);
 
         self.write_out(Lir::Cmp(
-            Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
             cond_reg.clone(),
         ));
         self.write_out(Lir::JmpCond("e", else_label));
@@ -926,7 +953,10 @@ impl Compiler {
             let address = self.cg_address_at(reg, free);
             let mut result = if offset != 0 {
                 self.cg_add(
-                    Register::Literal(offset as i128, Type::Primitive(Primitive::Int(false))),
+                    Register::Literal(
+                        LiteralKind::Signed(offset as i64),
+                        Type::Primitive(Primitive::Int(false)),
+                    ),
                     address,
                 )
             } else {
@@ -965,7 +995,7 @@ impl Compiler {
     ) -> Register {
         let value_reg = self.execute_expr(func, expr);
         let value_reg = self.convert_to_rval(value_reg);
-        let by_amount = Register::Literal(by_amount as i128, value_reg.get_type());
+        let by_amount = Register::Literal(LiteralKind::Signed(by_amount as i64), value_reg.get_type());
 
         match direction {
             ScaleDirection::Up => self.cg_mult(by_amount, value_reg),
@@ -1187,7 +1217,7 @@ impl Compiler {
 
         // jump to true label left is true => short circuit
         self.write_out(Lir::Cmp(
-            Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
             left.clone(),
         ));
         self.write_out(Lir::JmpCond("ne", true_label));
@@ -1200,7 +1230,7 @@ impl Compiler {
 
         // if right is false we know expression is false
         self.write_out(Lir::Cmp(
-            Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
             right.clone(),
         ));
         self.write_out(Lir::JmpCond("e", false_label));
@@ -1215,7 +1245,7 @@ impl Compiler {
         // if expression true write 1 in result and skip false label
         self.write_out(Lir::LabelDefinition(true_label));
         self.write_out(Lir::Mov(
-            Register::Literal(1, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(1), Type::Primitive(Primitive::Int(false))),
             result.clone(),
         ));
 
@@ -1223,7 +1253,7 @@ impl Compiler {
 
         self.write_out(Lir::LabelDefinition(false_label));
         self.write_out(Lir::Mov(
-            Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
             result.clone(),
         ));
 
@@ -1239,7 +1269,7 @@ impl Compiler {
 
         // if left is false expression is false, we jump to false label
         self.write_out(Lir::Cmp(
-            Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
             left.clone(),
         ));
         self.write_out(Lir::JmpCond("e", false_label));
@@ -1250,7 +1280,7 @@ impl Compiler {
         let right = convert_reg!(self, right, Register::Literal(..));
 
         self.write_out(Lir::Cmp(
-            Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
             right.clone(),
         ));
         self.write_out(Lir::JmpCond("e", false_label));
@@ -1264,14 +1294,14 @@ impl Compiler {
             self.instr_counter,
         ));
         self.write_out(Lir::Mov(
-            Register::Literal(1, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(1), Type::Primitive(Primitive::Int(false))),
             result.clone(),
         ));
         self.write_out(Lir::Jmp(true_label));
 
         self.write_out(Lir::LabelDefinition(false_label));
         self.write_out(Lir::Mov(
-            Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
             result.clone(),
         ));
 
@@ -1310,7 +1340,7 @@ impl Compiler {
     fn cg_bang(&mut self, reg: Register) -> Register {
         // compares reg-value with 0
         self.write_out(Lir::Cmp(
-            Register::Literal(0, Type::Primitive(Primitive::Int(false))),
+            Register::Literal(LiteralKind::Signed(0), Type::Primitive(Primitive::Int(false))),
             reg.clone(),
         ));
         self.write_out(Lir::Set("sete"));

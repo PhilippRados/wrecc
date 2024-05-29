@@ -4,7 +4,6 @@
 //! errors at once
 
 pub mod double_peek;
-pub mod fold;
 pub mod hir;
 
 use crate::compiler::common::{environment::*, error::*, token::*, types::*};
@@ -1185,7 +1184,7 @@ impl Parser {
                     ExprKind::CompoundAssign {
                         l_expr: Box::new(right),
                         token,
-                        r_expr: Box::new(ExprKind::new_literal(1, Primitive::Int(false))),
+                        r_expr: Box::new(ExprKind::Number(LiteralKind::Signed(1))),
                     }
                 }
                 // typecast
@@ -1313,16 +1312,11 @@ impl Parser {
     fn primary(&mut self) -> Result<ExprKind, Error> {
         if let Some(n) = match_next!(self, TokenKind::Number(_)) {
             let n = n.unwrap_num();
-            return Ok(ExprKind::Literal(
-                LiteralKind::Signed(n as i64),
-                QualType::new(Type::Primitive(integer_type(n))),
-            ));
+            // TODO: what about u64 sized literals?
+            return Ok(ExprKind::Number(LiteralKind::Signed(n as i64)));
         }
         if let Some(c) = match_next!(self, TokenKind::CharLit(_)) {
-            return Ok(ExprKind::Literal(
-                LiteralKind::Signed(c.unwrap_char() as i64),
-                QualType::new(Type::Primitive(Primitive::Char(false))),
-            ));
+            return Ok(ExprKind::Char(c.unwrap_char()));
         }
         if let Some(s) = match_next!(self, TokenKind::Ident(_)) {
             return Ok(ExprKind::Ident(s));
@@ -1746,5 +1740,21 @@ int main() {
         let expected = Some(token_default!(TokenKind::Number(2)));
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn specifier_unsigned_typedef_ambiguity() {
+        let actual = setup(
+            "
+typedef int num;
+unsigned num k = (unsigned int)-1;
+",
+        )
+        .parse();
+
+        assert!(matches!(
+            actual.map_err(|e| e.as_slice()),
+            Err(&[Error { kind: ErrorKind::InvalidVariadic, .. }])
+        ));
     }
 }

@@ -2,6 +2,7 @@ pub use struct_ref::StructRef;
 
 use crate::compiler::common::{error::*, token::*};
 use crate::compiler::parser::hir;
+use crate::compiler::typechecker::mir;
 
 use std::fmt::Display;
 use std::rc::Rc;
@@ -82,8 +83,8 @@ impl QualType {
         QualType { ty, qualifiers: Qualifiers::default() }
     }
 
-    pub fn type_compatible(&self, other: &QualType, other_expr: &impl hir::expr::IsZero) -> bool {
-        match (&self.ty, &other.ty) {
+    pub fn type_compatible(&self, other: &mir::expr::Expr) -> bool {
+        match (&self.ty, &other.qtype.ty) {
             (Type::Primitive(Primitive::Void), Type::Primitive(Primitive::Void)) => true,
 
             (Type::Primitive(Primitive::Void), Type::Primitive(_) | Type::Enum(..))
@@ -92,7 +93,7 @@ impl QualType {
             (Type::Primitive(_) | Type::Enum(..), Type::Primitive(_) | Type::Enum(..)) => true,
 
             // pointer to null-pointer-constant is always valid
-            (Type::Pointer(_), _) if other_expr.is_zero() => true,
+            (Type::Pointer(_), _) if other.is_zero() => true,
 
             // void* is compatible to any other pointer
             (Type::Pointer(t), Type::Pointer(_)) | (Type::Pointer(_), Type::Pointer(t))
@@ -115,7 +116,7 @@ impl QualType {
 
             // unspecified arrays are compatible if they have the same type and their sizes are
             // compatible (see PartialEq for ArraySize)
-            (Type::Array(..), Type::Array(..)) => self.ty == other.ty,
+            (Type::Array(..), Type::Array(..)) => self.ty == other.qtype.ty,
 
             // two structs/unions are compatible if they refer to the same definition
             (Type::Struct(s_l), Type::Struct(s_r)) | (Type::Union(s_l), Type::Union(s_r)) => s_l == s_r,
@@ -292,34 +293,20 @@ impl Type {
         }
     }
 
-    pub fn max(&self) -> i128 {
+    pub fn max(&self) -> u64 {
         match self {
             Type::Primitive(t) => t.max(),
-            Type::Enum(..) => i32::MAX as i128,
-            Type::Pointer(_) => u64::MAX as i128,
+            Type::Enum(..) => i32::MAX as u64,
+            Type::Pointer(_) => u64::MAX,
             _ => unreachable!(),
         }
     }
-    pub fn min(&self) -> i128 {
+    pub fn min(&self) -> i64 {
         match self {
             Type::Primitive(t) => t.min(),
-            Type::Enum(..) => i32::MIN as i128,
-            Type::Pointer(_) => u64::MIN as i128,
+            Type::Enum(..) => i32::MIN as i64,
+            Type::Pointer(_) => u64::MIN as i64,
             _ => unreachable!(),
-        }
-    }
-
-    pub fn maybe_wrap(&self, n: i64) -> Option<i64> {
-        match self {
-            Type::Primitive(Primitive::Char(false)) => Some(n as i8 as i128),
-            Type::Primitive(Primitive::Char(true)) => Some(n as u8 as i128),
-            Type::Primitive(Primitive::Short(false)) => Some(n as i16 as i128),
-            Type::Primitive(Primitive::Short(true)) => Some(n as u16 as i128),
-            Type::Primitive(Primitive::Int(false)) | Type::Enum(..) => Some(n as i32 as i128),
-            Type::Primitive(Primitive::Int(true)) => Some(n as u32 as i128),
-            Type::Primitive(Primitive::Long(false)) => Some(n as i64 as i128),
-            Type::Pointer(_) | Type::Primitive(Primitive::Long(true)) => Some(n as u64 as i128),
-            _ => None,
         }
     }
 
@@ -482,34 +469,52 @@ impl Primitive {
         }
     }
 
-    fn max(&self) -> i128 {
+    fn max(&self) -> u64 {
         match self {
             Primitive::Void => unreachable!(),
-            Primitive::Char(false) => i8::MAX as i128,
-            Primitive::Char(true) => u8::MAX as i128,
-            Primitive::Short(false) => i16::MAX as i128,
-            Primitive::Short(true) => u16::MAX as i128,
-            Primitive::Int(false) => i32::MAX as i128,
-            Primitive::Int(true) => u32::MAX as i128,
-            Primitive::Long(false) => i64::MAX as i128,
-            Primitive::Long(true) => u64::MAX as i128,
+            Primitive::Char(false) => i8::MAX as u64,
+            Primitive::Char(true) => u8::MAX as u64,
+            Primitive::Short(false) => i16::MAX as u64,
+            Primitive::Short(true) => u16::MAX as u64,
+            Primitive::Int(false) => i32::MAX as u64,
+            Primitive::Int(true) => u32::MAX as u64,
+            Primitive::Long(false) => i64::MAX as u64,
+            Primitive::Long(true) => u64::MAX,
         }
     }
-    fn min(&self) -> i128 {
+    fn min(&self) -> i64 {
         match self {
             Primitive::Void => unreachable!(),
             Primitive::Char(true)
             | Primitive::Short(true)
             | Primitive::Int(true)
-            | Primitive::Long(true) => u8::MIN as i128,
-            Primitive::Char(false) => i8::MIN as i128,
-            Primitive::Short(false) => i16::MIN as i128,
-            Primitive::Int(false) => i32::MIN as i128,
-            Primitive::Long(false) => i64::MIN as i128,
+            | Primitive::Long(true) => 0,
+            Primitive::Char(false) => i8::MIN as i64,
+            Primitive::Short(false) => i16::MIN as i64,
+            Primitive::Int(false) => i32::MIN as i64,
+            Primitive::Long(false) => i64::MIN,
         }
     }
 }
 
+macro_rules! wrap_to {
+    ($ty:expr,$n:expr,$prim:tt) => {
+        match $ty {
+            Type::Primitive(Primitive::Char(false)) => $n as i8 as $prim,
+            Type::Primitive(Primitive::Char(true)) => $n as u8 as $prim,
+            Type::Primitive(Primitive::Short(false)) => $n as i16 as $prim,
+            Type::Primitive(Primitive::Short(true)) => $n as u16 as $prim,
+            Type::Primitive(Primitive::Int(false)) | Type::Enum(..) => $n as i32 as $prim,
+            Type::Primitive(Primitive::Int(true)) => $n as u32 as $prim,
+            Type::Primitive(Primitive::Long(false)) => $n as i64 as $prim,
+            Type::Pointer(_) | Type::Primitive(Primitive::Long(true)) => $n as u64 as $prim,
+            _ => unreachable!("cast can only be scalar"),
+        }
+    };
+}
+
+/// Differentiates between signed and unsigned number literals,
+/// necessary to do correct integer-constant-folding
 #[derive(Debug, PartialEq, Clone)]
 pub enum LiteralKind {
     Unsigned(u64),
@@ -528,15 +533,53 @@ impl LiteralKind {
             LiteralKind::Unsigned(_) => false,
         }
     }
+    /// Determines smallest possible integer-type capable of holding literal number
+    pub fn integer_type(&self) -> Primitive {
+        match self {
+            LiteralKind::Signed(n) => {
+                if i32::try_from(*n).is_ok() {
+                    Primitive::Int(false)
+                } else {
+                    Primitive::Long(false)
+                }
+            }
+            LiteralKind::Unsigned(n) => {
+                if i32::try_from(*n).is_ok() {
+                    Primitive::Int(false)
+                } else if i64::try_from(*n).is_ok() {
+                    Primitive::Long(false)
+                } else {
+                    Primitive::Long(true)
+                }
+            }
+        }
+    }
+    pub fn try_i64(&self) -> Option<i64> {
+        match self {
+            LiteralKind::Signed(n) => Some(*n),
+            LiteralKind::Unsigned(n) => i64::try_from(*n).ok(),
+        }
+    }
+    pub fn wrap(&self, ty: &Type) -> LiteralKind {
+        match self {
+            LiteralKind::Signed(n) => LiteralKind::Signed(wrap_to!(ty, *n, i64)),
+            LiteralKind::Unsigned(n) => LiteralKind::Unsigned(wrap_to!(ty, *n, u64)),
+        }
+    }
+    pub fn type_overflow(&self, ty: &Type) -> bool {
+        match self {
+            LiteralKind::Signed(n) if *n < 0 => *n < ty.min(),
+            LiteralKind::Signed(n) => (*n as u64 > ty.max()) || (*n < ty.min()),
+            LiteralKind::Unsigned(n) => *n > ty.max(),
+        }
+    }
 }
-
-pub fn integer_type(n: u64) -> Primitive {
-    if i32::try_from(n).is_ok() {
-        Primitive::Int(false)
-    } else if i64::try_from(n).is_ok() {
-        Primitive::Long(false)
-    } else {
-        Primitive::Long(true)
+impl ToString for LiteralKind {
+    fn to_string(&self) -> String {
+        match self {
+            LiteralKind::Signed(n) => n.to_string(),
+            LiteralKind::Unsigned(n) => n.to_string(),
+        }
     }
 }
 

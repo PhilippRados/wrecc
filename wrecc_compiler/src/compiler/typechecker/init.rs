@@ -7,18 +7,18 @@ use crate::compiler::typechecker::mir::expr::Expr;
 /// `int array[10] = {1,2,[6] = 8}`
 /// and keeping track of nested initializations
 #[derive(Clone)]
-pub struct CurrentObjects(pub Vec<(i128, i128, QualType)>);
+pub struct CurrentObjects(pub Vec<(i64, i64, QualType)>);
 impl CurrentObjects {
     pub fn new(qtype: QualType) -> Self {
         CurrentObjects(vec![(0, 0, qtype)])
     }
     /// Updates current-objects when encountering designator
-    pub fn update(&mut self, (i, union_index, new_type): (i128, i128, QualType)) {
+    pub fn update(&mut self, (i, union_index, new_type): (i64, i64, QualType)) {
         self.0.last_mut().unwrap().0 = i;
         self.0.last_mut().unwrap().1 = union_index;
         self.0.push((0, 0, new_type));
     }
-    pub fn current(&self) -> &(i128, i128, QualType) {
+    pub fn current(&self) -> &(i64, i64, QualType) {
         self.0.last().unwrap()
     }
     pub fn current_type(&mut self) -> &mut QualType {
@@ -29,7 +29,7 @@ impl CurrentObjects {
         }
     }
     /// Returns overall offset up until current-objects
-    pub fn offset(&self) -> i128 {
+    pub fn offset(&self) -> i64 {
         self.0
             .iter()
             .fold(0, |acc, (i, _, qtype)| acc + qtype.ty.offset(*i))
@@ -42,7 +42,7 @@ impl CurrentObjects {
             if let Type::Array(_, ArraySize::Unknown) = qtype.ty {
                 break;
             }
-            if obj_index != 0 && (i + 1 >= qtype.ty.len() as i128) {
+            if obj_index != 0 && (i + 1 >= qtype.ty.len() as i64) {
                 remove_idx = Some(obj_index);
             } else {
                 break;
@@ -63,12 +63,9 @@ impl CurrentObjects {
     }
 
     /// Checks if this union has already been initialized and if so returns its size
-    pub fn find_same_union(
-        &self,
-        new_list: &Vec<(CurrentObjects, Expr, i128)>,
-    ) -> Option<(i128, usize)> {
+    pub fn find_same_union(&self, new_list: &Vec<(CurrentObjects, Expr, i64)>) -> Option<(i64, usize)> {
         for (objects, ..) in new_list {
-            let mut offset: i128 = 0;
+            let mut offset: i64 = 0;
             for (other_obj, current_obj) in objects.0.iter().zip(&self.0) {
                 match (other_obj, current_obj) {
                     (
@@ -126,14 +123,14 @@ impl Type {
     }
 
     /// Calculates offset in typesize until given index
-    pub fn offset(&self, index: i128) -> i128 {
+    pub fn offset(&self, index: i64) -> i64 {
         match self {
             Type::Struct(s) => s
                 .members()
                 .iter()
                 .take(index as usize)
-                .fold(0, |acc, (m_type, _)| acc + m_type.ty.size() as i128),
-            Type::Array(of, _) => of.ty.size() as i128 * index,
+                .fold(0, |acc, (m_type, _)| acc + m_type.ty.size() as i64),
+            Type::Array(of, _) => of.ty.size() as i64 * index,
             _ => 0,
         }
     }

@@ -155,7 +155,7 @@ impl Function {
                 self.returns_all_paths = true;
 
                 body.push(Stmt::Return(Some(Expr {
-                    kind: ExprKind::Literal(0),
+                    kind: ExprKind::Literal(LiteralKind::Signed(0)),
                     qtype: QualType::new(Type::Primitive(Primitive::Int(false))),
                     value_kind: ValueKind::Rvalue,
                 })));
@@ -182,11 +182,11 @@ macro_rules! find_scope {
 pub enum ScopeKind {
     Other,
     Loop,
-    Switch(Rc<RefCell<Vec<CaseKind>>>),
+    Switch(QualType, Rc<RefCell<Vec<CaseKind>>>),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum CaseKind {
-    Case(i32),
+    Case(LiteralKind),
     Default,
 }

@@ -59,7 +59,7 @@ pub enum ErrorKind {
 
     // parsing errors
     NotIntegerConstant(&'static str),
-    NegativeArraySize,
+    InvalidArraySize,
     IsEmpty(TokenKind),
     EnumOverflow,
     IncompleteType(QualType),
@@ -92,12 +92,13 @@ pub enum ErrorKind {
     NegativeShift,
     InvalidConstCast(QualType, QualType),
     IntegerOverflow(QualType),
+    ScaleOverflow(QualType),
 
     // typechecker errors
     UndeclaredLabel(String),
     NotInteger(&'static str, QualType),
     NotScalar(&'static str, QualType),
-    DuplicateCase(i32),
+    DuplicateCase(LiteralKind),
     NotIn(&'static str, &'static str),
     MultipleDefaults,
     IllegalAssign(QualType, QualType),
@@ -125,7 +126,7 @@ pub enum ErrorKind {
     InvalidStorageClass(StorageClass, &'static str),
     InvalidReturnType(QualType),
     NonAggregateDesignator(QualType),
-    DesignatorOverflow(usize, i128),
+    DesignatorOverflow(usize, i64),
     InitializerOverflow(QualType),
     ScalarOverflow,
     InvalidArray(QualType),
@@ -136,6 +137,7 @@ pub enum ErrorKind {
     InvalidAggrInit(QualType),
     ConstAssign,
     ConstStructAssign(QualType, String),
+    CaseOverflow(LiteralKind, QualType),
 
     // environment errors
     UndeclaredSymbol(String),
@@ -186,7 +188,7 @@ impl ErrorKind {
             ErrorKind::NotIntegerConstant(s) => {
                 format!("{} has to be an integer constant expression", s)
             }
-            ErrorKind::NegativeArraySize => "array size has to be greater than zero".to_string(),
+            ErrorKind::InvalidArraySize => "array size has to be greater than zero".to_string(),
             ErrorKind::IsEmpty(t) => format!("cannot have empty {}", t),
             ErrorKind::EnumOverflow => {
                 "enum constant overflow, value has to be in range of type 'int'".to_string()
@@ -273,6 +275,13 @@ impl ErrorKind {
                     ty, member
                 )
             }
+            ErrorKind::CaseOverflow(literal, qtype) => {
+                format!(
+                    "case value '{}' overflows switch condition type: '{}'",
+                    literal.to_string(),
+                    qtype
+                )
+            }
             ErrorKind::InvalidArray(qtype) => format!("invalid array-type: '{}'", qtype),
             ErrorKind::InvalidCaller(qtype) => format!(
                 "called object type: '{}' is not function or function pointer",
@@ -309,6 +318,9 @@ impl ErrorKind {
             ErrorKind::IntegerOverflow(qtype) => {
                 format!("integer overflow with type: '{}'", qtype)
             }
+            ErrorKind::ScaleOverflow(qtype) => {
+                format!("pointer increment overflows type '{}'", qtype)
+            }
 
             ErrorKind::UndeclaredLabel(label) => {
                 format!("undeclared label '{}'", label)
@@ -319,7 +331,9 @@ impl ErrorKind {
             ErrorKind::NotScalar(s, qtype) => {
                 format!("{} must be scalar type, found '{}'", s, qtype)
             }
-            ErrorKind::DuplicateCase(n) => format!("duplicate 'case'-statement with value {}", n),
+            ErrorKind::DuplicateCase(literal) => {
+                format!("duplicate 'case'-statement with value {}", literal.to_string())
+            }
             ErrorKind::NotIn(inner, outer) => {
                 format!("'{}'-statements have to be inside a '{}'-statement", inner, outer)
             }

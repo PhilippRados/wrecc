@@ -1,5 +1,6 @@
 //! Converts [HIR-parsetree](hir) to type-annotated [MIR-ast](mir) and checks for semantic errors
 
+pub mod fold;
 pub mod init;
 pub mod mir;
 
@@ -22,9 +23,8 @@ use std::rc::Rc;
 pub type ConstLabels = HashMap<String, usize>;
 
 pub struct TypeChecker {
-    // TODO: shouldn't have to be public
-    // symbol table
-    pub env: Environment,
+    // symbol table to store all tags and symbols
+    env: Environment,
 
     // label with its associated label index
     const_labels: ConstLabels,
@@ -431,8 +431,13 @@ impl TypeChecker {
                         return Err(Error::new(&token, ErrorKind::InvalidArray(qtype)));
                     }
 
-                    if let Some(mut expr) = size {
-                        let amount = expr.get_literal_constant(self, &token, "array size specifier")?;
+                    if let Some(expr) = size {
+                        let literal = self
+                            .visit_expr(&mut None, expr)?
+                            .get_literal_constant(&token, "array size specifier")?;
+                        let amount = literal
+                            .try_i64()
+                            .ok_or_else(|| Error::new(&token, ErrorKind::ArraySizeOverflow))?;
 
                         if amount > 0 {
                             if i64::overflowing_mul(qtype.ty.size() as i64, amount).1 {
@@ -443,7 +448,7 @@ impl TypeChecker {
                                 ArraySize::Known(amount as usize),
                             ))
                         } else {
-                            return Err(Error::new(&token, ErrorKind::NegativeArraySize));
+                            return Err(Error::new(&token, ErrorKind::InvalidArraySize));
                         }
                     } else {
                         QualType::new(Type::Array(Box::new(qtype), ArraySize::Unknown))
@@ -607,11 +612,19 @@ impl TypeChecker {
         constants: Vec<(Token, Option<hir::expr::ExprKind>)>,
     ) -> Result<Vec<(Token, i32)>, Error> {
         let mut parsed_constants = Vec::new();
+        // 6.7.2.2 The expression that defines the value of an enumeration constant shall be an integer
+        // constant expression that has a value representable as an `int`
         let mut index: i32 = 0;
 
         for (name, init) in constants {
-            if let Some(mut init_expr) = init {
-                index = init_expr.get_literal_constant(self, &name, "enum Constant")? as i32;
+            if let Some(init_expr) = init {
+                let literal = self
+                    .visit_expr(&mut None, init_expr)?
+                    .get_literal_constant(&name, "enum Constant")?;
+                if literal.type_overflow(&Type::Primitive(Primitive::Int(false))) {
+                    return Err(Error::new(&name, ErrorKind::EnumOverflow));
+                }
+                index = literal.try_i64().expect("just checked for int type-overflow") as i32;
             }
 
             // insert enum constant into symbol table
@@ -623,7 +636,7 @@ impl TypeChecker {
                     qtype: QualType::new(Type::Primitive(Primitive::Int(false))),
                     kind: InitType::Definition,
                     reg: Some(Register::Literal(
-                        index as i128,
+                        LiteralKind::Signed(index as i64),
                         Type::Primitive(Primitive::Int(false)),
                     )),
                 },
@@ -853,13 +866,13 @@ impl TypeChecker {
                     }
 
                     let init = self.init_check(func, sub_qtype, *list.remove(0), is_static)?;
-                    let sub_type_size = sub_qtype.ty.size() as i128;
+                    let sub_type_size = sub_qtype.ty.size() as i64;
                     let init_offset = objects.offset();
 
                     // remove overriding elements
                     let init_interval = if let Some((offset, size)) = objects.find_same_union(&new_list)
                     {
-                        offset..offset + size as i128
+                        offset..offset + size as i64
                     } else {
                         init_offset..init_offset + sub_type_size
                     };
@@ -869,7 +882,7 @@ impl TypeChecker {
                     match init {
                         mir::decl::Init::Aggr(list) => {
                             for (expr, offset) in list {
-                                new_list.push((objects.clone(), expr, init_offset + offset as i128))
+                                new_list.push((objects.clone(), expr, init_offset + offset as i64))
                             }
                         }
                         mir::decl::Init::Scalar(expr) => {
@@ -922,11 +935,17 @@ impl TypeChecker {
         &mut self,
         qtype: &QualType,
         designator: hir::decl::Designator,
-    ) -> Result<(i128, i128, QualType), Error> {
+    ) -> Result<(i64, i64, QualType), Error> {
         match (designator.kind, &qtype.ty) {
-            (hir::decl::DesignatorKind::Array(mut expr), Type::Array(of, size)) => {
-                let literal = expr.get_literal_constant(self, &designator.token, "array designator")?;
-                if literal < 0 {
+            (hir::decl::DesignatorKind::Array(expr), Type::Array(of, size)) => {
+                let literal = self
+                    .visit_expr(&mut None, expr)?
+                    .get_literal_constant(&designator.token, "array designator")?;
+                let index = literal
+                    .try_i64()
+                    .ok_or_else(|| Error::new(&designator.token, ErrorKind::ArraySizeOverflow))?;
+
+                if index < 0 {
                     return Err(Error::new(
                         &designator.token,
                         ErrorKind::Regular("array designator must be positive number"),
@@ -934,11 +953,11 @@ impl TypeChecker {
                 }
 
                 match size {
-                    ArraySize::Known(amount) if literal >= *amount as i128 => Err(Error::new(
+                    ArraySize::Known(amount) if index as usize >= *amount => Err(Error::new(
                         &designator.token,
-                        ErrorKind::DesignatorOverflow(*amount, literal),
+                        ErrorKind::DesignatorOverflow(*amount, index),
                     )),
-                    _ => Ok((literal, literal, *of.clone())),
+                    _ => Ok((index, index, *of.clone())),
                 }
             }
             (hir::decl::DesignatorKind::Member(_), Type::Array { .. }) => Err(Error::new(
@@ -953,16 +972,16 @@ impl TypeChecker {
                 ErrorKind::InvalidArrayDesignator(qtype.clone()),
             )),
             (hir::decl::DesignatorKind::Member(m), Type::Struct(s) | Type::Union(s)) => {
-                if let Some(i) = s
+                if let Some(index) = s
                     .members()
                     .iter()
                     .position(|(_, m_token)| *m == m_token.unwrap_string())
                 {
                     // unions only have single index
                     if let Type::Union(_) = qtype.ty {
-                        Ok((0, i as i128, s.member_type(&m)))
+                        Ok((0, index as i64, s.member_type(&m)))
                     } else {
-                        Ok((i as i128, i as i128, s.member_type(&m)))
+                        Ok((index as i64, index as i64, s.member_type(&m)))
                     }
                 } else {
                     Err(Error::new(
@@ -1041,10 +1060,7 @@ impl TypeChecker {
                 .map(|c| {
                     Box::new(hir::decl::Init {
                         token: token.clone(),
-                        kind: hir::decl::InitKind::Scalar(hir::expr::ExprKind::Literal(
-                            *c as i128,
-                            QualType::new(Type::Primitive(Primitive::Char(false))),
-                        )),
+                        kind: hir::decl::InitKind::Scalar(hir::expr::ExprKind::Char(*c as char)),
                         designator: None,
                     })
                 })
@@ -1251,7 +1267,8 @@ impl TypeChecker {
             ));
         }
         let labels = Rc::new(RefCell::new(Vec::new()));
-        func.scope.push(ScopeKind::Switch(Rc::clone(&labels)));
+        func.scope
+            .push(ScopeKind::Switch(cond.qtype.clone(), Rc::clone(&labels)));
         func.switches.push_back(Rc::clone(&labels));
 
         let stmt = self.visit_stmt(func, body);
@@ -1264,22 +1281,33 @@ impl TypeChecker {
         &mut self,
         func: &mut mir::decl::Function,
         token: Token,
-        mut value: hir::expr::ExprKind,
+        expr: hir::expr::ExprKind,
         body: hir::stmt::Stmt,
     ) -> Result<mir::stmt::Stmt, Error> {
-        let value = value.get_literal_constant(self, &token, "case value")? as i32;
+        let mut expr = self.visit_expr(&mut Some(func), expr)?;
+        if !expr.qtype.ty.is_integer() {
+            return Err(Error::new(
+                &token,
+                ErrorKind::NotInteger("case value", expr.qtype),
+            ));
+        }
+        let value = expr.get_literal_constant(&token, "case value")?;
 
-        match find_scope!(&mut func.scope, ScopeKind::Switch(..)) {
-            Some(ScopeKind::Switch(labels)) => {
-                if !labels.borrow().contains(&CaseKind::Case(value)) {
-                    labels.borrow_mut().push(CaseKind::Case(value))
-                } else {
-                    return Err(Error::new(&token, ErrorKind::DuplicateCase(value)));
-                }
+        if let Some(ScopeKind::Switch(qtype, labels)) =
+            find_scope!(&mut func.scope, ScopeKind::Switch(..))
+        {
+            if value.type_overflow(&qtype.ty) {
+                return Err(Error::new(&token, ErrorKind::CaseOverflow(value, qtype.clone())));
             }
-            _ => {
-                return Err(Error::new(&token, ErrorKind::NotIn("case", "switch")));
+
+            let case = CaseKind::Case(value.clone());
+            if !labels.borrow().contains(&case) {
+                labels.borrow_mut().push(case)
+            } else {
+                return Err(Error::new(&token, ErrorKind::DuplicateCase(value)));
             }
+        } else {
+            return Err(Error::new(&token, ErrorKind::NotIn("case", "switch")));
         }
 
         let body = self.visit_stmt(func, body)?;
@@ -1292,17 +1320,14 @@ impl TypeChecker {
         token: Token,
         body: hir::stmt::Stmt,
     ) -> Result<mir::stmt::Stmt, Error> {
-        match find_scope!(&mut func.scope, ScopeKind::Switch(..)) {
-            Some(ScopeKind::Switch(labels)) => {
-                if !labels.borrow().contains(&CaseKind::Default) {
-                    labels.borrow_mut().push(CaseKind::Default)
-                } else {
-                    return Err(Error::new(&token, ErrorKind::MultipleDefaults));
-                }
+        if let Some(ScopeKind::Switch(_, labels)) = find_scope!(&mut func.scope, ScopeKind::Switch(..)) {
+            if !labels.borrow().contains(&CaseKind::Default) {
+                labels.borrow_mut().push(CaseKind::Default)
+            } else {
+                return Err(Error::new(&token, ErrorKind::MultipleDefaults));
             }
-            _ => {
-                return Err(Error::new(&token, ErrorKind::NotIn("default", "switch")));
-            }
+        } else {
+            return Err(Error::new(&token, ErrorKind::NotIn("default", "switch")));
         }
         let body = self.visit_stmt(func, body)?;
 
@@ -1494,7 +1519,7 @@ impl TypeChecker {
             let expr = self.visit_expr(&mut Some(func), expr)?;
 
             let expr = expr.decay(&keyword)?;
-            if !func.return_type.type_compatible(&expr.qtype, &expr) {
+            if !func.return_type.type_compatible(&expr) {
                 return Err(Error::new(
                     &keyword,
                     ErrorKind::MismatchedFunctionReturn(func.return_type.clone(), expr.qtype),
@@ -1505,9 +1530,13 @@ impl TypeChecker {
             Some(expr)
         } else {
             let return_type = QualType::new(Type::Primitive(Primitive::Void));
-            let return_expr = hir::expr::ExprKind::Nop;
+            let return_expr = mir::expr::Expr {
+                kind: mir::expr::ExprKind::Nop,
+                qtype: return_type.clone(),
+                value_kind: ValueKind::Rvalue,
+            };
 
-            if !func.return_type.type_compatible(&return_type, &return_expr) {
+            if !func.return_type.type_compatible(&return_expr) {
                 return Err(Error::new(
                     &keyword,
                     ErrorKind::MismatchedFunctionReturn(func.return_type.clone(), return_type),
@@ -1547,18 +1576,21 @@ impl TypeChecker {
     pub fn visit_expr(
         &mut self,
         func: &mut Option<&mut mir::decl::Function>,
-        mut parse_tree: hir::expr::ExprKind,
+        expr: hir::expr::ExprKind,
     ) -> Result<mir::expr::Expr, Error> {
-        parse_tree.integer_const_fold(self)?;
-
-        match parse_tree {
+        let mut expr = match expr {
             hir::expr::ExprKind::Binary { left, token, right } => {
                 self.evaluate_binary(func, *left, token, *right)
             }
             hir::expr::ExprKind::Unary { token, right } => self.evaluate_unary(func, token, *right),
-            hir::expr::ExprKind::Literal(n, qtype) => Ok(mir::expr::Expr {
-                qtype,
-                kind: mir::expr::ExprKind::Literal(n),
+            hir::expr::ExprKind::Char(c) => Ok(mir::expr::Expr {
+                qtype: QualType::new(Type::Primitive(Primitive::Char(false))),
+                kind: mir::expr::ExprKind::Literal(LiteralKind::Signed(c as i64)),
+                value_kind: ValueKind::Rvalue,
+            }),
+            hir::expr::ExprKind::Number(literal) => Ok(mir::expr::Expr {
+                qtype: QualType::new(Type::Primitive(literal.integer_type())),
+                kind: mir::expr::ExprKind::Literal(literal),
                 value_kind: ValueKind::Rvalue,
             }),
             hir::expr::ExprKind::String(token) => self.string(token.unwrap_string()),
@@ -1601,17 +1633,18 @@ impl TypeChecker {
                 qtype: QualType::new(Type::Primitive(Primitive::Void)),
                 value_kind: ValueKind::Rvalue,
             }),
-        }
+        }?;
+
+        expr.integer_const_fold()?;
+
+        Ok(expr)
     }
     fn check_type_compatibility(
         token: &Token,
         left_qtype: &QualType,
         right: &mir::expr::Expr,
     ) -> Result<(), Error> {
-        if left_qtype.ty.is_void()
-            || right.qtype.ty.is_void()
-            || !left_qtype.type_compatible(&right.qtype, right)
-        {
+        if left_qtype.ty.is_void() || right.qtype.ty.is_void() || !left_qtype.type_compatible(right) {
             Err(Error::new(
                 token,
                 ErrorKind::IllegalAssign(left_qtype.clone(), right.qtype.clone()),
@@ -1620,6 +1653,7 @@ impl TypeChecker {
             Ok(())
         }
     }
+
     // TODO: display warning when casting down
     fn explicit_cast(
         &mut self,
@@ -1664,8 +1698,8 @@ impl TypeChecker {
         let qtype = self.parse_type(&token, decl_type)?;
 
         Ok(mir::expr::Expr {
-            kind: mir::expr::ExprKind::Literal(qtype.ty.size() as i128),
-            qtype: QualType::new(Type::Primitive(Primitive::Int(true))),
+            kind: mir::expr::ExprKind::Literal(LiteralKind::Unsigned(qtype.ty.size() as u64)),
+            qtype: QualType::new(Type::Primitive(Primitive::Long(true))),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -1683,8 +1717,8 @@ impl TypeChecker {
         }
 
         Ok(mir::expr::Expr {
-            kind: mir::expr::ExprKind::Literal(expr.qtype.ty.size() as i128),
-            qtype: QualType::new(Type::Primitive(Primitive::Int(true))),
+            kind: mir::expr::ExprKind::Literal(LiteralKind::Unsigned(expr.qtype.ty.size() as u64)),
+            qtype: QualType::new(Type::Primitive(Primitive::Long(true))),
             value_kind: ValueKind::Rvalue,
         })
     }
@@ -1724,7 +1758,7 @@ impl TypeChecker {
         let true_expr = self.visit_expr(func, true_expr)?;
         let false_expr = self.visit_expr(func, false_expr)?;
 
-        if !true_expr.qtype.type_compatible(&false_expr.qtype, &false_expr) {
+        if !true_expr.qtype.type_compatible(&false_expr) {
             return Err(Error::new(
                 &token,
                 ErrorKind::TypeMismatch(true_expr.qtype, false_expr.qtype),
@@ -1829,10 +1863,10 @@ impl TypeChecker {
             left: Box::new(hir::expr::ExprKind::CompoundAssign {
                 l_expr: Box::new(expr),
                 token: Token { kind: comp_op, ..token.clone() },
-                r_expr: Box::new(hir::expr::ExprKind::new_literal(1, Primitive::Int(false))),
+                r_expr: Box::new(hir::expr::ExprKind::Number(LiteralKind::Signed(1))),
             }),
             token: Token { kind: bin_op, ..token },
-            right: Box::new(hir::expr::ExprKind::new_literal(1, Primitive::Int(false))),
+            right: Box::new(hir::expr::ExprKind::Number(LiteralKind::Signed(1))),
         };
 
         // need to cast back to left-type since binary operation integer promotes
@@ -2097,9 +2131,9 @@ impl TypeChecker {
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Logical {
+                token,
                 left: Box::new(left),
                 right: Box::new(right),
-                operator: token.kind,
             },
             qtype: QualType::new(Type::Primitive(Primitive::Int(false))),
             value_kind: ValueKind::Rvalue,
@@ -2115,7 +2149,7 @@ impl TypeChecker {
         let left = self.visit_expr(func, left)?.to_rval().decay(&token)?;
         let right = self.visit_expr(func, right)?.to_rval().decay(&token)?;
 
-        if !is_valid_comp(&left.qtype, &left, &right.qtype, &right) {
+        if !Self::is_valid_comp(&left, &right) {
             return Err(Error::new(
                 &token,
                 ErrorKind::InvalidComp(token.kind.clone(), left.qtype, right.qtype),
@@ -2125,6 +2159,7 @@ impl TypeChecker {
         let mut left = left.maybe_int_promote();
         let mut right = right.maybe_int_promote();
 
+        // FIXME: use conversion rank instead of size
         match left.qtype.ty.size().cmp(&right.qtype.ty.size()) {
             Ordering::Greater => right = right.cast_to(left.qtype.clone(), CastDirection::Up),
             Ordering::Less => left = left.cast_to(right.qtype.clone(), CastDirection::Up),
@@ -2133,7 +2168,7 @@ impl TypeChecker {
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Comparison {
-                operator: token.kind,
+                token,
                 left: Box::new(left),
                 right: Box::new(right),
             },
@@ -2141,6 +2176,16 @@ impl TypeChecker {
             value_kind: ValueKind::Rvalue,
         })
     }
+    fn is_valid_comp(left: &mir::expr::Expr, right: &mir::expr::Expr) -> bool {
+        let integer_operands = left.qtype.ty.is_integer() && right.qtype.ty.is_integer();
+        let compatible_pointers = (left.qtype.ty.is_ptr() || right.qtype.ty.is_ptr())
+                // have to check in both directions since either expr can be 0 literal
+            && (left.qtype.type_compatible(&right)
+            || right.qtype.type_compatible(&left));
+
+        integer_operands || compatible_pointers
+    }
+
     fn evaluate_binary(
         &mut self,
         func: &mut Option<&mut mir::decl::Function>,
@@ -2151,7 +2196,7 @@ impl TypeChecker {
         let left = self.visit_expr(func, left)?.to_rval().decay(&token)?;
         let right = self.visit_expr(func, right)?.to_rval().decay(&token)?;
 
-        if !is_valid_bin(&token.kind, &left.qtype, &right.qtype, &right) {
+        if !Self::is_valid_bin(&token.kind, &left.qtype, &right) {
             return Err(Error::new(
                 &token,
                 ErrorKind::InvalidBinary(token.kind.clone(), left.qtype, right.qtype),
@@ -2161,24 +2206,53 @@ impl TypeChecker {
         let mut left = left.maybe_int_promote();
         let mut right = right.maybe_int_promote();
 
-        if let Some((expr, by_amount)) =
-            maybe_scale_index(&left.qtype.clone(), &right.qtype.clone(), &mut left, &mut right)
-        {
+        if let Some((expr, ptr_type, by_amount)) = Self::maybe_scale_index(&mut left, &mut right) {
             expr.kind = mir::expr::ExprKind::Scale {
                 by_amount,
+                token: token.clone(),
                 direction: mir::expr::ScaleDirection::Up,
                 expr: Box::new(expr.clone()),
             };
+            // expr.qtype = ptr_type;
         }
 
-        Ok(Self::binary_type_promotion(token.kind, left, right))
+        Ok(Self::binary_type_promotion(token, left, right))
     }
+
+    fn is_valid_bin(operator: &TokenKind, left_type: &QualType, right_expr: &mir::expr::Expr) -> bool {
+        match (&left_type.ty, &right_expr.qtype.ty) {
+            (left, right) if !left.is_scalar() || !right.is_scalar() => false,
+            (Type::Pointer(_), Type::Pointer(_)) => {
+                left_type.type_compatible(right_expr) && operator == &TokenKind::Minus
+            }
+            (_, Type::Pointer(_)) => operator == &TokenKind::Plus,
+            (Type::Pointer(_), _) => operator == &TokenKind::Plus || operator == &TokenKind::Minus,
+            _ => true,
+        }
+    }
+
+    // scale index when pointer arithmetic
+    fn maybe_scale_index<'a>(
+        left: &'a mut mir::expr::Expr,
+        right: &'a mut mir::expr::Expr,
+    ) -> Option<(&'a mut mir::expr::Expr, QualType, usize)> {
+        match (&left.qtype.ty, &right.qtype.ty) {
+            (index, Type::Pointer(inner)) if index.is_integer() && inner.ty.size() > 1 => {
+                Some((left, right.qtype.clone(), inner.ty.size()))
+            }
+            (Type::Pointer(inner), index) if index.is_integer() && inner.ty.size() > 1 => {
+                Some((right, left.qtype.clone(), inner.ty.size()))
+            }
+            _ => None,
+        }
+    }
+
     fn binary_type_promotion(
-        operator: TokenKind,
+        token: Token,
         left: mir::expr::Expr,
         right: mir::expr::Expr,
     ) -> mir::expr::Expr {
-        let (left, right, scale_factor) = match (&left.qtype.ty, &right.qtype.ty, &operator) {
+        let (left, right, scale_factor) = match (&left.qtype.ty, &right.qtype.ty, &token.kind) {
             // shift operations always have the type of the left operand
             (.., TokenKind::GreaterGreater | TokenKind::LessLess) => (left, right, None),
 
@@ -2205,7 +2279,7 @@ impl TypeChecker {
         let result = mir::expr::Expr {
             qtype: left.qtype.clone(),
             kind: mir::expr::ExprKind::Binary {
-                operator,
+                token: token.clone(),
                 left: Box::new(left),
                 right: Box::new(right),
             },
@@ -2215,6 +2289,7 @@ impl TypeChecker {
         if let Some(scale_factor) = scale_factor {
             mir::expr::Expr {
                 kind: mir::expr::ExprKind::Scale {
+                    token,
                     by_amount: scale_factor,
                     direction: mir::expr::ScaleDirection::Down,
                     expr: Box::new(result),
@@ -2254,7 +2329,7 @@ impl TypeChecker {
                     }
 
                     Ok(mir::expr::Expr {
-                        kind: mir::expr::ExprKind::Unary { operator: token.kind, right },
+                        kind: mir::expr::ExprKind::Unary { token, right },
                         qtype: QualType::new(Type::Primitive(Primitive::Int(false))),
                         value_kind: ValueKind::Rvalue,
                     })
@@ -2272,7 +2347,7 @@ impl TypeChecker {
 
                     Ok(mir::expr::Expr {
                         qtype: right.qtype.clone(),
-                        kind: mir::expr::ExprKind::Unary { operator: token.kind, right },
+                        kind: mir::expr::ExprKind::Unary { token, right },
                         value_kind: ValueKind::Rvalue,
                     })
                 }
@@ -2294,10 +2369,7 @@ impl TypeChecker {
             Ok(mir::expr::Expr {
                 qtype: right.qtype.clone().pointer_to(),
                 value_kind: ValueKind::Rvalue,
-                kind: mir::expr::ExprKind::Unary {
-                    right: Box::new(right),
-                    operator: token.kind,
-                },
+                kind: mir::expr::ExprKind::Unary { token, right: Box::new(right) },
             })
         } else {
             Err(Error::new(&token, ErrorKind::NotLvalue("as unary '&' operand")))
@@ -2308,10 +2380,7 @@ impl TypeChecker {
             Ok(mir::expr::Expr {
                 value_kind: ValueKind::Lvalue,
                 qtype: inner,
-                kind: mir::expr::ExprKind::Unary {
-                    right: Box::new(right),
-                    operator: token.kind,
-                },
+                kind: mir::expr::ExprKind::Unary { right: Box::new(right), token },
             })
         } else {
             Err(Error::new(&token, ErrorKind::InvalidDerefType(right.qtype)))
@@ -2330,66 +2399,6 @@ pub fn create_label(index: &mut usize) -> usize {
     let prev = *index;
     *index += 1;
     prev
-}
-
-// cannot just pass mir-expr since also used in fold which uses hir
-pub fn is_valid_bin(
-    operator: &TokenKind,
-    left_type: &QualType,
-    right_type: &QualType,
-    right_expr: &impl hir::expr::IsZero,
-) -> bool {
-    match (&left_type.ty, &right_type.ty) {
-        (Type::Primitive(Primitive::Void), _)
-        | (_, Type::Primitive(Primitive::Void))
-        | (Type::Struct(..), _)
-        | (_, Type::Struct(..))
-        | (Type::Union(..), _)
-        | (_, Type::Union(..)) => false,
-
-        (Type::Pointer(_), Type::Pointer(_)) => {
-            if left_type.type_compatible(right_type, right_expr) {
-                operator == &TokenKind::Minus
-            } else {
-                false
-            }
-        }
-        (_, Type::Pointer(_)) => operator == &TokenKind::Plus,
-        (Type::Pointer(_), _) => operator == &TokenKind::Plus || operator == &TokenKind::Minus,
-        _ => true,
-    }
-}
-pub fn is_valid_comp(
-    left_type: &QualType,
-    left_expr: &impl hir::expr::IsZero,
-    right_type: &QualType,
-    right_expr: &impl hir::expr::IsZero,
-) -> bool {
-    let integer_operands = left_type.ty.is_integer() && right_type.ty.is_integer();
-    let compatible_pointers = (left_type.ty.is_ptr() || right_type.ty.is_ptr())
-                // have to unfortunately check in both directions since either expr can be 0 literal
-            && (left_type.type_compatible(right_type, right_expr)
-            || right_type.type_compatible(left_type, left_expr));
-
-    integer_operands || compatible_pointers
-}
-
-// scale index when pointer arithmetic
-pub fn maybe_scale_index<'a, T>(
-    left_type: &QualType,
-    right_type: &QualType,
-    left_expr: &'a mut T,
-    right_expr: &'a mut T,
-) -> Option<(&'a mut T, usize)> {
-    match (&left_type.ty, &right_type.ty) {
-        (t, Type::Pointer(inner)) if !t.is_ptr() && inner.ty.size() > 1 => {
-            Some((left_expr, inner.ty.size()))
-        }
-        (Type::Pointer(inner), t) if !t.is_ptr() && inner.ty.size() > 1 => {
-            Some((right_expr, inner.ty.size()))
-        }
-        _ => None,
-    }
 }
 
 #[cfg(test)]

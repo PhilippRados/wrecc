@@ -340,7 +340,7 @@ impl Expr {
                     },
                 )?)
             }
-            (..) => None,
+            _ => None,
         })
     }
     fn logical_fold(
@@ -411,15 +411,6 @@ impl Expr {
         expr.integer_const_fold()?;
 
         if let ExprKind::Literal(literal) = &expr.kind {
-            // let wrapped = ;
-            // let wrapped = if matches!(new_type.get_primitive().map(Primitive::is_unsigned), Some(true))
-            //     || new_type.is_ptr()
-            // {
-            //     LiteralKind::Unsigned(wrapped as u64)
-            // } else {
-            //     LiteralKind::Signed(wrapped)
-            // };
-
             Ok(Some(Expr {
                 kind: ExprKind::Literal(literal.wrap(&new_type)),
                 qtype: QualType::new(new_type),
@@ -437,37 +428,29 @@ mod tests {
     use crate::compiler::parser::tests::setup;
     use crate::setup_type;
 
-    fn assert_fold(input: &str, expected: &str) {
-        let mut actual = setup(input).expression().unwrap();
-        actual.integer_const_fold().unwrap();
+    fn setup_fold(input: &str) -> Result<Expr, Error> {
+        let expr = setup(input).expression()?;
+        let mut expr = TypeChecker::new().visit_expr(&mut None, expr)?;
+        expr.integer_const_fold()?;
 
-        let mut expected = setup(expected).expression().unwrap();
-        expected.integer_const_fold().unwrap();
+        Ok(expr)
+    }
+    fn assert_fold(input: &str, expected: &str) {
+        let actual = setup_fold(input).unwrap();
+        let expected = setup_fold(expected).unwrap();
 
         assert_eq!(actual, expected);
     }
     fn assert_fold_type(input: &str, expected: &str, expected_type: &str) {
-        let mut actual = setup(input).expression().unwrap();
-        actual.integer_const_fold().unwrap();
-
-        let mut expected = setup(expected).expression().unwrap();
-        expected.integer_const_fold().unwrap();
+        let actual = setup_fold(input).unwrap();
+        let expected = setup_fold(expected).unwrap();
 
         assert_eq!(actual, expected);
-
-        if let ExprKind::Literal(_, actual_type) = actual {
-            assert_eq!(actual_type, setup_type!(expected_type));
-        } else {
-            unreachable!("only literals have type")
-        }
+        assert_eq!(actual.qtype, setup_type!(expected_type));
     }
     macro_rules! assert_fold_error {
         ($input:expr,$expected_err:pat) => {
-            let actual_fold = setup($input)
-                .expression()
-                .unwrap()
-                .integer_const_fold()
-                .unwrap_err();
+            let actual_fold = setup_fold($input).unwrap_err();
 
             assert!(
                 matches!(actual_fold.kind, $expected_err),
@@ -735,10 +718,11 @@ mod tests {
         assert_fold_type("(short)127 + 2", "129", "int");
         assert_fold_type("2147483648 + 1", "2147483649", "long");
 
-        assert_fold_type("(unsigned)999999 * 9999999 * 999999", "", "unsigned int");
-        assert_fold_error!("999999 * 9999999 * 999999",
+        assert_fold_type("(unsigned)999999 * 9999999 * 999999", "420793087", "unsigned int");
+        assert_fold_error!(
+            "999999 * 9999999 * 999999",
             ErrorKind::IntegerOverflow(QualType {
-                ty: Type::Primitive(Primitive::(false)),
+                ty: Type::Primitive(Primitive::Int(false)),
                 ..
             })
         );
@@ -773,9 +757,29 @@ mod tests {
     }
     #[test]
     fn scale_ptr() {
-        assert_fold_type("(char *)1 + 9223372036854775805");
-        assert_fold_error!("(char **)1 + 9223372036854775805");
-        assert_fold_error!("(long *)1 + 9223372036854775805 * 1");
-        assert_fold_error!("(int *)1 + 9223372036854775805 * 1");
+        assert_fold_type(
+            "(char *)1 + 9223372036854775805",
+            "(char*)9223372036854775806",
+            "char*",
+        );
+
+        assert_fold_error!(
+            "(char **)1 + 9223372036854775805",
+            ErrorKind::ScaleOverflow(QualType { ty: Type::Pointer(_), .. })
+        );
+        assert_fold_error!(
+            "(long *)1 + 9223372036854775805",
+            ErrorKind::ScaleOverflow(QualType {
+                ty: Type::Primitive(Primitive::Long(false)),
+                ..
+            })
+        );
+        assert_fold_error!(
+            "(int *)1 + 9223372036854775805",
+            ErrorKind::ScaleOverflow(QualType {
+                ty: Type::Primitive(Primitive::Int(false)),
+                ..
+            })
+        );
     }
 }

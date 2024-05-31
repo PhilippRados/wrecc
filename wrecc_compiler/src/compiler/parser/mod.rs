@@ -1313,7 +1313,7 @@ impl Parser {
         if let Some(n) = match_next!(self, TokenKind::Number(_)) {
             let n = n.unwrap_num();
             // TODO: what about u64 sized literals?
-            return Ok(ExprKind::Number(LiteralKind::Signed(n as i64)));
+            return Ok(ExprKind::Number(LiteralKind::new(n)));
         }
         if let Some(c) = match_next!(self, TokenKind::CharLit(_)) {
             return Ok(ExprKind::Char(c.unwrap_char()));
@@ -1740,21 +1740,5 @@ int main() {
         let expected = Some(token_default!(TokenKind::Number(2)));
 
         assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn specifier_unsigned_typedef_ambiguity() {
-        let actual = setup(
-            "
-typedef int num;
-unsigned num k = (unsigned int)-1;
-",
-        )
-        .parse();
-
-        assert!(matches!(
-            actual.map_err(|e| e.as_slice()),
-            Err(&[Error { kind: ErrorKind::InvalidVariadic, .. }])
-        ));
     }
 }

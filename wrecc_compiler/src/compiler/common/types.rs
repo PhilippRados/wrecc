@@ -325,6 +325,16 @@ impl Type {
         }
         None
     }
+    pub fn is_unsigned(&self) -> bool {
+        match self {
+            Type::Primitive(Primitive::Char(true))
+            | Type::Primitive(Primitive::Short(true))
+            | Type::Primitive(Primitive::Int(true))
+            | Type::Primitive(Primitive::Long(true))
+            | Type::Pointer(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -445,16 +455,6 @@ impl TypeInfo for Primitive {
     }
 }
 impl Primitive {
-    pub fn is_unsigned(&self) -> bool {
-        match self {
-            Primitive::Char(true)
-            | Primitive::Short(true)
-            | Primitive::Int(true)
-            | Primitive::Long(true) => true,
-            _ => false,
-        }
-    }
-
     fn fmt(&self) -> &str {
         match self {
             Primitive::Void => "void",
@@ -521,6 +521,13 @@ pub enum LiteralKind {
     Signed(i64),
 }
 impl LiteralKind {
+    pub fn new(n: u64) -> LiteralKind {
+        if let Ok(n) = i64::try_from(n) {
+            LiteralKind::Signed(n)
+        } else {
+            LiteralKind::Unsigned(n)
+        }
+    }
     pub fn is_zero(&self) -> bool {
         match self {
             LiteralKind::Signed(0) | LiteralKind::Unsigned(0) => true,
@@ -569,7 +576,7 @@ impl LiteralKind {
     pub fn type_overflow(&self, ty: &Type) -> bool {
         match self {
             LiteralKind::Signed(n) if *n < 0 => *n < ty.min(),
-            LiteralKind::Signed(n) => (*n as u64 > ty.max()) || (*n < ty.min()),
+            LiteralKind::Signed(n) => *n as u64 > ty.max(),
             LiteralKind::Unsigned(n) => *n > ty.max(),
         }
     }

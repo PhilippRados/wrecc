@@ -1676,6 +1676,7 @@ impl TypeChecker {
     }
     // ensures that equal sized expressions still have new type
     fn always_cast(expr: mir::expr::Expr, new_type: QualType) -> mir::expr::Expr {
+        // TODO: usual_arithmetic_conversion() ???
         match expr.qtype.ty.size().cmp(&new_type.ty.size()) {
             Ordering::Less => expr.cast_to(new_type, CastDirection::Up),
             Ordering::Greater => expr.cast_to(new_type, CastDirection::Down),
@@ -1768,17 +1769,7 @@ impl TypeChecker {
         let true_expr = true_expr.maybe_int_promote();
         let false_expr = false_expr.maybe_int_promote();
 
-        let (true_expr, false_expr) = match true_expr.qtype.ty.size().cmp(&false_expr.qtype.ty.size()) {
-            Ordering::Greater => (
-                true_expr.clone(),
-                false_expr.cast_to(true_expr.qtype, CastDirection::Up),
-            ),
-            Ordering::Less => (
-                true_expr.cast_to(false_expr.qtype.clone(), CastDirection::Up),
-                false_expr,
-            ),
-            Ordering::Equal => (true_expr, false_expr),
-        };
+        let (true_expr, false_expr) = Self::usual_arithmetic_conversion(true_expr, false_expr);
 
         Ok(mir::expr::Expr {
             qtype: true_expr.qtype.clone(),
@@ -2156,15 +2147,10 @@ impl TypeChecker {
             ));
         }
 
-        let mut left = left.maybe_int_promote();
-        let mut right = right.maybe_int_promote();
+        let left = left.maybe_int_promote();
+        let right = right.maybe_int_promote();
 
-        // FIXME: use conversion rank instead of size
-        match left.qtype.ty.size().cmp(&right.qtype.ty.size()) {
-            Ordering::Greater => right = right.cast_to(left.qtype.clone(), CastDirection::Up),
-            Ordering::Less => left = left.cast_to(right.qtype.clone(), CastDirection::Up),
-            Ordering::Equal => (),
-        }
+        let (left, right) = Self::usual_arithmetic_conversion(left, right);
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Comparison {
@@ -2206,14 +2192,13 @@ impl TypeChecker {
         let mut left = left.maybe_int_promote();
         let mut right = right.maybe_int_promote();
 
-        if let Some((expr, ptr_type, by_amount)) = Self::maybe_scale_index(&mut left, &mut right) {
+        if let Some((expr, by_amount)) = Self::maybe_scale_index(&mut left, &mut right) {
             expr.kind = mir::expr::ExprKind::Scale {
                 by_amount,
                 token: token.clone(),
                 direction: mir::expr::ScaleDirection::Up,
                 expr: Box::new(expr.clone()),
             };
-            // expr.qtype = ptr_type;
         }
 
         Ok(Self::binary_type_promotion(token, left, right))
@@ -2235,13 +2220,13 @@ impl TypeChecker {
     fn maybe_scale_index<'a>(
         left: &'a mut mir::expr::Expr,
         right: &'a mut mir::expr::Expr,
-    ) -> Option<(&'a mut mir::expr::Expr, QualType, usize)> {
+    ) -> Option<(&'a mut mir::expr::Expr, usize)> {
         match (&left.qtype.ty, &right.qtype.ty) {
             (index, Type::Pointer(inner)) if index.is_integer() && inner.ty.size() > 1 => {
-                Some((left, right.qtype.clone(), inner.ty.size()))
+                Some((left, inner.ty.size()))
             }
             (Type::Pointer(inner), index) if index.is_integer() && inner.ty.size() > 1 => {
-                Some((right, left.qtype.clone(), inner.ty.size()))
+                Some((right, inner.ty.size()))
             }
             _ => None,
         }
@@ -2261,19 +2246,10 @@ impl TypeChecker {
                 let scale_factor = inner.ty.size();
                 (left, right, Some(scale_factor))
             }
-
-            // if integer type and pointer then result is always the pointer type
-            (.., Type::Pointer(_), _) => (Self::always_cast(left, right.qtype.clone()), right, None),
-            (Type::Pointer(_), ..) => (left.clone(), Self::always_cast(right, left.qtype), None),
-
-            // otherwise cast to bigger type if unequal types
-            (left_type, right_type, _) if left_type.size() > right_type.size() => {
-                (left.clone(), Self::always_cast(right, left.qtype), None)
+            _ => {
+                let (left, right) = Self::usual_arithmetic_conversion(left, right);
+                (left, right, None)
             }
-            (left_type, right_type, _) if left_type.size() < right_type.size() => {
-                (Self::always_cast(left, right.qtype.clone()), right, None)
-            }
-            _ => (left, right, None),
         };
 
         let result = mir::expr::Expr {
@@ -2299,6 +2275,29 @@ impl TypeChecker {
             }
         } else {
             result
+        }
+    }
+    fn usual_arithmetic_conversion(
+        left: mir::expr::Expr,
+        right: mir::expr::Expr,
+    ) -> (mir::expr::Expr, mir::expr::Expr) {
+        match (&left.qtype.ty, &right.qtype.ty) {
+            // if integer type and pointer then result is always the pointer type
+            (.., Type::Pointer(_)) => (Self::always_cast(left, right.qtype.clone()), right),
+            (Type::Pointer(_), ..) => (left.clone(), Self::always_cast(right, left.qtype)),
+
+            // otherwise case to bigger type, or to the unsigned type
+            (left_type, right_type)
+                if (left_type.size() > right_type.size()) || left_type.is_unsigned() =>
+            {
+                (left.clone(), Self::always_cast(right, left.qtype))
+            }
+            (left_type, right_type)
+                if (left_type.size() < right_type.size()) || right_type.is_unsigned() =>
+            {
+                (Self::always_cast(left, right.qtype.clone()), right)
+            }
+            _ => (left, right),
         }
     }
     fn evaluate_unary(
@@ -2682,8 +2681,14 @@ int a;";
     fn finds_nested_loop() {
         let mut scopes = vec![
             ScopeKind::Loop,
-            ScopeKind::Switch(Rc::new(RefCell::new(Vec::new()))),
-            ScopeKind::Switch(Rc::new(RefCell::new(Vec::new()))),
+            ScopeKind::Switch(
+                QualType::new(Type::Primitive(Primitive::Int(false))),
+                Rc::new(RefCell::new(Vec::new())),
+            ),
+            ScopeKind::Switch(
+                QualType::new(Type::Primitive(Primitive::Int(false))),
+                Rc::new(RefCell::new(Vec::new())),
+            ),
         ];
         let actual = find_scope!(scopes, ScopeKind::Loop).is_some();
 
@@ -2701,25 +2706,37 @@ int a;";
     fn finds_and_mutates_scope() {
         let mut scopes = vec![
             ScopeKind::Loop,
-            ScopeKind::Switch(Rc::new(RefCell::new(Vec::new()))),
-            ScopeKind::Switch(Rc::new(RefCell::new(Vec::new()))),
+            ScopeKind::Switch(
+                QualType::new(Type::Primitive(Primitive::Int(false))),
+                Rc::new(RefCell::new(Vec::new())),
+            ),
+            ScopeKind::Switch(
+                QualType::new(Type::Primitive(Primitive::Int(true))),
+                Rc::new(RefCell::new(Vec::new())),
+            ),
             ScopeKind::Loop,
         ];
         let expected = vec![
             ScopeKind::Loop,
-            ScopeKind::Switch(Rc::new(RefCell::new(Vec::new()))),
-            ScopeKind::Switch(Rc::new(RefCell::new(vec![
-                CaseKind::Case(1),
-                CaseKind::Default,
-                CaseKind::Case(3),
-            ]))),
+            ScopeKind::Switch(
+                QualType::new(Type::Primitive(Primitive::Int(false))),
+                Rc::new(RefCell::new(Vec::new())),
+            ),
+            ScopeKind::Switch(
+                QualType::new(Type::Primitive(Primitive::Int(true))),
+                Rc::new(RefCell::new(vec![
+                    CaseKind::Case(LiteralKind::Unsigned(1)),
+                    CaseKind::Default,
+                    CaseKind::Case(LiteralKind::Unsigned(3)),
+                ])),
+            ),
             ScopeKind::Loop,
         ];
-        let ScopeKind::Switch(labels) =
+        let ScopeKind::Switch(_,labels) =
             find_scope!(scopes, ScopeKind::Switch(..)).unwrap() else {unreachable!()};
-        labels.borrow_mut().push(CaseKind::Case(1));
+        labels.borrow_mut().push(CaseKind::Case(LiteralKind::Unsigned(1)));
         labels.borrow_mut().push(CaseKind::Default);
-        labels.borrow_mut().push(CaseKind::Case(3));
+        labels.borrow_mut().push(CaseKind::Case(LiteralKind::Unsigned(3)));
 
         assert_eq!(scopes, expected);
     }

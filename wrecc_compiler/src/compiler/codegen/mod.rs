@@ -1014,11 +1014,11 @@ impl Compiler {
     ) -> Register {
         match direction {
             CastDirection::Up => self.cg_cast_up(func, expr, new_type),
-            CastDirection::Down => self.cg_cast_down(func, expr, new_type),
-            CastDirection::Equal => self.execute_expr(func, expr),
+            CastDirection::Down | CastDirection::Equal => self.cg_cast_type(func, expr, new_type),
         }
     }
-    fn cg_cast_down(&mut self, func: &mut Function, expr: Expr, new_type: Type) -> Register {
+    // only changes the type of the register, doesnt generate any casting asm
+    fn cg_cast_type(&mut self, func: &mut Function, expr: Expr, new_type: Type) -> Register {
         let mut value_reg = self.execute_expr(func, expr);
         value_reg.set_type(new_type);
 
@@ -1037,12 +1037,10 @@ impl Compiler {
                 self.instr_counter,
             ));
 
-            if let Some(prim) = value_reg.get_type().get_primitive() {
-                if prim.is_unsigned() {
-                    self.write_out(Lir::Movz(value_reg.clone(), dest_reg.clone()));
-                } else {
-                    self.write_out(Lir::Movs(value_reg.clone(), dest_reg.clone()));
-                }
+            if value_reg.get_type().is_unsigned() {
+                self.write_out(Lir::Movz(value_reg.clone(), dest_reg.clone()));
+            } else {
+                self.write_out(Lir::Movs(value_reg.clone(), dest_reg.clone()));
             }
 
             self.free(value_reg);

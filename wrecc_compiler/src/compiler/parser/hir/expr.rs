@@ -78,18 +78,6 @@ pub enum ExprKind {
     Nop,
 }
 
-pub trait IsZero {
-    fn is_zero(&self) -> bool;
-}
-impl IsZero for ExprKind {
-    fn is_zero(&self) -> bool {
-        match self {
-            ExprKind::Number(literal) => literal.is_zero(),
-            _ => false,
-        }
-    }
-}
-
 pub trait PrintIndent {
     fn print_indent(&self, indent_level: usize) -> String;
 }

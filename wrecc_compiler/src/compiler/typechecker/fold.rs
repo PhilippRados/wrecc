@@ -33,8 +33,6 @@ fn overflow_bin_op(
     }
 }
 
-type Folded = (LiteralKind, bool);
-
 impl Expr {
     pub fn int_literal(value: i64) -> Expr {
         Expr {
@@ -207,40 +205,40 @@ impl Expr {
             Ok(None)
         }
     }
-    fn shift_fold(token: &Token, left: &LiteralKind, right: &LiteralKind) -> Result<Folded, Error> {
+    fn shift_fold(
+        token: &Token,
+        left: &LiteralKind,
+        right: &LiteralKind,
+    ) -> Result<(LiteralKind, bool), Error> {
         if right.is_negative() {
             return Err(Error::new(token, ErrorKind::NegativeShift));
         }
 
-        fn overflow_shift_op(
-            left: &LiteralKind,
-            right: &LiteralKind,
-            overflow_op: fn(i64, u32) -> (i64, bool),
-            wrap_op: fn(u64, u32) -> u64,
-        ) -> (LiteralKind, bool) {
-            match (left, right) {
-                (LiteralKind::Signed(left), LiteralKind::Signed(right)) => {
-                    let (value, overflow) = overflow_op(*left, *right as u32);
-                    (LiteralKind::Signed(value), overflow)
-                }
-                (LiteralKind::Unsigned(left), LiteralKind::Unsigned(right)) => {
-                    (LiteralKind::Unsigned(wrap_op(*left, *right as u32)), false)
-                }
-                _ => unreachable!("typechecker makes sure both operands are equal"),
+        Ok(match (&token.kind, left, right) {
+            (TokenKind::GreaterGreater, LiteralKind::Signed(left), LiteralKind::Signed(right)) => {
+                let (value, overflow) = i64::overflowing_shr(*left, *right as u32);
+                (LiteralKind::Signed(value), overflow)
             }
-        }
-
-        Ok(match token.kind {
-            TokenKind::GreaterGreater => {
-                overflow_shift_op(left, right, i64::overflowing_shr, u64::wrapping_shr)
+            (TokenKind::GreaterGreater, LiteralKind::Unsigned(left), LiteralKind::Unsigned(right)) => {
+                let value = u64::wrapping_shr(*left, *right as u32);
+                (LiteralKind::Unsigned(value), false)
             }
-            TokenKind::LessLess => {
-                overflow_shift_op(left, right, i64::overflowing_shl, u64::wrapping_shl)
+            (TokenKind::LessLess, LiteralKind::Signed(left), LiteralKind::Signed(right)) => {
+                let (value, overflow) = i64::overflowing_shl(*left, *right as u32);
+                (LiteralKind::Signed(value), overflow)
+            }
+            (TokenKind::LessLess, LiteralKind::Unsigned(left), LiteralKind::Unsigned(right)) => {
+                let value = u64::wrapping_shl(*left, *right as u32);
+                (LiteralKind::Unsigned(value), false)
             }
             _ => unreachable!("not shift operation"),
         })
     }
-    fn div_fold(token: &Token, left: &LiteralKind, right: &LiteralKind) -> Result<Folded, Error> {
+    fn div_fold(
+        token: &Token,
+        left: &LiteralKind,
+        right: &LiteralKind,
+    ) -> Result<(LiteralKind, bool), Error> {
         if right.is_zero() {
             return Err(Error::new(token, ErrorKind::DivideByZero));
         }

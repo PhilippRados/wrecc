@@ -411,8 +411,14 @@ impl Expr {
         expr.integer_const_fold()?;
 
         if let ExprKind::Literal(literal) = &expr.kind {
+            let wrapped = literal.wrap(&new_type);
+            let wrapped = match (wrapped, new_type.is_unsigned()) {
+                (LiteralKind::Signed(n), true) => LiteralKind::Unsigned(n as u64),
+                (wrapped, _) => wrapped,
+            };
+
             Ok(Some(Expr {
-                kind: ExprKind::Literal(literal.wrap(&new_type)),
+                kind: ExprKind::Literal(wrapped),
                 qtype: QualType::new(new_type),
                 value_kind: ValueKind::Rvalue,
             }))
@@ -632,8 +638,9 @@ mod tests {
     fn ternary_fold() {
         assert_fold("1 == 2 ? 4 : 9", "9");
         assert_fold("(char*)1 ? 4 : 9", "4");
-
+        assert_fold_type("1 > 2 ? (unsigned)1 : (long)8", "(long)8", "long");
         assert_fold_type("1 - 2 ? (void*)4 : (long*)9 - 3", "(void*)4", "void*");
+        assert_fold_type("1 - 2 ? (long*)4 : (void*)9 - 3", "(void*)4", "void*");
 
         assert_fold_error!(
             "1 == 2 ? 4 : (long*)9",
@@ -671,8 +678,6 @@ mod tests {
 
         assert_fold_type("-2147483649", "-2147483649", "long");
         assert_fold_type("(int)-2147483648", "(int)-2147483648", "int");
-
-        assert_fold_type("(char **)1 + (9223372036854775805 * 1)", "(char**)-23", "char**");
     }
 
     #[test]

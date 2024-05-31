@@ -1769,7 +1769,7 @@ impl TypeChecker {
         let true_expr = true_expr.maybe_int_promote();
         let false_expr = false_expr.maybe_int_promote();
 
-        let (true_expr, false_expr) = Self::usual_arithmetic_conversion(true_expr, false_expr);
+        let (true_expr, false_expr) = Self::scalar_conversion(true_expr, false_expr);
 
         Ok(mir::expr::Expr {
             qtype: true_expr.qtype.clone(),
@@ -2150,7 +2150,7 @@ impl TypeChecker {
         let left = left.maybe_int_promote();
         let right = right.maybe_int_promote();
 
-        let (left, right) = Self::usual_arithmetic_conversion(left, right);
+        let (left, right) = Self::scalar_conversion(left, right);
 
         Ok(mir::expr::Expr {
             kind: mir::expr::ExprKind::Comparison {
@@ -2247,7 +2247,7 @@ impl TypeChecker {
                 (left, right, Some(scale_factor))
             }
             _ => {
-                let (left, right) = Self::usual_arithmetic_conversion(left, right);
+                let (left, right) = Self::scalar_conversion(left, right);
                 (left, right, None)
             }
         };
@@ -2277,27 +2277,62 @@ impl TypeChecker {
             result
         }
     }
-    fn usual_arithmetic_conversion(
+    fn scalar_conversion(
+        left: mir::expr::Expr,
+        right: mir::expr::Expr,
+    ) -> (mir::expr::Expr, mir::expr::Expr) {
+        let (left, right) = Self::pointer_conversion(left, right);
+        Self::usual_arithmetic_conversion(left, right)
+    }
+    fn pointer_conversion(
         left: mir::expr::Expr,
         right: mir::expr::Expr,
     ) -> (mir::expr::Expr, mir::expr::Expr) {
         match (&left.qtype.ty, &right.qtype.ty) {
-            // if integer type and pointer then result is always the pointer type
-            (.., Type::Pointer(_)) => (Self::always_cast(left, right.qtype.clone()), right),
-            (Type::Pointer(_), ..) => (left.clone(), Self::always_cast(right, left.qtype)),
-
-            // otherwise case to bigger type, or to the unsigned type
-            (left_type, right_type)
-                if (left_type.size() > right_type.size()) || left_type.is_unsigned() =>
-            {
+            // if two pointers always convert to `void*` if exists
+            (Type::Pointer(inner), other) if other.is_ptr() && inner.ty.is_void() => {
                 (left.clone(), Self::always_cast(right, left.qtype))
             }
-            (left_type, right_type)
-                if (left_type.size() < right_type.size()) || right_type.is_unsigned() =>
-            {
+            (other, Type::Pointer(inner)) if other.is_ptr() && inner.ty.is_void() => {
                 (Self::always_cast(left, right.qtype.clone()), right)
             }
+
+            // if integer type and pointer then result is always the pointer type
+            (other, Type::Pointer(_)) if !other.is_ptr() => {
+                (Self::always_cast(left, right.qtype.clone()), right)
+            }
+            (Type::Pointer(_), other) if !other.is_ptr() => {
+                (left.clone(), Self::always_cast(right, left.qtype))
+            }
             _ => (left, right),
+        }
+    }
+    fn usual_arithmetic_conversion(
+        left: mir::expr::Expr,
+        right: mir::expr::Expr,
+    ) -> (mir::expr::Expr, mir::expr::Expr) {
+        if !left.qtype.ty.is_integer() || !right.qtype.ty.is_integer() {
+            return (left, right);
+        }
+
+        match (&left.qtype.ty, &right.qtype.ty) {
+            // cast to bigger type
+            (left_type, right_type) if left_type.size() > right_type.size() => {
+                (left.clone(), Self::always_cast(right, left.qtype))
+            }
+            (left_type, right_type) if left_type.size() < right_type.size() => {
+                (Self::always_cast(left, right.qtype.clone()), right)
+            }
+            // if both operands have same size then cast to unsigned type if it exists
+            (left_type, right_type) => {
+                if left_type.is_unsigned() {
+                    (left.clone(), Self::always_cast(right, left.qtype))
+                } else if right_type.is_unsigned() {
+                    (Self::always_cast(left, right.qtype.clone()), right)
+                } else {
+                    (left, right)
+                }
+            }
         }
     }
     fn evaluate_unary(

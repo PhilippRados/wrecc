@@ -289,8 +289,16 @@ impl Expr {
         result_type: QualType,
         (literal, overflow): (LiteralKind, bool),
     ) -> Result<Expr, Error> {
-        // calculation can overflow or type from literal can overflow
-        if overflow || literal.type_overflow(&result_type.ty) {
+        // unsigned literals get wrapped
+        if result_type.ty.is_unsigned() {
+            Ok(Expr {
+                kind: ExprKind::Literal(literal.wrap(&result_type.ty)),
+                qtype: result_type,
+                value_kind: ValueKind::Rvalue,
+            })
+        }
+        // signed calculations can overflow, or the literal can overflow its type
+        else if overflow || literal.type_overflow(&result_type.ty) {
             Err(Error::new(token, ErrorKind::IntegerOverflow(result_type)))
         } else {
             Ok(Expr {
@@ -414,6 +422,7 @@ impl Expr {
             let wrapped = literal.wrap(&new_type);
             let wrapped = match (wrapped, new_type.is_unsigned()) {
                 (LiteralKind::Signed(n), true) => LiteralKind::Unsigned(n as u64),
+                (LiteralKind::Unsigned(n), false) => LiteralKind::Signed(n as i64),
                 (wrapped, _) => wrapped,
             };
 
@@ -723,11 +732,22 @@ mod tests {
         assert_fold_type("(short)127 + 2", "129", "int");
         assert_fold_type("2147483648 + 1", "2147483649", "long");
 
-        assert_fold_type("(unsigned)999999 * 9999999 * 999999", "420793087", "unsigned int");
+        assert_fold_type(
+            "(unsigned)999999 * 9999999 * 999999",
+            "(unsigned)420793087",
+            "unsigned int",
+        );
         assert_fold_error!(
             "999999 * 9999999 * 999999",
             ErrorKind::IntegerOverflow(QualType {
                 ty: Type::Primitive(Primitive::Int(false)),
+                ..
+            })
+        );
+        assert_fold_error!(
+            "(unsigned)999999 * (long)9999999 * 999999",
+            ErrorKind::IntegerOverflow(QualType {
+                ty: Type::Primitive(Primitive::Long(false)),
                 ..
             })
         );

@@ -2244,7 +2244,12 @@ impl TypeChecker {
             // if pointer - pointer, scale result before operation to match left-pointers type
             (Type::Pointer(inner), Type::Pointer(_), _) => {
                 let scale_factor = inner.ty.size();
-                (left, right, Some(scale_factor))
+                let long_ty = QualType::new(Type::Primitive(Primitive::Long(false)));
+                (
+                    Self::always_cast(left, long_ty.clone()),
+                    Self::always_cast(right, long_ty),
+                    Some(scale_factor),
+                )
             }
             _ => {
                 let (left, right) = Self::scalar_conversion(left, right);

@@ -577,6 +577,14 @@ mod tests {
         assert_fold_type("(int*)100 - (int *)2", "(long)24", "long");
         assert_fold_type("(const short*)2 - (short*)100", "(long)-49", "long");
         assert_fold_type("(char*)5 - (char *)10", "(long)-5", "long");
+        assert_fold(
+            "(short *)9223372036854775809 - (short *)1",
+            "-4611686018427387904",
+        );
+        assert_fold(
+            "(long)(short *)9223372036854775809 - (long)(short *)1",
+            "(long)-9223372036854775808",
+        );
 
         assert_fold_error!(
             "6 / (int *)1",

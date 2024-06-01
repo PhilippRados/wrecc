@@ -14,4 +14,14 @@ int main(){
     }
   }
   case 3: x = 1;
+
+  const char c = -56;
+  switch (c) {
+  case 200: {
+    break;
+  }
+  case -56: {
+    break;
+  }
+  }
 }

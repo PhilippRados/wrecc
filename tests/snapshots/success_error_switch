@@ -23,4 +23,9 @@ error: 'case'-statements have to be inside a 'switch'-statement
 |
 16   case 3: x = 1;
 |    ^
-5 errors generated.
+error: case value '200' overflows switch condition type: 'const char'
+|  --> in tests/fixtures/error_switch.c:20:3
+|
+20   case 200: {
+|    ^
+6 errors generated.

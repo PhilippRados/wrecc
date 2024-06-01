@@ -34,13 +34,6 @@ fn overflow_bin_op(
 }
 
 impl Expr {
-    pub fn int_literal(value: i64) -> Expr {
-        Expr {
-            kind: ExprKind::Literal(LiteralKind::Signed(value)),
-            qtype: QualType::new(Type::Primitive(Primitive::Int(false))),
-            value_kind: ValueKind::Rvalue,
-        }
-    }
     pub fn get_literal_constant(
         &mut self,
         token: &Token,
@@ -363,6 +356,10 @@ impl Expr {
                 TokenKind::LessEqual => bin_op!(left_n, <= ,right_n),
                 _ => unreachable!("not valid comparison token"),
             };
+            let literal = match literal {
+                LiteralKind::Unsigned(n) => LiteralKind::Signed(n as i64),
+                _ => literal,
+            };
 
             Ok(Some(Self::literal_type(token, result_type, (literal, false))?))
         } else {
@@ -479,6 +476,7 @@ mod tests {
         assert_fold("(long*)4 == (long*)1", "0");
         assert_fold("(long*)4 > (long*)1", "1");
         assert_fold("(long*)4 > 0", "1");
+        assert_fold("(int *)-2 > (int *)1", "1");
 
         assert_fold("-56 == (char)200", "1");
         assert_fold("(unsigned)2147483649 == -2147483647", "1");

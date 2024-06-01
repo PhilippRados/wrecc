@@ -90,7 +90,6 @@ pub enum ErrorKind {
     // folding errors
     DivideByZero,
     NegativeShift,
-    InvalidConstCast(QualType, QualType),
     IntegerOverflow(QualType),
     ScaleOverflow(QualType),
 
@@ -311,9 +310,6 @@ impl ErrorKind {
             ErrorKind::DuplicateMember(name) => format!("duplicate member '{}'", name),
 
             ErrorKind::DivideByZero => "cannot divide by zero".to_string(),
-            ErrorKind::InvalidConstCast(old_type, new_type) => {
-                format!("invalid constant-cast from '{}' to '{}'", old_type, new_type)
-            }
             ErrorKind::NegativeShift => "shift amount has to positive".to_string(),
             ErrorKind::IntegerOverflow(qtype) => {
                 format!("integer overflow with type: '{}'", qtype)

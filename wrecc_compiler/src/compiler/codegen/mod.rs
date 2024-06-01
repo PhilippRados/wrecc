@@ -1032,13 +1032,23 @@ impl Compiler {
             Register::Temp(..) | Register::Stack(..) | Register::Label(..)
         ) {
             let dest_reg = Register::Temp(TempRegister::new(
-                new_type,
+                new_type.clone(),
                 &mut self.interval_counter,
                 self.instr_counter,
             ));
 
             if value_reg.get_type().is_unsigned() {
-                self.write_out(Lir::Movz(value_reg.clone(), dest_reg.clone()));
+                // INFO: `movz` only used for smaller than 32-bit regs:
+                // A special case to note is that a mov to write a 32-bit value
+                // into a register also zeroes the upper 32 bits of the register by default,
+                // i.e does an implicit zero-extend to bitwidth q
+                // So `movzlq` is illegal and is done automatically in a normal `mov`
+                if value_reg.get_type().size() < 4 {
+                    self.write_out(Lir::Movz(value_reg.clone(), dest_reg.clone()));
+                } else {
+                    value_reg.set_type(new_type);
+                    self.write_out(Lir::Mov(value_reg.clone(), dest_reg.clone()))
+                }
             } else {
                 self.write_out(Lir::Movs(value_reg.clone(), dest_reg.clone()));
             }

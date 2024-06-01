@@ -255,7 +255,9 @@ impl Expr {
         else if overflow || literal.type_overflow(&result_type.ty) {
             Err(Error::new(token, ErrorKind::IntegerOverflow(result_type.clone())))
         } else {
-            Ok(ExprKind::Literal(literal))
+            Ok(ExprKind::Literal(
+                literal.try_i64().map_or(literal, |n| LiteralKind::Signed(n)),
+            ))
         }
     }
 
@@ -484,6 +486,12 @@ mod tests {
 
         assert_fold_error!("(int*)4 <= 1", ErrorKind::InvalidComp(..));
         assert_fold_error!("(long*)4 > (char*)1", ErrorKind::InvalidComp(..));
+    }
+
+    #[test]
+    fn sub_fold() {
+        assert_fold("(unsigned)100 - (unsigned)2", "(unsigned)98");
+        assert_fold("(unsigned)2 - (unsigned)100", "(unsigned)4294967198");
     }
 
     #[test]
@@ -716,7 +724,7 @@ mod tests {
 
         assert_fold_error!(
             "(struct {int age;})2",
-            ErrorKind::InvalidConstCast(
+            ErrorKind::InvalidExplicitCast(
                 QualType {
                     ty: Type::Primitive(Primitive::Int(false)),
                     ..

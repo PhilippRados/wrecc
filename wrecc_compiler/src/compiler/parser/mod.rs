@@ -1312,7 +1312,6 @@ impl Parser {
     fn primary(&mut self) -> Result<ExprKind, Error> {
         if let Some(n) = match_next!(self, TokenKind::Number(_)) {
             let n = n.unwrap_num();
-            // TODO: what about u64 sized literals?
             return Ok(ExprKind::Number(LiteralKind::new(n)));
         }
         if let Some(c) = match_next!(self, TokenKind::CharLit(_)) {

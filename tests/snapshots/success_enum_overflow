@@ -1,16 +1,21 @@
 error: enum constant overflow, value has to be in range of type 'int'
-|  --> in tests/fixtures/enum_overflow.c:4:14
+|  --> in tests/fixtures/enum_overflow.c:3:13
 |
-4 enum Other { A = 2147483647, B, C }; // overflow
-|              ^
-error: undeclared symbol 'B'
-|  --> in tests/fixtures/enum_overflow.c:8:17
+3 enum Some { D = 9223372036854775807, E, F };
+|             ^
+error: enum constant overflow, value has to be in range of type 'int'
+|  --> in tests/fixtures/enum_overflow.c:4:33
 |
-8   printf("%d\n",B);
-|                 ^
+4 enum Other { A = 2147483646, B, C };
+|                                 ^
 error: undeclared symbol 'C'
-|  --> in tests/fixtures/enum_overflow.c:9:17
+|  --> in tests/fixtures/enum_overflow.c:11:18
 |
-9   printf("%d\n",C);
-|                 ^
-3 errors generated.
+11   printf("%d\n", C);
+|                   ^
+error: undeclared symbol 'D'
+|  --> in tests/fixtures/enum_overflow.c:13:18
+|
+13   printf("%d\n", D);
+|                   ^
+4 errors generated.

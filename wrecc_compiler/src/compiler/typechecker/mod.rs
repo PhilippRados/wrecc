@@ -615,8 +615,9 @@ impl TypeChecker {
         // 6.7.2.2 The expression that defines the value of an enumeration constant shall be an integer
         // constant expression that has a value representable as an `int`
         let mut index: i32 = 0;
+        let mut constants = constants.into_iter().peekable();
 
-        for (name, init) in constants {
+        while let Some((name, init)) = constants.next() {
             if let Some(init_expr) = init {
                 let literal = self
                     .visit_expr(&mut None, init_expr)?
@@ -647,7 +648,9 @@ impl TypeChecker {
             if let Some(inc) = index.checked_add(1) {
                 index = inc;
             } else {
-                return Err(Error::new(&name, ErrorKind::EnumOverflow));
+                if let Some((next_tok, None)) = constants.peek() {
+                    return Err(Error::new(next_tok, ErrorKind::EnumOverflow));
+                }
             }
         }
 
@@ -2192,13 +2195,14 @@ impl TypeChecker {
         let mut left = left.maybe_int_promote();
         let mut right = right.maybe_int_promote();
 
-        if let Some((expr, by_amount)) = Self::maybe_scale_index(&mut left, &mut right) {
+        if let Some((expr, ptr_type)) = Self::maybe_scale_index(&mut left, &mut right) {
             expr.kind = mir::expr::ExprKind::Scale {
-                by_amount,
+                by_amount: ptr_type.deref_at().expect("can only scale pointers").ty.size(),
                 token: token.clone(),
                 direction: mir::expr::ScaleDirection::Up,
                 expr: Box::new(expr.clone()),
             };
+            // expr.qtype = ptr_type;
         }
 
         Ok(Self::binary_type_promotion(token, left, right))
@@ -2220,13 +2224,13 @@ impl TypeChecker {
     fn maybe_scale_index<'a>(
         left: &'a mut mir::expr::Expr,
         right: &'a mut mir::expr::Expr,
-    ) -> Option<(&'a mut mir::expr::Expr, usize)> {
+    ) -> Option<(&'a mut mir::expr::Expr, QualType)> {
         match (&left.qtype.ty, &right.qtype.ty) {
             (index, Type::Pointer(inner)) if index.is_integer() && inner.ty.size() > 1 => {
-                Some((left, inner.ty.size()))
+                Some((left, right.qtype.clone()))
             }
             (Type::Pointer(inner), index) if index.is_integer() && inner.ty.size() > 1 => {
-                Some((right, inner.ty.size()))
+                Some((right, left.qtype.clone()))
             }
             _ => None,
         }
@@ -2240,6 +2244,24 @@ impl TypeChecker {
         let (left, right, scale_factor) = match (&left.qtype.ty, &right.qtype.ty, &token.kind) {
             // shift operations always have the type of the left operand
             (.., TokenKind::GreaterGreater | TokenKind::LessLess) => (left, right, None),
+
+            // (Type::Pointer(_), Type::Pointer(_), _)
+            //     if matches!(
+            //         left.kind,
+            //         mir::expr::ExprKind::Scale {
+            //             direction: mir::expr::ScaleDirection::Up,
+            //             ..
+            //         }
+            //     ) || matches!(
+            //         right.kind,
+            //         mir::expr::ExprKind::Scale {
+            //             direction: mir::expr::ScaleDirection::Up,
+            //             ..
+            //         }
+            //     ) =>
+            // {
+            //     (left, right, None)
+            // }
 
             // if pointer - pointer, scale result before operation to match left-pointers type
             (Type::Pointer(inner), Type::Pointer(_), _) => {

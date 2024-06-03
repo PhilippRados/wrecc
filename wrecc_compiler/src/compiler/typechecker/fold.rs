@@ -144,22 +144,29 @@ impl Expr {
             let scaled_literal = match direction {
                 ScaleDirection::Up => {
                     let (literal, index_overflow) = match (literal, by_amount) {
+                        // negative indices cannot overflow and since get wrapped
+                        (LiteralKind::Signed(left), LiteralKind::Signed(right)) if *left < 0 => (
+                            LiteralKind::Unsigned(i64::wrapping_mul(*left, right) as u64),
+                            false,
+                        ),
                         // both check for u64::overflow since u64::MAX is biggest possible
                         // pointer size to be addressed
                         (LiteralKind::Signed(left), LiteralKind::Signed(right)) => {
-                            u64::overflowing_mul(*left as u64, right as u64)
+                            let (value, overflow) = u64::overflowing_mul(*left as u64, right as u64);
+                            (LiteralKind::Unsigned(value), overflow)
                         }
                         (LiteralKind::Unsigned(left), LiteralKind::Unsigned(right)) => {
-                            u64::overflowing_mul(*left, right)
+                            let (value, overflow) = u64::overflowing_mul(*left, right);
+                            (LiteralKind::Unsigned(value), overflow)
                         }
                         _ => unreachable!("typechecker makes sure both operands are equal"),
                     };
                     if index_overflow {
                         return Err(Error::new(token, ErrorKind::ScaleOverflow));
                     } else {
-                        // resulting literal gets casted after this anyways so doesnt matter if
-                        // literal matches other binary operand
-                        return Ok(Some(ExprKind::Literal(LiteralKind::new(literal))));
+                        // resulting literal gets casted after this anyways so doesn't matter if
+                        // literalkind matches other binary operand
+                        return Ok(Some(ExprKind::Literal(literal)));
                     }
                 }
                 ScaleDirection::Down => {
@@ -775,7 +782,7 @@ mod tests {
 
         assert_fold("(short *)5 + -1", "(short*)3");
         assert_fold("(short *)1 + -5", "(short*)-9");
-        assert_fold("(int*)1 + -9223372036854775807", "");
+        assert_fold("(int*)1 + -9223372036854775807", "(int*)5");
         assert_fold_error!("(int*)1 + -9223372036854775808", ErrorKind::ScaleOverflow);
     }
 }

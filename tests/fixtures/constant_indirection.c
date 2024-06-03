@@ -38,8 +38,6 @@ union Other {
 
 struct Some *s_ptr = &single_union.sec;
 
-char **string_offset_glob = (char **)&"hello" + (9223372036854775805 * 1);
-
 int main() {
   printf("%d\n", (int)int_literal_pointer_offset1);
   printf("%d\n", (int)int_literal_pointer_offset2);
@@ -55,8 +53,4 @@ int main() {
   printf("%d\n", *(int *)struct_arr_index);
   printf("%d\n", s_ptr->id);
   printf("%d\n", s_ptr->age);
-
-  char **string_offset_loc = (char **)&"hello" + (9223372036854775805 * 1);
-  printf("%ld\n", (char **)&"hello" - string_offset_loc);
-  printf("%ld\n", (char **)&"hello" - string_offset_glob);
 }

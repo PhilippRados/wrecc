@@ -725,30 +725,6 @@ impl Compiler {
                 reg.set_type(new_type);
                 reg
             }
-            ExprKind::Scale {
-                by_amount,
-                direction: ScaleDirection::Up,
-                expr,
-                ..
-            } => {
-                if let StaticRegister::Literal(literal, ty) = self.execute_global_expr(*expr) {
-                    let n = match literal {
-                        LiteralKind::Signed(n) => n.wrapping_mul(by_amount as i64),
-                        LiteralKind::Unsigned(n) => (n as i64).wrapping_mul(by_amount as i64),
-                    };
-                    let scaled_type = LiteralKind::Signed(n).integer_type();
-
-                    let ty = if ty.size() < scaled_type.size() {
-                        Type::Primitive(scaled_type)
-                    } else {
-                        ty
-                    };
-
-                    StaticRegister::Literal(literal, ty)
-                } else {
-                    unreachable!("can only scale literal value")
-                }
-            }
             ExprKind::Unary { token, right } => {
                 let mut reg = self.execute_global_expr(*right);
                 match token.kind {

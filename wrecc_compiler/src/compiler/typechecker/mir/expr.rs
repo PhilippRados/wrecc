@@ -177,8 +177,7 @@ impl Expr {
     pub fn is_constant(&self) -> bool {
         match &self.kind {
             ExprKind::String(_) | ExprKind::Literal(_) => true,
-            ExprKind::Cast { expr, .. }
-            | ExprKind::Scale { expr, direction: ScaleDirection::Up, .. } => expr.is_constant(),
+            ExprKind::Cast { expr, .. } => expr.is_constant(),
             _ => self.is_address_constant(true),
         }
     }
@@ -202,17 +201,13 @@ impl Expr {
                     _ => false,
                 }
             }
-            ExprKind::Cast { expr, .. }
-            | ExprKind::Scale { expr, direction: ScaleDirection::Up, .. } => {
-                expr.is_address_constant(is_outer)
-            }
+            ExprKind::Cast { expr, .. } => expr.is_address_constant(is_outer),
             _ => false,
         }
     }
     fn is_const_literal(&self) -> bool {
         match &self.kind {
-            ExprKind::Cast { expr, .. }
-            | ExprKind::Scale { expr, direction: ScaleDirection::Up, .. } => expr.is_const_literal(),
+            ExprKind::Cast { expr, .. } => expr.is_const_literal(),
             ExprKind::Literal(_) => true,
             _ => false,
         }

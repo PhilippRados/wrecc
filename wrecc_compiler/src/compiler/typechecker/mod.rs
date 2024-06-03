@@ -1679,7 +1679,6 @@ impl TypeChecker {
     }
     // ensures that equal sized expressions still have new type
     fn always_cast(expr: mir::expr::Expr, new_type: QualType) -> mir::expr::Expr {
-        // TODO: usual_arithmetic_conversion() ???
         match expr.qtype.ty.size().cmp(&new_type.ty.size()) {
             Ordering::Less => expr.cast_to(new_type, CastDirection::Up),
             Ordering::Greater => expr.cast_to(new_type, CastDirection::Down),
@@ -2195,14 +2194,13 @@ impl TypeChecker {
         let mut left = left.maybe_int_promote();
         let mut right = right.maybe_int_promote();
 
-        if let Some((expr, ptr_type)) = Self::maybe_scale_index(&mut left, &mut right) {
+        if let Some((expr, by_amount)) = Self::maybe_scale_index(&mut left, &mut right) {
             expr.kind = mir::expr::ExprKind::Scale {
-                by_amount: ptr_type.deref_at().expect("can only scale pointers").ty.size(),
+                by_amount,
                 token: token.clone(),
                 direction: mir::expr::ScaleDirection::Up,
                 expr: Box::new(expr.clone()),
             };
-            // expr.qtype = ptr_type;
         }
 
         Ok(Self::binary_type_promotion(token, left, right))
@@ -2224,13 +2222,13 @@ impl TypeChecker {
     fn maybe_scale_index<'a>(
         left: &'a mut mir::expr::Expr,
         right: &'a mut mir::expr::Expr,
-    ) -> Option<(&'a mut mir::expr::Expr, QualType)> {
+    ) -> Option<(&'a mut mir::expr::Expr, usize)> {
         match (&left.qtype.ty, &right.qtype.ty) {
             (index, Type::Pointer(inner)) if index.is_integer() && inner.ty.size() > 1 => {
-                Some((left, right.qtype.clone()))
+                Some((left, inner.ty.size()))
             }
             (Type::Pointer(inner), index) if index.is_integer() && inner.ty.size() > 1 => {
-                Some((right, left.qtype.clone()))
+                Some((right, inner.ty.size()))
             }
             _ => None,
         }
@@ -2244,24 +2242,6 @@ impl TypeChecker {
         let (left, right, scale_factor) = match (&left.qtype.ty, &right.qtype.ty, &token.kind) {
             // shift operations always have the type of the left operand
             (.., TokenKind::GreaterGreater | TokenKind::LessLess) => (left, right, None),
-
-            // (Type::Pointer(_), Type::Pointer(_), _)
-            //     if matches!(
-            //         left.kind,
-            //         mir::expr::ExprKind::Scale {
-            //             direction: mir::expr::ScaleDirection::Up,
-            //             ..
-            //         }
-            //     ) || matches!(
-            //         right.kind,
-            //         mir::expr::ExprKind::Scale {
-            //             direction: mir::expr::ScaleDirection::Up,
-            //             ..
-            //         }
-            //     ) =>
-            // {
-            //     (left, right, None)
-            // }
 
             // if pointer - pointer, scale result before operation to match left-pointers type
             (Type::Pointer(inner), Type::Pointer(_), _) => {

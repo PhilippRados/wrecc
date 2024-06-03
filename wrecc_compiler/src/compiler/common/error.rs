@@ -91,7 +91,7 @@ pub enum ErrorKind {
     DivideByZero,
     NegativeShift,
     IntegerOverflow(QualType),
-    ScaleOverflow(QualType),
+    ScaleOverflow,
 
     // typechecker errors
     UndeclaredLabel(String),
@@ -314,9 +314,7 @@ impl ErrorKind {
             ErrorKind::IntegerOverflow(qtype) => {
                 format!("integer overflow with type: '{}'", qtype)
             }
-            ErrorKind::ScaleOverflow(qtype) => {
-                format!("pointer increment overflows type '{}'", qtype)
-            }
+            ErrorKind::ScaleOverflow => "pointer increment overflows biggest possible index".to_string(),
 
             ErrorKind::UndeclaredLabel(label) => {
                 format!("undeclared label '{}'", label)

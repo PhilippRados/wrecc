@@ -143,20 +143,31 @@ impl Expr {
             };
             let scaled_literal = match direction {
                 ScaleDirection::Up => {
-                    overflow_bin_op(&literal, &by_amount, i64::overflowing_mul, u64::wrapping_mul)
+                    let (literal, index_overflow) = match (literal, by_amount) {
+                        // both check for u64::overflow since u64::MAX is biggest possible
+                        // pointer size to be addressed
+                        (LiteralKind::Signed(left), LiteralKind::Signed(right)) => {
+                            u64::overflowing_mul(*left as u64, right as u64)
+                        }
+                        (LiteralKind::Unsigned(left), LiteralKind::Unsigned(right)) => {
+                            u64::overflowing_mul(*left, right)
+                        }
+                        _ => unreachable!("typechecker makes sure both operands are equal"),
+                    };
+                    if index_overflow {
+                        return Err(Error::new(token, ErrorKind::ScaleOverflow));
+                    } else {
+                        // resulting literal gets casted after this anyways so doesnt matter if
+                        // literal matches other binary operand
+                        return Ok(Some(ExprKind::Literal(LiteralKind::new(literal))));
+                    }
                 }
                 ScaleDirection::Down => {
                     overflow_bin_op(&literal, &by_amount, i64::overflowing_div, u64::wrapping_div)
                 }
             };
 
-            match Self::literal_type(token, result_type, scaled_literal) {
-                Ok(expr) => Ok(Some(expr)),
-                Err(err) => Err(Error {
-                    kind: ErrorKind::ScaleOverflow(result_type.clone()),
-                    ..err
-                }),
-            }
+            Ok(Some(Self::literal_type(token, &result_type, scaled_literal)?))
         } else {
             Ok(None)
         }
@@ -751,24 +762,20 @@ mod tests {
             "(char*)9223372036854775806",
             "char*",
         );
+        assert_fold_type("(int *)1 + 2147483646", "(int*)8589934585", "int*");
+        assert_fold("(short *)1 + 9223372036854775806", "(short*)18446744073709551613");
 
-        assert_fold_error!(
-            "(char **)1 + 9223372036854775805",
-            ErrorKind::ScaleOverflow(QualType { ty: Type::Pointer(_), .. })
-        );
-        assert_fold_error!(
-            "(long *)1 + 9223372036854775805",
-            ErrorKind::ScaleOverflow(QualType {
-                ty: Type::Primitive(Primitive::Long(false)),
-                ..
-            })
-        );
-        assert_fold_error!(
-            "(int *)1 + 9223372036854775805",
-            ErrorKind::ScaleOverflow(QualType {
-                ty: Type::Primitive(Primitive::Int(false)),
-                ..
-            })
-        );
+        // INFO: clang also errors for `(short *)1 + 9223372036854775807`
+        // but that is because `ULONG_MAX / sizeof(short)` gets truncated, resulting in an
+        // overflow-error which is actually fine
+        assert_fold_error!("(short *)1 + 9223372036854775808", ErrorKind::ScaleOverflow);
+        assert_fold_error!("(char **)1 + 9223372036854775805", ErrorKind::ScaleOverflow);
+        assert_fold_error!("(long *)1 + 9223372036854775805", ErrorKind::ScaleOverflow);
+        assert_fold_error!("(int *)1 + 9223372036854775805", ErrorKind::ScaleOverflow);
+
+        assert_fold("(short *)5 + -1", "(short*)3");
+        assert_fold("(short *)1 + -5", "(short*)-9");
+        assert_fold("(int*)1 + -9223372036854775807", "");
+        assert_fold_error!("(int*)1 + -9223372036854775808", ErrorKind::ScaleOverflow);
     }
 }

@@ -2195,12 +2195,15 @@ impl TypeChecker {
         let mut right = right.maybe_int_promote();
 
         if let Some((expr, by_amount)) = Self::maybe_scale_index(&mut left, &mut right) {
+            // have to make sure that result fits into type
+            let expr_type = QualType::new(Type::Primitive(Primitive::Long(false)));
             expr.kind = mir::expr::ExprKind::Scale {
                 by_amount,
                 token: token.clone(),
                 direction: mir::expr::ScaleDirection::Up,
-                expr: Box::new(expr.clone()),
+                expr: Box::new(Self::maybe_cast(expr_type.clone(), expr.clone())),
             };
+            expr.qtype = expr_type;
         }
 
         Ok(Self::binary_type_promotion(token, left, right))
@@ -2218,7 +2221,7 @@ impl TypeChecker {
         }
     }
 
-    // scale index when pointer arithmetic
+    // scale index when doing pointer arithmetic
     fn maybe_scale_index<'a>(
         left: &'a mut mir::expr::Expr,
         right: &'a mut mir::expr::Expr,

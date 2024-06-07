@@ -1591,11 +1591,7 @@ impl TypeChecker {
                 kind: mir::expr::ExprKind::Literal(LiteralKind::Signed(c as i64)),
                 value_kind: ValueKind::Rvalue,
             }),
-            hir::expr::ExprKind::Number(literal, suffix) => Ok(mir::expr::Expr {
-                qtype: QualType::new(Type::Primitive(literal.integer_type(suffix))),
-                kind: mir::expr::ExprKind::Literal(literal),
-                value_kind: ValueKind::Rvalue,
-            }),
+            hir::expr::ExprKind::Number(n, suffix) => Ok(Self::num_literal(n, suffix)),
             hir::expr::ExprKind::String(token) => self.string(token.unwrap_string()),
             hir::expr::ExprKind::Logical { left, token, right } => {
                 self.evaluate_logical(func, *left, token, *right)
@@ -1856,15 +1852,23 @@ impl TypeChecker {
             left: Box::new(hir::expr::ExprKind::CompoundAssign {
                 l_expr: Box::new(expr),
                 token: Token { kind: comp_op, ..token.clone() },
-                r_expr: Box::new(hir::expr::ExprKind::Number(LiteralKind::Signed(1), None)),
+                r_expr: Box::new(hir::expr::ExprKind::Number(1, None)),
             }),
             token: Token { kind: bin_op, ..token },
-            right: Box::new(hir::expr::ExprKind::Number(LiteralKind::Signed(1), None)),
+            right: Box::new(hir::expr::ExprKind::Number(1, None)),
         };
 
         // need to cast back to left-type since binary operation integer promotes
         // char c; typeof(c--) == char
         Ok(Self::maybe_cast(qtype, self.visit_expr(func, postunary_sugar)?))
+    }
+    fn num_literal(n: u64, suffix: Option<IntSuffix>) -> mir::expr::Expr {
+        let literal = LiteralKind::new(n, &suffix);
+        mir::expr::Expr {
+            qtype: QualType::new(Type::Primitive(literal.integer_type(suffix))),
+            kind: mir::expr::ExprKind::Literal(literal),
+            value_kind: ValueKind::Rvalue,
+        }
     }
     fn string(&mut self, data: String) -> Result<mir::expr::Expr, Error> {
         let len = data.len() + 1; // extra byte for \0-Terminator

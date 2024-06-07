@@ -1,4 +1,4 @@
-use crate::compiler::common::{token::*, types::*};
+use crate::compiler::common::token::*;
 use crate::compiler::parser::hir::decl::*;
 use crate::compiler::typechecker::TypeChecker;
 use std::fmt;
@@ -73,7 +73,7 @@ pub enum ExprKind {
     },
     String(Token),
     Char(char),
-    Number(LiteralKind, Option<IntSuffix>),
+    Number(u64, Option<IntSuffix>),
     Ident(Token),
     Nop,
 }

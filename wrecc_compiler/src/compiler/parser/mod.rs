@@ -6,7 +6,7 @@
 pub mod double_peek;
 pub mod hir;
 
-use crate::compiler::common::{environment::*, error::*, token::*, types::*};
+use crate::compiler::common::{environment::*, error::*, token::*};
 use crate::compiler::parser::double_peek::*;
 use crate::compiler::parser::hir::{decl::*, expr::*, stmt::*};
 
@@ -1184,7 +1184,7 @@ impl Parser {
                     ExprKind::CompoundAssign {
                         l_expr: Box::new(right),
                         token,
-                        r_expr: Box::new(ExprKind::Number(LiteralKind::Signed(1), None)),
+                        r_expr: Box::new(ExprKind::Number(1, None)),
                     }
                 }
                 // typecast
@@ -1312,7 +1312,7 @@ impl Parser {
     fn primary(&mut self) -> Result<ExprKind, Error> {
         if let Some(n) = match_next!(self, TokenKind::Number(..)) {
             let (n, suffix) = n.unwrap_num();
-            return Ok(ExprKind::Number(LiteralKind::new(n, &suffix), suffix));
+            return Ok(ExprKind::Number(n, suffix));
         }
         if let Some(c) = match_next!(self, TokenKind::CharLit(_)) {
             return Ok(ExprKind::Char(c.unwrap_char()));

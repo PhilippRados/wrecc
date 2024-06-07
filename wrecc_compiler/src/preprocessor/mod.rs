@@ -24,7 +24,7 @@ impl IfDirective {
     }
 }
 /// Adds filename info to [scanner-token](scanner::Token), since scanner doesn't have that information
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PPToken {
     pub kind: TokenKind,
     pub column: i32,

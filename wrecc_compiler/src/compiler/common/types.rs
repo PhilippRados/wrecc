@@ -521,7 +521,10 @@ pub enum LiteralKind {
     Signed(i64),
 }
 impl LiteralKind {
-    pub fn new(n: u64) -> LiteralKind {
+    pub fn new(n: u64, suffix: &Option<IntSuffix>) -> LiteralKind {
+        if let Some(IntSuffix::U | IntSuffix::UL | IntSuffix::ULL) = suffix {
+            return LiteralKind::Unsigned(n);
+        }
         if let Ok(n) = i64::try_from(n) {
             LiteralKind::Signed(n)
         } else {
@@ -541,20 +544,19 @@ impl LiteralKind {
         }
     }
     /// Determines smallest possible integer-type capable of holding literal number
-    pub fn integer_type(&self) -> Primitive {
+    pub fn integer_type(&self, suffix: Option<IntSuffix>) -> Primitive {
         match self {
             LiteralKind::Signed(n) => {
-                if i32::try_from(*n).is_ok() {
+                // don't have to check for unsigned suffix because then literalkind is already unsigned
+                if i32::try_from(*n).is_ok() && !matches!(suffix, Some(IntSuffix::L | IntSuffix::LL)) {
                     Primitive::Int(false)
                 } else {
                     Primitive::Long(false)
                 }
             }
             LiteralKind::Unsigned(n) => {
-                if i32::try_from(*n).is_ok() {
-                    Primitive::Int(false)
-                } else if i64::try_from(*n).is_ok() {
-                    Primitive::Long(false)
+                if u32::try_from(*n).is_ok() && !matches!(suffix, Some(IntSuffix::UL | IntSuffix::ULL)) {
+                    Primitive::Int(true)
                 } else {
                     Primitive::Long(true)
                 }
@@ -855,7 +857,7 @@ pub mod tests {
         };
         // if type depends on an already existing environment, supply said environment
         ($input:expr,$typechecker:expr) => {
-            if let Ok(ty) = crate::compiler::parser::tests::setup($input).type_name() {
+            if let Ok(ty) = setup($input).type_name() {
                 if let Ok(actual_ty) = $typechecker.parse_type(&Token::default(TokenKind::Semicolon), ty)
                 {
                     actual_ty
@@ -938,5 +940,7 @@ pub mod tests {
     #[test]
     fn unsigned() {
         assert_type_print("unsigned int", "unsigned int");
+        assert_type_print("unsigned", "unsigned int");
+        assert_type_print("unsigned long", "unsigned long");
     }
 }

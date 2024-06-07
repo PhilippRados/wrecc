@@ -4,10 +4,10 @@ error: expected ';' after declaration
 8  o wie "gehts";
 |    ^
 error: expected ';' after declaration
-|  --> in tests/fixtures/multiline_err.c:21:2
+|  --> in tests/fixtures/multiline_err.c:21:3
 |
-21 2ö;
-|   ^
+21 2 ö;
+|    ^
 error: expected expression, found: ')'
 |  --> in tests/fixtures/multiline_err.c:26:17
 |

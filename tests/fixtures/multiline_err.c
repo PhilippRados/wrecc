@@ -18,7 +18,7 @@ name                                                                  \
 
 int so\
 me = 2\
-2ö;
+2 ö;
 
 #ifdef somename
 int main() {

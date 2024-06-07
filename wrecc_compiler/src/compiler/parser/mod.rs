@@ -1184,7 +1184,7 @@ impl Parser {
                     ExprKind::CompoundAssign {
                         l_expr: Box::new(right),
                         token,
-                        r_expr: Box::new(ExprKind::Number(LiteralKind::Signed(1))),
+                        r_expr: Box::new(ExprKind::Number(LiteralKind::Signed(1), None)),
                     }
                 }
                 // typecast
@@ -1310,9 +1310,9 @@ impl Parser {
         })
     }
     fn primary(&mut self) -> Result<ExprKind, Error> {
-        if let Some(n) = match_next!(self, TokenKind::Number(_)) {
-            let n = n.unwrap_num();
-            return Ok(ExprKind::Number(LiteralKind::new(n)));
+        if let Some(n) = match_next!(self, TokenKind::Number(..)) {
+            let (n, suffix) = n.unwrap_num();
+            return Ok(ExprKind::Number(LiteralKind::new(n, &suffix), suffix));
         }
         if let Some(c) = match_next!(self, TokenKind::CharLit(_)) {
             return Ok(ExprKind::Char(c.unwrap_char()));
@@ -1730,13 +1730,13 @@ int main() {
     #[test]
     fn matches_works_on_enums_with_values() {
         let tokens = vec![
-            token_default!(TokenKind::Number(2)),
+            token_default!(TokenKind::Number(2, None)),
             token_default!(TokenKind::Plus),
         ];
         let mut p = Parser::new(tokens);
 
-        let result = match_next!(p, TokenKind::Number(_) | TokenKind::String(_));
-        let expected = Some(token_default!(TokenKind::Number(2)));
+        let result = match_next!(p, TokenKind::Number(..) | TokenKind::String(_));
+        let expected = Some(token_default!(TokenKind::Number(2, None)));
 
         assert_eq!(result, expected);
     }

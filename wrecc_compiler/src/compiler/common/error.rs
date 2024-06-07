@@ -55,6 +55,7 @@ pub enum ErrorKind {
     InvalidEscape(char),
     UnterminatedString,
     InvalidNumber(IntErrorKind),
+    InvalidIntSuffix(String),
     Eof(&'static str),
 
     // parsing errors
@@ -177,6 +178,9 @@ impl ErrorKind {
                         _ => "",
                     }
                 )
+            }
+            ErrorKind::InvalidIntSuffix(s) => {
+                format!("invalid integer suffix: '{}'", s)
             }
             ErrorKind::CharLiteralAscii(c) => {
                 format!("character literal must be valid ascii value. '{}' is not", c)

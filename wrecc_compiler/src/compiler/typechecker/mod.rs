@@ -336,7 +336,7 @@ impl TypeChecker {
                 | [SpecifierKind::Unsigned, SpecifierKind::Long, SpecifierKind::Int]
                 | [SpecifierKind::Unsigned, SpecifierKind::Long, SpecifierKind::Long]
                 | [SpecifierKind::Unsigned, SpecifierKind::Long, SpecifierKind::Long, SpecifierKind::Int] => {
-                    Type::Primitive(Primitive::Long(false))
+                    Type::Primitive(Primitive::Long(true))
                 }
                 _ => {
                     return Err(Error::new(
@@ -1591,8 +1591,8 @@ impl TypeChecker {
                 kind: mir::expr::ExprKind::Literal(LiteralKind::Signed(c as i64)),
                 value_kind: ValueKind::Rvalue,
             }),
-            hir::expr::ExprKind::Number(literal) => Ok(mir::expr::Expr {
-                qtype: QualType::new(Type::Primitive(literal.integer_type())),
+            hir::expr::ExprKind::Number(literal, suffix) => Ok(mir::expr::Expr {
+                qtype: QualType::new(Type::Primitive(literal.integer_type(suffix))),
                 kind: mir::expr::ExprKind::Literal(literal),
                 value_kind: ValueKind::Rvalue,
             }),
@@ -1856,10 +1856,10 @@ impl TypeChecker {
             left: Box::new(hir::expr::ExprKind::CompoundAssign {
                 l_expr: Box::new(expr),
                 token: Token { kind: comp_op, ..token.clone() },
-                r_expr: Box::new(hir::expr::ExprKind::Number(LiteralKind::Signed(1))),
+                r_expr: Box::new(hir::expr::ExprKind::Number(LiteralKind::Signed(1), None)),
             }),
             token: Token { kind: bin_op, ..token },
-            right: Box::new(hir::expr::ExprKind::Number(LiteralKind::Signed(1))),
+            right: Box::new(hir::expr::ExprKind::Number(LiteralKind::Signed(1), None)),
         };
 
         // need to cast back to left-type since binary operation integer promotes
@@ -2466,6 +2466,18 @@ mod tests {
     }
 
     macro_rules! assert_type {
+        ($input:expr,$expected_type:expr) => {
+            let expr = setup($input).expression().unwrap();
+            let actual = TypeChecker::new().visit_expr(&mut None, expr).unwrap();
+            let expected_type = setup_type!($expected_type);
+
+            assert!(
+                actual.qtype == expected_type,
+                "actual: {}, expected: {}",
+                actual.qtype,
+                expected_type.to_string(),
+            );
+        };
         ($input:expr,$expected_type:expr,$env:expr) => {
             let expr = setup($input).expression().unwrap();
 
@@ -2558,6 +2570,18 @@ mod tests {
 
             assert_eq!(actual.0, expected_expr);
         }
+    }
+
+    #[test]
+    fn literal_type() {
+        assert_type!("1u", "unsigned int");
+        assert_type!("1l", "long");
+        assert_type!("1ll", "long");
+        assert_type!("4294967295u", "unsigned int");
+        assert_type!("4294967296u", "unsigned long");
+        assert_type!("9223372036854775807l", "long");
+        assert_type!("9223372036854775807ULL", "unsigned long");
+        assert_type!("9223372036854775808l", "unsigned long");
     }
 
     #[test]

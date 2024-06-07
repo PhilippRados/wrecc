@@ -55,6 +55,18 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    fn matches(&mut self, expected: char) -> bool {
+        match self.source.peek() {
+            Some(PPToken { kind: PPKind::Other(c), .. }) => {
+                if *c != expected {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+        self.source.next();
+        true
+    }
     fn match_next(&mut self, expected: char, if_match: TokenKind, if_not: TokenKind) -> TokenKind {
         match self.matches(expected) {
             true => if_match,
@@ -199,7 +211,7 @@ impl<'a> Scanner<'a> {
                         self.source.peek().map(|t| &t.kind)
                     {
                         match self.source.next().map(|t| t.kind) {
-                            Some(PPKind::String(s)) => match self.string_lit(&pp_token, s.clone()) {
+                            Some(PPKind::String(s)) => match self.string_lit(&pp_token, s) {
                                 Ok(s) => string.push_str(&s),
                                 Err(e) => errors.push(e),
                             },
@@ -213,14 +225,9 @@ impl<'a> Scanner<'a> {
                     Ok(char) => tokens.push(pp_token, TokenKind::CharLit(char)),
                     Err(e) => errors.push(e),
                 },
-                PPKind::Number(ref num) => match num.parse::<u64>() {
-                    Ok(n) => tokens.push(pp_token, TokenKind::Number(n)),
-                    Err(e) => {
-                        errors.push(Error::new(
-                            &pp_token.clone(),
-                            ErrorKind::InvalidNumber(e.kind().clone()),
-                        ));
-                    }
+                PPKind::Number(ref num) => match self.num_lit(&pp_token, num) {
+                    Ok((num, suffix)) => tokens.push(pp_token, TokenKind::Number(num, suffix)),
+                    Err(e) => errors.push(e),
                 },
                 PPKind::Ident(_)
                 | PPKind::Include
@@ -250,17 +257,29 @@ impl<'a> Scanner<'a> {
             Err(errors)
         }
     }
-    fn matches(&mut self, expected: char) -> bool {
-        match self.source.peek() {
-            Some(PPToken { kind: PPKind::Other(c), .. }) => {
-                if *c != expected {
-                    return false;
+    fn num_lit(&mut self, pp_token: &PPToken, num: &String) -> Result<(u64, Option<IntSuffix>), Error> {
+        let n = num
+            .parse::<u64>()
+            .map_err(|e| Error::new(pp_token, ErrorKind::InvalidNumber(e.kind().clone())))?;
+
+        let suffix = match self.source.peek().map(|tok| &tok.kind) {
+            Some(PPKind::Ident(_)) => {
+                let suffix_tok = self.source.next().expect("just checked if ident");
+                let suffix = suffix_tok.kind.to_string();
+
+                match suffix.as_str() {
+                    "u" | "U" => Some(IntSuffix::U),
+                    "l" | "L" => Some(IntSuffix::L),
+                    "ul" | "Ul" | "uL" | "UL" => Some(IntSuffix::UL),
+                    "ll" | "LL" => Some(IntSuffix::LL),
+                    "ull" | "Ull" | "uLL" | "ULL" => Some(IntSuffix::ULL),
+                    _ => return Err(Error::new(&suffix_tok, ErrorKind::InvalidIntSuffix(suffix))),
                 }
             }
-            _ => return false,
-        }
-        self.source.next();
-        true
+            None | Some(_) => None,
+        };
+
+        Ok((n, suffix))
     }
     fn string_lit(&mut self, pp_token: &PPToken, mut string: String) -> Result<String, Error> {
         let first = string.remove(0);
@@ -427,12 +446,12 @@ mod tests {
     fn token_basic_math_expression() {
         let actual = setup("3 + 1 / -4");
         let expected = vec![
-            TokenKind::Number(3),
+            TokenKind::Number(3, None),
             TokenKind::Plus,
-            TokenKind::Number(1),
+            TokenKind::Number(1, None),
             TokenKind::Slash,
             TokenKind::Minus,
-            TokenKind::Number(4),
+            TokenKind::Number(4, None),
         ];
         assert_eq!(actual, expected);
     }
@@ -440,11 +459,11 @@ mod tests {
     fn basic_math_double_digit_nums() {
         let actual = setup("300 - 11 * 41");
         let expected = vec![
-            TokenKind::Number(300),
+            TokenKind::Number(300, None),
             TokenKind::Minus,
-            TokenKind::Number(11),
+            TokenKind::Number(11, None),
             TokenKind::Star,
-            TokenKind::Number(41),
+            TokenKind::Number(41, None),
         ];
         assert_eq!(actual, expected);
     }
@@ -482,7 +501,7 @@ mod tests {
                 "while (val >= 12) {*p = val}",
             ),
             test_token(TokenKind::GreaterEqual, 2, 12, "while (val >= 12) {*p = val}"),
-            test_token(TokenKind::Number(12), 2, 15, "while (val >= 12) {*p = val}"),
+            test_token(TokenKind::Number(12, None), 2, 15, "while (val >= 12) {*p = val}"),
             test_token(TokenKind::RightParen, 2, 17, "while (val >= 12) {*p = val}"),
             test_token(TokenKind::LeftBrace, 2, 19, "while (val >= 12) {*p = val}"),
             test_token(TokenKind::Star, 2, 20, "while (val >= 12) {*p = val}"),
@@ -545,7 +564,7 @@ mod tests {
             test_token(TokenKind::Int, 2, 1, "int ä = 123"),
             test_token(TokenKind::Ident("ä".to_string()), 2, 5, "int ä = 123"),
             test_token(TokenKind::Equal, 2, 8, "int ä = 123"), // ä len is 2 but thats fine because its the same when indexing
-            test_token(TokenKind::Number(123), 2, 10, "int ä = 123"),
+            test_token(TokenKind::Number(123, None), 2, 10, "int ä = 123"),
         ];
         assert_eq!(actual, expected);
     }

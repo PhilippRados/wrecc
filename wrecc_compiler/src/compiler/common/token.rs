@@ -4,6 +4,15 @@ use std::fmt::Display;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum IntSuffix {
+    U,
+    L,
+    UL,
+    LL,
+    ULL,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     // Single-character tokens.
     LeftParen,
@@ -59,7 +68,7 @@ pub enum TokenKind {
     Ident(String),
     String(String),
     CharLit(char),
-    Number(u64),
+    Number(u64, Option<IntSuffix>),
 
     // Keywords.
     Void,
@@ -155,7 +164,15 @@ impl TokenKind {
             TokenKind::TypeDef | TokenKind::Default => 7,
             TokenKind::Continue | TokenKind::Register => 8,
 
-            TokenKind::Number(n) => n.to_string().len(),
+            TokenKind::Number(n, suffix) => {
+                n.to_string().len()
+                    + match suffix {
+                        Some(IntSuffix::U | IntSuffix::L) => 1,
+                        Some(IntSuffix::UL | IntSuffix::LL) => 2,
+                        Some(IntSuffix::ULL) => 3,
+                        None => 0,
+                    }
+            }
             TokenKind::String(s) => s.len() + 2,
             TokenKind::Ident(s) => s.len(),
 
@@ -231,7 +248,7 @@ impl Display for TokenKind {
                 TokenKind::LessLessEqual => "'<<='",
                 TokenKind::Ident(..) => "identifier",
                 TokenKind::String(_) => "string",
-                TokenKind::Number(_) => "number",
+                TokenKind::Number(..) => "number",
                 TokenKind::Else => "'else'",
                 TokenKind::For => "'for'",
                 TokenKind::If => "'if'",
@@ -296,15 +313,15 @@ impl Token {
             _ => panic!("cant unwrap string on {} token", self.kind),
         }
     }
-    pub fn unwrap_num(&self) -> u64 {
-        match &self.kind {
-            TokenKind::Number(n) => *n,
+    pub fn unwrap_num(self) -> (u64, Option<IntSuffix>) {
+        match self.kind {
+            TokenKind::Number(n, suffix) => (n, suffix),
             _ => panic!("cant unwrap number on {} token", self.kind),
         }
     }
-    pub fn unwrap_char(&self) -> char {
-        match &self.kind {
-            TokenKind::CharLit(c) => *c,
+    pub fn unwrap_char(self) -> char {
+        match self.kind {
+            TokenKind::CharLit(c) => c,
             _ => panic!("cant unwrap char on {} token", self.kind),
         }
     }

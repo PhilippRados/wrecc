@@ -575,6 +575,9 @@ mod tests {
         assert_fold("-32 % -5", "-2");
 
         assert_fold("(34 / 3) * 3 + 34 % 3", "34");
+
+        assert_fold("4294967295u / 2", "2147483647u");
+        assert_fold("4294967295u % 2", "1u");
     }
     #[test]
     fn div_fold_error() {

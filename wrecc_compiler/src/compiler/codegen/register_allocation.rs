@@ -473,7 +473,7 @@ mod tests {
                 | Lir::And(left, right)
                 | Lir::Load(left, right)
                 | Lir::Shift(_, left, right) => (Some(left), Some(right)),
-                Lir::Neg(reg) | Lir::Not(reg) | Lir::Idiv(reg) => (None, Some(reg)),
+                Lir::Neg(reg) | Lir::Not(reg) | Lir::Div(reg) => (None, Some(reg)),
                 Lir::GlobalInit(..) => (None, None),
                 _ => (None, None),
             }
@@ -596,7 +596,7 @@ mod tests {
         let input = vec![
             Lir::Mov(regs[0].clone(), regs[1].clone()),
             Lir::Add(regs[2].clone(), regs[1].clone()),
-            Lir::Idiv(regs[1].clone()),
+            Lir::Div(regs[1].clone()),
             Lir::Mov(regs[1].clone(), regs[4].clone()),
             Lir::Mov(regs[4].clone(), regs[6].clone()),
             Lir::Shift("l", regs[6].clone(), regs[3].clone()),
@@ -606,7 +606,7 @@ mod tests {
         let expected = vec![
             Lir::Mov(filled_regs[0].clone(), filled_regs[1].clone()),
             Lir::Add(filled_regs[2].clone(), filled_regs[1].clone()),
-            Lir::Idiv(filled_regs[1].clone()),
+            Lir::Div(filled_regs[1].clone()),
             Lir::Mov(filled_regs[1].clone(), filled_regs[4].clone()),
             Lir::Mov(filled_regs[4].clone(), filled_regs[6].clone()),
             Lir::Shift("l", filled_regs[6].clone(), filled_regs[3].clone()),
@@ -716,7 +716,7 @@ mod tests {
             Lir::And(regs[8].clone(), regs[9].clone()),
             Lir::Mov(regs[9].clone(), regs[19].clone()),
             Lir::And(regs[10].clone(), regs[11].clone()),
-            Lir::Idiv(regs[11].clone()),
+            Lir::Div(regs[11].clone()),
             Lir::And(regs[11].clone(), regs[12].clone()),
             Lir::Add(regs[13].clone(), regs[14].clone()),
             Lir::Mov(regs[10].clone(), regs[20].clone()),
@@ -767,7 +767,7 @@ mod tests {
             Lir::Mov(filled_regs[9].clone(), filled_regs[19].clone()),
             Lir::Push(filled_regs[22].clone()),
             Lir::And(filled_regs[10].clone(), filled_regs[11].clone()),
-            Lir::Idiv(filled_regs[11].clone()),
+            Lir::Div(filled_regs[11].clone()),
             Lir::Mov(filled_regs[10].clone(), spilled_reg1.clone()), // spill %r10
             Lir::And(filled_regs[11].clone(), filled_regs[12].clone()),
             Lir::Pop(filled_regs[22].clone()),

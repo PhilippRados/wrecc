@@ -1425,7 +1425,7 @@ impl Compiler {
             self.instr_counter,
         ));
 
-        self.write_out(Lir::Idiv(right.clone()));
+        self.write_out(Lir::Div(right.clone()));
 
         if is_mod {
             // rax % right => rdx

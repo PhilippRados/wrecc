@@ -41,7 +41,7 @@ pub enum Lir {
     Sub(Register, Register),
     Add(Register, Register),
     Imul(Register, Register),
-    Idiv(Register),
+    Div(Register),
 
     // shift direction, reg, dest
     Shift(&'static str, Register, Register),
@@ -78,7 +78,7 @@ impl Lir {
             | Lir::And(left, right)
             | Lir::Load(left, right)
             | Lir::Shift(_, left, right) => (Some(left), Some(right)),
-            Lir::Neg(reg) | Lir::Not(reg) | Lir::Idiv(reg) => (None, Some(reg)),
+            Lir::Neg(reg) | Lir::Not(reg) | Lir::Div(reg) => (None, Some(reg)),
             // global initializer can only have static-registers and no temporaries
             Lir::GlobalInit(..) => (None, None),
             _ => (None, None),
@@ -201,12 +201,18 @@ impl Lir {
                 left.name(),
                 right.name()
             ),
-            Lir::Idiv(reg) => format!(
-                "\t{}\n\tidiv{}   {}",
-                match reg.get_type().size() {
-                    0..=7 => "cdq",
+            Lir::Div(reg) => format!(
+                "\t{}\n\t{}div{}   {}",
+                match reg.get_type() {
+                    // zero extend %edx for unsigned division, works even for %rdx since x86-64
+                    // zero-extends upper 32bits aswell
+                    ty if ty.is_unsigned() => "movl\t$0, %edx",
+                    // sign-extends %eax for to %edx:eax used for signed division
+                    ty if ty.size() < 8 => "cdq",
+                    // sign-extends %rax for to %rdx:rax
                     _ => "cqo",
                 },
+                if reg.get_type().is_unsigned() { "" } else { "i" },
                 reg.get_type().suffix(),
                 reg.name()
             ),

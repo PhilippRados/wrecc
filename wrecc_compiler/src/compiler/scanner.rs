@@ -263,9 +263,17 @@ impl<'a> Scanner<'a> {
         num: &String,
         suffix: &String,
     ) -> Result<(u64, Option<IntSuffix>), Error> {
-        let n = num
-            .parse::<u64>()
-            .map_err(|e| Error::new(pp_token, ErrorKind::InvalidNumber(e.kind().clone())))?;
+        let mut num_iter = num.chars().peekable();
+        let n = if num.len() > 1 && num_iter.next_if(|c| *c == '0').is_some() {
+            if num_iter.next_if(|c| *c == 'x' || *c == 'X').is_some() {
+                u64::from_str_radix(&num_iter.collect::<String>(), 16).map_err(|e| (e, "hex"))
+            } else {
+                u64::from_str_radix(&num_iter.collect::<String>(), 8).map_err(|e| (e, "octal"))
+            }
+        } else {
+            num.parse::<u64>().map_err(|e| (e, "decimal"))
+        }
+        .map_err(|(e, radix)| Error::new(pp_token, ErrorKind::InvalidNumber(e.kind().clone(), radix)))?;
 
         let suffix = match suffix.as_str() {
             "u" | "U" => Some(IntSuffix::U),
@@ -705,6 +713,9 @@ mod tests {
 
     #[test]
     fn num_literals() {
-        // assert!(matches!(setup_err("08")[0], ErrorKind::InvalidOctal(..)));
+        assert!(matches!(setup("0")[0], TokenKind::Number(0, None)));
+        assert!(matches!(setup("07132")[0], TokenKind::Number(3674, None)));
+        assert!(matches!(setup("0X1aA")[0], TokenKind::Number(426, None)));
+        assert!(matches!(setup_err("08")[0], ErrorKind::InvalidNumber(_, "octal")));
     }
 }

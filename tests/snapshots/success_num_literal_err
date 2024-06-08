@@ -1,0 +1,21 @@
+error: cannot parse octal number literal: invalid digit found in string
+|  --> in tests/fixtures/num_literal_err.c:2:11
+|
+2   int a = 08;
+|           ^
+error: invalid integer suffix: 'jdd'
+|  --> in tests/fixtures/num_literal_err.c:3:11
+|
+3   int b = 0x1djdd;
+|           ^
+error: invalid integer suffix: 'x'
+|  --> in tests/fixtures/num_literal_err.c:4:11
+|
+4   int c = 0x;
+|           ^
+error: cannot parse decimal number literal: number is too large to fit in 64bits
+|  --> in tests/fixtures/num_literal_err.c:5:11
+|
+5   int d = 7777777777777777777777777777777777777777777;
+|           ^
+4 errors generated.

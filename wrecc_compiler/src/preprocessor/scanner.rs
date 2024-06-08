@@ -201,17 +201,29 @@ impl Scanner {
                 }
                 _ if c.is_ascii_digit() => {
                     let mut num_string = String::from(c);
-                    if c == '0' {
+                    let is_hex = if c == '0' {
                         match (self.source.peek(), self.source.double_peek()) {
                             (Some('x' | 'X'), Some(next)) if next.is_ascii_digit() => {
-                                num_string.push(self.source.next().unwrap())
+                                num_string.push(self.source.next().unwrap());
+                                true
                             }
-                            _ => (),
+                            _ => false,
                         }
-                    }
+                    } else {
+                        false
+                    };
 
-                    let (num_string, loc) =
-                        self.consume_until(&num_string, |c, _| !c.is_ascii_digit(), false);
+                    let (num_string, loc) = self.consume_until(
+                        &num_string,
+                        |c, _| {
+                            if is_hex {
+                                !c.is_digit(16)
+                            } else {
+                                !c.is_ascii_digit()
+                            }
+                        },
+                        false,
+                    );
 
                     let (suffix, _) = self.consume_until(
                         &"",
@@ -617,6 +629,10 @@ mod tests {
         assert_eq!(
             setup_tokenkind("01221_this121_suf")[0],
             TokenKind::Number("01221".to_string(), "_this121_suf".to_string())
+        );
+        assert_eq!(
+            setup_tokenkind("0x1djdd")[0],
+            TokenKind::Number("0x1d".to_string(), "jdd".to_string())
         );
     }
 }

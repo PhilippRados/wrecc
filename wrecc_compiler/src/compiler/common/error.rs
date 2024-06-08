@@ -54,7 +54,7 @@ pub enum ErrorKind {
     CharLiteralAscii(char),
     InvalidEscape(char),
     UnterminatedString,
-    InvalidNumber(IntErrorKind),
+    InvalidNumber(IntErrorKind, &'static str),
     InvalidIntSuffix(String),
     Eof(&'static str),
 
@@ -169,9 +169,10 @@ impl ErrorKind {
                 "character literal must contain single character enclosed by single quotes ('')"
                     .to_string()
             }
-            ErrorKind::InvalidNumber(kind) => {
+            ErrorKind::InvalidNumber(kind, radix) => {
                 format!(
-                    "cannot parse number literal: {}",
+                    "cannot parse {} number literal: {}",
+                    radix,
                     match kind {
                         IntErrorKind::InvalidDigit => "invalid digit found in string",
                         IntErrorKind::PosOverflow => "number is too large to fit in 64bits",

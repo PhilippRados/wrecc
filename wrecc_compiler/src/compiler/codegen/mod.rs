@@ -978,7 +978,7 @@ impl Compiler {
             ScaleDirection::Up => self.cg_mult(by_amount, value_reg),
             ScaleDirection::Down => {
                 let by_amount = self.make_temp(by_amount);
-                self.cg_div(value_reg, by_amount)
+                self.cg_div(value_reg, by_amount, false)
             }
         }
     }
@@ -1410,7 +1410,7 @@ impl Compiler {
         right
     }
 
-    fn cg_div(&mut self, left: Register, right: Register) -> Register {
+    fn cg_div(&mut self, left: Register, right: Register, is_mod: bool) -> Register {
         let right = convert_reg!(
             self,
             right,
@@ -1425,71 +1425,34 @@ impl Compiler {
             self.instr_counter,
         ));
 
-        // rax / right => rax
         self.write_out(Lir::Idiv(right.clone()));
 
-        // move rax(div result) into right reg
-        self.write_out(Lir::Mov(Register::Return(right.get_type()), right.clone()));
+        if is_mod {
+            // rax % right => rdx
+            self.write_out(Lir::Mov(rdx_reg.clone(), right.clone()));
+        } else {
+            // rax / right => rax
+            self.write_out(Lir::Mov(Register::Return(right.get_type()), right.clone()));
+        }
 
         self.free(rdx_reg);
         self.free(left);
         right
     }
 
-    fn cg_mod(&mut self, left: Register, right: Register) -> Register {
+    fn cg_bit_op(&mut self, left: Register, right: Register, op: &TokenKind) -> Register {
         let right = convert_reg!(
             self,
             right,
             Register::Stack(..) | Register::Label(..) | Register::Literal(..)
         );
-        self.write_out(Lir::Mov(left.clone(), Register::Return(left.get_type())));
 
-        // rdx(3rd Argument register) stores remainder
-        let rdx_reg = Register::Arg(ArgRegister::new(
-            2,
-            right.get_type(),
-            &mut self.interval_counter,
-            self.instr_counter,
-        ));
-
-        // rax % rcx => rdx
-        self.write_out(Lir::Idiv(right.clone()));
-        self.write_out(Lir::Mov(rdx_reg.clone(), right.clone()));
-
-        self.free(rdx_reg);
-        self.free(left);
-        right
-    }
-
-    fn cg_bit_xor(&mut self, left: Register, right: Register) -> Register {
-        let right = convert_reg!(
-            self,
-            right,
-            Register::Stack(..) | Register::Label(..) | Register::Literal(..)
-        );
-        self.write_out(Lir::Xor(left.clone(), right.clone()));
-
-        self.free(left);
-        right
-    }
-    fn cg_bit_or(&mut self, left: Register, right: Register) -> Register {
-        let right = convert_reg!(
-            self,
-            right,
-            Register::Stack(..) | Register::Label(..) | Register::Literal(..)
-        );
-        self.write_out(Lir::Or(left.clone(), right.clone()));
-
-        self.free(left);
-        right
-    }
-    fn cg_bit_and(&mut self, left: Register, right: Register) -> Register {
-        let right = convert_reg!(
-            self,
-            right,
-            Register::Stack(..) | Register::Label(..) | Register::Literal(..)
-        );
-        self.write_out(Lir::And(left.clone(), right.clone()));
+        self.write_out(match op {
+            TokenKind::Xor => Lir::Xor(left.clone(), right.clone()),
+            TokenKind::Pipe => Lir::Or(left.clone(), right.clone()),
+            TokenKind::Amp => Lir::And(left.clone(), right.clone()),
+            _ => unreachable!("not binary bit-operator"),
+        });
 
         self.free(left);
         right
@@ -1523,11 +1486,11 @@ impl Compiler {
             TokenKind::Plus => self.cg_add(left_reg, right_reg),
             TokenKind::Minus => self.cg_sub(left_reg, right_reg),
             TokenKind::Star => self.cg_mult(left_reg, right_reg),
-            TokenKind::Slash => self.cg_div(left_reg, right_reg),
-            TokenKind::Mod => self.cg_mod(left_reg, right_reg),
-            TokenKind::Xor => self.cg_bit_xor(left_reg, right_reg),
-            TokenKind::Pipe => self.cg_bit_or(left_reg, right_reg),
-            TokenKind::Amp => self.cg_bit_and(left_reg, right_reg),
+            TokenKind::Slash => self.cg_div(left_reg, right_reg, false),
+            TokenKind::Mod => self.cg_div(left_reg, right_reg, true),
+            TokenKind::Xor => self.cg_bit_op(left_reg, right_reg, token),
+            TokenKind::Pipe => self.cg_bit_op(left_reg, right_reg, token),
+            TokenKind::Amp => self.cg_bit_op(left_reg, right_reg, token),
             TokenKind::LessLess => self.cg_shift("l", left_reg, right_reg),
             TokenKind::GreaterGreater => self.cg_shift("r", left_reg, right_reg),
             _ => unreachable!(),

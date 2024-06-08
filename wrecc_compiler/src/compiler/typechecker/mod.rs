@@ -2591,6 +2591,11 @@ mod tests {
     #[test]
     fn binary_type() {
         assert_type!("a + '2'", "int", "char a;");
+        assert_type!("a + 2l", "long", "unsigned a;");
+        assert_type!("(char)'a' + 1L", "long");
+        assert_type!("2u - 10", "unsigned int");
+        assert_type!("5UL - 2ULL", "unsigned long");
+        assert_type!("0UL - 1LL", "unsigned long");
     }
 
     #[test]

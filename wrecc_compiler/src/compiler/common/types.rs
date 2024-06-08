@@ -942,5 +942,6 @@ pub mod tests {
         assert_type_print("unsigned int", "unsigned int");
         assert_type_print("unsigned", "unsigned int");
         assert_type_print("unsigned long", "unsigned long");
+        assert_type_print("unsigned char (unsigned)", "unsigned char (unsigned int)");
     }
 }

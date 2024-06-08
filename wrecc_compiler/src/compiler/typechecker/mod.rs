@@ -1757,7 +1757,9 @@ impl TypeChecker {
         let true_expr = self.visit_expr(func, true_expr)?;
         let false_expr = self.visit_expr(func, false_expr)?;
 
-        if !true_expr.qtype.type_compatible(&false_expr) {
+        // have to check in both directions since either expr can be 0 literal treated as pointer
+        if !true_expr.qtype.type_compatible(&false_expr) && !false_expr.qtype.type_compatible(&true_expr)
+        {
             return Err(Error::new(
                 &token,
                 ErrorKind::TypeMismatch(true_expr.qtype, false_expr.qtype),
@@ -2606,6 +2608,13 @@ mod tests {
     }
 
     #[test]
+    fn ternary() {
+        assert_type!("a ? 0 : (const void *)0", "const void*", "int a;");
+        assert_type!("a ? (void *)0 : 0", "void*", "int a;");
+        assert_type!("a ? a : 0", "int*", "int* a;");
+    }
+
+    #[test]
     fn comp_type() {
         assert_type!("1 == a", "int", "long a;");
         assert_type!("a == b", "int", "char *a,*b;");
@@ -2663,6 +2672,9 @@ mod tests {
         assert_type_err!("s1 && 1", ErrorKind::InvalidLogical(..), env);
         assert_type_err!("s1 - u1", ErrorKind::InvalidBinary(..), env);
         assert_type_err!("&s1 - &u1", ErrorKind::InvalidBinary(..), env);
+
+        assert_type!("a ? s1 : s2", "struct Foo", env);
+        assert_type_err!("a ? s1 : u1", ErrorKind::TypeMismatch(..), env);
     }
     #[test]
     fn func_expr() {

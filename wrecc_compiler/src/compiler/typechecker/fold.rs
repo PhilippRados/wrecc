@@ -722,6 +722,7 @@ mod tests {
             "(unsigned)420793087",
             "unsigned int",
         );
+        assert_fold_type("999999u * 9999999 * 999999", "420793087u", "unsigned int");
         assert_fold_error!(
             "999999 * 9999999 * 999999",
             ErrorKind::IntegerOverflow(QualType {
@@ -787,5 +788,6 @@ mod tests {
         assert_fold("(short *)1 + -5", "(short*)-9");
         assert_fold("(int*)1 + -9223372036854775807", "(int*)5");
         assert_fold_error!("(int*)1 + -9223372036854775808", ErrorKind::ScaleOverflow);
+        assert_fold_error!("(int*)1 - 9223372036854775809ul", ErrorKind::ScaleOverflow);
     }
 }

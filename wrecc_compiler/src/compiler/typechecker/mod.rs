@@ -2614,6 +2614,8 @@ mod tests {
         assert_type!("(void*)1 == a", "int", "long* a;");
         assert_type!("0 == a", "int", "long* a;");
         assert_type!("a == 0", "int", "int* a;");
+        assert_type!("a == 2l", "int", "unsigned int a;");
+        assert_type!("a == 2lu", "int", "int a;");
 
         assert_type_err!("1 == a", ErrorKind::InvalidComp(..), "long *a;");
         assert_type_err!("a == b", ErrorKind::InvalidComp(..), "int *a; long *b;");

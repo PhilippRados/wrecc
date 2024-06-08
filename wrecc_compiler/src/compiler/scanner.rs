@@ -270,9 +270,11 @@ impl<'a> Scanner<'a> {
                 match suffix.as_str() {
                     "u" | "U" => Some(IntSuffix::U),
                     "l" | "L" => Some(IntSuffix::L),
-                    "ul" | "Ul" | "uL" | "UL" => Some(IntSuffix::UL),
+                    "ul" | "Ul" | "uL" | "UL" | "lu" | "lU" | "Lu" | "LU" => Some(IntSuffix::UL),
                     "ll" | "LL" => Some(IntSuffix::LL),
-                    "ull" | "Ull" | "uLL" | "ULL" => Some(IntSuffix::ULL),
+                    "ull" | "Ull" | "uLL" | "ULL" | "llu" | "llU" | "LLu" | "LLU" => {
+                        Some(IntSuffix::ULL)
+                    }
                     _ => return Err(Error::new(&suffix_tok, ErrorKind::InvalidIntSuffix(suffix))),
                 }
             }
@@ -682,5 +684,21 @@ mod tests {
         ];
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn int_suffix() {
+        assert_eq!(setup("1L")[0], TokenKind::Number(1, Some(IntSuffix::L)));
+        assert_eq!(setup("1LU")[0], TokenKind::Number(1, Some(IntSuffix::UL)));
+        assert_eq!(setup("1Ul")[0], TokenKind::Number(1, Some(IntSuffix::UL)));
+        assert_eq!(setup("1llU")[0], TokenKind::Number(1, Some(IntSuffix::ULL)));
+        assert_eq!(
+            setup("1 l"),
+            [TokenKind::Number(1, None), TokenKind::Ident("l".to_string())]
+        );
+
+        assert!(matches!(setup_err("01UU")[0], ErrorKind::InvalidIntSuffix(..)));
+        assert!(matches!(setup_err("1lLu")[0], ErrorKind::InvalidIntSuffix(..)));
+        assert!(matches!(setup_err("1p")[0], ErrorKind::InvalidIntSuffix(..)));
     }
 }

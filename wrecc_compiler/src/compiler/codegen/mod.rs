@@ -1027,11 +1027,7 @@ impl Compiler {
                     // that doesnt belong to value_reg: casting unsigned int to long
                     // int a: -4(%rbp), 4 bytes allocate
                     // `movq -4(%rbp), %r10`, would read 8 bytes
-                    value_reg = convert_reg!(
-                        self,
-                        value_reg,
-                        Register::Temp(..) | Register::Stack(..) | Register::Label(..)
-                    );
+                    value_reg = convert_reg!(self, value_reg, Register::Stack(..) | Register::Label(..));
 
                     value_reg.set_type(new_type);
                     self.write_out(Lir::Mov(value_reg.clone(), dest_reg.clone()))

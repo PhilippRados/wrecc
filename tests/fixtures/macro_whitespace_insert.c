@@ -1,4 +1,4 @@
-#define more 12
+#define ll 12
 
 #define foo +some
 #define some =
@@ -8,7 +8,7 @@
 int main() {
   foo;
 
-  int b = 1more;
+  int b = 1ll;
 
   int a;
   a >bar= 2;

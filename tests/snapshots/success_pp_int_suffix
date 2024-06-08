@@ -1,0 +1,6 @@
+error: invalid integer suffix: '_this121_suf'
+|  --> in tests/fixtures/pp_int_suffix.c:5:11
+|
+5   int c = 1221_this121_suf;
+|           ^
+1 error generated.

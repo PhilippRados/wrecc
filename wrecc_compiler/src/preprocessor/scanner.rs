@@ -24,7 +24,7 @@ pub enum TokenKind {
     String(String),
     CharLit(String),
     Ident(String),
-    Number(String),
+    Number(String, String),
     Whitespace(String),
     Other(char),
 }
@@ -56,10 +56,10 @@ impl Token {
             TokenKind::Define | TokenKind::Ifndef => 6,
             TokenKind::Include | TokenKind::Defined => 7,
             TokenKind::String(s)
-            | TokenKind::Number(s)
             | TokenKind::CharLit(s)
             | TokenKind::Ident(s)
             | TokenKind::Whitespace(s) => s.len(),
+            TokenKind::Number(num, suffix) => num.len() + suffix.len(),
         }
     }
 }
@@ -97,12 +97,12 @@ impl ToString for TokenKind {
             TokenKind::Else => "else".to_string(),
             TokenKind::Endif => "endif".to_string(),
             TokenKind::Newline => "\n".to_string(),
-            TokenKind::Number(s)
-            | TokenKind::String(s)
+            TokenKind::String(s)
             | TokenKind::CharLit(s)
             | TokenKind::Ident(s)
             | TokenKind::Whitespace(s) => s.to_string(),
             TokenKind::Other(c) => c.to_string(),
+            TokenKind::Number(num, suffix) => num.to_string() + suffix,
         }
     }
 }
@@ -200,10 +200,26 @@ impl Scanner {
                     self.add_token(&mut result, ident, Some(loc));
                 }
                 _ if c.is_ascii_digit() => {
-                    let (number, loc) =
-                        self.consume_until(&c.to_string(), |c, _| !c.is_ascii_digit(), false);
+                    let mut num_string = String::from(c);
+                    if c == '0' {
+                        match (self.source.peek(), self.source.double_peek()) {
+                            (Some('x' | 'X'), Some(next)) if next.is_ascii_digit() => {
+                                num_string.push(self.source.next().unwrap())
+                            }
+                            _ => (),
+                        }
+                    }
 
-                    self.add_token(&mut result, TokenKind::Number(number), Some(loc));
+                    let (num_string, loc) =
+                        self.consume_until(&num_string, |c, _| !c.is_ascii_digit(), false);
+
+                    let (suffix, _) = self.consume_until(
+                        &"",
+                        |c, _| !c.is_alphabetic() && c != '_' && !c.is_ascii_digit(),
+                        false,
+                    );
+
+                    self.add_token(&mut result, TokenKind::Number(num_string, suffix), Some(loc));
                 }
                 '\\' if matches!(self.source.peek(), Some('\n')) => {
                     // skip over escaped newline
@@ -350,10 +366,9 @@ mod tests {
     fn ident() {
         let actual = setup_tokenkind("1first 2 some23: more");
         let expected = vec![
-            TokenKind::Number("1".to_string()),
-            TokenKind::Ident("first".to_string()),
+            TokenKind::Number("1".to_string(), "first".to_string()),
             TokenKind::Whitespace(" ".to_string()),
-            TokenKind::Number("2".to_string()),
+            TokenKind::Number("2".to_string(), "".to_string()),
             TokenKind::Whitespace(" ".to_string()),
             TokenKind::Ident("some23".to_string()),
             TokenKind::Other(':'),
@@ -399,7 +414,7 @@ mod tests {
             TokenKind::Whitespace(" ".to_string()),
             TokenKind::Other('*'),
             TokenKind::Other(')'),
-            TokenKind::Number("0".to_string()),
+            TokenKind::Number("0".to_string(), "".to_string()),
             TokenKind::Other(')'),
         ];
 
@@ -448,7 +463,7 @@ mod tests {
             TokenKind::Hash,
             TokenKind::If,
             TokenKind::Whitespace(" ".to_string()),
-            TokenKind::Number("1".to_string()),
+            TokenKind::Number("1".to_string(), "".to_string()),
             TokenKind::Whitespace(" ".to_string()),
             TokenKind::Other('<'),
             TokenKind::Whitespace(" ".to_string()),
@@ -527,8 +542,7 @@ mod tests {
     fn numbers_and_idents() {
         let actual = setup_tokenkind("12323_hello12_2;");
         let expected = vec![
-            TokenKind::Number("12323".to_string()),
-            TokenKind::Ident("_hello12_2".to_string()),
+            TokenKind::Number("12323".to_string(), "_hello12_2".to_string()),
             TokenKind::Other(';'),
         ];
 
@@ -551,13 +565,58 @@ mod tests {
     fn multiline_number() {
         let actual = setup_tok_line("123\\\n32\n12\\3\\\n4");
         let expected = vec![
-            (TokenKind::Number("12332".to_string()), 1),
+            (TokenKind::Number("12332".to_string(), "".to_string()), 1),
             (TokenKind::Newline, 2),
-            (TokenKind::Number("12".to_string()), 3),
+            (TokenKind::Number("12".to_string(), "".to_string()), 3),
             (TokenKind::Other('\\'), 3),
-            (TokenKind::Number("34".to_string()), 3),
+            (TokenKind::Number("34".to_string(), "".to_string()), 3),
         ];
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn hex_numbers() {
+        assert_eq!(
+            setup_tokenkind("0x")[0],
+            TokenKind::Number("0".to_string(), "x".to_string())
+        );
+        assert_eq!(
+            setup_tokenkind("0xxxx")[0],
+            TokenKind::Number("0".to_string(), "xxxx".to_string())
+        );
+        assert_eq!(
+            setup_tokenkind("0x1")[0],
+            TokenKind::Number("0x1".to_string(), "".to_string())
+        );
+        assert_eq!(
+            setup_tokenkind("0X1ll")[0],
+            TokenKind::Number("0X1".to_string(), "ll".to_string())
+        );
+        assert_eq!(
+            setup_tokenkind("1x1")[0],
+            TokenKind::Number("1".to_string(), "x1".to_string())
+        );
+
+        assert_eq!(
+            setup_tokenkind("1 x1"),
+            [
+                TokenKind::Number("1".to_string(), "".to_string()),
+                TokenKind::Whitespace(" ".to_string()),
+                TokenKind::Ident("x1".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn num_suffix() {
+        assert_eq!(
+            setup_tokenkind("1l")[0],
+            TokenKind::Number("1".to_string(), "l".to_string())
+        );
+        assert_eq!(
+            setup_tokenkind("01221_this121_suf")[0],
+            TokenKind::Number("01221".to_string(), "_this121_suf".to_string())
+        );
     }
 }

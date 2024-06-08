@@ -225,7 +225,7 @@ impl<'a> Scanner<'a> {
                     Ok(char) => tokens.push(pp_token, TokenKind::CharLit(char)),
                     Err(e) => errors.push(e),
                 },
-                PPKind::Number(ref num) => match self.num_lit(&pp_token, num) {
+                PPKind::Number(ref num, ref suffix) => match self.num_lit(&pp_token, num, suffix) {
                     Ok((num, suffix)) => tokens.push(pp_token, TokenKind::Number(num, suffix)),
                     Err(e) => errors.push(e),
                 },
@@ -257,28 +257,29 @@ impl<'a> Scanner<'a> {
             Err(errors)
         }
     }
-    fn num_lit(&mut self, pp_token: &PPToken, num: &String) -> Result<(u64, Option<IntSuffix>), Error> {
+    fn num_lit(
+        &mut self,
+        pp_token: &PPToken,
+        num: &String,
+        suffix: &String,
+    ) -> Result<(u64, Option<IntSuffix>), Error> {
         let n = num
             .parse::<u64>()
             .map_err(|e| Error::new(pp_token, ErrorKind::InvalidNumber(e.kind().clone())))?;
 
-        let suffix = match self.source.peek().map(|tok| &tok.kind) {
-            Some(PPKind::Ident(_)) => {
-                let suffix_tok = self.source.next().expect("just checked if ident");
-                let suffix = suffix_tok.kind.to_string();
-
-                match suffix.as_str() {
-                    "u" | "U" => Some(IntSuffix::U),
-                    "l" | "L" => Some(IntSuffix::L),
-                    "ul" | "Ul" | "uL" | "UL" | "lu" | "lU" | "Lu" | "LU" => Some(IntSuffix::UL),
-                    "ll" | "LL" => Some(IntSuffix::LL),
-                    "ull" | "Ull" | "uLL" | "ULL" | "llu" | "llU" | "LLu" | "LLU" => {
-                        Some(IntSuffix::ULL)
-                    }
-                    _ => return Err(Error::new(&suffix_tok, ErrorKind::InvalidIntSuffix(suffix))),
-                }
+        let suffix = match suffix.as_str() {
+            "u" | "U" => Some(IntSuffix::U),
+            "l" | "L" => Some(IntSuffix::L),
+            "ul" | "Ul" | "uL" | "UL" | "lu" | "lU" | "Lu" | "LU" => Some(IntSuffix::UL),
+            "ll" | "LL" => Some(IntSuffix::LL),
+            "ull" | "Ull" | "uLL" | "ULL" | "llu" | "llU" | "LLu" | "LLU" => Some(IntSuffix::ULL),
+            "" => None,
+            _ => {
+                return Err(Error::new(
+                    pp_token,
+                    ErrorKind::InvalidIntSuffix(suffix.to_string()),
+                ))
             }
-            None | Some(_) => None,
         };
 
         Ok((n, suffix))
@@ -697,8 +698,13 @@ mod tests {
             [TokenKind::Number(1, None), TokenKind::Ident("l".to_string())]
         );
 
-        assert!(matches!(setup_err("01UU")[0], ErrorKind::InvalidIntSuffix(..)));
+        assert!(matches!(setup_err("1UU")[0], ErrorKind::InvalidIntSuffix(..)));
         assert!(matches!(setup_err("1lLu")[0], ErrorKind::InvalidIntSuffix(..)));
         assert!(matches!(setup_err("1p")[0], ErrorKind::InvalidIntSuffix(..)));
+    }
+
+    #[test]
+    fn num_literals() {
+        // assert!(matches!(setup_err("08")[0], ErrorKind::InvalidOctal(..)));
     }
 }

@@ -3,14 +3,9 @@ error: expected expression, found: '='
 |
 9   foo;
 |   ^
-error: expected ';' after declaration
-|  --> in tests/fixtures/macro_whitespace_insert.c:11:12
-|
-11   int b = 1more;
-|             ^
 error: expected expression, found: '>'
 |  --> in tests/fixtures/macro_whitespace_insert.c:14:6
 |
 14   a >bar= 2;
 |       ^
-3 errors generated.
+2 errors generated.

@@ -477,12 +477,12 @@ impl<'a> Preprocessor<'a> {
                             Some(identifier) => {
                                 result.push(if self.defines.contains_key(&identifier) {
                                     Token {
-                                        kind: TokenKind::Number("1".to_string()),
+                                        kind: TokenKind::Number("1".to_string(), "".to_string()),
                                         ..token
                                     }
                                 } else {
                                     Token {
-                                        kind: TokenKind::Number("0".to_string()),
+                                        kind: TokenKind::Number("0".to_string(), "".to_string()),
                                         ..token
                                     }
                                 });
@@ -539,7 +539,7 @@ impl<'a> Preprocessor<'a> {
             .map(|token| {
                 if token.kind.as_ident().is_some() {
                     Token {
-                        kind: TokenKind::Number("0".to_string()),
+                        kind: TokenKind::Number("0".to_string(), "".to_string()),
                         ..token
                     }
                 } else {

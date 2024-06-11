@@ -1184,7 +1184,7 @@ impl Parser {
                     ExprKind::CompoundAssign {
                         l_expr: Box::new(right),
                         token,
-                        r_expr: Box::new(ExprKind::Number(1, None)),
+                        r_expr: Box::new(ExprKind::Number(1, Radix::Decimal, None)),
                     }
                 }
                 // typecast
@@ -1311,8 +1311,8 @@ impl Parser {
     }
     fn primary(&mut self) -> Result<ExprKind, Error> {
         if let Some(n) = match_next!(self, TokenKind::Number(..)) {
-            let (n, suffix) = n.unwrap_num();
-            return Ok(ExprKind::Number(n, suffix));
+            let (n, radix, suffix) = n.unwrap_num();
+            return Ok(ExprKind::Number(n, radix, suffix));
         }
         if let Some(c) = match_next!(self, TokenKind::CharLit(_)) {
             return Ok(ExprKind::Char(c.unwrap_char()));
@@ -1730,13 +1730,13 @@ int main() {
     #[test]
     fn matches_works_on_enums_with_values() {
         let tokens = vec![
-            token_default!(TokenKind::Number(2, None)),
+            token_default!(TokenKind::Number(2, Radix::Decimal, None)),
             token_default!(TokenKind::Plus),
         ];
         let mut p = Parser::new(tokens);
 
         let result = match_next!(p, TokenKind::Number(..) | TokenKind::String(_));
-        let expected = Some(token_default!(TokenKind::Number(2, None)));
+        let expected = Some(token_default!(TokenKind::Number(2, Radix::Decimal, None)));
 
         assert_eq!(result, expected);
     }

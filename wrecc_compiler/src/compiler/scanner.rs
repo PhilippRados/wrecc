@@ -226,7 +226,9 @@ impl<'a> Scanner<'a> {
                     Err(e) => errors.push(e),
                 },
                 PPKind::Number(ref num, ref suffix) => match self.num_lit(&pp_token, num, suffix) {
-                    Ok((num, suffix)) => tokens.push(pp_token, TokenKind::Number(num, suffix)),
+                    Ok((num, radix, suffix)) => {
+                        tokens.push(pp_token, TokenKind::Number(num, radix, suffix))
+                    }
                     Err(e) => errors.push(e),
                 },
                 PPKind::Ident(_)
@@ -262,18 +264,27 @@ impl<'a> Scanner<'a> {
         pp_token: &PPToken,
         num: &String,
         suffix: &String,
-    ) -> Result<(u64, Option<IntSuffix>), Error> {
+    ) -> Result<(u64, Radix, Option<IntSuffix>), Error> {
         let mut num_iter = num.chars().peekable();
-        let n = if num.len() > 1 && num_iter.next_if(|c| *c == '0').is_some() {
+        let (n, radix) = if num.len() > 1 && num_iter.next_if(|c| *c == '0').is_some() {
             if num_iter.next_if(|c| *c == 'x' || *c == 'X').is_some() {
-                u64::from_str_radix(&num_iter.collect::<String>(), 16).map_err(|e| (e, "hex"))
+                (u64::from_str_radix(&num_iter.collect::<String>(), 16), Radix::Hex)
             } else {
-                u64::from_str_radix(&num_iter.collect::<String>(), 8).map_err(|e| (e, "octal"))
+                (
+                    u64::from_str_radix(&num_iter.collect::<String>(), 8),
+                    Radix::Octal,
+                )
             }
         } else {
-            num.parse::<u64>().map_err(|e| (e, "decimal"))
-        }
-        .map_err(|(e, radix)| Error::new(pp_token, ErrorKind::InvalidNumber(e.kind().clone(), radix)))?;
+            (num.parse::<u64>(), Radix::Decimal)
+        };
+
+        let n = n.map_err(|e| {
+            Error::new(
+                pp_token,
+                ErrorKind::InvalidNumber(e.kind().clone(), radix.to_string()),
+            )
+        })?;
 
         let suffix = match suffix.as_str() {
             "u" | "U" => Some(IntSuffix::U),
@@ -290,7 +301,7 @@ impl<'a> Scanner<'a> {
             }
         };
 
-        Ok((n, suffix))
+        Ok((n, radix, suffix))
     }
     fn string_lit(&mut self, pp_token: &PPToken, mut string: String) -> Result<String, Error> {
         let first = string.remove(0);
@@ -457,12 +468,12 @@ mod tests {
     fn token_basic_math_expression() {
         let actual = setup("3 + 1 / -4");
         let expected = vec![
-            TokenKind::Number(3, None),
+            TokenKind::Number(3, Radix::Decimal, None),
             TokenKind::Plus,
-            TokenKind::Number(1, None),
+            TokenKind::Number(1, Radix::Decimal, None),
             TokenKind::Slash,
             TokenKind::Minus,
-            TokenKind::Number(4, None),
+            TokenKind::Number(4, Radix::Decimal, None),
         ];
         assert_eq!(actual, expected);
     }
@@ -470,11 +481,11 @@ mod tests {
     fn basic_math_double_digit_nums() {
         let actual = setup("300 - 11 * 41");
         let expected = vec![
-            TokenKind::Number(300, None),
+            TokenKind::Number(300, Radix::Decimal, None),
             TokenKind::Minus,
-            TokenKind::Number(11, None),
+            TokenKind::Number(11, Radix::Decimal, None),
             TokenKind::Star,
-            TokenKind::Number(41, None),
+            TokenKind::Number(41, Radix::Decimal, None),
         ];
         assert_eq!(actual, expected);
     }
@@ -512,7 +523,12 @@ mod tests {
                 "while (val >= 12) {*p = val}",
             ),
             test_token(TokenKind::GreaterEqual, 2, 12, "while (val >= 12) {*p = val}"),
-            test_token(TokenKind::Number(12, None), 2, 15, "while (val >= 12) {*p = val}"),
+            test_token(
+                TokenKind::Number(12, Radix::Decimal, None),
+                2,
+                15,
+                "while (val >= 12) {*p = val}",
+            ),
             test_token(TokenKind::RightParen, 2, 17, "while (val >= 12) {*p = val}"),
             test_token(TokenKind::LeftBrace, 2, 19, "while (val >= 12) {*p = val}"),
             test_token(TokenKind::Star, 2, 20, "while (val >= 12) {*p = val}"),
@@ -575,7 +591,7 @@ mod tests {
             test_token(TokenKind::Int, 2, 1, "int ä = 123"),
             test_token(TokenKind::Ident("ä".to_string()), 2, 5, "int ä = 123"),
             test_token(TokenKind::Equal, 2, 8, "int ä = 123"), // ä len is 2 but thats fine because its the same when indexing
-            test_token(TokenKind::Number(123, None), 2, 10, "int ä = 123"),
+            test_token(TokenKind::Number(123, Radix::Decimal, None), 2, 10, "int ä = 123"),
         ];
         assert_eq!(actual, expected);
     }
@@ -697,13 +713,28 @@ mod tests {
 
     #[test]
     fn int_suffix() {
-        assert_eq!(setup("1L")[0], TokenKind::Number(1, Some(IntSuffix::L)));
-        assert_eq!(setup("1LU")[0], TokenKind::Number(1, Some(IntSuffix::UL)));
-        assert_eq!(setup("1Ul")[0], TokenKind::Number(1, Some(IntSuffix::UL)));
-        assert_eq!(setup("1llU")[0], TokenKind::Number(1, Some(IntSuffix::ULL)));
+        assert_eq!(
+            setup("1L")[0],
+            TokenKind::Number(1, Radix::Decimal, Some(IntSuffix::L))
+        );
+        assert_eq!(
+            setup("1LU")[0],
+            TokenKind::Number(1, Radix::Decimal, Some(IntSuffix::UL))
+        );
+        assert_eq!(
+            setup("1Ul")[0],
+            TokenKind::Number(1, Radix::Decimal, Some(IntSuffix::UL))
+        );
+        assert_eq!(
+            setup("1llU")[0],
+            TokenKind::Number(1, Radix::Decimal, Some(IntSuffix::ULL))
+        );
         assert_eq!(
             setup("1 l"),
-            [TokenKind::Number(1, None), TokenKind::Ident("l".to_string())]
+            [
+                TokenKind::Number(1, Radix::Decimal, None),
+                TokenKind::Ident("l".to_string())
+            ]
         );
 
         assert!(matches!(setup_err("1UU")[0], ErrorKind::InvalidIntSuffix(..)));
@@ -713,9 +744,23 @@ mod tests {
 
     #[test]
     fn num_literals() {
-        assert!(matches!(setup("0")[0], TokenKind::Number(0, None)));
-        assert!(matches!(setup("07132")[0], TokenKind::Number(3674, None)));
-        assert!(matches!(setup("0X1aA")[0], TokenKind::Number(426, None)));
+        assert!(matches!(
+            setup("0")[0],
+            TokenKind::Number(0, Radix::Decimal, None)
+        ));
+        assert!(matches!(
+            setup("07132")[0],
+            TokenKind::Number(3674, Radix::Octal, None)
+        ));
+        assert!(matches!(
+            setup("0X1aA")[0],
+            TokenKind::Number(426, Radix::Hex, None)
+        ));
+        assert!(matches!(
+            setup("0xffffffff")[0],
+            TokenKind::Number(4294967295, Radix::Hex, None)
+        ));
+
         assert!(matches!(setup_err("08")[0], ErrorKind::InvalidNumber(_, "octal")));
     }
 }

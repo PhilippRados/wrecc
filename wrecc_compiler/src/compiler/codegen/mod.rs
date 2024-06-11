@@ -971,8 +971,7 @@ impl Compiler {
     ) -> Register {
         let value_reg = self.execute_expr(func, expr);
         let value_reg = self.convert_to_rval(value_reg);
-        let by_amount =
-            Register::Literal(LiteralKind::new(by_amount as u64, &None), value_reg.get_type());
+        let by_amount = Register::Literal(LiteralKind::Unsigned(by_amount as u64), value_reg.get_type());
 
         match direction {
             ScaleDirection::Up => self.cg_mult(by_amount, value_reg),

@@ -73,7 +73,7 @@ pub enum ExprKind {
     },
     String(Token),
     Char(char),
-    Number(u64, Option<IntSuffix>),
+    Number(u64, Radix, Option<IntSuffix>),
     Ident(Token),
     Nop,
 }
@@ -104,7 +104,7 @@ impl PrintIndent for ExprKind {
                     indent_fmt(r_expr.as_ref(), indent_level + 1)
                 )
             }
-            ExprKind::Number(literal, _) => format!("Literal: {}", literal.to_string()),
+            ExprKind::Number(literal, ..) => format!("Literal: {}", literal.to_string()),
             ExprKind::Char(c) => format!("Character-literal: {}", c),
             ExprKind::Ident(name) => format!("Ident: '{}'", name.unwrap_string()),
             ExprKind::String(token) => format!("String: {:?}", token.unwrap_string()),

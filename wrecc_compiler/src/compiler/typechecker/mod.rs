@@ -1591,7 +1591,7 @@ impl TypeChecker {
                 kind: mir::expr::ExprKind::Literal(LiteralKind::Signed(c as i64)),
                 value_kind: ValueKind::Rvalue,
             }),
-            hir::expr::ExprKind::Number(n, suffix) => Ok(Self::num_literal(n, suffix)),
+            hir::expr::ExprKind::Number(n, radix, suffix) => Ok(Self::num_literal(n, radix, suffix)),
             hir::expr::ExprKind::String(token) => self.string(token.unwrap_string()),
             hir::expr::ExprKind::Logical { left, token, right } => {
                 self.evaluate_logical(func, *left, token, *right)
@@ -1854,20 +1854,26 @@ impl TypeChecker {
             left: Box::new(hir::expr::ExprKind::CompoundAssign {
                 l_expr: Box::new(expr),
                 token: Token { kind: comp_op, ..token.clone() },
-                r_expr: Box::new(hir::expr::ExprKind::Number(1, None)),
+                r_expr: Box::new(hir::expr::ExprKind::Number(1, Radix::Decimal, None)),
             }),
             token: Token { kind: bin_op, ..token },
-            right: Box::new(hir::expr::ExprKind::Number(1, None)),
+            right: Box::new(hir::expr::ExprKind::Number(1, Radix::Decimal, None)),
         };
 
         // need to cast back to left-type since binary operation integer promotes
         // char c; typeof(c--) == char
         Ok(Self::maybe_cast(qtype, self.visit_expr(func, postunary_sugar)?))
     }
-    fn num_literal(n: u64, suffix: Option<IntSuffix>) -> mir::expr::Expr {
-        let literal = LiteralKind::new(n, &suffix);
+    fn num_literal(n: u64, radix: Radix, suffix: Option<IntSuffix>) -> mir::expr::Expr {
+        let prim_ty = Primitive::new(n, radix, suffix);
+        let literal = if prim_ty.is_unsigned() {
+            LiteralKind::Unsigned(n)
+        } else {
+            LiteralKind::Signed(n as i64)
+        };
+
         mir::expr::Expr {
-            qtype: QualType::new(Type::Primitive(literal.integer_type(suffix))),
+            qtype: QualType::new(Type::Primitive(prim_ty)),
             kind: mir::expr::ExprKind::Literal(literal),
             value_kind: ValueKind::Rvalue,
         }
@@ -2583,11 +2589,17 @@ mod tests {
         assert_type!("1u", "unsigned int");
         assert_type!("1l", "long");
         assert_type!("1ll", "long");
+        assert_type!("4294967295", "long");
         assert_type!("4294967295u", "unsigned int");
         assert_type!("4294967296u", "unsigned long");
         assert_type!("9223372036854775807l", "long");
         assert_type!("9223372036854775807ULL", "unsigned long");
         assert_type!("9223372036854775808l", "unsigned long");
+        assert_type!("0xffffffff", "unsigned int");
+        assert_type!("0xffffffffl", "long");
+        assert_type!("037777777777", "unsigned int");
+        assert_type!("037777777777u", "unsigned int");
+        assert_type!("037777777777l", "long");
     }
 
     #[test]

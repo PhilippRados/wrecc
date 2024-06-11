@@ -203,7 +203,7 @@ impl Scanner {
                     let mut num_string = String::from(c);
                     let is_hex = if c == '0' {
                         match (self.source.peek(), self.source.double_peek()) {
-                            (Some('x' | 'X'), Some(next)) if next.is_ascii_digit() => {
+                            (Some('x' | 'X'), Some(next)) if next.is_digit(16) => {
                                 num_string.push(self.source.next().unwrap());
                                 true
                             }
@@ -608,6 +608,10 @@ mod tests {
         assert_eq!(
             setup_tokenkind("1x1")[0],
             TokenKind::Number("1".to_string(), "x1".to_string())
+        );
+        assert_eq!(
+            setup_tokenkind("0xffffffff")[0],
+            TokenKind::Number("0xffffffff".to_string(), "".to_string())
         );
 
         assert_eq!(

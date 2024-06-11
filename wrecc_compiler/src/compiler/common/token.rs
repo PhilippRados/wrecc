@@ -13,6 +13,22 @@ pub enum IntSuffix {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Radix {
+    Decimal,
+    Hex,
+    Octal,
+}
+impl Radix {
+    pub fn to_string(&self) -> &'static str {
+        match self {
+            Radix::Hex => "hex",
+            Radix::Octal => "octal",
+            Radix::Decimal => "decimal",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     // Single-character tokens.
     LeftParen,
@@ -68,7 +84,7 @@ pub enum TokenKind {
     Ident(String),
     String(String),
     CharLit(char),
-    Number(u64, Option<IntSuffix>),
+    Number(u64, Radix, Option<IntSuffix>),
 
     // Keywords.
     Void,
@@ -164,7 +180,7 @@ impl TokenKind {
             TokenKind::TypeDef | TokenKind::Default => 7,
             TokenKind::Continue | TokenKind::Register => 8,
 
-            TokenKind::Number(n, suffix) => {
+            TokenKind::Number(n, _, suffix) => {
                 n.to_string().len()
                     + match suffix {
                         Some(IntSuffix::U | IntSuffix::L) => 1,
@@ -313,9 +329,9 @@ impl Token {
             _ => panic!("cant unwrap string on {} token", self.kind),
         }
     }
-    pub fn unwrap_num(self) -> (u64, Option<IntSuffix>) {
+    pub fn unwrap_num(self) -> (u64, Radix, Option<IntSuffix>) {
         match self.kind {
-            TokenKind::Number(n, suffix) => (n, suffix),
+            TokenKind::Number(n, radix, suffix) => (n, radix, suffix),
             _ => panic!("cant unwrap number on {} token", self.kind),
         }
     }

@@ -327,11 +327,8 @@ impl Type {
     }
     pub fn is_unsigned(&self) -> bool {
         match self {
-            Type::Primitive(Primitive::Char(true))
-            | Type::Primitive(Primitive::Short(true))
-            | Type::Primitive(Primitive::Int(true))
-            | Type::Primitive(Primitive::Long(true))
-            | Type::Pointer(_) => true,
+            Type::Primitive(prim) => prim.is_unsigned(),
+            Type::Pointer(_) => true,
             _ => false,
         }
     }
@@ -455,6 +452,33 @@ impl TypeInfo for Primitive {
     }
 }
 impl Primitive {
+    /// 6.4.4.1.5 Determines smallest possible integer-type capable of holding literal number
+    pub fn new(n: u64, radix: Radix, suffix: Option<IntSuffix>) -> Primitive {
+        if let Some(IntSuffix::U | IntSuffix::UL | IntSuffix::ULL) = suffix {
+            return if u32::try_from(n).is_ok() && matches!(suffix, Some(IntSuffix::U)) {
+                Primitive::Int(true)
+            } else {
+                Primitive::Long(true)
+            };
+        }
+        if let Some(IntSuffix::L | IntSuffix::LL) = suffix {
+            return if i64::try_from(n).is_ok() {
+                Primitive::Long(false)
+            } else {
+                Primitive::Long(true)
+            };
+        }
+
+        if i32::try_from(n).is_ok() {
+            Primitive::Int(false)
+        } else if u32::try_from(n).is_ok() && matches!(radix, Radix::Octal | Radix::Hex) {
+            Primitive::Int(true)
+        } else if i64::try_from(n).is_ok() {
+            Primitive::Long(false)
+        } else {
+            Primitive::Long(true)
+        }
+    }
     fn fmt(&self) -> &str {
         match self {
             Primitive::Void => "void",
@@ -466,6 +490,16 @@ impl Primitive {
             Primitive::Int(true) => "unsigned int",
             Primitive::Long(false) => "long",
             Primitive::Long(true) => "unsigned long",
+        }
+    }
+
+    pub fn is_unsigned(&self) -> bool {
+        match self {
+            Primitive::Char(true)
+            | Primitive::Short(true)
+            | Primitive::Int(true)
+            | Primitive::Long(true) => true,
+            _ => false,
         }
     }
 
@@ -521,48 +555,6 @@ pub enum LiteralKind {
     Signed(i64),
 }
 impl LiteralKind {
-    pub fn new(n: u64, suffix: &Option<IntSuffix>) -> LiteralKind {
-        if let Some(IntSuffix::U | IntSuffix::UL | IntSuffix::ULL) = suffix {
-            return LiteralKind::Unsigned(n);
-        }
-        if let Ok(n) = i64::try_from(n) {
-            LiteralKind::Signed(n)
-        } else {
-            LiteralKind::Unsigned(n)
-        }
-    }
-    pub fn is_zero(&self) -> bool {
-        match self {
-            LiteralKind::Signed(0) | LiteralKind::Unsigned(0) => true,
-            _ => false,
-        }
-    }
-    pub fn is_negative(&self) -> bool {
-        match self {
-            LiteralKind::Signed(n) => *n < 0,
-            LiteralKind::Unsigned(_) => false,
-        }
-    }
-    /// Determines smallest possible integer-type capable of holding literal number
-    pub fn integer_type(&self, suffix: Option<IntSuffix>) -> Primitive {
-        match self {
-            LiteralKind::Signed(n) => {
-                // don't have to check for unsigned suffix because then literalkind is already unsigned
-                if i32::try_from(*n).is_ok() && !matches!(suffix, Some(IntSuffix::L | IntSuffix::LL)) {
-                    Primitive::Int(false)
-                } else {
-                    Primitive::Long(false)
-                }
-            }
-            LiteralKind::Unsigned(n) => {
-                if u32::try_from(*n).is_ok() && !matches!(suffix, Some(IntSuffix::UL | IntSuffix::ULL)) {
-                    Primitive::Int(true)
-                } else {
-                    Primitive::Long(true)
-                }
-            }
-        }
-    }
     pub fn try_i64(&self) -> Option<i64> {
         match self {
             LiteralKind::Signed(n) => Some(*n),
@@ -580,6 +572,18 @@ impl LiteralKind {
             LiteralKind::Signed(n) if *n < 0 => *n < ty.min(),
             LiteralKind::Signed(n) => *n as u64 > ty.max(),
             LiteralKind::Unsigned(n) => *n > ty.max(),
+        }
+    }
+    pub fn is_zero(&self) -> bool {
+        match self {
+            LiteralKind::Signed(0) | LiteralKind::Unsigned(0) => true,
+            _ => false,
+        }
+    }
+    pub fn is_negative(&self) -> bool {
+        match self {
+            LiteralKind::Signed(n) => *n < 0,
+            LiteralKind::Unsigned(_) => false,
         }
     }
 }

@@ -239,6 +239,7 @@ impl<'a> Scanner<'a> {
                 | PPKind::Else
                 | PPKind::Elif
                 | PPKind::Endif
+                | PPKind::Error
                 | PPKind::Undef
                 | PPKind::Define
                 | PPKind::Defined => {

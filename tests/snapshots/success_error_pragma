@@ -1,0 +1,6 @@
+error: oh   nooooo
+|  --> in tests/fixtures/error_pragma.c:3:2
+|
+3 #error oh   nooooo
+|  ^
+1 error generated.

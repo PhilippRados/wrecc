@@ -52,7 +52,7 @@ cargo install wrecc
 ## Features
 Since not all keywords are currently implemented wrecc uses [custom standard-headers](https://github.com/PhilippRados/wrecc/tree/master/include) which are built directly into the binary
 ### Preprocessor
-The preprocessor implements all [C99 preprocessor directives](https://en.cppreference.com/w/c/keyword), except `#line`, `#error` and `#pragma`. Most prominently it currently also misses function-like macros which are on the agenda though.
+The preprocessor implements all [C99 preprocessor directives](https://en.cppreference.com/w/c/keyword), except `#line` and `#pragma`. Most prominently it currently also misses function-like macros which are on the agenda though.
 
 ### Compiler
 #### Supported Keywords <a name="keywords"></a>

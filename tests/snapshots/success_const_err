@@ -3,7 +3,7 @@ error: cannot assign variable which was declared 'const'
 |
 16   a.dig = Two;
 |          ^
-error: cannot assign to 'struct Foo' that contains member 'dig' declared 'const'
+error: cannot assign to 'struct Foo' that contains member 'dig' declared 'const'
 |  --> in tests/fixtures/const_err.c:17:5
 |
 17   a = b;

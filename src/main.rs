@@ -96,12 +96,27 @@ fn output_path(
 fn assemble(options: &CliOptions, file: &Path, asm_file: OutFile) -> Result<OutFile, WreccError> {
     let output_path = output_path(file, &options.output_path, options.no_link, "o");
 
-    let output = Command::new("as")
-        .arg(asm_file.get())
-        .arg("-o")
-        .arg(output_path.get())
-        .output()
-        .map_err(|_| WreccError::Sys("could not invoke assembler 'as'".to_string()))?;
+    let output = match std::env::consts::OS {
+        "linux" => {
+            Command::new("as")
+            .arg(asm_file.get())
+            .arg("-o")
+            .arg(output_path.get())
+            .output()
+            .map_err(|_| WreccError::Sys("could not invoke assembler 'as'".to_string()))?
+        }
+        "macos" => {
+            Command::new("as")
+            .arg(asm_file.get())
+            .arg("-o")
+            .arg(output_path.get())
+            .arg("-arch")
+            .arg("x86_64")
+            .output()
+            .map_err(|_| WreccError::Sys("could not invoke assembler 'as'".to_string()))?
+        }
+        _ => return Err(WreccError::Sys(String::from("only supports linux and macos"))),
+    };
 
     if output.status.success() {
         Ok(output_path)

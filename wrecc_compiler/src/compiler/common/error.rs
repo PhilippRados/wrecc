@@ -52,7 +52,7 @@ pub enum ErrorKind {
     UnexpectedChar(char),
     CharLiteralQuotes,
     CharLiteralAscii(char),
-    InvalidEscape(char),
+    InvalidEscape(String),
     UnterminatedString,
     InvalidNumber(IntErrorKind, &'static str),
     InvalidIntSuffix(String),
@@ -186,7 +186,7 @@ impl ErrorKind {
             ErrorKind::CharLiteralAscii(c) => {
                 format!("character literal must be valid ascii value. '{}' is not", c)
             }
-            ErrorKind::InvalidEscape(c) => format!("cannot escape character '{}'", c),
+            ErrorKind::InvalidEscape(c) => format!("cannot escape character sequence '{}'", c),
             ErrorKind::UnterminatedString => "unterminated string".to_string(),
 
             ErrorKind::NotIntegerConstant(s) => {

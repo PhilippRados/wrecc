@@ -308,11 +308,11 @@ impl<'a> Scanner<'a> {
         assert_eq!(first, '"');
 
         if let Some('"') = string.pop() {
-            let mut chars = string.chars();
+            let mut chars = string.chars().peekable();
             let mut string = Vec::new();
 
             while let Some(c) = chars.next() {
-                let c = self.parse_char(pp_token, c, &mut chars)?;
+                let c = self.parse_char(pp_token, c, &mut chars, true)?;
                 string.push(c);
             }
 
@@ -322,52 +322,92 @@ impl<'a> Scanner<'a> {
         }
     }
     fn char_lit(&mut self, pp_token: &PPToken, char_string: &str) -> Result<char, Error> {
-        let mut char_iter = char_string.chars();
+        let mut char_iter = char_string.chars().peekable();
 
         let first = char_iter.next();
         assert_eq!(first, Some('\''));
 
         let c = char_iter
             .next()
-            .ok_or(Error::new(pp_token, ErrorKind::Eof("character literal")))?;
+            .ok_or(Error::new(pp_token, ErrorKind::Eof("expected character literal")))?;
 
-        let c = self.parse_char(pp_token, c, &mut char_iter)?;
+        let c = self.parse_char(pp_token, c, &mut char_iter, false)?;
 
         if !matches!(char_iter.next(), Some('\'')) {
             return Err(Error::new(pp_token, ErrorKind::CharLiteralQuotes));
         }
-        if !c.is_ascii() {
-            return Err(Error::new(pp_token, ErrorKind::CharLiteralAscii(c)));
-        };
 
         Ok(c)
     }
     fn parse_char(
         &mut self,
         pp_token: &PPToken,
-        mut c: char,
-        char_iter: &mut Chars,
+        c: char,
+        char_iter: &mut Peekable<Chars>,
+        is_string: bool,
     ) -> Result<char, Error> {
         if c == '\\' {
+            let char_string = char_iter.clone().collect::<String>();
             let char_to_escape = char_iter
                 .next()
-                .ok_or(Error::new(pp_token, ErrorKind::Eof("character literal")))?;
-            c = self
-                .escape_char(char_to_escape)
-                .ok_or(Error::new(pp_token, ErrorKind::InvalidEscape(char_to_escape)))?;
+                .ok_or(Error::new(pp_token, ErrorKind::Eof("expected character literal")))?;
+            self.escape_char(char_to_escape, char_iter)
+                .ok_or(Error::new(pp_token, ErrorKind::InvalidEscape(char_string)))
+        // strings can contain non-ascii chars
+        } else if c.is_ascii() || is_string {
+            Ok(c)
+        } else {
+            Err(Error::new(pp_token, ErrorKind::CharLiteralAscii(c)))
         }
-
-        Ok(c)
     }
-    fn escape_char(&mut self, char_to_escape: char) -> Option<char> {
+    fn escape_char(&mut self, char_to_escape: char, char_iter: &mut Peekable<Chars>) -> Option<char> {
         match char_to_escape {
-            '0' => Some('\0'),
+            'a' => Some('\x07'),
+            'b' => Some('\x08'),
+            'f' => Some('\x0C'),
             'n' => Some('\n'),
             'r' => Some('\r'),
             't' => Some('\t'),
+            'v' => Some('\x0B'),
             '\\' => Some('\\'),
-            '\'' => Some('\''),
             '"' => Some('\"'),
+            '\'' => Some('\''),
+            '?' => Some('?'),
+            c if c.is_digit(8) => {
+                let mut octal = String::from(c);
+                while let Some(c) = char_iter.peek() {
+                    if c.is_digit(8) {
+                        octal.push(char_iter.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                // should only contain upto three octal literals
+                if octal.len() > 3 {
+                    return None;
+                }
+
+                let dec = u8::from_str_radix(&octal, 8).ok()?;
+                let c = char::from_u32(dec as u32)?;
+
+                Some(c)
+            }
+            c if c == 'x' => {
+                // Hexadecimal escape sequences have no length limit and terminate at the first
+                // character that is not a valid hexadecimal digit. Resulting literal should fit in char type
+                let mut hex = String::new();
+                while let Some(c) = char_iter.peek() {
+                    if c.is_digit(16) {
+                        hex.push(char_iter.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                let dec = u8::from_str_radix(&hex, 16).ok()?;
+                let c = char::from_u32(dec as u32)?;
+
+                Some(c)
+            }
             _ => None,
         }
     }
@@ -608,7 +648,7 @@ mod tests {
         assert_eq!(actual, expected);
     }
     #[test]
-    fn char_literal() {
+    fn char_assign() {
         let actual = setup("char some = '1'");
         let expected = vec![
             TokenKind::Char,
@@ -627,6 +667,17 @@ mod tests {
     }
 
     #[test]
+    fn non_ascii_char() {
+        assert!(matches!(setup_err("'ü'")[0], ErrorKind::CharLiteralAscii(_)));
+    }
+
+    #[test]
+    fn non_ascii_string() {
+        // non ascii value in string is fine but in char is not
+        assert_eq!(setup("\"hallö\"")[0], TokenKind::String("hallö".to_string()));
+    }
+
+    #[test]
     fn ellipsis_dot_distinction() {
         let actual = setup(".....;...");
         let expected = vec![
@@ -636,21 +687,6 @@ mod tests {
             TokenKind::Semicolon,
             TokenKind::Ellipsis,
         ];
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn escaped_char() {
-        // c = '\'';
-        let input: String = vec!['c', '=', '\'', '\\', '\'', '\'', ';'].into_iter().collect();
-        let actual = setup(&input);
-        let expected = vec![
-            TokenKind::Ident("c".to_string()),
-            TokenKind::Equal,
-            TokenKind::CharLit(39 as char),
-            TokenKind::Semicolon,
-        ];
-
         assert_eq!(actual, expected);
     }
 
@@ -762,5 +798,21 @@ mod tests {
         ));
 
         assert!(matches!(setup_err("08")[0], ErrorKind::InvalidNumber(_, "octal")));
+    }
+
+    #[test]
+    fn escaped_char() {
+        assert_eq!(setup("'\\''")[0], TokenKind::CharLit(39 as char));
+        assert_eq!(setup("'\\077'")[0], TokenKind::CharLit(63 as char));
+        // octal 377 is the upper limit (is 255 in decimal which is 1 Byte)
+        assert_eq!(setup("'\\377'")[0], TokenKind::CharLit(255 as char));
+
+        // octal 400 is 256 and thus too big
+        assert!(matches!(setup_err("'\\400'")[0], ErrorKind::InvalidEscape(_)));
+        assert!(matches!(setup_err("'\\0000'")[0], ErrorKind::InvalidEscape(_)));
+
+        assert_eq!(setup("'\\xFF'")[0], TokenKind::CharLit(255 as char));
+        // 0x100 == 256
+        assert!(matches!(setup_err("'\\x100'")[0], ErrorKind::InvalidEscape(_)));
     }
 }

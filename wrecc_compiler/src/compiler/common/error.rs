@@ -154,6 +154,7 @@ pub enum ErrorKind {
     ElifAfterElse,
     TrailingTokens(&'static str),
     MaxIncludeDepth(usize),
+    ErrorDirective(String),
 
     Regular(&'static str), // generic error message when message only used once
     Multiple(Vec<Error>),
@@ -226,7 +227,7 @@ impl ErrorKind {
             }
             ErrorKind::IncompleteFuncParam(func_name, qtype) => {
                 format!(
-                    "function '{}' contains incomplete type '{}' as parameter",
+                    "function '{}' contains incomplete type '{}' as parameter",
                     func_name, qtype
                 )
             }
@@ -235,7 +236,7 @@ impl ErrorKind {
                     .to_string()
             }
             ErrorKind::TypeAlreadyExists(name, token) => {
-                format!("type '{}' already exists but not as {}", name, token)
+                format!("type '{}' already exists but not as {}", name, token)
             }
             ErrorKind::EnumForwardDecl => "cannot forward declare enums".to_string(),
             ErrorKind::EmptyAggregate(token) => {
@@ -275,7 +276,7 @@ impl ErrorKind {
             ErrorKind::ConstAssign => "cannot assign variable which was declared 'const'".to_string(),
             ErrorKind::ConstStructAssign(ty, member) => {
                 format!(
-                    "cannot assign to '{}' that contains member '{}' declared 'const'",
+                    "cannot assign to '{}' that contains member '{}' declared 'const'",
                     ty, member
                 )
             }
@@ -478,6 +479,7 @@ impl ErrorKind {
             ErrorKind::MaxIncludeDepth(max) => {
                 format!("#include is nested too deeply, exceeds maximum-depth of {}", max)
             }
+            ErrorKind::ErrorDirective(s) => s.clone(),
 
             ErrorKind::Regular(s) => s.to_string(),
             ErrorKind::Multiple(_) => {

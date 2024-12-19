@@ -639,6 +639,18 @@ impl<'a> Preprocessor<'a> {
                                 }
                                 self.conditional_block(directive)
                             }
+                            TokenKind::Error => {
+                                let _ = self.skip_whitespace();
+                                let rest = self
+                                    .fold_until_token(TokenKind::Newline)
+                                    .into_iter()
+                                    .map(|t| t.kind.to_string())
+                                    .collect::<String>();
+                                Err(Error::new(
+                                    &PPToken::from(&directive, self.filename),
+                                    ErrorKind::ErrorDirective(rest),
+                                ))
+                            }
                             _ => Err(Error::new(
                                 &PPToken::from(&directive, self.filename),
                                 ErrorKind::InvalidDirective(directive.kind.to_string()),

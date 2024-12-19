@@ -21,6 +21,7 @@ pub enum TokenKind {
     Else,
     Endif,
     Newline,
+    Error,
     String(String),
     CharLit(String),
     Ident(String),
@@ -52,7 +53,7 @@ impl Token {
             TokenKind::Hash | TokenKind::Other(_) => 1,
             TokenKind::If => 2,
             TokenKind::Else | TokenKind::Elif => 4,
-            TokenKind::Undef | TokenKind::Ifdef | TokenKind::Endif => 5,
+            TokenKind::Undef | TokenKind::Ifdef | TokenKind::Endif | TokenKind::Error => 5,
             TokenKind::Define | TokenKind::Ifndef => 6,
             TokenKind::Include | TokenKind::Defined => 7,
             TokenKind::String(s)
@@ -77,7 +78,8 @@ impl TokenKind {
             | TokenKind::If
             | TokenKind::Elif
             | TokenKind::Else
-            | TokenKind::Endif => Some(self.to_string()),
+            | TokenKind::Endif
+            | TokenKind::Error => Some(self.to_string()),
             _ => None,
         }
     }
@@ -96,6 +98,7 @@ impl ToString for TokenKind {
             TokenKind::Elif => "elif".to_string(),
             TokenKind::Else => "else".to_string(),
             TokenKind::Endif => "endif".to_string(),
+            TokenKind::Error => "error".to_string(),
             TokenKind::Newline => "\n".to_string(),
             TokenKind::String(s)
             | TokenKind::CharLit(s)
@@ -140,6 +143,7 @@ impl Scanner {
                 ("elif", TokenKind::Elif),
                 ("else", TokenKind::Else),
                 ("endif", TokenKind::Endif),
+                ("error", TokenKind::Error),
             ]),
         }
     }

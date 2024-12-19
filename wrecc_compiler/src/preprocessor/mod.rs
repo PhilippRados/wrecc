@@ -9,7 +9,7 @@ use crate::compiler::typechecker::TypeChecker;
 use crate::preprocessor::scanner::{Token, TokenKind};
 use crate::PPScanner;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -269,31 +269,33 @@ impl<'a> Preprocessor<'a> {
             ))
         }
     }
-    fn replace_macros(&self, macro_name: Token, replace_list: Vec<Token>) -> Vec<Token> {
-        replace_list
+    fn replace_macros(&self, macro_name: Token, used_macros: &mut HashSet<String>) -> Vec<Token> {
+        let macro_ident = if let Some(ident) = macro_name.kind.as_ident() {
+            ident
+        } else {
+            return vec![macro_name];
+        };
+        if used_macros.contains(&macro_ident) {
+            return vec![macro_name];
+        }
+        used_macros.insert(macro_ident.clone());
+        let replacement = if let Some(replacement) = self.defines.get(&macro_ident) {
+            replacement
+        } else {
+            return vec![macro_name];
+        };
+        let result = replacement
             .into_iter()
             .flat_map(|token| {
-                match (token.kind.to_string(), self.defines.get(&token.kind.to_string())) {
-                    (token_name, Some(replacement))
-                        if token_name != macro_name.kind.as_ident().unwrap() =>
-                    {
-                        let replacement = replacement
-                            .iter()
-                            .map(|replace_t| Token {
-                                kind: replace_t.kind.clone(),
-                                ..macro_name.clone()
-                            })
-                            .collect::<Vec<Token>>();
-
-                        pad_whitespace(self.replace_macros(macro_name.clone(), replacement))
-                    }
-                    _ => {
-                        // can't further replace if replacement is current macro name
-                        vec![Token { kind: token.kind, ..macro_name.clone() }]
-                    }
-                }
+                self.replace_macros(token.clone(), used_macros)
             })
-            .collect()
+            .map(|token| Token {
+                kind: token.kind,
+                ..macro_name.clone()
+            })
+            .collect();
+        used_macros.remove(&macro_ident);
+        pad_whitespace(result)
     }
     fn undef(&mut self, directive: Token) -> Result<(), Error> {
         self.skip_whitespace()?;
@@ -518,15 +520,10 @@ impl<'a> Preprocessor<'a> {
                     }
                 }
                 _ => {
-                    if let Some(identifier) = token.kind.as_ident() {
+                    if token.kind.as_ident().is_some() {
+                        let mut macros_used = HashSet::new();
                         // if ident is defined replace it
-                        if let Some(replacement) = self.defines.get(&identifier) {
-                            let expanded_replacement =
-                                pad_whitespace(self.replace_macros(token, replacement.clone()));
-                            result.extend(expanded_replacement)
-                        } else {
-                            result.push(token)
-                        }
+                        result.extend(self.replace_macros(token, &mut macros_used))
                     } else {
                         result.push(token)
                     }
@@ -676,15 +673,9 @@ impl<'a> Preprocessor<'a> {
                     }
                 }
                 _ => {
-                    if let Some(identifier) = token.kind.as_ident() {
-                        if let Some(replacement) = self.defines.get(&identifier) {
-                            let expanded_replacement =
-                                pad_whitespace(self.replace_macros(token, replacement.clone()));
-
-                            result.append(expanded_replacement)
-                        } else {
-                            result.push(token)
-                        }
+                    if token.kind.as_ident().is_some() {
+                        let mut macros_used = HashSet::new();
+                        result.append(self.replace_macros(token, &mut macros_used))
                     } else {
                         result.push(token)
                     }
@@ -902,7 +893,8 @@ mod tests {
             let pp = Preprocessor::new(Path::new(""), Vec::new(), defined.clone(), &v, &h, 0);
 
             let mut result = HashMap::new();
-            for (name, replace_list) in defined {
+            for (name, _) in defined {
+                let mut macros_used = HashSet::new();
                 result.insert(
                     name.to_string(),
                     pp.replace_macros(
@@ -912,7 +904,7 @@ mod tests {
                             line: 1,
                             line_string: "".to_string(),
                         },
-                        replace_list,
+                        &mut macros_used,
                     )
                     .into_iter()
                     .map(|t| t.kind.to_string())

@@ -353,10 +353,12 @@ impl<'a> Scanner<'a> {
                 .ok_or(Error::new(pp_token, ErrorKind::Eof("expected character literal")))?;
             self.escape_char(char_to_escape, char_iter)
                 .ok_or(Error::new(pp_token, ErrorKind::InvalidEscape(char_string)))
-        // strings can contain non-ascii chars
         } else if c.is_ascii() || is_string {
+            // strings can contain non-ascii chars
             Ok(c)
         } else {
+            // doesn't apply to escaped chars since they can are in
+            // range [0;255] which is valid while valid ascii is only [0;127]
             Err(Error::new(pp_token, ErrorKind::CharLiteralAscii(c)))
         }
     }

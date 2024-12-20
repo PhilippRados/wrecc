@@ -24,12 +24,7 @@ jobs:
 
       - name: cargo test
         uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --workspace
+        run: make unit-tests
 
       - name: snapshot tests
-        run: |
-         chmod +x ./tests/snapshot_tests.sh
-         ./tests/snapshot_tests.sh
-        shell: bash
+        run: make snapshot-tests

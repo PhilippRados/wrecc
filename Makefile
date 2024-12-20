@@ -12,7 +12,7 @@ snapshot-tests: ## Run snapshot-tests located in tests/
 c-testsuite: ## Requires c-testsuite (https://github.com/c-testsuite/c-testsuite) and env-var C_TESTSUITE set to its path
 	bash tests/c_testsuite.sh
 
-fuzzer: ## Launch cargo-afl fuzzer
+fuzzer: ## Launch afl.rs fuzzer
 	cd fuzzer && \
 	cargo afl build && \
 	cargo afl fuzz -i inputs -o outputs target/debug/fuzz_target

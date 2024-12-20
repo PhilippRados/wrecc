@@ -23,7 +23,6 @@ jobs:
           override: true
 
       - name: cargo test
-        uses: actions-rs/cargo@v1
         run: make unit-tests
 
       - name: snapshot tests

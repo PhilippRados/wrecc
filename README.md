@@ -203,7 +203,7 @@ When compiling using the `--dump-ast` option it prints the parse-tree
 #### Inspect all options by running `wrecc --help`
 
 ## Testing
-Run different types of tests with `make <target>` available targets can be inspected using `make help` shown below.
+Run different types of tests with `make <target>`. Available targets can be inspected using `make help` as shown below.
 ```console
 $ make help
 Usage:

@@ -24,9 +24,6 @@ The compiler emits [x86-64](https://en.wikipedia.org/wiki/X86-64) assembly in [A
   + [Error messages](#errors)
   + [Ast pretty-printer](#ast)
 * [Testing](#testing)
-  + [Unit-tests](#unit)
-  + [Snapshot-tests](#snap)
-  + [Fuzzer](#fuzzer)
 * [Troubleshooting](#troubleshooting) 
 * [Contribution](#contribution)
 * [Project goals](#goals)
@@ -206,21 +203,16 @@ When compiling using the `--dump-ast` option it prints the parse-tree
 #### Inspect all options by running `wrecc --help`
 
 ## Testing
-#### Unit tests <a name="unit"></a>
-```
-cargo test --workspace
-```
-#### Snapshot testing <a name="snap"></a>
-This runs all [fixtures](https://github.com/PhilippRados/wrecc/tree/master/tests/fixtures) and compares them to the expected [snapshot](https://github.com/PhilippRados/wrecc/tree/master/tests/snapshots)
-```
-bash tests/snapshot_tests.sh
-```
-#### Fuzzer
-Runs the fuzzer using [afl.rs](https://github.com/rust-fuzz/afl.rs)
-```
-// in fuzzer directory
-cargo afl build
-cargo afl fuzz -i inputs -o outputs target/debug/fuzz_target
+Run different types of tests with `make <target>` available targets can be inspected using `make help` shown below.
+```console
+$ make help
+Usage:
+  make <target>
+  help             Display this help
+  unit-tests       Run rust unit-tests
+  snapshot-tests   Run snapshot-tests located in tests/
+  c-testsuite      Requires c-testsuite (https://github.com/c-testsuite/c-testsuite) and env-var C_TESTSUITE set to its path
+  fuzzer           Launch afl.rs fuzzer
 ```
 
 ## Troubleshooting
